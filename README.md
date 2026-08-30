@@ -23,7 +23,7 @@ The launchers resolve their own directory and use `.venv` when it exists. They a
 convenience wrappers only; the dashboard's **Refresh authentication** control does
 not invoke them. On macOS/Linux, create the environment with
 `python3 -m venv .venv`; on Windows use `py -3 -m venv .venv`. Install
-`fyers-apiv3` once in that environment.
+the locked runtime dependencies once with `pip install -r requirements.txt`.
 
 ## Connect a live Fyers feed
 
@@ -79,6 +79,15 @@ URL and reports the required action in the UI. FYERS login and 2FA still require
 account holder's interaction; the dashboard does not attempt to bypass that
 broker-enforced security step. FYERS error codes `-8`, `-15`, `-16`, `-17`, HTTP
 401, and equivalent token/authentication messages trigger this renewal path.
+
+### TLS certificate trust
+
+The WebSocket always verifies the FYERS certificate and hostname. It uses an
+explicit `WEBSOCKET_CLIENT_CA_BUNDLE` when provided, then a populated Python/system
+trust store, and finally the Mozilla CA bundle supplied by `certifi`. This fallback
+is needed by some Python.org macOS installations whose OpenSSL trust store is empty;
+it is also portable to Windows and Linux. An invalid explicit bundle or an empty
+trust store is reported as an error. Certificate verification is never disabled.
 
 When Fyers reports an expired or invalid token, the dashboard detects the authentication error and invokes the same renewal module automatically. Fyers still requires browser login/2FA; once finished, the dashboard replaces itself and reconnects using the fresh token.
 

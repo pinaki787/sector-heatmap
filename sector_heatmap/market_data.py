@@ -1,4 +1,7 @@
 from datetime import datetime
+import os
+from pathlib import Path
+import ssl
 from threading import Lock, Thread
 from fyers_apiv3.FyersWebsocket import data_ws
 from .sectors import SECTORS, SECTOR_STOCKS, equity_symbol
@@ -9,6 +12,32 @@ def is_token_error(message):
     if isinstance(message, dict) and message.get("code") in {-8, -15, -16, -17, 401}:
         return True
     return any(hint in str(message).lower() for hint in TOKEN_ERROR_HINTS)
+
+def configure_websocket_ca_bundle():
+    """Select a trusted CA source without weakening TLS verification."""
+    configured = os.getenv("WEBSOCKET_CLIENT_CA_BUNDLE")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if not configured_path.exists():
+            raise RuntimeError("WEBSOCKET_CLIENT_CA_BUNDLE does not exist")
+        return str(configured_path)
+
+    default_context = ssl.create_default_context()
+    if default_context.cert_store_stats().get("x509_ca", 0) > 0:
+        return "system"
+
+    try:
+        import certifi
+    except ImportError as error:
+        raise RuntimeError("Python has no trusted CA certificates; install certifi") from error
+    certifi_path = Path(certifi.where())
+    if not certifi_path.is_file():
+        raise RuntimeError("The certifi CA bundle is unavailable")
+    certifi_context = ssl.create_default_context(cafile=str(certifi_path))
+    if certifi_context.cert_store_stats().get("x509_ca", 0) == 0:
+        raise RuntimeError("The certifi CA bundle contains no trusted certificates")
+    os.environ["WEBSOCKET_CLIENT_CA_BUNDLE"] = str(certifi_path)
+    return str(certifi_path)
 
 class FyersLiveFeed:
     def __init__(self, access_token):
@@ -29,6 +58,12 @@ class FyersLiveFeed:
             index_symbols = [symbol for _, symbol, _ in SECTORS]
             stock_symbols = [equity_symbol(ticker) for stocks in SECTOR_STOCKS.values() for ticker, _ in stocks]
             socket.subscribe(list(dict.fromkeys(index_symbols + stock_symbols)), data_type="SymbolUpdate")
+        try:
+            configure_websocket_ca_bundle()
+        except RuntimeError as error:
+            with self.lock:
+                self.error, self.connected = str(error), False
+            return
         socket = data_ws.FyersDataSocket(access_token=self.access_token, litemode=False, reconnect=True, on_message=on_message, on_error=on_error, on_connect=on_connect)
         Thread(target=socket.connect, daemon=True, name="fyers-market-data").start()
     def snapshot(self):
