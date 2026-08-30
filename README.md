@@ -1,10 +1,26 @@
 # NSE Sector Heat Map
 
-Start the dashboard from the project root. The dashboard and its authentication
-callback use only Python and the browser; no platform-specific shell command is
-required by the refresh button.
+For a first-time setup, run the native setup-and-launch entry point from the
+project root. It creates `.venv`, installs the fully resolved Python dependency
+set from `requirements.lock`, installs the UI packages from `pnpm-lock.yaml` with
+pnpm 10.17.1, builds the UI, and starts the dashboard.
 
-| Platform | Start dashboard |
+| Platform | First setup and launch |
+| --- | --- |
+| Windows | `setup_and_run.bat` |
+| macOS / Linux | `sh setup_and_run.sh` |
+
+Python 3.9+ and Node.js 20.19+ (including `npx`) must already be installed. The
+scripts are idempotent: rerunning them reuses `.venv` and the locked dependency
+sets. They do not read credentials aloud, place orders, or make any broker trade.
+They stop immediately if dependency installation or the UI build fails.
+For CI or setup validation without starting the long-running server, set
+`HEATMAP_SETUP_ONLY=1` before invoking either script.
+
+For later launches that do not need dependency or UI build validation, use the
+lighter launchers:
+
+| Platform | Fast launch |
 | --- | --- |
 | Windows | `run_live_heatmap.bat` |
 | macOS / Linux | `sh run_live_heatmap.sh` |
@@ -19,11 +35,31 @@ Open `http://127.0.0.1:8080` in a browser. This same local server also handles t
 | Windows | `renew_fyers_token.bat` | `run_live_heatmap.bat` |
 | macOS / Linux | `sh renew_fyers_token.sh` | `sh run_live_heatmap.sh` |
 
-The launchers resolve their own directory and use `.venv` when it exists. They are
-convenience wrappers only; the dashboard's **Refresh authentication** control does
-not invoke them. On macOS/Linux, create the environment with
-`python3 -m venv .venv`; on Windows use `py -3 -m venv .venv`. Install
-the locked runtime dependencies once with `pip install -r requirements.txt`.
+All launchers resolve their own directory, so paths containing spaces are
+supported. The POSIX scripts use `/bin/sh` syntax and LF line endings; the Windows
+scripts use `cmd.exe` syntax and CRLF checkouts. The dashboard's **Refresh
+authentication** control does not invoke a shell or batch file.
+
+`requirements.txt` records the maintainable top-level compatibility ranges.
+`requirements.lock` is the setup/release input and pins the complete resolved
+Python environment. `client/pnpm-lock.yaml` and the `packageManager` field pin the
+UI dependency graph and pnpm release. Update these lock inputs deliberately and
+rerun the validations before publishing a release.
+
+### Operating-system and broker boundaries
+
+- The HTTP server binds only to `127.0.0.1`; setup does not expose the dashboard
+  to the local network or start any trading action.
+- OAuth uses the operating system's default browser and a loopback callback. The
+  UI opens login from the user's click and falls back to same-tab navigation when
+  a browser blocks the popup. Login, 2FA, callback registration, FYERS service
+  availability, and broker/API entitlements remain broker-controlled.
+- Token replacement is atomic on Windows, Linux, and macOS. POSIX systems also
+  receive mode `0600`; on Windows, private access depends on the user's existing
+  NTFS account and directory ACLs because POSIX modes are not authoritative.
+- `setup_and_run.bat` targets native `cmd.exe`. `setup_and_run.sh` targets a POSIX
+  `/bin/sh` as provided by Linux and macOS. Neither requires PowerShell, Bash,
+  WSL, platform-specific browser automation, or a global pnpm installation.
 
 ## Connect a live Fyers feed
 
