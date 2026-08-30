@@ -131,7 +131,9 @@ When Fyers reports an expired or invalid token, the dashboard detects the authen
 
 - `sector_heatmap/config.py` — local configuration and token persistence
 - `sector_heatmap/authentication.py` — browser OAuth, local callback, and token exchange
-- `sector_heatmap/sectors.py` — configurable sector, benchmark, FYERS symbol, and constituent definitions
+- `sector_heatmap/official_weights.py` — validated loading and provenance for versioned official NSE Indices weights
+- `sector_heatmap/data/nse_weights/` — immutable source-as-of snapshots transcribed from official factsheets and constituent files
+- `sector_heatmap/sectors.py` — configurable sector, benchmark, and FYERS index symbols joined to official constituents
 - `sector_heatmap/market_data.py` — Fyers WebSocket subscription and live snapshot aggregation
 - `sector_heatmap/indicators.py` — dependency-free EMA, ATR, RSI, ADX/DMI, breadth, and volume calculations
 - `sector_heatmap/analysis.py` — explainable timeframe, RS, momentum, score, ranking, alignment, rotation, and event domain logic
@@ -154,3 +156,24 @@ The primary endpoints are:
 
 See [the implementation design](docs/sector-analysis-design.md) for formulas,
 caching, refresh behavior, and current provider limitations.
+
+## Official-weight contributor attribution
+
+The checked-in weight snapshot is sourced from NSE Indices Limited monthly
+factsheets and official constituent files. The dashboard shows the source date,
+coverage scope, and a factsheet link. It never renormalizes the published
+weights. A stock's displayed percentage-point contribution is:
+
+`official weight (%) × unrounded live stock change (%) ÷ 100`
+
+FYERS prices are presentation-rounded only after this calculation. Raw provider
+tick timestamps are retained alongside normalized ISO timestamps, and snapshot
+time is kept separate from provider time. Attribution remains read-only and does
+not expose credentials or create, modify, or place orders.
+
+Public NSE factsheets publish only the ten largest weights. Consequently, a
+ten-constituent index can be labelled `OFFICIAL_COMPLETE`; a larger index is
+labelled `OFFICIAL_PARTIAL` with both published constituent count and covered
+weight. Missing live ticks stay unavailable rather than being estimated. See
+[the source and refresh guide](docs/official-weight-attribution.md) for the exact
+coverage boundary and monthly update procedure.

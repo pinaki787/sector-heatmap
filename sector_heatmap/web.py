@@ -8,6 +8,7 @@ from .config import ROOT, load_config
 from .authentication import authorization_url, exchange_auth_code
 from .market_data import FyersLiveFeed, is_token_error
 from .market_calendar import market_session
+from .official_weights import OFFICIAL_WEIGHT_SET
 from .sector_service import SectorAnalysisService
 from fyers_apiv3 import fyersModel
 
@@ -77,7 +78,20 @@ def run_server():
             if state["auth_error"]:
                 result["error"] = state["auth_error"]
             return result
-        return {"mode":"needs_token", "connected":False, "error":state["auth_error"] or "No reusable Fyers token was found. Reauthentication will start automatically.", "updated_at":datetime.now().astimezone().isoformat(), "market_session":market_session(), "sectors":[]}
+        return {"mode":"needs_token", "connected":False, "error":state["auth_error"] or "No reusable Fyers token was found. Reauthentication will start automatically.", "updated_at":None, "snapshot_at":datetime.now().astimezone().isoformat(), "provider":"FYERS", "weight_source":OFFICIAL_WEIGHT_SET.summary(), "market_session":market_session(), "sectors":[]}
+
+    def attach_live_attribution(result):
+        live_by_id = {item.get("sector_id"): item for item in snapshot().get("sectors", [])}
+        for sector in result.get("sectors", []):
+            live_sector = live_by_id.get(sector.get("sector_id"))
+            if not live_sector:
+                continue
+            sector["constituent_movers"] = live_sector.get("drivers", [])
+            sector["top_contributors"] = live_sector.get("top_contributors", [])
+            sector["attribution"] = live_sector.get("attribution", sector.get("attribution"))
+            sector["provider_tick_timestamp"] = live_sector.get("provider_tick_timestamp")
+            sector["provider_tick_timestamp_iso"] = live_sector.get("provider_tick_timestamp_iso")
+        return result
     def account_summary():
         token = load_config().get("FYERS_ACCESS_TOKEN", "")
         if not token or ":" not in token:
@@ -158,7 +172,7 @@ def run_server():
                 return
             if path == "/api/sector-analysis":
                 mode = (parse_qs(urlparse(self.path).query).get("mode") or ["intraday"])[0]
-                self.send_json(200, state["sector_analysis"].snapshot(mode=mode))
+                self.send_json(200, attach_live_attribution(state["sector_analysis"].snapshot(mode=mode)))
                 return
             if path == "/api/sector-analysis/detail":
                 query = parse_qs(urlparse(self.path).query)
@@ -166,9 +180,11 @@ def run_server():
                 sector_id = (query.get("sector") or [""])[0]
                 result = state["sector_analysis"].snapshot(mode=mode, sector_id=sector_id)
                 if result.get("sector"):
-                    live_sector = next((item for item in snapshot().get("sectors", []) if item.get("name") == result["sector"]["name"]), None)
+                    live_sector = next((item for item in snapshot().get("sectors", []) if item.get("sector_id") == result["sector"]["sector_id"]), None)
                     if live_sector:
                         result["sector"]["constituent_movers"] = live_sector.get("drivers", [])
+                        result["sector"]["top_contributors"] = live_sector.get("top_contributors", [])
+                        result["sector"]["attribution"] = live_sector.get("attribution", result["sector"].get("attribution"))
                 self.send_json(200 if result.get("sector") else 404, result)
                 return
             if path == "/api/heatmap":

@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "dataset_version": "2026-07-31",
+  "source_as_of": "2026-07-31",
+  "publisher": "NSE Indices Limited",
+  "source_policy": "Official monthly factsheet top-constituent weights matched to the official index constituent list. Weights are used exactly as published and are not renormalized.",
+  "indices": {
+    "bank": {
+      "official_index_name": "Nifty Bank",
+      "constituent_count": 14,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_bank.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftybanklist.csv",
+      "constituents": [
+        {"ticker": "HDFCBANK", "name": "HDFC Bank Ltd.", "weight": 18.20},
+        {"ticker": "ICICIBANK", "name": "ICICI Bank Ltd.", "weight": 14.86},
+        {"ticker": "SBIN", "name": "State Bank of India", "weight": 10.09},
+        {"ticker": "KOTAKBANK", "name": "Kotak Mahindra Bank Ltd.", "weight": 9.32},
+        {"ticker": "AXISBANK", "name": "Axis Bank Ltd.", "weight": 8.81},
+        {"ticker": "FEDERALBNK", "name": "Federal Bank Ltd.", "weight": 7.29},
+        {"ticker": "INDUSINDBK", "name": "IndusInd Bank Ltd.", "weight": 5.50},
+        {"ticker": "AUBANK", "name": "AU Small Finance Bank Ltd.", "weight": 4.71},
+        {"ticker": "IDFCFIRSTB", "name": "IDFC First Bank Ltd.", "weight": 4.67},
+        {"ticker": "BANKBARODA", "name": "Bank of Baroda", "weight": 3.58}
+      ]
+    },
+    "financial-services": {
+      "official_index_name": "Nifty Financial Services",
+      "constituent_count": 20,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_Nifty_Financial_Services.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyfinancelist.csv",
+      "constituents": [
+        {"ticker": "HDFCBANK", "name": "HDFC Bank Ltd.", "weight": 18.01},
+        {"ticker": "ICICIBANK", "name": "ICICI Bank Ltd.", "weight": 14.70},
+        {"ticker": "SBIN", "name": "State Bank of India", "weight": 9.98},
+        {"ticker": "BAJFINANCE", "name": "Bajaj Finance Ltd.", "weight": 9.43},
+        {"ticker": "AXISBANK", "name": "Axis Bank Ltd.", "weight": 8.89},
+        {"ticker": "KOTAKBANK", "name": "Kotak Mahindra Bank Ltd.", "weight": 8.86},
+        {"ticker": "BSE", "name": "BSE Ltd.", "weight": 4.59},
+        {"ticker": "SHRIRAMFIN", "name": "Shriram Finance Ltd.", "weight": 4.52},
+        {"ticker": "BAJAJFINSV", "name": "Bajaj Finserv Ltd.", "weight": 3.62},
+        {"ticker": "SBILIFE", "name": "SBI Life Insurance Company Ltd.", "weight": 2.61}
+      ]
+    },
+    "it": {
+      "official_index_name": "Nifty IT",
+      "constituent_count": 10,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_it.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyitlist.csv",
+      "constituents": [
+        {"ticker": "INFY", "name": "Infosys Ltd.", "weight": 29.23},
+        {"ticker": "TCS", "name": "Tata Consultancy Services Ltd.", "weight": 20.29},
+        {"ticker": "HCLTECH", "name": "HCL Technologies Ltd.", "weight": 11.93},
+        {"ticker": "TECHM", "name": "Tech Mahindra Ltd.", "weight": 10.84},
+        {"ticker": "PERSISTENT", "name": "Persistent Systems Ltd.", "weight": 6.23},
+        {"ticker": "COFORGE", "name": "Coforge Ltd.", "weight": 6.19},
+        {"ticker": "WIPRO", "name": "Wipro Ltd.", "weight": 5.14},
+        {"ticker": "LTM", "name": "LTM Ltd.", "weight": 4.19},
+        {"ticker": "MPHASIS", "name": "MphasiS Ltd.", "weight": 3.21},
+        {"ticker": "OFSS", "name": "Oracle Financial Services Software Ltd.", "weight": 2.76}
+      ]
+    },
+    "auto": {
+      "official_index_name": "Nifty Auto",
+      "constituent_count": 15,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_auto.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyautolist.csv",
+      "constituents": [
+        {"ticker": "M&M", "name": "Mahindra & Mahindra Ltd.", "weight": 23.68},
+        {"ticker": "MARUTI", "name": "Maruti Suzuki India Ltd.", "weight": 14.49},
+        {"ticker": "BAJAJ-AUTO", "name": "Bajaj Auto Ltd.", "weight": 9.96},
+        {"ticker": "EICHERMOT", "name": "Eicher Motors Ltd.", "weight": 8.43},
+        {"ticker": "TVSMOTOR", "name": "TVS Motor Company Ltd.", "weight": 7.91},
+        {"ticker": "TMPV", "name": "Tata Motors Passenger Vehicles Ltd.", "weight": 5.54},
+        {"ticker": "HEROMOTOCO", "name": "Hero MotoCorp Ltd.", "weight": 5.46},
+        {"ticker": "MOTHERSON", "name": "Samvardhana Motherson International Ltd.", "weight": 5.20},
+        {"ticker": "BHARATFORG", "name": "Bharat Forge Ltd.", "weight": 4.58},
+        {"ticker": "ASHOKLEY", "name": "Ashok Leyland Ltd.", "weight": 3.71}
+      ]
+    },
+    "pharma": {
+      "official_index_name": "Nifty Pharma",
+      "constituent_count": 20,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_pharma.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftypharmalist.csv",
+      "constituents": [
+        {"ticker": "SUNPHARMA", "name": "Sun Pharmaceutical Industries Ltd.", "weight": 21.34},
+        {"ticker": "DIVISLAB", "name": "Divi's Laboratories Ltd.", "weight": 10.36},
+        {"ticker": "CIPLA", "name": "Cipla Ltd.", "weight": 8.39},
+        {"ticker": "TORNTPHARM", "name": "Torrent Pharmaceuticals Ltd.", "weight": 7.61},
+        {"ticker": "LAURUSLABS", "name": "Laurus Labs Ltd.", "weight": 7.15},
+        {"ticker": "DRREDDY", "name": "Dr. Reddy's Laboratories Ltd.", "weight": 7.08},
+        {"ticker": "LUPIN", "name": "Lupin Ltd.", "weight": 5.94},
+        {"ticker": "AUROPHARMA", "name": "Aurobindo Pharma Ltd.", "weight": 4.43},
+        {"ticker": "ALKEM", "name": "Alkem Laboratories Ltd.", "weight": 3.41},
+        {"ticker": "GLENMARK", "name": "Glenmark Pharmaceuticals Ltd.", "weight": 3.40}
+      ]
+    },
+    "healthcare": {
+      "official_index_name": "Nifty Healthcare",
+      "constituent_count": 20,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/Factsheet_Nifty_Healthcare_Index.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyhealthcarelist.csv",
+      "constituents": [
+        {"ticker": "SUNPHARMA", "name": "Sun Pharmaceutical Industries Ltd.", "weight": 18.34},
+        {"ticker": "DIVISLAB", "name": "Divi's Laboratories Ltd.", "weight": 8.91},
+        {"ticker": "APOLLOHOSP", "name": "Apollo Hospitals Enterprise Ltd.", "weight": 8.02},
+        {"ticker": "CIPLA", "name": "Cipla Ltd.", "weight": 7.21},
+        {"ticker": "MAXHEALTH", "name": "Max Healthcare Institute Ltd.", "weight": 7.11},
+        {"ticker": "TORNTPHARM", "name": "Torrent Pharmaceuticals Ltd.", "weight": 6.54},
+        {"ticker": "LAURUSLABS", "name": "Laurus Labs Ltd.", "weight": 6.15},
+        {"ticker": "DRREDDY", "name": "Dr. Reddy's Laboratories Ltd.", "weight": 6.09},
+        {"ticker": "LUPIN", "name": "Lupin Ltd.", "weight": 5.10},
+        {"ticker": "FORTIS", "name": "Fortis Healthcare Ltd.", "weight": 4.28}
+      ]
+    },
+    "fmcg": {
+      "official_index_name": "Nifty FMCG",
+      "constituent_count": 15,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_FMCG.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyfmcglist.csv",
+      "constituents": [
+        {"ticker": "ITC", "name": "ITC Ltd.", "weight": 26.80},
+        {"ticker": "HINDUNILVR", "name": "Hindustan Unilever Ltd.", "weight": 18.44},
+        {"ticker": "NESTLEIND", "name": "Nestle India Ltd.", "weight": 10.71},
+        {"ticker": "TATACONSUM", "name": "Tata Consumer Products Ltd.", "weight": 6.98},
+        {"ticker": "BRITANNIA", "name": "Britannia Industries Ltd.", "weight": 6.31},
+        {"ticker": "VBL", "name": "Varun Beverages Ltd.", "weight": 5.98},
+        {"ticker": "MARICO", "name": "Marico Ltd.", "weight": 4.56},
+        {"ticker": "MCDOWELL-N", "name": "United Spirits Ltd.", "weight": 4.43},
+        {"ticker": "GODREJCP", "name": "Godrej Consumer Products Ltd.", "weight": 4.26},
+        {"ticker": "RADICO", "name": "Radico Khaitan Ltd.", "weight": 3.36}
+      ]
+    },
+    "metal": {
+      "official_index_name": "Nifty Metal",
+      "constituent_count": 15,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_metal.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftymetallist.csv",
+      "constituents": [
+        {"ticker": "TATASTEEL", "name": "Tata Steel Ltd.", "weight": 19.09},
+        {"ticker": "HINDALCO", "name": "Hindalco Industries Ltd.", "weight": 17.18},
+        {"ticker": "JSWSTEEL", "name": "JSW Steel Ltd.", "weight": 14.51},
+        {"ticker": "ADANIENT", "name": "Adani Enterprises Ltd.", "weight": 10.58},
+        {"ticker": "VEDL", "name": "Vedanta Ltd.", "weight": 5.46},
+        {"ticker": "JINDALSTEL", "name": "Jindal Steel Ltd.", "weight": 4.97},
+        {"ticker": "APLAPOLLO", "name": "APL Apollo Tubes Ltd.", "weight": 4.03},
+        {"ticker": "NATIONALUM", "name": "National Aluminium Co. Ltd.", "weight": 3.82},
+        {"ticker": "NMDC", "name": "NMDC Ltd.", "weight": 3.58},
+        {"ticker": "LLOYDSME", "name": "Lloyds Metals And Energy Ltd.", "weight": 3.24}
+      ]
+    },
+    "realty": {
+      "official_index_name": "Nifty Realty",
+      "constituent_count": 10,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_realty.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyrealtylist.csv",
+      "constituents": [
+        {"ticker": "DLF", "name": "DLF Ltd.", "weight": 18.95},
+        {"ticker": "PHOENIXLTD", "name": "Phoenix Mills Ltd.", "weight": 15.83},
+        {"ticker": "LODHA", "name": "Lodha Developers Ltd.", "weight": 15.46},
+        {"ticker": "GODREJPROP", "name": "Godrej Properties Ltd.", "weight": 12.76},
+        {"ticker": "PRESTIGE", "name": "Prestige Estates Projects Ltd.", "weight": 12.21},
+        {"ticker": "OBEROIRLTY", "name": "Oberoi Realty Ltd.", "weight": 9.64},
+        {"ticker": "BRIGADE", "name": "Brigade Enterprises Ltd.", "weight": 4.82},
+        {"ticker": "ANANTRAJ", "name": "Anant Raj Ltd.", "weight": 4.27},
+        {"ticker": "ABREL", "name": "Aditya Birla Real Estate Ltd.", "weight": 3.33},
+        {"ticker": "SOBHA", "name": "Sobha Ltd.", "weight": 2.74}
+      ]
+    },
+    "energy": {
+      "official_index_name": "Nifty Energy",
+      "constituent_count": 40,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_energy.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyenergylist.csv",
+      "constituents": [
+        {"ticker": "RELIANCE", "name": "Reliance Industries Ltd.", "weight": 10.26},
+        {"ticker": "ONGC", "name": "Oil & Natural Gas Corporation Ltd.", "weight": 10.01},
+        {"ticker": "COALINDIA", "name": "Coal India Ltd.", "weight": 9.66},
+        {"ticker": "NTPC", "name": "NTPC Ltd.", "weight": 5.93},
+        {"ticker": "GAIL", "name": "GAIL (India) Ltd.", "weight": 5.20},
+        {"ticker": "POWERGRID", "name": "Power Grid Corporation of India Ltd.", "weight": 4.63},
+        {"ticker": "BHEL", "name": "Bharat Heavy Electricals Ltd.", "weight": 3.59},
+        {"ticker": "CGPOWER", "name": "CG Power and Industrial Solutions Ltd.", "weight": 3.58},
+        {"ticker": "SUZLON", "name": "Suzlon Energy Ltd.", "weight": 3.53},
+        {"ticker": "GVT&D", "name": "GE Vernova T&D India Ltd.", "weight": 3.24}
+      ]
+    },
+    "oil-gas": {
+      "official_index_name": "Nifty Oil & Gas",
+      "constituent_count": 15,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/Factsheet_nifty_oil_and_gas.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyoilgaslist.csv",
+      "constituents": [
+        {"ticker": "RELIANCE", "name": "Reliance Industries Ltd.", "weight": 32.83},
+        {"ticker": "ONGC", "name": "Oil & Natural Gas Corporation Ltd.", "weight": 15.28},
+        {"ticker": "BPCL", "name": "Bharat Petroleum Corporation Ltd.", "weight": 10.51},
+        {"ticker": "IOC", "name": "Indian Oil Corporation Ltd.", "weight": 8.50},
+        {"ticker": "GAIL", "name": "GAIL (India) Ltd.", "weight": 7.94},
+        {"ticker": "HINDPETRO", "name": "Hindustan Petroleum Corporation Ltd.", "weight": 6.07},
+        {"ticker": "OIL", "name": "Oil India Ltd.", "weight": 4.06},
+        {"ticker": "PETRONET", "name": "Petronet LNG Ltd.", "weight": 3.41},
+        {"ticker": "ATGL", "name": "Adani Total Gas Ltd.", "weight": 2.93},
+        {"ticker": "AEGISLOG", "name": "Aegis Logistics Ltd.", "weight": 2.61}
+      ]
+    },
+    "psu-bank": {
+      "official_index_name": "Nifty PSU Bank",
+      "constituent_count": 12,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_psu_bank.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftypsubanklist.csv",
+      "constituents": [
+        {"ticker": "SBIN", "name": "State Bank of India", "weight": 33.87},
+        {"ticker": "BANKBARODA", "name": "Bank of Baroda", "weight": 12.63},
+        {"ticker": "CANBK", "name": "Canara Bank", "weight": 11.79},
+        {"ticker": "PNB", "name": "Punjab National Bank", "weight": 10.89},
+        {"ticker": "UNIONBANK", "name": "Union Bank of India", "weight": 9.29},
+        {"ticker": "INDIANB", "name": "Indian Bank", "weight": 8.30},
+        {"ticker": "BANKINDIA", "name": "Bank of India", "weight": 4.70},
+        {"ticker": "MAHABANK", "name": "Bank of Maharashtra", "weight": 4.53},
+        {"ticker": "CENTRALBK", "name": "Central Bank of India", "weight": 1.48},
+        {"ticker": "IOB", "name": "Indian Overseas Bank", "weight": 1.39}
+      ]
+    },
+    "consumer-durables": {
+      "official_index_name": "Nifty Consumer Durables",
+      "constituent_count": 13,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/Factsheet_nifty_consumer_durables.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftyconsumerdurableslist.csv",
+      "constituents": [
+        {"ticker": "TITAN", "name": "Titan Company Ltd.", "weight": 33.96},
+        {"ticker": "DIXON", "name": "Dixon Technologies (India) Ltd.", "weight": 15.76},
+        {"ticker": "HAVELLS", "name": "Havells India Ltd.", "weight": 8.59},
+        {"ticker": "VOLTAS", "name": "Voltas Ltd.", "weight": 8.19},
+        {"ticker": "KALYANKJIL", "name": "Kalyan Jewellers India Ltd.", "weight": 6.36},
+        {"ticker": "BLUESTARCO", "name": "Blue Star Ltd.", "weight": 5.90},
+        {"ticker": "CROMPTON", "name": "Crompton Greaves Consumer Electricals Ltd.", "weight": 4.52},
+        {"ticker": "AMBER", "name": "Amber Enterprises India Ltd.", "weight": 4.40},
+        {"ticker": "LGEINDIA", "name": "LG Electronics India Ltd.", "weight": 4.11},
+        {"ticker": "KAJARIACER", "name": "Kajaria Ceramics Ltd.", "weight": 2.68}
+      ]
+    },
+    "media": {
+      "official_index_name": "Nifty Media",
+      "constituent_count": 10,
+      "factsheet_url": "https://www.niftyindices.com/Factsheet/ind_nifty_media.pdf",
+      "constituent_url": "https://www.niftyindices.com/IndexConstituent/ind_niftymedialist.csv",
+      "constituents": [
+        {"ticker": "ZEEL", "name": "Zee Entertainment Enterprises Ltd.", "weight": 24.21},
+        {"ticker": "PVRINOX", "name": "PVR INOX Ltd.", "weight": 18.57},
+        {"ticker": "NAZARA", "name": "Nazara Technologies Ltd.", "weight": 17.76},
+        {"ticker": "SUNTV", "name": "Sun TV Network Ltd.", "weight": 11.57},
+        {"ticker": "SAREGAMA", "name": "Saregama India Ltd.", "weight": 8.70},
+        {"ticker": "TIPSMUSIC", "name": "Tips Music Ltd.", "weight": 7.07},
+        {"ticker": "NETWORK18", "name": "Network18 Media & Investments Ltd.", "weight": 4.44},
+        {"ticker": "PFOCUS", "name": "Prime Focus Ltd.", "weight": 4.40},
+        {"ticker": "DBCORP", "name": "D.B.Corp Ltd.", "weight": 2.19},
+        {"ticker": "HATHWAY", "name": "Hathway Cable & Datacom Ltd.", "weight": 1.10}
+      ]
+    }
+  }
+}

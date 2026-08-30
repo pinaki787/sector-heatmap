@@ -1,0 +1,40 @@
+.driver-row {
+  grid-template-columns: 1.35fr .7fr .8fr .9fr .8fr;
+}
+
+.sector {
+  align-content: start;
+  min-height: 158px;
+}
+
+.sector .source-label {
+  color: #8ea4be;
+  display: block;
+  font-size: 9px;
+  line-height: 1.35;
+  margin-top: 7px;
+}
+
+.sector .top-inline {
+  color: #c6d5e6;
+  display: block;
+  font-size: 9px;
+  line-height: 1.5;
+  margin-top: 7px;
+}
+
+.panel-title small {
+  color: #7f94af;
+  display: block;
+  margin-top: 5px;
+}
+
+@media (max-width: 600px) {
+  .driver-row {
+    grid-template-columns: 1.1fr .65fr .75fr .85fr;
+  }
+
+  .driver-row span:last-child {
+    display: none;
+  }
+}

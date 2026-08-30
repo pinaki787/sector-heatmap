@@ -21,6 +21,7 @@ from .analysis_config import (
 from .config import _atomic_private_write
 from .indicators import resample_weekly
 from .market_calendar import IST, market_session
+from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import BENCHMARK_SYMBOL, SECTOR_BY_ID, SECTOR_DEFINITIONS
 
 LOGGER = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ class SectorAnalysisService:
 
     @staticmethod
     def _empty_snapshot(mode, error):
-        return {"status": "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": None, "refreshing": False, "error": error, "market_session": market_session(), "market_overview": {}, "sectors": [], "events": []}
+        return {"status": "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": None, "refreshing": False, "error": error, "market_session": market_session(), "market_overview": {}, "weight_source": OFFICIAL_WEIGHT_SET.summary(), "sectors": [], "events": []}
 
     def start(self):
         if self.running or not self.provider:
@@ -193,14 +194,16 @@ class SectorAnalysisService:
                 history = self.store.sector_history(mode, sector["sector_id"])
                 sector["rotation_state"], sector["acceleration_state"], sector["score_velocity"] = classify_rotation(sector, history)
                 sector["history"] = history
-                sector["constituents"] = [{"ticker": ticker, "weight": weight} for ticker, weight in SECTOR_BY_ID[sector["sector_id"]].constituents]
+                definition = SECTOR_BY_ID[sector["sector_id"]]
+                sector["constituents"] = [{"ticker": item.ticker, "name": item.name, "weight": item.weight} for item in definition.constituents]
+                sector["attribution"] = definition.attribution
                 previous = history[-1] if history else None
                 events.extend(detect_events(previous, sector))
             overview = market_overview(sectors, benchmark_states)
             usable = any(sector.get("overall_score") is not None for sector in sectors)
             has_stale_data = any(sector.get("data_quality") == "STALE" for sector in sectors)
             status = "UNAVAILABLE" if not usable else "STALE" if has_stale_data else "MARKET_CLOSED" if session["status"] == "CLOSED" else "DELAYED"
-            new_snapshots[mode] = {"status": status, "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": now, "refreshing": False, "error": None if usable else "No sector has sufficient completed candle data", "market_session": session, "market_overview": overview, "benchmark_states": benchmark_states, "sectors": sectors, "events": events}
+            new_snapshots[mode] = {"status": status, "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": now, "refreshing": False, "error": None if usable else "No sector has sufficient completed candle data", "market_session": session, "market_overview": overview, "benchmark_states": benchmark_states, "weight_source": OFFICIAL_WEIGHT_SET.summary(), "sectors": sectors, "events": events}
 
         if time.monotonic() - self.last_saved >= SNAPSHOT_INTERVAL_SECONDS or not self.last_saved:
             for mode, snapshot in new_snapshots.items():
@@ -247,7 +250,7 @@ class SectorAnalysisService:
             snapshot = deepcopy(self.snapshots[mode])
         if sector_id:
             sector = next((item for item in snapshot["sectors"] if item["sector_id"] == sector_id), None)
-            return {"status": snapshot["status"] if sector else "UNAVAILABLE", "mode": mode, "benchmark": snapshot["benchmark"], "updated_at": snapshot["updated_at"], "market_session": snapshot.get("market_session"), "sector": sector, "error": snapshot.get("error") if sector else "Unknown or unavailable sector"}
+            return {"status": snapshot["status"] if sector else "UNAVAILABLE", "mode": mode, "benchmark": snapshot["benchmark"], "updated_at": snapshot["updated_at"], "market_session": snapshot.get("market_session"), "weight_source": snapshot.get("weight_source"), "sector": sector, "error": snapshot.get("error") if sector else "Unknown or unavailable sector"}
         for sector in snapshot["sectors"]:
             for timeframe in sector.get("timeframe_states", {}).values():
                 timeframe.pop("series", None)
