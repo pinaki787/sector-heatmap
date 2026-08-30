@@ -126,7 +126,7 @@
         {"ticker": "BRITANNIA", "name": "Britannia Industries Ltd.", "weight": 6.31},
         {"ticker": "VBL", "name": "Varun Beverages Ltd.", "weight": 5.98},
         {"ticker": "MARICO", "name": "Marico Ltd.", "weight": 4.56},
-        {"ticker": "MCDOWELL-N", "name": "United Spirits Ltd.", "weight": 4.43},
+        {"ticker": "UNITDSPR", "name": "United Spirits Ltd.", "weight": 4.43},
         {"ticker": "GODREJCP", "name": "Godrej Consumer Products Ltd.", "weight": 4.26},
         {"ticker": "RADICO", "name": "Radico Khaitan Ltd.", "weight": 3.36}
       ]

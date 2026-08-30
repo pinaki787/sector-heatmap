@@ -28,6 +28,9 @@ class OfficialWeightDataTests(unittest.TestCase):
     def test_known_official_weight_is_loaded_exactly_as_published(self):
         hdfc = OFFICIAL_WEIGHT_SET.indices["bank"].constituents[0]
         self.assertEqual((hdfc.ticker, hdfc.weight), ("HDFCBANK", 18.20))
+        fmcg_tickers = {item.ticker for item in OFFICIAL_WEIGHT_SET.indices["fmcg"].constituents}
+        self.assertIn("UNITDSPR", fmcg_tickers)
+        self.assertNotIn("MCDOWELL-N", fmcg_tickers)
 
     def test_sector_without_authoritative_weights_is_explicitly_unavailable(self):
         unsupported = SectorDefinition("unsupported", "Unsupported", "NSE:UNSUPPORTED-INDEX")
