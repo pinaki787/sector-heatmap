@@ -5,6 +5,11 @@ from .sectors import SECTORS, SECTOR_STOCKS, equity_symbol
 
 TOKEN_ERROR_HINTS = ("token", "auth", "unauthor", "401", "expired", "invalid access")
 
+def is_token_error(message):
+    if isinstance(message, dict) and message.get("code") in {-8, -15, -16, -17, 401}:
+        return True
+    return any(hint in str(message).lower() for hint in TOKEN_ERROR_HINTS)
+
 class FyersLiveFeed:
     def __init__(self, access_token):
         self.access_token, self.lock, self.ticks = access_token, Lock(), {}
@@ -18,7 +23,7 @@ class FyersLiveFeed:
             error = str(message)
             with self.lock:
                 self.error, self.connected = error, False
-                self.token_expired = any(hint in error.lower() for hint in TOKEN_ERROR_HINTS)
+                self.token_expired = is_token_error(message)
         def on_connect():
             with self.lock: self.connected, self.error = True, None
             index_symbols = [symbol for _, symbol, _ in SECTORS]

@@ -20,14 +20,14 @@
     setText('sector-count', String(sectors.length));
     setText('sector-time', data.updated_at ? new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
     $('sector-grid').innerHTML = sectors.map(item => `<article class="sector ${item.change < 0 ? 'down-sector' : ''}"><b>${item.name}</b><small>${item.index}</small><span class="${signed(item.change)}">${pct(item.change)}</span><small>${item.weight}% index weight</small></article>`).join('') || '<p class="empty">Waiting for market data…</p>';
-    $('feed-dot').classList.toggle('ok', !!data.connected); $('feed-state').textContent = data.connected ? 'Fyers feed connected' : 'Feed unavailable';
+    $('feed-dot').classList.toggle('ok', !!data.connected); $('feed-state').textContent = data.connected ? 'Fyers feed connected' : (data.error || 'Feed unavailable');
   };
   const refreshSectors = () => fetch('/api/heatmap', { cache: 'no-store' }).then(response => response.json()).then(renderSectors).catch(() => { $('feed-state').textContent = 'Feed unavailable'; });
   const refreshAccount = () => fetch('/api/account', { cache: 'no-store' }).then(response => response.json()).then(data => {
     const positions = (data.positions || []).filter(item => Number(item.netQty || item.net_qty || 0) !== 0);
     setText('live-pnl', money(data.pnl), signed(data.pnl)); setText('open-count', String(positions.length)); setText('funds', data.available_funds == null ? '—' : money(data.available_funds));
     $('open-positions').innerHTML = positions.length ? positions.map(item => { const qty = item.netQty ?? item.net_qty ?? 0, pnl = item.pl ?? item.pnl ?? 0; return `<div class="row"><b>${item.symbol || item.symbol_name || '—'}</b><span>${qty}</span><span>${money(item.netAvg ?? item.net_avg ?? 0)}</span><strong class="${signed(pnl)}">${money(pnl)}</strong></div>`; }).join('') : '<p class="empty">No open broker positions.</p>';
-    ['broker-dot', 'account-dot'].forEach(id => $(id).classList.toggle('ok', !!data.connected)); $('broker-state').textContent = data.connected ? 'Fyers connected' : 'Fyers disconnected'; $('account-state').textContent = data.connected ? 'Broker feed connected' : 'Broker feed unavailable';
+    ['broker-dot', 'account-dot'].forEach(id => $(id).classList.toggle('ok', !!data.connected)); $('broker-state').textContent = data.connected ? 'Fyers connected' : (data.error || 'Fyers disconnected'); $('account-state').textContent = data.connected ? 'Broker feed connected' : (data.error || 'Broker feed unavailable');
   }).catch(() => { $('account-state').textContent = 'Broker feed unavailable'; });
   const refreshClosed = () => fetch(`/api/realized-pnl?period=${period}`, { cache: 'no-store' }).then(response => response.json()).then(data => {
     const summary = data.summary || {}; setText('closed-pnl', money(summary.net_pnl), signed(summary.net_pnl));
@@ -35,6 +35,29 @@
   }).catch(() => { $('closed-positions').innerHTML = '<p class="empty">Closed-position data is unavailable.</p>'; });
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(item => item.classList.toggle('active', item === button)); document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view)); }));
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => { period = button.dataset.period; document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button)); refreshClosed(); }));
-  $('reauth').addEventListener('click', () => fetch('/api/auth/start').then(response => response.json()).then(data => window.open(data.url, '_blank', 'noopener')));
+  $('reauth').addEventListener('click', async () => {
+    const button = $('reauth');
+    const loginWindow = window.open('about:blank', 'fyers-oauth');
+    button.disabled = true;
+    button.textContent = 'Opening Fyers login…';
+    try {
+      const response = await fetch('/api/auth/start', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !data.url) throw new Error(data.error || 'Could not start Fyers authentication');
+      if (loginWindow) {
+        loginWindow.opener = null;
+        loginWindow.location.replace(data.url);
+      } else {
+        window.location.assign(data.url);
+      }
+      $('broker-state').textContent = 'Complete login and 2FA in the browser';
+    } catch (error) {
+      if (loginWindow) loginWindow.close();
+      $('broker-state').textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Refresh authentication';
+    }
+  });
   refreshSectors(); refreshAccount(); refreshClosed(); setInterval(refreshSectors, sectorRefreshMs); setInterval(refreshAccount, accountRefreshMs);
 })();
