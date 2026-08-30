@@ -7,6 +7,7 @@ import webbrowser
 from .config import ROOT, load_config
 from .authentication import authorization_url, exchange_auth_code
 from .market_data import FyersLiveFeed, is_token_error
+from .sector_service import SectorAnalysisService
 from fyers_apiv3 import fyersModel
 
 def run_server():
@@ -14,12 +15,20 @@ def run_server():
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
     feed = FyersLiveFeed(token) if token else None
     if feed: feed.start()
-    state = {"feed": feed, "renewing": False, "auth_error": None, "next_auth_attempt": 0.0}
+    sector_analysis = SectorAnalysisService(token)
+    sector_analysis.start()
+    state = {"feed": feed, "sector_analysis": sector_analysis, "renewing": False, "auth_error": None, "next_auth_attempt": 0.0}
 
     def replace_feed(token):
+        previous_analysis = state.get("sector_analysis")
+        if previous_analysis:
+            previous_analysis.running = False
         replacement = FyersLiveFeed(token)
         replacement.start()
         state["feed"] = replacement
+        replacement_analysis = SectorAnalysisService(token)
+        replacement_analysis.start()
+        state["sector_analysis"] = replacement_analysis
         state["auth_error"] = None
 
     def mark_auth_failure(*responses):
@@ -145,6 +154,21 @@ def run_server():
                     self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
                 except Exception as error:
                     self.send_error(502, str(error))
+                return
+            if path == "/api/sector-analysis":
+                mode = (parse_qs(urlparse(self.path).query).get("mode") or ["intraday"])[0]
+                self.send_json(200, state["sector_analysis"].snapshot(mode=mode))
+                return
+            if path == "/api/sector-analysis/detail":
+                query = parse_qs(urlparse(self.path).query)
+                mode = (query.get("mode") or ["intraday"])[0]
+                sector_id = (query.get("sector") or [""])[0]
+                result = state["sector_analysis"].snapshot(mode=mode, sector_id=sector_id)
+                if result.get("sector"):
+                    live_sector = next((item for item in snapshot().get("sectors", []) if item.get("name") == result["sector"]["name"]), None)
+                    if live_sector:
+                        result["sector"]["constituent_movers"] = live_sector.get("drivers", [])
+                self.send_json(200 if result.get("sector") else 404, result)
                 return
             if path == "/api/heatmap":
                 body = json.dumps(snapshot()).encode(); self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return

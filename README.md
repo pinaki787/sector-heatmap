@@ -131,6 +131,26 @@ When Fyers reports an expired or invalid token, the dashboard detects the authen
 
 - `sector_heatmap/config.py` — local configuration and token persistence
 - `sector_heatmap/authentication.py` — browser OAuth, local callback, and token exchange
-- `sector_heatmap/sectors.py` — sector definitions and Fyers index symbols
+- `sector_heatmap/sectors.py` — configurable sector, benchmark, FYERS symbol, and constituent definitions
 - `sector_heatmap/market_data.py` — Fyers WebSocket subscription and live snapshot aggregation
+- `sector_heatmap/indicators.py` — dependency-free EMA, ATR, RSI, ADX/DMI, breadth, and volume calculations
+- `sector_heatmap/analysis.py` — explainable timeframe, RS, momentum, score, ranking, alignment, rotation, and event domain logic
+- `sector_heatmap/sector_service.py` — completed-candle cache, FYERS history adapter, bounded snapshot history, and refresh service
 - `sector_heatmap/web.py` — local HTTP API and dashboard server
+
+## Multi-timeframe sector analysis
+
+The Sector Rotation view analyzes the configured FYERS sector indices on 15m,
+1H, Daily, and Weekly completed candles against `NSE:NIFTY50-INDEX`. It supports
+Intraday and Swing weighting, explainable trend and relative-strength states,
+ranking and rank change, persisted rotation history, multi-timeframe alignment,
+filters, sorting, and a sector detail workflow. It is an analytical prioritization
+system, not an automatic signal or order-entry feature.
+
+The primary endpoints are:
+
+- `GET /api/sector-analysis?mode=intraday|swing`
+- `GET /api/sector-analysis/detail?mode=intraday|swing&sector=<sector-id>`
+
+See [the implementation design](docs/sector-analysis-design.md) for formulas,
+caching, refresh behavior, and current provider limitations.
