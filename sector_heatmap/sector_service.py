@@ -107,7 +107,7 @@ class AnalysisHistoryStore:
 
     def append(self, mode, sector):
         history = self.data.setdefault("modes", {}).setdefault(mode, {}).setdefault(sector["sector_id"], [])
-        point = {key: sector.get(key) for key in ("last_updated", "overall_score", "trend_score", "relative_strength_score", "momentum_score", "breadth_score", "volume_score", "rank", "rotation_state", "acceleration_state", "mtf_alignment")}
+        point = {key: sector.get(key) for key in ("last_updated", "overall_score", "trend_score", "relative_strength_score", "momentum_score", "breadth_score", "volume_score", "rank", "rotation_state", "acceleration_state", "rotation_readiness", "mtf_alignment")}
         point["timestamp"] = datetime.now(IST).isoformat()
         if history and history[-1].get("last_updated") == point.get("last_updated") and history[-1].get("overall_score") == point.get("overall_score"):
             history[-1] = point
@@ -192,7 +192,12 @@ class SectorAnalysisService:
             events = []
             for sector in sectors:
                 history = self.store.sector_history(mode, sector["sector_id"])
-                sector["rotation_state"], sector["acceleration_state"], sector["score_velocity"] = classify_rotation(sector, history)
+                (
+                    sector["rotation_state"],
+                    sector["acceleration_state"],
+                    sector["score_velocity"],
+                    sector["rotation_readiness"],
+                ) = classify_rotation(sector, history)
                 sector["history"] = history
                 definition = SECTOR_BY_ID[sector["sector_id"]]
                 sector["constituents"] = [{"ticker": item.ticker, "name": item.name, "weight": item.weight} for item in definition.constituents]

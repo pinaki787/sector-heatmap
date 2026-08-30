@@ -5,7 +5,7 @@ import unittest
 
 from sector_heatmap.analysis import (
     calculate_sector, calculate_timeframe_state, classify_rotation, detect_events,
-    mtf_alignment, rank_sectors, rsi_state, weighted_available,
+    market_overview, mtf_alignment, rank_sectors, rsi_state, weighted_available,
 )
 from sector_heatmap.analysis_config import MTF_MODES, SECTOR_SCORE_WEIGHTS
 from sector_heatmap.indicators import (
@@ -120,14 +120,34 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(ranked[0]["rank_change"], 2)
 
     def test_rotation_classification_uses_score_and_rank_direction(self):
-        current = {"overall_score": 72, "rank": 1}
-        history = [{"overall_score": 60, "rank": 4}, {"overall_score": 68, "rank": 2}]
+        current = {"overall_score": 72, "rank": 1, "last_updated": "bar-3"}
+        history = [{"overall_score": 60, "rank": 4, "last_updated": "bar-1"}, {"overall_score": 68, "rank": 2, "last_updated": "bar-2"}]
         self.assertEqual(classify_rotation(current, history)[0], "LEADING")
 
     def test_rotation_acceleration_compares_velocities(self):
-        current = {"overall_score": 75, "rank": 1}
-        history = [{"overall_score": 60, "rank": 4}, {"overall_score": 64, "rank": 3}]
+        current = {"overall_score": 75, "rank": 1, "last_updated": "bar-3"}
+        history = [{"overall_score": 60, "rank": 4, "last_updated": "bar-1"}, {"overall_score": 64, "rank": 3, "last_updated": "bar-2"}]
         self.assertEqual(classify_rotation(current, history)[1], "ACCELERATING")
+
+    def test_rotation_ignores_duplicate_and_current_completed_bar_timestamps(self):
+        current = {"overall_score": 75, "rank": 1, "last_updated": "bar-2"}
+        history = [
+            {"overall_score": 60, "rank": 4, "last_updated": "bar-1"},
+            {"overall_score": 61, "rank": 3, "last_updated": "bar-1"},
+            {"overall_score": 65, "rank": 2, "last_updated": "bar-2"},
+        ]
+        quadrant, pace, velocity, readiness = classify_rotation(current, history)
+        self.assertEqual((quadrant, pace, velocity, readiness), ("UNAVAILABLE", "UNAVAILABLE", None, "INSUFFICIENT_HISTORY"))
+
+    def test_market_overview_exposes_rotation_readiness_without_fabricating_neutral(self):
+        sectors = [{
+            "name": "Auto", "overall_score": 60, "rotation_state": "UNAVAILABLE",
+            "rotation_readiness": "INSUFFICIENT_HISTORY", "mtf_alignment": "MIXED",
+            "relative_strength_state": "Neutral", "timeframe_states": {"daily": {"state": 0}},
+        }]
+        overview = market_overview(sectors, {})
+        self.assertEqual(overview["rotation_readiness"], "INSUFFICIENT_HISTORY")
+        self.assertEqual(overview["neutral"], [])
 
     def test_full_mtf_alignment(self):
         states = {key: timeframe(state=1) for key in ("15m", "1h", "daily", "weekly")}
@@ -166,7 +186,7 @@ class ScoringTests(unittest.TestCase):
 
     def test_alert_ready_transition_event(self):
         previous = {"rank": 5, "rotation_state": "IMPROVING", "mtf_alignment": "MIXED", "relative_strength_state": "Neutral"}
-        current = {"sector_id": "auto", "rank": 2, "rotation_state": "LEADING", "mtf_alignment": "BULLISH ALIGNMENT", "relative_strength_state": "Strong Outperformer"}
+        current = {"sector_id": "auto", "rank": 2, "rotation_state": "LEADING", "rotation_readiness": "READY", "mtf_alignment": "BULLISH ALIGNMENT", "relative_strength_state": "Strong Outperformer"}
         types = {event["type"] for event in detect_events(previous, current)}
         self.assertIn("TOP_3_ENTERED", types)
         self.assertIn("ROTATION_CHANGED", types)

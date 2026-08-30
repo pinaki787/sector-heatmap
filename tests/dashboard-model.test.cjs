@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { analysisStatusText, filterAndSortSectors, qualityText } = require('../sector-dashboard-model.js')
+const { analysisStatusText, filterAndSortSectors, qualityText, rotationDisplay, rotationOverviewValue } = require('../sector-dashboard-model.js')
 
 const sectors = [
   { sector_id: 'auto', rank: 1, overall_score: 80, rank_change: 2, rotation_state: 'LEADING', mtf_alignment: 'BULLISH ALIGNMENT', relative_strength_state: 'Strong Outperformer' },
@@ -40,4 +40,15 @@ test('closed market does not mask stale or failure status', () => {
   const stale = { status: 'STALE', market_session: { status: 'CLOSED' }, sectors: [{ last_updated: '2026-08-27T15:15:00+05:30' }] }
   assert.match(analysisStatusText(stale, value => value), /^DATA STALE · MARKET CLOSED/)
   assert.equal(analysisStatusText({ status: 'UNAVAILABLE', error: 'Provider failed' }), 'Provider failed')
+})
+
+test('rotation readiness is rendered as waiting instead of neutral or none', () => {
+  const sector = { rotation_state: 'UNAVAILABLE', acceleration_state: 'UNAVAILABLE', rotation_readiness: 'INSUFFICIENT_HISTORY' }
+  const overview = { rotation_readiness: 'INSUFFICIENT_HISTORY', leading: [], improving: [], weakening: [], lagging: [] }
+  assert.equal(rotationDisplay(sector), 'Waiting for completed-bar history')
+  assert.equal(rotationOverviewValue(overview, ['leading']), 'Waiting for completed-bar history')
+})
+
+test('rotation quadrant and acceleration pace remain independently visible when ready', () => {
+  assert.equal(rotationDisplay({ rotation_state: 'IMPROVING', acceleration_state: 'DECELERATING', rotation_readiness: 'READY' }), 'IMPROVING · DECELERATING')
 })

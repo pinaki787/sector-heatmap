@@ -40,5 +40,15 @@
     return quality === 'MARKET CLOSED' ? 'MARKET CLOSED — last completed session' : quality
   }
 
-  return { analysisStatusText, filterAndSortSectors, latestDataTimestamp, qualityText }
+  function rotationDisplay(sector) {
+    if (sector?.rotation_readiness !== 'READY') return 'Waiting for completed-bar history'
+    return `${sector.rotation_state || 'Unavailable'} · ${sector.acceleration_state || 'Unavailable'}`
+  }
+
+  function rotationOverviewValue(overview, states) {
+    if (overview?.rotation_readiness !== 'READY') return 'Waiting for completed-bar history'
+    return states.flatMap(state => overview?.[state] || []).join(', ') || 'None'
+  }
+
+  return { analysisStatusText, filterAndSortSectors, latestDataTimestamp, qualityText, rotationDisplay, rotationOverviewValue }
 })

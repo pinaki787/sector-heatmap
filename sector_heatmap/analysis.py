@@ -67,8 +67,9 @@ class SectorAnalysis:
     rank: Optional[int] = None
     previous_rank: Optional[int] = None
     rank_change: Optional[int] = None
-    rotation_state: str = "NEUTRAL"
-    acceleration_state: str = "STABLE"
+    rotation_state: str = "UNAVAILABLE"
+    acceleration_state: str = "UNAVAILABLE"
+    rotation_readiness: str = "INSUFFICIENT_HISTORY"
     mtf_alignment: str = "MIXED"
     adx: Optional[float] = None
     last_updated: Optional[str] = None
@@ -277,10 +278,29 @@ def rank_sectors(sectors, previous_ranks=None):
     return ordered
 
 
+def _distinct_prior_rotation_history(current, history):
+    """Keep the latest usable observation for each prior completed sector bar."""
+    current_bar = current.get("last_updated")
+    distinct = {}
+    for point in history:
+        completed_bar = point.get("last_updated")
+        if (
+            not completed_bar
+            or completed_bar == current_bar
+            or point.get("overall_score") is None
+            or point.get("rank") is None
+        ):
+            continue
+        # Reinsert repeated bars so the most recently persisted observation wins.
+        distinct.pop(completed_bar, None)
+        distinct[completed_bar] = point
+    return list(distinct.values())
+
+
 def classify_rotation(current, history):
-    usable = [point for point in history if point.get("overall_score") is not None and point.get("rank") is not None]
+    usable = _distinct_prior_rotation_history(current, history)
     if current.get("overall_score") is None or current.get("rank") is None or len(usable) < ROTATION["minimum_snapshots"]:
-        return "NEUTRAL", "STABLE", 0.0
+        return "UNAVAILABLE", "UNAVAILABLE", None, "INSUFFICIENT_HISTORY"
     previous = usable[-1]
     score_velocity = current["overall_score"] - previous["overall_score"]
     rank_velocity = previous["rank"] - current["rank"]
@@ -302,7 +322,7 @@ def classify_rotation(current, history):
             acceleration = "ACCELERATING"
         elif change < -ROTATION["acceleration_threshold"]:
             acceleration = "DECELERATING"
-    return state, acceleration, _round(score_velocity)
+    return state, acceleration, _round(score_velocity), "READY"
 
 
 def detect_events(previous, current):
@@ -313,6 +333,8 @@ def detect_events(previous, current):
     if previous_top != current_top:
         events.append({"type": "TOP_3_ENTERED" if current_top else "TOP_3_EXITED", "sector_id": current["sector_id"]})
     for key, event_type in (("rotation_state", "ROTATION_CHANGED"), ("mtf_alignment", "MTF_ALIGNMENT_CHANGED"), ("relative_strength_state", "RELATIVE_STRENGTH_CHANGED")):
+        if key == "rotation_state" and current.get("rotation_readiness") != "READY":
+            continue
         if previous.get(key) != current.get(key):
             events.append({"type": event_type, "sector_id": current["sector_id"], "from": previous.get(key), "to": current.get(key)})
     return events
@@ -320,6 +342,7 @@ def detect_events(previous, current):
 
 def market_overview(sectors, benchmark_states):
     available = [sector for sector in sectors if sector.get("overall_score") is not None]
+    rotation_ready = [sector for sector in available if sector.get("rotation_readiness") == "READY"]
     daily_weekly_bullish = sum(sector["mtf_alignment"] in {"FULL BULLISH ALIGNMENT", "BULLISH ALIGNMENT"} for sector in available)
     bullish = sum((sector.get("timeframe_states", {}).get("daily", {}).get("state") or 0) > 0 for sector in available)
     benchmark_daily = benchmark_states.get("daily", {}).get("state")
@@ -327,9 +350,12 @@ def market_overview(sectors, benchmark_states):
     alignment_ratio = daily_weekly_bullish / len(available) if available else 0
     regime_score = (benchmark_daily or 0) + (benchmark_weekly or 0) + (1 if alignment_ratio >= 0.6 else -1 if alignment_ratio <= 0.3 else 0)
     regime = "STRONGLY BULLISH" if regime_score >= 4 else "BULLISH" if regime_score >= 2 else "STRONGLY BEARISH" if regime_score <= -4 else "BEARISH" if regime_score <= -2 else "NEUTRAL"
-    by_rotation = {state: [sector["name"] for sector in available if sector["rotation_state"] == state][:4] for state in ("LEADING", "IMPROVING", "NEUTRAL", "WEAKENING", "LAGGING")}
+    by_rotation = {state: [sector["name"] for sector in rotation_ready if sector["rotation_state"] == state][:4] for state in ("LEADING", "IMPROVING", "NEUTRAL", "WEAKENING", "LAGGING")}
     return {
         "market_regime": regime,
+        "rotation_readiness": "READY" if available and len(rotation_ready) == len(available) else "INSUFFICIENT_HISTORY",
+        "rotation_ready_sectors": len(rotation_ready),
+        "rotation_total_sectors": len(available),
         "sector_breadth": {"bullish": bullish, "total": len(available)},
         "daily_weekly_bullish_alignment": {"count": daily_weekly_bullish, "total": len(available)},
         "strong_outperformers": sum(sector.get("relative_strength_state") == "Strong Outperformer" for sector in available),

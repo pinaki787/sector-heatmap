@@ -3,7 +3,7 @@
   const accountRefreshMs = 10 * 1000
   const periods = ['daily', 'weekly', 'monthly', 'annual']
   const timeframeOrder = ['15m', '1h', 'daily', 'weekly']
-  const { analysisStatusText, filterAndSortSectors, qualityText } = window.SectorDashboardModel
+  const { analysisStatusText, filterAndSortSectors, qualityText, rotationDisplay, rotationOverviewValue } = window.SectorDashboardModel
   const stateClass = value => value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
   const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
   const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character])
@@ -87,9 +87,9 @@
   const renderOverview = overview => {
     $('market-overview').innerHTML = [
       metric('Market regime', overview.market_regime || 'Unavailable'),
-      metric('Leading', (overview.leading || []).join(', ') || 'None'),
-      metric('Improving', (overview.improving || []).join(', ') || 'None'),
-      metric('Weakening / lagging', [...(overview.weakening || []), ...(overview.lagging || [])].join(', ') || 'None'),
+      metric('Leading', rotationOverviewValue(overview, ['leading'])),
+      metric('Improving', rotationOverviewValue(overview, ['improving'])),
+      metric('Weakening / lagging', rotationOverviewValue(overview, ['weakening', 'lagging'])),
       metric('Sector breadth', overview.sector_breadth ? `${overview.sector_breadth.bullish} / ${overview.sector_breadth.total} bullish` : 'Unavailable'),
       metric('Daily + Weekly bullish', overview.daily_weekly_bullish_alignment ? `${overview.daily_weekly_bullish_alignment.count} / ${overview.daily_weekly_bullish_alignment.total}` : 'Unavailable'),
     ].join('')
@@ -104,7 +104,8 @@
     const rows = applyFilter(analysis.sectors)
     $('sector-body').innerHTML = rows.map(sector => {
       const rankChange = sector.rank_change == null ? '—' : sector.rank_change > 0 ? `+${sector.rank_change}` : String(sector.rank_change)
-      return `<tr class="sector-row" tabindex="0" data-detail="${escapeHtml(sector.sector_id)}"><td class="sector-name"><b>${escapeHtml(sector.name)}</b><small class="quality ${qualityClass(sector.data_quality)}">${escapeHtml(qualityText(sector.data_quality))}</small></td>${renderTopContributors(sector)}${timeframeOrder.map(tf => `<td>${stateButton(sector, tf)}</td>`).join('')}<td>${escapeHtml(sector.mtf_alignment)}</td><td class="${stateClass((sector.relative_strength_score ?? 50) - 50)}">${escapeHtml(sector.relative_strength_state)}<br><small>${number(sector.relative_strength_score)}</small></td><td>${number(sector.adx)}</td><td>${number(sector.momentum_score)}</td><td>${number(sector.breadth_score)}</td><td>${number(sector.volume_score)}</td><td>${escapeHtml(sector.rotation_state)}<br><small>${escapeHtml(sector.acceleration_state)}</small></td><td><b>${number(sector.overall_score)}</b></td><td>${sector.rank ? `#${sector.rank}` : '—'}</td><td class="rank-change ${sector.rank_change > 0 ? 'up' : sector.rank_change < 0 ? 'down' : ''}">${rankChange}</td><td>${time(sector.last_updated)}</td></tr>`
+      const rotation = rotationDisplay(sector)
+      return `<tr class="sector-row" tabindex="0" data-detail="${escapeHtml(sector.sector_id)}"><td class="sector-name"><b>${escapeHtml(sector.name)}</b><small class="quality ${qualityClass(sector.data_quality)}">${escapeHtml(qualityText(sector.data_quality))}</small></td>${renderTopContributors(sector)}${timeframeOrder.map(tf => `<td>${stateButton(sector, tf)}</td>`).join('')}<td>${escapeHtml(sector.mtf_alignment)}</td><td class="${stateClass((sector.relative_strength_score ?? 50) - 50)}">${escapeHtml(sector.relative_strength_state)}<br><small>${number(sector.relative_strength_score)}</small></td><td>${number(sector.adx)}</td><td>${number(sector.momentum_score)}</td><td>${number(sector.breadth_score)}</td><td>${number(sector.volume_score)}</td><td class="${sector.rotation_readiness === 'READY' ? '' : 'neutral'}">${escapeHtml(rotation)}</td><td><b>${number(sector.overall_score)}</b></td><td>${sector.rank ? `#${sector.rank}` : '—'}</td><td class="rank-change ${sector.rank_change > 0 ? 'up' : sector.rank_change < 0 ? 'down' : ''}">${rankChange}</td><td>${time(sector.last_updated)}</td></tr>`
     }).join('') || '<tr><td colspan="17" class="empty">No sectors match this filter.</td></tr>'
     document.querySelectorAll('[data-detail]').forEach(row => {
       const open = () => loadDetail(row.dataset.detail, selectedTimeframe)
