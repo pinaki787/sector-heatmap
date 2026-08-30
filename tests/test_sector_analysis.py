@@ -12,6 +12,7 @@ from sector_heatmap.indicators import (
     adx_dmi, breadth_score, ema, normalized_slope, rsi,
     volume_participation_score,
 )
+from sector_heatmap.market_calendar import IST, market_session
 from sector_heatmap.sector_service import SectorAnalysisService
 from sector_heatmap.sectors import SECTOR_DEFINITIONS
 
@@ -142,8 +143,10 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(mtf_alignment(states), "MIXED")
 
     def test_stale_data_handling(self):
-        old = [{"timestamp": int((datetime.now() - timedelta(days=20)).timestamp())}]
-        self.assertEqual(SectorAnalysisService._quality("daily", old), "STALE")
+        current = datetime(2026, 8, 28, 11, 0, tzinfo=IST)
+        old = [{"timestamp": int((current - timedelta(days=20)).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("daily", old), "STALE")
 
     def test_insufficient_candles_are_explicit(self):
         result = calculate_timeframe_state("daily", candles(20), candles(20))
@@ -183,7 +186,7 @@ class ServiceContractTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "analysis.json"
             provider = Provider()
-            service = SectorAnalysisService("", state_file=path, provider=provider)
+            service = SectorAnalysisService("", state_file=path, provider=provider, now=lambda: datetime(2026, 8, 28, 11, 0, tzinfo=IST))
             service.refresh()
             snapshot = service.snapshot("intraday")
             detail = service.snapshot("intraday", SECTOR_DEFINITIONS[0].sector_id)
@@ -221,6 +224,36 @@ class ServiceContractTests(unittest.TestCase):
             service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json")
             result = service.snapshot("intraday")
             self.assertIn("authentication", result["error"].lower())
+
+
+class MarketCalendarTests(unittest.TestCase):
+    def test_weekend_uses_last_completed_session_instead_of_stale(self):
+        current = datetime(2026, 8, 30, 12, 0, tzinfo=IST)  # Sunday
+        friday_bar = [{"timestamp": int(datetime(2026, 8, 28, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        session = market_session(current)
+        self.assertEqual(session["status"], "CLOSED")
+        self.assertEqual(session["last_completed_session"], "2026-08-28")
+        self.assertEqual(service._quality("15m", friday_bar), "MARKET CLOSED")
+
+    def test_closed_market_does_not_hide_genuinely_stale_data(self):
+        current = datetime(2026, 8, 30, 12, 0, tzinfo=IST)
+        thursday_bar = [{"timestamp": int(datetime(2026, 8, 27, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("15m", thursday_bar), "STALE")
+
+    def test_open_market_keeps_previous_session_intraday_data_stale(self):
+        current = datetime(2026, 8, 31, 11, 30, tzinfo=IST)
+        friday_bar = [{"timestamp": int(datetime(2026, 8, 28, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(market_session(current)["status"], "OPEN")
+        self.assertEqual(service._quality("15m", friday_bar), "STALE")
+
+    def test_exchange_holiday_and_special_sunday_are_calendar_aware(self):
+        holiday = market_session(datetime(2026, 9, 14, 10, 0, tzinfo=IST))
+        budget_session = market_session(datetime(2026, 2, 1, 10, 0, tzinfo=IST))
+        self.assertEqual((holiday["status"], holiday["reason"]), ("CLOSED", "Ganesh Chaturthi"))
+        self.assertEqual(budget_session["status"], "OPEN")
 
 
 if __name__ == "__main__":

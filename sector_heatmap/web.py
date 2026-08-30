@@ -7,6 +7,7 @@ import webbrowser
 from .config import ROOT, load_config
 from .authentication import authorization_url, exchange_auth_code
 from .market_data import FyersLiveFeed, is_token_error
+from .market_calendar import market_session
 from .sector_service import SectorAnalysisService
 from fyers_apiv3 import fyersModel
 
@@ -76,7 +77,7 @@ def run_server():
             if state["auth_error"]:
                 result["error"] = state["auth_error"]
             return result
-        return {"mode":"needs_token", "connected":False, "error":state["auth_error"] or "No reusable Fyers token was found. Reauthentication will start automatically.", "updated_at":datetime.now().astimezone().isoformat(), "sectors":[]}
+        return {"mode":"needs_token", "connected":False, "error":state["auth_error"] or "No reusable Fyers token was found. Reauthentication will start automatically.", "updated_at":datetime.now().astimezone().isoformat(), "market_session":market_session(), "sectors":[]}
     def account_summary():
         token = load_config().get("FYERS_ACCESS_TOKEN", "")
         if not token or ":" not in token:

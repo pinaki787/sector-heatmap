@@ -5,6 +5,7 @@ import ssl
 from threading import Lock, Thread
 from fyers_apiv3.FyersWebsocket import data_ws
 from .sectors import SECTORS, SECTOR_STOCKS, equity_symbol
+from .market_calendar import market_session
 
 TOKEN_ERROR_HINTS = ("token", "auth", "unauthor", "401", "expired", "invalid access")
 
@@ -81,4 +82,4 @@ class FyersLiveFeed:
                                 "contribution": round(driver_weight * stock_change / 100, 3) if stock_change is not None else None})
             drivers.sort(key=lambda item: item["contribution"] if item["contribution"] is not None else float("-inf"), reverse=True)
             rows.append({"name": name, "index": symbol.split(":", 1)[1].removesuffix("-INDEX"), "weight": weight, "change": change, "drivers": drivers})
-        return {"mode": "live" if connected else "connecting", "connected": connected, "error": error, "updated_at": datetime.now().astimezone().isoformat(), "sectors": rows}
+        return {"mode": "live" if connected else "connecting", "connected": connected, "error": error, "updated_at": datetime.now().astimezone().isoformat(), "market_session": market_session(), "sectors": rows}

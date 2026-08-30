@@ -243,7 +243,7 @@ def calculate_sector(sector, timeframe_states, mode="intraday", constituent_metr
     overall, effective_weights = weighted_available(components, SECTOR_SCORE_WEIGHTS)
     missing = [key for key, value in components.items() if value is None]
     quality_values = [value.get("data_quality") for value in timeframe_states.values()]
-    quality = "UNAVAILABLE" if all(value == "UNAVAILABLE" for value in quality_values) else "INSUFFICIENT DATA" if all(value in {"UNAVAILABLE", "INSUFFICIENT DATA"} for value in quality_values) else "STALE" if "STALE" in quality_values else "DELAYED"
+    quality = "UNAVAILABLE" if all(value == "UNAVAILABLE" for value in quality_values) else "INSUFFICIENT DATA" if all(value in {"UNAVAILABLE", "INSUFFICIENT DATA"} for value in quality_values) else "STALE" if "STALE" in quality_values else "MARKET CLOSED" if "MARKET CLOSED" in quality_values else "DELAYED"
     latest = max((value.get("last_updated") for value in timeframe_states.values() if value.get("last_updated")), default=None)
     rs_label = "Unavailable"
     if relative_strength is not None:

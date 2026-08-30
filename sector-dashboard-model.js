@@ -21,5 +21,24 @@
     return rows
   }
 
-  return { filterAndSortSectors }
+  function latestDataTimestamp(analysis) {
+    return (analysis?.sectors || []).reduce((latest, sector) => !sector.last_updated || (latest && latest >= sector.last_updated) ? latest : sector.last_updated, null)
+  }
+
+  function analysisStatusText(analysis, formatTime = value => value) {
+    if (analysis?.refreshing) return 'Refreshing completed bars'
+    if (!analysis || analysis.status === 'UNAVAILABLE' || analysis.error) return analysis?.error || 'Analysis unavailable'
+    const updated = latestDataTimestamp(analysis)
+    const suffix = updated ? ` — data through ${formatTime(updated)}` : ''
+    if (analysis.status === 'STALE') return `DATA STALE${analysis.market_session?.status === 'CLOSED' ? ' · MARKET CLOSED' : ''}${suffix}`
+    if (analysis.market_session?.status === 'CLOSED') return `MARKET CLOSED — last completed session${suffix}`
+    if (analysis.status === 'DELAYED') return `MARKET OPEN · completed-bar data${suffix}`
+    return `${analysis.status || 'Analysis ready'}${suffix}`
+  }
+
+  function qualityText(quality) {
+    return quality === 'MARKET CLOSED' ? 'MARKET CLOSED — last completed session' : quality
+  }
+
+  return { analysisStatusText, filterAndSortSectors, latestDataTimestamp, qualityText }
 })

@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 from threading import Lock, Thread
 import time
-from zoneinfo import ZoneInfo
 
 from fyers_apiv3 import fyersModel
 
@@ -21,10 +20,10 @@ from .analysis_config import (
 )
 from .config import _atomic_private_write
 from .indicators import resample_weekly
+from .market_calendar import IST, market_session
 from .sectors import BENCHMARK_SYMBOL, SECTOR_BY_ID, SECTOR_DEFINITIONS
 
 LOGGER = logging.getLogger(__name__)
-IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_STATE_FILE = Path(os.getenv("SECTOR_ANALYSIS_STATE_FILE", Path.home() / ".fyers" / "sector-heatmap" / "analysis-history.json")).expanduser()
 
 
@@ -120,12 +119,13 @@ class AnalysisHistoryStore:
 
 
 class SectorAnalysisService:
-    def __init__(self, access_token, state_file=DEFAULT_STATE_FILE, provider=None):
+    def __init__(self, access_token, state_file=DEFAULT_STATE_FILE, provider=None, now=None):
         self.lock = Lock()
         self.running = False
         self.snapshots = {mode: self._empty_snapshot(mode, "Analysis is loading") for mode in MTF_MODES}
         self.store = AnalysisHistoryStore(state_file)
         self.last_saved = 0.0
+        self.now = now or (lambda: datetime.now(IST))
         self.client = None
         if provider is not None:
             self.provider = provider
@@ -140,7 +140,7 @@ class SectorAnalysisService:
 
     @staticmethod
     def _empty_snapshot(mode, error):
-        return {"status": "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": None, "refreshing": False, "error": error, "market_overview": {}, "sectors": [], "events": []}
+        return {"status": "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": None, "refreshing": False, "error": error, "market_session": market_session(), "market_overview": {}, "sectors": [], "events": []}
 
     def start(self):
         if self.running or not self.provider:
@@ -180,7 +180,9 @@ class SectorAnalysisService:
                 timeframe_states[timeframe] = calculate_timeframe_state(timeframe, candles, benchmark_candles.get(timeframe, []), self._quality(timeframe, candles))
             raw_sector_states.append((sector, timeframe_states))
 
-        now = datetime.now(IST).isoformat()
+        current = self.now()
+        now = current.isoformat()
+        session = market_session(current)
         new_snapshots = {}
         for mode in MTF_MODES:
             previous_ranks = {sector_id: history[-1].get("rank") for sector_id in SECTOR_BY_ID if (history := self.store.sector_history(mode, sector_id))}
@@ -196,7 +198,9 @@ class SectorAnalysisService:
                 events.extend(detect_events(previous, sector))
             overview = market_overview(sectors, benchmark_states)
             usable = any(sector.get("overall_score") is not None for sector in sectors)
-            new_snapshots[mode] = {"status": "DELAYED" if usable else "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": now, "refreshing": False, "error": None if usable else "No sector has sufficient completed candle data", "market_overview": overview, "benchmark_states": benchmark_states, "sectors": sectors, "events": events}
+            has_stale_data = any(sector.get("data_quality") == "STALE" for sector in sectors)
+            status = "UNAVAILABLE" if not usable else "STALE" if has_stale_data else "MARKET_CLOSED" if session["status"] == "CLOSED" else "DELAYED"
+            new_snapshots[mode] = {"status": status, "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": now, "refreshing": False, "error": None if usable else "No sector has sufficient completed candle data", "market_session": session, "market_overview": overview, "benchmark_states": benchmark_states, "sectors": sectors, "events": events}
 
         if time.monotonic() - self.last_saved >= SNAPSHOT_INTERVAL_SECONDS or not self.last_saved:
             for mode, snapshot in new_snapshots.items():
@@ -225,12 +229,16 @@ class SectorAnalysisService:
             LOGGER.warning("Daily/Weekly history failed for %s: %s", symbol, error)
         return result
 
-    @staticmethod
-    def _quality(timeframe, candles):
+    def _quality(self, timeframe, candles):
         if not candles:
             return "UNAVAILABLE"
         last = datetime.fromtimestamp(int(candles[-1]["timestamp"]), IST)
-        age = (datetime.now(IST) - last).total_seconds()
+        current = self.now()
+        session = market_session(current)
+        last_session = datetime.fromisoformat(session["last_completed_session"]).date()
+        if session["status"] == "CLOSED" and last.date() >= last_session:
+            return "MARKET CLOSED"
+        age = (current - last).total_seconds()
         return "STALE" if age > TIMEFRAMES[timeframe]["stale_seconds"] else "DELAYED"
 
     def snapshot(self, mode="intraday", sector_id=None):
@@ -239,7 +247,7 @@ class SectorAnalysisService:
             snapshot = deepcopy(self.snapshots[mode])
         if sector_id:
             sector = next((item for item in snapshot["sectors"] if item["sector_id"] == sector_id), None)
-            return {"status": snapshot["status"] if sector else "UNAVAILABLE", "mode": mode, "benchmark": snapshot["benchmark"], "updated_at": snapshot["updated_at"], "sector": sector, "error": snapshot.get("error") if sector else "Unknown or unavailable sector"}
+            return {"status": snapshot["status"] if sector else "UNAVAILABLE", "mode": mode, "benchmark": snapshot["benchmark"], "updated_at": snapshot["updated_at"], "market_session": snapshot.get("market_session"), "sector": sector, "error": snapshot.get("error") if sector else "Unknown or unavailable sector"}
         for sector in snapshot["sectors"]:
             for timeframe in sector.get("timeframe_states", {}).values():
                 timeframe.pop("series", None)
