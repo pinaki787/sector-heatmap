@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from sector_heatmap.analysis import (
     calculate_sector, calculate_timeframe_state, classify_rotation, detect_events,
@@ -13,7 +14,9 @@ from sector_heatmap.indicators import (
     volume_participation_score,
 )
 from sector_heatmap.market_calendar import IST, market_session
-from sector_heatmap.sector_service import SectorAnalysisService
+from sector_heatmap.sector_service import (
+    CandleHistoryProvider, FyersAuthenticationError, SectorAnalysisService, rank_directional_drivers,
+)
 from sector_heatmap.sectors import SECTOR_DEFINITIONS
 
 
@@ -83,6 +86,24 @@ class IndicatorTests(unittest.TestCase):
         score, details = volume_participation_score([{"volume": 200, "average_volume20": 100}, {"volume": 80, "average_volume20": 100}])
         self.assertEqual(details["above_average_pct"], 50)
         self.assertGreater(score, 0)
+
+
+class HistoryThrottleTests(unittest.TestCase):
+    def test_rate_limited_history_request_is_retried_before_failure(self):
+        class Client:
+            calls = 0
+
+            def history(self, _payload):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"s": "error", "message": "request limit reached"}
+                return {"s": "ok", "candles": [[1_788_000_000, 100, 101, 99, 100, 1000]]}
+
+        client = Client()
+        provider = CandleHistoryProvider(client, now=lambda: datetime(2026, 9, 4, 16, tzinfo=IST))
+        with patch("sector_heatmap.sector_service.time.sleep"):
+            provider._download("NSE:NIFTYIT-INDEX", "60", 1)
+        self.assertEqual(client.calls, 2)
 
 
 class ScoringTests(unittest.TestCase):
@@ -193,6 +214,41 @@ class ScoringTests(unittest.TestCase):
 
 
 class ServiceContractTests(unittest.TestCase):
+    def test_directional_scan_does_not_let_index_weight_suppress_momentum(self):
+        drivers = [
+            {"ticker": "HEAVY", "change": 2.0, "contribution": 0.40},
+            {"ticker": "MOMENTUM", "change": 3.5, "contribution": 0.10},
+            {"ticker": "OPPOSITE", "change": -4.0, "contribution": -0.50},
+        ]
+        bullish = rank_directional_drivers(drivers, "BULLISH")
+        bearish = rank_directional_drivers(drivers, "BEARISH")
+        self.assertEqual([item["ticker"] for item in bullish], ["MOMENTUM", "HEAVY"])
+        self.assertEqual([item["ticker"] for item in bearish], ["OPPOSITE"])
+
+    def test_handoff_candidate_scan_excludes_stale_full_alignment(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=object())
+            service.snapshots["intraday"] = {
+                **service._empty_snapshot("intraday"),
+                "status": "STALE", "refreshing": False, "updated_at": "2026-08-28T15:15:00+05:30",
+                "sectors": [{
+                    "sector_id": "it", "name": "IT", "symbol": "NSE:NIFTYIT-INDEX",
+                    "mtf_alignment": "FULL BULLISH ALIGNMENT", "data_quality": "STALE",
+                }],
+            }
+            service._timeframe_candles = lambda symbol: {}
+            result = service.alignment_candidates([], "intraday")
+            self.assertEqual(result["candidates"], [])
+
+    def test_initial_snapshot_is_loading_not_unavailable_when_provider_exists(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=object())
+            snapshot = service.snapshot("intraday")
+            self.assertEqual(snapshot["status"], "LOADING")
+            self.assertTrue(snapshot["refreshing"])
+            self.assertEqual(snapshot["refresh_state"]["phase"], "CONNECTING")
+            self.assertIsNone(snapshot["error"])
+
     def test_refresh_ranks_sectors_persists_history_and_keeps_detail_series(self):
         class Provider:
             def __init__(self):
@@ -217,6 +273,27 @@ class ServiceContractTests(unittest.TestCase):
             self.assertTrue(detail["sector"]["timeframe_states"]["daily"]["series"])
             self.assertTrue(path.exists())
             self.assertEqual(len(provider.calls), (len(SECTOR_DEFINITIONS) + 1) * 3)
+            self.assertEqual(snapshot["refresh_state"]["phase"], "READY")
+
+    def test_failed_refresh_retains_last_valid_snapshot(self):
+        class Provider:
+            def get(self, symbol, timeframe):
+                return candles(260)
+
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=Provider(), now=lambda: datetime(2026, 8, 28, 11, 0, tzinfo=IST))
+            service.refresh()
+            before = service.snapshot("intraday")
+            service._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=3)
+            service._record_refresh_failure(RuntimeError("provider timed out"))
+            after = service.snapshot("intraday")
+            self.assertEqual(after["status"], before["status"])
+            self.assertEqual(after["updated_at"], before["updated_at"])
+            self.assertEqual(after["sectors"], before["sectors"])
+            self.assertIsNone(after["error"])
+            self.assertEqual(after["refresh_error"], "provider timed out")
+            self.assertEqual(after["refresh_state"]["phase"], "FAILED")
+            self.assertEqual(after["refresh_state"]["last_phase"], "LOADING_BARS")
 
     def test_unknown_detail_is_explicitly_unavailable(self):
         with TemporaryDirectory() as directory:
@@ -238,6 +315,24 @@ class ServiceContractTests(unittest.TestCase):
             sector = service.snapshot("intraday", SECTOR_DEFINITIONS[0].sector_id)["sector"]
             self.assertEqual(sector["timeframe_states"]["1h"]["data_quality"], "UNAVAILABLE")
             self.assertIsNotNone(sector["overall_score"])
+
+    def test_authentication_failure_stops_refresh_after_first_request(self):
+        class ExpiredProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, symbol, timeframe):
+                self.calls += 1
+                raise FyersAuthenticationError("FYERS authentication expired")
+
+        with TemporaryDirectory() as directory:
+            provider = ExpiredProvider()
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=provider)
+
+            with self.assertRaises(FyersAuthenticationError):
+                service.refresh()
+
+            self.assertEqual(provider.calls, 1)
 
     def test_missing_authentication_has_actionable_analysis_error(self):
         with TemporaryDirectory() as directory:

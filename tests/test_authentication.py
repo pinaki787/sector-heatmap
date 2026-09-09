@@ -2,10 +2,10 @@ import unittest
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sector_heatmap import authentication
-from sector_heatmap.market_data import configure_websocket_ca_bundle, is_token_error
+from sector_heatmap.market_data import FyersLiveFeed, configure_websocket_ca_bundle, is_token_error
 
 
 class AuthenticationConfigTests(unittest.TestCase):
@@ -26,12 +26,43 @@ class AuthenticationConfigTests(unittest.TestCase):
         with patch.object(authentication, "load_config", return_value=config):
             self.assertEqual(authentication.validated_config(expected_port=8080), config)
 
+    def test_authorization_url_uses_supplied_oauth_state(self):
+        config = {"FYERS_APP_ID": "APP-200", "FYERS_SECRET_KEY": "secret", "FYERS_REDIRECT_URI": "http://127.0.0.1:8080/callback"}
+        with patch.object(authentication, "load_config", return_value=config):
+            url = authentication.authorization_url(expected_port=8080, state="random-state")
+
+        self.assertIn("state=random-state", url)
+        self.assertNotIn("state=None", url)
+
     def test_documented_fyers_expiry_codes_are_detected(self):
         for code in (-8, -15, -16, -17, 401):
             with self.subTest(code=code):
                 self.assertTrue(is_token_error({"code": code, "message": "request failed"}))
         self.assertTrue(is_token_error("invalid access token"))
         self.assertFalse(is_token_error({"code": 200, "s": "ok"}))
+
+    def test_expired_feed_never_reports_connected(self):
+        feed = FyersLiveFeed("APP-200:expired-token")
+        feed.connected = True
+        feed.token_expired = True
+
+        snapshot = feed.snapshot()
+
+        self.assertFalse(snapshot["connected"])
+        self.assertEqual(snapshot["mode"], "connecting")
+        self.assertIn("authentication expired", snapshot["error"])
+
+    def test_feed_stop_closes_the_sdk_socket(self):
+        feed = FyersLiveFeed("APP-200:valid-token")
+        socket = Mock()
+        feed.socket = socket
+        feed.connected = True
+
+        feed.stop()
+
+        socket.close_connection.assert_called_once_with()
+        self.assertFalse(feed.connected)
+        self.assertIsNone(feed.socket)
 
     def test_existing_websocket_ca_bundle_is_respected(self):
         with TemporaryDirectory() as directory:

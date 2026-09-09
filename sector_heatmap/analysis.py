@@ -36,6 +36,7 @@ class TimeframeTrendState:
     ema50_slope: Optional[float] = None
     rsi: Optional[float] = None
     adx: Optional[float] = None
+    atr: Optional[float] = None
     plus_di: Optional[float] = None
     minus_di: Optional[float] = None
     momentum_score: Optional[float] = None
@@ -197,7 +198,7 @@ def calculate_timeframe_state(timeframe, candles, benchmark_candles, data_qualit
     state.state, state.score, state.label = trend_state, _round(trend_score), STATE_LABELS[trend_state]
     state.close, state.ema20, state.ema50, state.ema200 = map(_round, (close, ema20_value, ema50_value, ema200_value))
     state.ema20_slope, state.ema50_slope = _round(ema20_slope, 4), _round(ema50_slope, 4)
-    state.rsi, state.adx, state.plus_di, state.minus_di = map(_round, (rsi_value, adx_value, plus_di, minus_di))
+    state.rsi, state.adx, state.atr, state.plus_di, state.minus_di = map(_round, (rsi_value, adx_value, atr_value, plus_di, minus_di))
     state.momentum_score = _round(momentum_score)
     state.relative_strength_score, state.relative_strength_state = _round(rs_score), rs_label
     state.relative_strength_slope, state.relative_strength_roc = _round(rs_slope), _round(rs_roc)

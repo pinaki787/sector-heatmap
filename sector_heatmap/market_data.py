@@ -75,6 +75,7 @@ class FyersLiveFeed:
     def __init__(self, access_token):
         self.access_token, self.lock, self.ticks = access_token, Lock(), {}
         self.error, self.connected, self.token_expired = None, False, False
+        self.socket = None
     def start(self):
         def on_message(message):
             symbol = message.get("symbol") if isinstance(message, dict) else None
@@ -97,9 +98,28 @@ class FyersLiveFeed:
                 self.error, self.connected = str(error), False
             return
         socket = data_ws.FyersDataSocket(access_token=self.access_token, litemode=False, reconnect=True, on_message=on_message, on_error=on_error, on_connect=on_connect)
+        with self.lock:
+            self.socket = socket
         Thread(target=socket.connect, daemon=True, name="fyers-market-data").start()
+
+    def stop(self):
+        """Close the SDK socket so interpreter shutdown does not wait for it."""
+        with self.lock:
+            socket, self.socket = self.socket, None
+            self.connected = False
+        if socket:
+            try:
+                socket.close_connection()
+            except Exception:
+                pass
     def snapshot(self):
-        with self.lock: ticks, error, connected = dict(self.ticks), self.error, self.connected
+        with self.lock:
+            ticks = dict(self.ticks)
+            error = self.error
+            token_expired = self.token_expired
+            connected = self.connected and not token_expired
+        if token_expired:
+            error = "Fyers authentication expired; browser reauthentication is required."
         rows = []
         provider_times = []
         for sector in SECTOR_DEFINITIONS:

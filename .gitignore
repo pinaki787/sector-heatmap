@@ -1,4 +1,8 @@
 .venv/
 .fyers.env
+.private/
+outputs/
+.DS_Store
 __pycache__/
 *.log
+.pnpm-store/

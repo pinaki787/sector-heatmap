@@ -1,0 +1,176 @@
+//@version=6
+strategy(
+    "EMA 21 High/Low Band Strategy",
+    shorttitle="EMA 21 Band",
+    overlay=true,
+    pyramiding=0,
+    process_orders_on_close=true
+)
+
+// EMA band settings.
+emaLength = input.int(21, "EMA Length", minval=1)
+ema200Length = input.int(200, "Long-term EMA Length", minval=1)
+showExitMarkers = input.bool(true, "Show exit markers")
+reentryCooldownBars = input.int(0, "Same-direction re-entry cooldown", minval=0, tooltip="After an EMA-band exit, block only same-direction entries for this many completed candles. Set to 0 to disable.")
+showSupportResistance = input.bool(false, "Enable support and resistance", group="Support and resistance")
+pivotStrength = input.int(5, "Pivot strength", minval=1, group="Support and resistance", tooltip="Bars required on both sides before a pivot level is confirmed.")
+showSupplyDemand = input.bool(false, "Enable supply and demand zones", group="Supply and demand zones")
+zonePivotStrength = input.int(5, "Zone pivot strength", minval=1, group="Supply and demand zones", tooltip="Bars required on both sides before a zone pivot is confirmed.")
+zoneAtrMultiplier = input.float(0.5, "Zone thickness (ATR)", minval=0.1, step=0.1, group="Supply and demand zones")
+useEntrySession = input.bool(false, "Enable entry time filter", group="Entry time filter")
+entrySession = input.session("0915-1515", "Entry start and end time", group="Entry time filter", tooltip="Uses the symbol's exchange timezone. Exits remain active outside this session.")
+
+emaHigh = ta.ema(high, emaLength)
+emaLow = ta.ema(low, emaLength)
+ema200 = ta.ema(close, ema200Length)
+
+// Keep only the latest confirmed pivot high and pivot low.
+pivotResistance = ta.pivothigh(high, pivotStrength, pivotStrength)
+pivotSupport = ta.pivotlow(low, pivotStrength, pivotStrength)
+newResistance = not na(pivotResistance)
+newSupport = not na(pivotSupport)
+
+var float latestResistance = na
+var float latestSupport = na
+var line resistanceLine = na
+var line supportLine = na
+var label resistanceLabel = na
+var label supportLabel = na
+var int resistanceStartBar = na
+var int supportStartBar = na
+
+if newResistance
+    latestResistance := pivotResistance
+    resistanceStartBar := bar_index - pivotStrength
+    if showSupportResistance
+        if not na(resistanceLine)
+            line.delete(resistanceLine)
+        if not na(resistanceLabel)
+            label.delete(resistanceLabel)
+        resistanceLine := line.new(resistanceStartBar, latestResistance, bar_index, latestResistance, xloc=xloc.bar_index, extend=extend.none, color=color.red, width=2)
+        resistanceLabel := label.new(int(math.round((resistanceStartBar + bar_index) / 2.0)), latestResistance, "RESISTANCE - " + str.tostring(latestResistance, format.mintick), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.red, textalign=text.align_center)
+
+if newSupport
+    latestSupport := pivotSupport
+    supportStartBar := bar_index - pivotStrength
+    if showSupportResistance
+        if not na(supportLine)
+            line.delete(supportLine)
+        if not na(supportLabel)
+            label.delete(supportLabel)
+        supportLine := line.new(supportStartBar, latestSupport, bar_index, latestSupport, xloc=xloc.bar_index, extend=extend.none, color=color.green, width=2)
+        supportLabel := label.new(int(math.round((supportStartBar + bar_index) / 2.0)), latestSupport, "SUPPORT - " + str.tostring(latestSupport, format.mintick), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.green, textalign=text.align_center)
+
+if showSupportResistance
+    if not na(resistanceLine)
+        line.set_x2(resistanceLine, bar_index)
+    if not na(resistanceLabel)
+        label.set_x(resistanceLabel, int(math.round((resistanceStartBar + bar_index) / 2.0)))
+    if not na(supportLine)
+        line.set_x2(supportLine, bar_index)
+    if not na(supportLabel)
+        label.set_x(supportLabel, int(math.round((supportStartBar + bar_index) / 2.0)))
+
+resistanceCrossed = ta.crossover(close, latestResistance)
+supportCrossed = ta.crossunder(close, latestSupport)
+resistanceBreak = showSupportResistance and barstate.isconfirmed and not newResistance and resistanceCrossed
+supportBreak = showSupportResistance and barstate.isconfirmed and not newSupport and supportCrossed
+
+// Keep only the latest confirmed supply and demand zones. Supply extends
+// downward from a pivot high; demand extends upward from a pivot low.
+zonePivotHigh = ta.pivothigh(high, zonePivotStrength, zonePivotStrength)
+zonePivotLow = ta.pivotlow(low, zonePivotStrength, zonePivotStrength)
+zoneAtr = ta.atr(14)
+newSupplyZone = not na(zonePivotHigh) and not na(zoneAtr[zonePivotStrength])
+newDemandZone = not na(zonePivotLow) and not na(zoneAtr[zonePivotStrength])
+
+var box supplyZone = na
+var box demandZone = na
+var float supplyTop = na
+var float demandBottom = na
+
+if showSupplyDemand and newSupplyZone
+    if not na(supplyZone)
+        box.delete(supplyZone)
+    supplyTop := zonePivotHigh
+    supplyBottom = supplyTop - zoneAtr[zonePivotStrength] * zoneAtrMultiplier
+    supplyZone := box.new(bar_index - zonePivotStrength, supplyTop, bar_index, supplyBottom, xloc=xloc.bar_index, extend=extend.none, border_color=color.red, bgcolor=color.new(color.red, 85), text="SUPPLY", text_color=color.red, text_halign=text.align_center, text_valign=text.align_center)
+
+if showSupplyDemand and newDemandZone
+    if not na(demandZone)
+        box.delete(demandZone)
+    demandBottom := zonePivotLow
+    demandTop = demandBottom + zoneAtr[zonePivotStrength] * zoneAtrMultiplier
+    demandZone := box.new(bar_index - zonePivotStrength, demandTop, bar_index, demandBottom, xloc=xloc.bar_index, extend=extend.none, border_color=color.green, bgcolor=color.new(color.green, 85), text="DEMAND", text_color=color.green, text_halign=text.align_center, text_valign=text.align_center)
+
+if showSupplyDemand
+    if not na(supplyZone)
+        box.set_right(supplyZone, bar_index)
+    if not na(demandZone)
+        box.set_right(demandZone, bar_index)
+
+// A completed close through the far edge invalidates the active zone.
+if showSupplyDemand and barstate.isconfirmed and not na(supplyZone) and close > supplyTop
+    box.delete(supplyZone)
+    supplyZone := na
+    supplyTop := na
+
+if showSupplyDemand and barstate.isconfirmed and not na(demandZone) and close < demandBottom
+    box.delete(demandZone)
+    demandZone := na
+    demandBottom := na
+
+// The signal candle is the previous, fully completed candle. Its real body
+// must cross through the applicable EMA edge; a wick-only touch is ignored.
+longSignalCandle = open[1] <= emaHigh[1] and close[1] > emaHigh[1]
+shortSignalCandle = open[1] >= emaLow[1] and close[1] < emaLow[1]
+
+// The current candle is the one immediately following the signal candle.
+// Its open is compared with the 50% level of the signal candle's full range.
+signalCandleMidpoint = (high[1] + low[1]) / 2.0
+confirmedBar = barstate.isconfirmed
+entryTimePass = not useEntrySession or not na(time(timeframe.period, entrySession))
+
+// Preserve the first valid setup. After an exit, suppress only rapid repeat
+// entries in the same direction; an opposite-direction reversal is unaffected.
+var int lastLongExitBar = na
+var int lastShortExitBar = na
+longReentryPass = na(lastLongExitBar) or bar_index - lastLongExitBar > reentryCooldownBars
+shortReentryPass = na(lastShortExitBar) or bar_index - lastShortExitBar > reentryCooldownBars
+
+longEntry = confirmedBar and entryTimePass and strategy.position_size == 0 and close > open and longSignalCandle and open > signalCandleMidpoint and longReentryPass
+shortEntry = confirmedBar and entryTimePass and strategy.position_size == 0 and close < open and shortSignalCandle and open < signalCandleMidpoint and shortReentryPass
+
+// Exit either direction when a completed candle closes inside the EMA band.
+longExit = confirmedBar and strategy.position_size > 0 and close >= emaLow and close <= emaHigh
+shortExit = confirmedBar and strategy.position_size < 0 and close >= emaLow and close <= emaHigh
+
+if longExit
+    lastLongExitBar := bar_index
+    strategy.close("BUY", comment="EXIT BUY")
+else if shortExit
+    lastShortExitBar := bar_index
+    strategy.close("SELL", comment="EXIT SELL")
+else if longEntry
+    strategy.entry("BUY", strategy.long, comment="BUY")
+else if shortEntry
+    strategy.entry("SELL", strategy.short, comment="SELL")
+
+upperBand = plot(emaHigh, "EMA 21 High", color=color.red, linewidth=2)
+lowerBand = plot(emaLow, "EMA 21 Low", color=color.green, linewidth=2)
+fill(upperBand, lowerBand, title="EMA Band", color=color.new(color.blue, 88))
+plot(ema200, "EMA 200", color=color.blue, linewidth=2)
+plot(latestResistance, "Latest Resistance", display=display.none)
+plot(latestSupport, "Latest Support", display=display.none)
+
+plotshape(longEntry, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, size=size.small)
+plotshape(shortEntry, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+plotshape(showExitMarkers and longExit, title="Exit BUY", text="EXIT BUY", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
+plotshape(showExitMarkers and shortExit, title="Exit SELL", text="EXIT SELL", style=shape.labelup, location=location.belowbar, color=color.orange, textcolor=color.white, size=size.tiny)
+
+alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: bullish confirmation candle after the EMA High cross and midpoint confirmation.")
+alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: bearish confirmation candle after the EMA Low cross and midpoint confirmation.")
+alertcondition(longExit, title="Exit BUY Alert", message="EXIT BUY {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")
+alertcondition(shortExit, title="Exit SELL Alert", message="EXIT SELL {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")
+alertcondition(resistanceBreak, title="Resistance Break Alert", message="{{ticker}} {{interval}}: completed candle closed above resistance.")
+alertcondition(supportBreak, title="Support Break Alert", message="{{ticker}} {{interval}}: completed candle closed below support.")

@@ -1,0 +1,29 @@
+{
+  "name": "NIFTY bearish call credit spread - conditional draft",
+  "mode": "PAPER_DRAFT_NO_BROKER_ORDER",
+  "underlying": "NSE:NIFTY50-INDEX",
+  "expiry_selection": "nearest weekly expiry returned by FYERS at trigger time",
+  "entry_rule": "Completed 15-minute NIFTY close below 23465",
+  "cancel_rule": "Completed 15-minute NIFTY close above 23525",
+  "legs": [
+    {
+      "action": "SELL",
+      "option_type": "CE",
+      "strike": 23600,
+      "quantity": "one exchange lot or user-defined quantity"
+    },
+    {
+      "action": "BUY",
+      "option_type": "CE",
+      "strike": 23700,
+      "quantity": "same quantity as short leg"
+    }
+  ],
+  "validation_at_trigger": [
+    "fresh FYERS expiry and contract symbols",
+    "valid two-sided bid/ask for both legs",
+    "positive net credit",
+    "matched lot sizes",
+    "fresh reviewed order preview and explicit live confirmation"
+  ]
+}

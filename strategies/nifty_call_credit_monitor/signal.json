@@ -1,0 +1,15 @@
+{
+  "timestamp_ist": "2026-09-09T11:00:14+05:30",
+  "mode": "DRY_RUN_MONITOR",
+  "nifty_completed_15m_close": 23535.6,
+  "completed_candle_epoch": 1788930900,
+  "breakdown": 23465.0,
+  "invalidation": 23525.0,
+  "lots": 1,
+  "short_strike": 23600.0,
+  "long_strike": 23700.0,
+  "status": "INVALIDATED",
+  "preview": null,
+  "order_response": null,
+  "note": "Completed candle is at or above the invalidation level."
+}

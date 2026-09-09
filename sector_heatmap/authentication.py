@@ -6,8 +6,8 @@ import webbrowser
 from fyers_apiv3 import fyersModel
 from .config import load_config, save_access_token
 
-def create_session(cfg):
-    return fyersModel.SessionModel(client_id=cfg["FYERS_APP_ID"], secret_key=cfg["FYERS_SECRET_KEY"], redirect_uri=cfg["FYERS_REDIRECT_URI"], response_type="code", grant_type="authorization_code")
+def create_session(cfg, state=None):
+    return fyersModel.SessionModel(client_id=cfg["FYERS_APP_ID"], secret_key=cfg["FYERS_SECRET_KEY"], redirect_uri=cfg["FYERS_REDIRECT_URI"], response_type="code", grant_type="authorization_code", state=state)
 
 def validated_config(expected_port=None):
     cfg = load_config()
@@ -24,9 +24,9 @@ def validated_config(expected_port=None):
         raise RuntimeError(f"FYERS_REDIRECT_URI port must match the dashboard port ({expected_port})")
     return cfg
 
-def authorization_url(expected_port=None):
+def authorization_url(expected_port=None, state=None):
     cfg = validated_config(expected_port)
-    return create_session(cfg).generate_authcode()
+    return create_session(cfg, state=state).generate_authcode()
 
 def exchange_auth_code(auth_code):
     cfg = load_config()

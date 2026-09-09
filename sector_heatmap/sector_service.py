@@ -12,7 +12,7 @@ from fyers_apiv3 import fyersModel
 
 from .analysis import (
     calculate_sector, calculate_timeframe_state, classify_rotation, detect_events,
-    market_overview, rank_sectors,
+    market_overview, mtf_alignment, rank_sectors,
 )
 from .analysis_config import (
     MTF_MODES, REFRESH_INTERVAL_SECONDS, ROTATION, SNAPSHOT_INTERVAL_SECONDS,
@@ -21,11 +21,40 @@ from .analysis_config import (
 from .config import _atomic_private_write
 from .indicators import resample_weekly
 from .market_calendar import IST, market_session
+from .market_data import is_token_error
 from .official_weights import OFFICIAL_WEIGHT_SET
-from .sectors import BENCHMARK_SYMBOL, SECTOR_BY_ID, SECTOR_DEFINITIONS
+from .sectors import BENCHMARK_SYMBOL, SECTOR_BY_ID, SECTOR_DEFINITIONS, equity_symbol
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_STATE_FILE = Path(os.getenv("SECTOR_ANALYSIS_STATE_FILE", Path.home() / ".fyers" / "sector-heatmap" / "analysis-history.json")).expanduser()
+HISTORY_REQUEST_MIN_INTERVAL_SECONDS = 0.35
+HISTORY_RATE_LIMIT_RETRIES = 3
+
+
+class FyersAuthenticationError(RuntimeError):
+    """Stop a refresh immediately when FYERS rejects the shared session."""
+
+
+def rank_directional_drivers(drivers, direction):
+    """Rank the bounded stock scan by directional move, not index weight.
+
+    Official contribution remains attribution evidence, but multiplying a stock's
+    move by its index weight suppresses lower-weight momentum leaders before their
+    completed-candle alignment can be evaluated.
+    """
+    directional = [item for item in drivers if item.get("change") is not None]
+    if direction == "BULLISH":
+        directional = [item for item in directional if item["change"] > 0]
+        return sorted(
+            directional,
+            key=lambda item: (item["change"], item.get("contribution") or -float("inf")),
+            reverse=True,
+        )
+    directional = [item for item in directional if item["change"] < 0]
+    return sorted(
+        directional,
+        key=lambda item: (item["change"], item.get("contribution") or float("inf")),
+    )
 
 
 class CandleHistoryProvider:
@@ -36,6 +65,7 @@ class CandleHistoryProvider:
         self.now = now or (lambda: datetime.now(IST))
         self.cache = {}
         self.lock = Lock()
+        self.request_lock = Lock()
         self.last_request = 0.0
 
     def get(self, symbol, timeframe):
@@ -63,13 +93,28 @@ class CandleHistoryProvider:
         while cursor <= end:
             chunk_end = min(end, cursor + timedelta(days=chunk_days - 1))
             payload = {"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": cursor.isoformat(), "range_to": chunk_end.isoformat(), "cont_flag": 1}
-            elapsed = time.monotonic() - self.last_request
-            if elapsed < 0.12:
-                time.sleep(0.12 - elapsed)
-            response = self.client.history(payload)
-            self.last_request = time.monotonic()
+            response = None
+            for attempt in range(HISTORY_RATE_LIMIT_RETRIES + 1):
+                with self.request_lock:
+                    elapsed = time.monotonic() - self.last_request
+                    if elapsed < HISTORY_REQUEST_MIN_INTERVAL_SECONDS:
+                        time.sleep(HISTORY_REQUEST_MIN_INTERVAL_SECONDS - elapsed)
+                    response = self.client.history(payload)
+                    self.last_request = time.monotonic()
+                message = response.get("message") if isinstance(response, dict) else "invalid response"
+                rate_limited = "request limit" in str(message or "").lower()
+                if not rate_limited or attempt == HISTORY_RATE_LIMIT_RETRIES:
+                    break
+                delay = 2 ** attempt
+                LOGGER.warning(
+                    "FYERS history rate limit for %s %s; retrying in %ss (%s/%s)",
+                    symbol, resolution, delay, attempt + 1, HISTORY_RATE_LIMIT_RETRIES,
+                )
+                time.sleep(delay)
             if not isinstance(response, dict) or response.get("s") not in {"ok", None} or not isinstance(response.get("candles"), list):
                 message = response.get("message") if isinstance(response, dict) else "invalid response"
+                if is_token_error(response):
+                    raise FyersAuthenticationError("FYERS authentication expired; use Refresh authentication and complete daily 2FA.")
                 raise RuntimeError(f"FYERS history unavailable for {symbol} {resolution}: {message or 'no candles'}")
             for row in response["candles"]:
                 if len(row) < 6:
@@ -122,8 +167,9 @@ class AnalysisHistoryStore:
 class SectorAnalysisService:
     def __init__(self, access_token, state_file=DEFAULT_STATE_FILE, provider=None, now=None):
         self.lock = Lock()
+        self.candidate_scan_lock = Lock()
         self.running = False
-        self.snapshots = {mode: self._empty_snapshot(mode, "Analysis is loading") for mode in MTF_MODES}
+        self.snapshots = {mode: self._empty_snapshot(mode) for mode in MTF_MODES}
         self.store = AnalysisHistoryStore(state_file)
         self.last_saved = 0.0
         self.now = now or (lambda: datetime.now(IST))
@@ -137,11 +183,70 @@ class SectorAnalysisService:
         else:
             self.provider = None
         if self.provider is None:
-            self.snapshots = {mode: self._empty_snapshot(mode, "FYERS authentication is required for completed-candle sector analysis") for mode in MTF_MODES}
+            self.snapshots = {
+                mode: self._empty_snapshot(
+                    mode,
+                    error="FYERS authentication is required for completed-candle sector analysis",
+                    phase="FAILED",
+                )
+                for mode in MTF_MODES
+            }
 
     @staticmethod
-    def _empty_snapshot(mode, error):
-        return {"status": "UNAVAILABLE", "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": None, "refreshing": False, "error": error, "market_session": market_session(), "market_overview": {}, "weight_source": OFFICIAL_WEIGHT_SET.summary(), "sectors": [], "events": []}
+    def _empty_snapshot(mode, error=None, phase="CONNECTING"):
+        loading = phase != "FAILED"
+        return {
+            "status": "LOADING" if loading else "UNAVAILABLE",
+            "mode": mode,
+            "benchmark": BENCHMARK_SYMBOL,
+            "updated_at": None,
+            "refreshing": loading,
+            "refresh_error": None,
+            "refresh_state": {
+                "phase": phase,
+                "completed": 0,
+                "total": len(SECTOR_DEFINITIONS) + 1,
+                "message": "Connecting to FYERS history" if loading else error,
+            },
+            "error": error,
+            "market_session": market_session(),
+            "market_overview": {},
+            "weight_source": OFFICIAL_WEIGHT_SET.summary(),
+            "sectors": [],
+            "events": [],
+        }
+
+    def _set_refresh_state(self, phase, message, completed=0, total=None):
+        progress = {
+            "phase": phase,
+            "completed": completed,
+            "total": total if total is not None else len(SECTOR_DEFINITIONS) + 1,
+            "message": message,
+        }
+        with self.lock:
+            for snapshot in self.snapshots.values():
+                snapshot["refreshing"] = True
+                snapshot["refresh_error"] = None
+                snapshot["refresh_state"] = progress.copy()
+
+    def _record_refresh_failure(self, error):
+        message = str(error)
+        with self.lock:
+            for snapshot in self.snapshots.values():
+                has_valid_snapshot = bool(snapshot.get("sectors")) and snapshot.get("updated_at") is not None
+                previous_phase = snapshot.get("refresh_state", {}).get("phase", "CONNECTING")
+                snapshot["refreshing"] = False
+                snapshot["refresh_state"] = {
+                    "phase": "FAILED",
+                    "last_phase": previous_phase,
+                    "completed": snapshot.get("refresh_state", {}).get("completed", 0),
+                    "total": snapshot.get("refresh_state", {}).get("total", len(SECTOR_DEFINITIONS) + 1),
+                    "message": message,
+                }
+                if has_valid_snapshot:
+                    snapshot["refresh_error"] = message
+                else:
+                    snapshot.update({"status": "UNAVAILABLE", "error": message, "refresh_error": None})
 
     def start(self):
         if self.running or not self.provider:
@@ -153,23 +258,24 @@ class SectorAnalysisService:
         while self.running:
             try:
                 self.refresh()
+            except FyersAuthenticationError as error:
+                LOGGER.warning("Sector analysis unavailable: %s", error)
+                self._record_refresh_failure(error)
             except Exception as error:
                 LOGGER.exception("Sector analysis refresh failed")
-                with self.lock:
-                    for snapshot in self.snapshots.values():
-                        snapshot.update({"status": "UNAVAILABLE", "refreshing": False, "error": str(error)})
+                self._record_refresh_failure(error)
             time.sleep(REFRESH_INTERVAL_SECONDS)
 
     def refresh(self):
         if not self.provider:
             return
-        with self.lock:
-            for snapshot in self.snapshots.values():
-                snapshot["refreshing"] = True
+        total_symbols = len(SECTOR_DEFINITIONS) + 1
+        self._set_refresh_state("CONNECTING", "Connecting to FYERS history", total=total_symbols)
         benchmark_candles = self._timeframe_candles(BENCHMARK_SYMBOL)
+        self._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=1, total=total_symbols)
         benchmark_states = {timeframe: calculate_timeframe_state(timeframe, candles, candles, self._quality(timeframe, candles)) for timeframe, candles in benchmark_candles.items()}
         raw_sector_states = []
-        for sector in SECTOR_DEFINITIONS:
+        for index, sector in enumerate(SECTOR_DEFINITIONS, start=2):
             timeframe_states = {}
             try:
                 sector_candles = self._timeframe_candles(sector.symbol)
@@ -180,7 +286,9 @@ class SectorAnalysisService:
                 candles = sector_candles.get(timeframe, [])
                 timeframe_states[timeframe] = calculate_timeframe_state(timeframe, candles, benchmark_candles.get(timeframe, []), self._quality(timeframe, candles))
             raw_sector_states.append((sector, timeframe_states))
+            self._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=index, total=total_symbols)
 
+        self._set_refresh_state("CALCULATING_INDICATORS", "Calculating indicators, ranks and rotation", completed=total_symbols, total=total_symbols)
         current = self.now()
         now = current.isoformat()
         session = market_session(current)
@@ -208,7 +316,27 @@ class SectorAnalysisService:
             usable = any(sector.get("overall_score") is not None for sector in sectors)
             has_stale_data = any(sector.get("data_quality") == "STALE" for sector in sectors)
             status = "UNAVAILABLE" if not usable else "STALE" if has_stale_data else "MARKET_CLOSED" if session["status"] == "CLOSED" else "DELAYED"
-            new_snapshots[mode] = {"status": status, "mode": mode, "benchmark": BENCHMARK_SYMBOL, "updated_at": now, "refreshing": False, "error": None if usable else "No sector has sufficient completed candle data", "market_session": session, "market_overview": overview, "benchmark_states": benchmark_states, "weight_source": OFFICIAL_WEIGHT_SET.summary(), "sectors": sectors, "events": events}
+            new_snapshots[mode] = {
+                "status": status,
+                "mode": mode,
+                "benchmark": BENCHMARK_SYMBOL,
+                "updated_at": now,
+                "refreshing": False,
+                "refresh_error": None,
+                "refresh_state": {
+                    "phase": "READY" if usable else "FAILED",
+                    "completed": total_symbols,
+                    "total": total_symbols,
+                    "message": "Sector rotation is ready" if usable else "No sector has sufficient completed candle data",
+                },
+                "error": None if usable else "No sector has sufficient completed candle data",
+                "market_session": session,
+                "market_overview": overview,
+                "benchmark_states": benchmark_states,
+                "weight_source": OFFICIAL_WEIGHT_SET.summary(),
+                "sectors": sectors,
+                "events": events,
+            }
 
         if time.monotonic() - self.last_saved >= SNAPSHOT_INTERVAL_SECONDS or not self.last_saved:
             for mode, snapshot in new_snapshots.items():
@@ -227,12 +355,16 @@ class SectorAnalysisService:
         for timeframe in ("15m", "1h"):
             try:
                 result[timeframe] = self.provider.get(symbol, timeframe)
+            except FyersAuthenticationError:
+                raise
             except Exception as error:
                 LOGGER.warning("%s history failed for %s: %s", timeframe, symbol, error)
         try:
             daily_source = self.provider.get(symbol, "daily")
             result["daily"] = daily_source
             result["weekly"] = resample_weekly(daily_source)
+        except FyersAuthenticationError:
+            raise
         except Exception as error:
             LOGGER.warning("Daily/Weekly history failed for %s: %s", symbol, error)
         return result
@@ -261,3 +393,114 @@ class SectorAnalysisService:
                 timeframe.pop("series", None)
         snapshot.pop("benchmark_states", None)
         return snapshot
+
+    def alignment_candidates(self, live_sectors, mode="intraday", max_stocks_per_sector=3):
+        """Scan directional live leaders inside fully aligned sectors on user request."""
+        if not self.provider:
+            raise RuntimeError("FYERS authentication is required to scan stock alignment.")
+        mode = mode if mode in MTF_MODES else "intraday"
+        snapshot = self.snapshot(mode)
+        aligned_sectors = [
+            sector for sector in snapshot.get("sectors", [])
+            if sector.get("mtf_alignment") in {"FULL BULLISH ALIGNMENT", "FULL BEARISH ALIGNMENT"}
+            and sector.get("data_quality") not in {"STALE", "UNAVAILABLE", "INSUFFICIENT DATA"}
+        ]
+        live_by_id = {item.get("sector_id"): item for item in live_sectors or []}
+        sector_candidates = []
+        stock_candidates = []
+        scanned_stocks = 0
+        with self.candidate_scan_lock:
+            benchmark_candles = self._timeframe_candles(BENCHMARK_SYMBOL)
+            for sector in aligned_sectors:
+                direction = "BULLISH" if "BULLISH" in sector["mtf_alignment"] else "BEARISH"
+                live = live_by_id.get(sector["sector_id"], {})
+                sector_candidates.append({
+                    "key": f"sector:{sector['sector_id']}",
+                    "kind": "sector",
+                    "sector_id": sector["sector_id"],
+                    "name": sector["name"],
+                    "symbol": sector["symbol"],
+                    "direction": direction,
+                    "mtf_alignment": sector["mtf_alignment"],
+                    "rank": sector.get("rank"),
+                    "overall_score": sector.get("overall_score"),
+                    "relative_strength_state": sector.get("relative_strength_state"),
+                    "data_quality": sector.get("data_quality"),
+                    "last_updated": sector.get("last_updated"),
+                    "price": None,
+                    "market_change_pct": live.get("change"),
+                    "provider_tick_timestamp_iso": live.get("provider_tick_timestamp_iso"),
+                    "timeframe_states": {
+                        timeframe: {key: value for key, value in state.items() if key != "series"}
+                        for timeframe, state in sector.get("timeframe_states", {}).items()
+                    },
+                })
+                drivers = rank_directional_drivers(live.get("drivers", []), direction)
+                for driver in drivers[:max_stocks_per_sector]:
+                    scanned_stocks += 1
+                    symbol = equity_symbol(driver["ticker"])
+                    stock_candles = self._timeframe_candles(symbol)
+                    states = {
+                        timeframe: calculate_timeframe_state(
+                            timeframe,
+                            stock_candles.get(timeframe, []),
+                            benchmark_candles.get(timeframe, []),
+                            self._quality(timeframe, stock_candles.get(timeframe, [])),
+                        )
+                        for timeframe in TIMEFRAMES
+                    }
+                    alignment = mtf_alignment(states)
+                    if alignment != sector["mtf_alignment"]:
+                        continue
+                    qualities = [state.get("data_quality") for state in states.values()]
+                    if any(quality in {"STALE", "UNAVAILABLE", "INSUFFICIENT DATA"} for quality in qualities):
+                        continue
+                    quality = "STALE" if "STALE" in qualities else "MARKET CLOSED" if "MARKET CLOSED" in qualities else "DELAYED"
+                    stock_candidates.append({
+                        "key": f"stock:{driver['ticker']}",
+                        "kind": "stock",
+                        "ticker": driver["ticker"],
+                        "name": driver.get("name") or driver["ticker"],
+                        "symbol": symbol,
+                        "parent_sector_id": sector["sector_id"],
+                        "parent_sector": sector["name"],
+                        "direction": direction,
+                        "mtf_alignment": alignment,
+                        "data_quality": quality,
+                        "last_updated": max((state.get("last_updated") for state in states.values() if state.get("last_updated")), default=None),
+                        "price": driver.get("price"),
+                        "market_change_pct": driver.get("change"),
+                        "official_weight_pct": driver.get("weight"),
+                        "official_contribution_pp": driver.get("contribution"),
+                        "provider_tick_timestamp_iso": driver.get("provider_tick_timestamp_iso"),
+                        "timeframe_states": {
+                            timeframe: {key: value for key, value in state.items() if key != "series"}
+                            for timeframe, state in states.items()
+                        },
+                    })
+        # A constituent can occur in more than one official sector index. It is
+        # still one underlying and must produce one handoff recommendation.
+        unique_stocks = {}
+        for candidate in stock_candidates:
+            symbol = candidate["symbol"]
+            current = unique_stocks.get(symbol)
+            contribution = abs(float(candidate.get("official_contribution_pp") or 0))
+            current_contribution = abs(float(current.get("official_contribution_pp") or 0)) if current else -1
+            if current is None or contribution > current_contribution:
+                unique_stocks[symbol] = candidate
+        deduplicated_stocks = list(unique_stocks.values())
+        return {
+            "status": "READY",
+            "mode": mode,
+            "updated_at": snapshot.get("updated_at"),
+            "market_session": snapshot.get("market_session"),
+            "scope": {
+                "sector_rule": "Exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGNMENT on completed 15m, 1h, Daily and Weekly states.",
+                "stock_universe": f"Up to {max_stocks_per_sector} strongest direction-matching live moves from the official-weight constituents of each fully aligned sector.",
+                "stock_selection_rule": "Directional percentage move ranks the bounded stock scan; official index weight and contribution are retained only as attribution evidence.",
+                "scanned_stocks": scanned_stocks,
+                "matched_stocks": len(deduplicated_stocks),
+                "duplicate_recommendations_eliminated": len(stock_candidates) - len(deduplicated_stocks),
+            },
+            "candidates": sector_candidates + deduplicated_stocks,
+        }

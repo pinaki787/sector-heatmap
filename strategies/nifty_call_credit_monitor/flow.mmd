@@ -1,0 +1,12 @@
+flowchart TD
+    A[Read completed 15-minute NIFTY candle] --> B{Close below 23465?}
+    B -- No --> C[Write WATCHING or INVALIDATED report]
+    B -- Yes --> D[Fetch fresh FYERS weekly chain and exact F&O master]
+    D --> E[Validate two-sided quotes, matched lots, positive credit and risk cap]
+    E --> F{Duplicate basket-leg exposure?}
+    F -- Yes --> G[Stop and reconcile FYERS]
+    F -- No --> H[Write ENTRY_READY preview]
+    H --> I{Run with --live?}
+    I -- No --> J[Dry-run only]
+    I -- Yes --> K[Submit one basket: buy 23700 CE, sell 23600 CE]
+    K --> L[Reconcile both legs in FYERS; no retry]

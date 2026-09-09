@@ -138,6 +138,9 @@ When Fyers reports an expired or invalid token, the dashboard detects the authen
 - `sector_heatmap/indicators.py` — dependency-free EMA, ATR, RSI, ADX/DMI, breadth, and volume calculations
 - `sector_heatmap/analysis.py` — explainable timeframe, RS, momentum, score, ranking, alignment, rotation, and event domain logic
 - `sector_heatmap/sector_service.py` — completed-candle cache, FYERS history adapter, bounded snapshot history, and refresh service
+- `sector_heatmap/handoff.py` — local analysis-packet construction, risk sizing, and fresh FYERS option-chain proposals
+- `sector_heatmap/fyers_execution.py` — FYERS-only, confirmation-gated limit-order preview and reconciliation
+- `sector_heatmap/automation.py` — disabled-by-default unattended-policy authoring, fail-closed evaluation, and hash-chained audit log
 - `sector_heatmap/web.py` — local HTTP API and dashboard server
 
 ## Multi-timeframe sector analysis
@@ -149,10 +152,75 @@ ranking and rank change, persisted rotation history, multi-timeframe alignment,
 filters, sorting, and a sector detail workflow. It is an analytical prioritization
 system, not an automatic signal or order-entry feature.
 
+## Analysis handoff and gated FYERS tickets
+
+The **Analysis handoff** view scans completed 15m, 1H, Daily, and Weekly bars for
+exact fully bullish or fully bearish sectors and direction-matching contributor
+stocks. It builds a local packet for ChatGPT or Codex only after the user selects
+the recipient and chooses preview or export. Nothing is transmitted by the
+dashboard. Available FYERS funds are omitted unless the user enables them and
+separately confirms their inclusion.
+
+Sizing requires a positive stop or invalidation for every selected idea. The
+default planning values are ₹100,000 capital, a hard ₹5,000 daily loss limit,
+₹2,000 maximum new-idea risk, and a protected ₹1,000 reserve. The server rejects
+a daily limit above ₹5,000 and option proposals below 1:1 reward-to-risk.
+
+Order previews are FYERS-only. Preparing a ticket refreshes the token/profile,
+nearest expiry and option chain, exact daily symbol-master contracts, bid/ask,
+lot and tick size, funds, positions, and order state. It produces DAY limit
+orders and an exact, short-lived confirmation phrase. Live submission remains
+disabled unless the account holder starts the server with
+`SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=1`; setting that flag alone never places an
+order. Submission still requires the current typed phrase and a second complete
+preflight. State changes produce a replacement preview instead of an order, and
+submitted baskets are reconciled without automatic retries. Credit spreads stay
+preview-only because the installed FYERS SDK does not expose an exact basket/SPAN
+margin check; eligible debit spreads reserve the full protective-leg premium and
+send the BUY protection leg first. No alternative broker route is supported in
+this dashboard.
+
+The optional unattended policy is a separate approval mode, not a relaxation of
+the per-order confirmation flow. It defaults to PAPER and disabled, requires a
+full human-readable preview plus an exact acknowledgement before saving, and
+  captures symbol/segment/strategy allowlists, completed-candle conditions, risk
+and concurrency limits, limit-price protections, trading hours, DTE/liquidity
+filters, stops/targets, cooldown, stale-data veto, kill switch, and mandatory
+halt-on-uncertain behavior. Profiles are stored privately with a tamper-evident
+hash-chained audit log. This release provides policy authoring and fail-closed
+evaluation only; it does not include an automatic signal scheduler. An enabled
+LIVE profile additionally requires
+`SECTOR_PULSE_ENABLE_FYERS_UNATTENDED=1`, and no order can bypass fresh FYERS
+preflight or uncertainty halts.
+
+A disabled PAPER draft may cover both fully aligned NSE cash equities and
+supported index or stock options. It never pre-authorizes an option contract:
+active expiry, exact FYERS chain/master identity, two-sided bid/ask and configured
+spread, OI/volume, complete Greeks, valid lot/tick, defined maximum loss, stop or
+invalidation, target, and the configured minimum reward:risk must all pass again
+on fresh data before a future policy evaluation can allow it.
+
+## Broker invariant
+
+Sector Heatmap is strictly FYERS-only. Market data, completed-candle analysis,
+option chains, account reads, ticket previews, confirmation-gated execution, and
+future unattended policy evaluation must all use fresh FYERS evidence. New work
+must not add a second broker, broker-selection abstraction, fallback quote feed,
+or cross-broker execution route. See `BROKER_POLICY.md` for the enforced project
+boundary.
+
 The primary endpoints are:
 
 - `GET /api/sector-analysis?mode=intraday|swing`
 - `GET /api/sector-analysis/detail?mode=intraday|swing&sector=<sector-id>`
+- `GET /api/analysis-handoff/candidates?mode=intraday|swing`
+- `POST /api/analysis-handoff/preview`
+- `POST /api/analysis-handoff/analyze` — refreshes full-alignment candidates and renders local evidence proposals; it explicitly reports ChatGPT/Codex as unavailable unless a real recipient connection exists
+- `POST /api/analysis-handoff/size` — accepts or edits one structure, percent, ATR, or custom invalidation and recomputes stop, target and size from a fresh FYERS quote/tick
+- `GET /api/trade-ticket/capabilities`
+- `POST /api/trade-ticket/prepare` and `POST /api/trade-ticket/submit`
+- `GET /api/automation/profile`, `POST /api/automation/profile/preview`, and
+  `POST /api/automation/profile/draft` or `POST /api/automation/profile/save`
 
 See [the implementation design](docs/sector-analysis-design.md) for formulas,
 caching, refresh behavior, and current provider limitations.

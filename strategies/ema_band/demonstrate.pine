@@ -1,0 +1,61 @@
+//@version=6
+indicator("EMA 21 High/Low Band Indicator", shorttitle="EMA 21 Band", overlay=true)
+
+// This indicator mirrors the completed-candle entry/exit semantics used by
+// source.pine and the Sector Pulse EMA-band runner. It is visual only.
+emaLength = input.int(21, "EMA Length", minval=1)
+reentryCooldownBars = input.int(0, "Same-direction re-entry cooldown", minval=0, tooltip="After an EMA-band exit, block only same-direction entries for this many completed candles. Set to 0 to disable.")
+useEntrySession = input.bool(false, "Enable entry time filter", group="Entry time filter")
+entrySession = input.session("0915-1515", "Entry start and end time", group="Entry time filter", tooltip="Uses the symbol's exchange timezone. Exits remain active outside this session.")
+
+emaHigh = ta.ema(high, emaLength)
+emaLow = ta.ema(low, emaLength)
+confirmedBar = barstate.isconfirmed
+entryTimePass = not useEntrySession or not na(time(timeframe.period, entrySession))
+
+// The preceding, already completed candle must cross the relevant EMA edge
+// with its real body. A wick-only touch does not qualify.
+longSignalCandle = open[1] <= emaHigh[1] and close[1] > emaHigh[1]
+shortSignalCandle = open[1] >= emaLow[1] and close[1] < emaLow[1]
+signalCandleMidpoint = (high[1] + low[1]) / 2.0
+
+// Indicator-local position state replaces strategy.position_size. Entries are
+// evaluated only while flat, preventing silent reversals and duplicate markers.
+var int positionState = 0 // 1 = BUY active, -1 = SELL active, 0 = flat
+var int lastLongExitBar = na
+var int lastShortExitBar = na
+
+longReentryPass = na(lastLongExitBar) or bar_index - lastLongExitBar > reentryCooldownBars
+shortReentryPass = na(lastShortExitBar) or bar_index - lastShortExitBar > reentryCooldownBars
+
+longExit = confirmedBar and positionState == 1 and close >= emaLow and close <= emaHigh
+shortExit = confirmedBar and positionState == -1 and close >= emaLow and close <= emaHigh
+
+longEntry = confirmedBar and entryTimePass and positionState == 0 and close > open and longSignalCandle and open > signalCandleMidpoint and longReentryPass
+shortEntry = confirmedBar and entryTimePass and positionState == 0 and close < open and shortSignalCandle and open < signalCandleMidpoint and shortReentryPass
+
+// Exit takes precedence. An exit candle never silently reverses or re-enters.
+if longExit
+    positionState := 0
+    lastLongExitBar := bar_index
+else if shortExit
+    positionState := 0
+    lastShortExitBar := bar_index
+else if longEntry
+    positionState := 1
+else if shortEntry
+    positionState := -1
+
+upperBand = plot(emaHigh, "EMA 21 High", color=color.red, linewidth=2)
+lowerBand = plot(emaLow, "EMA 21 Low", color=color.green, linewidth=2)
+fill(upperBand, lowerBand, title="EMA Band", color=color.new(color.blue, 88))
+
+plotshape(longEntry, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, size=size.small)
+plotshape(shortEntry, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+plotshape(longExit, title="EXIT BUY", text="EXIT BUY", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
+plotshape(shortExit, title="EXIT SELL", text="EXIT SELL", style=shape.labelup, location=location.belowbar, color=color.orange, textcolor=color.white, size=size.tiny)
+
+alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: bullish confirmation candle after the EMA High cross and midpoint confirmation.")
+alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: bearish confirmation candle after the EMA Low cross and midpoint confirmation.")
+alertcondition(longExit, title="EXIT BUY Alert", message="EXIT BUY {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")
+alertcondition(shortExit, title="EXIT SELL Alert", message="EXIT SELL {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")

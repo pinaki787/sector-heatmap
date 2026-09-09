@@ -35,15 +35,21 @@ if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number
   exit 1
 fi
 
+npm_cache_dir=${TMPDIR:-/tmp}/sector-heatmap-npm-cache
+mkdir -p "$npm_cache_dir"
 (
   cd client
-  npx --yes pnpm@10.17.1 install --frozen-lockfile
-  npx --yes pnpm@10.17.1 run build
+  CI=true NPM_CONFIG_CACHE="$npm_cache_dir" npx --yes pnpm@10.17.1 install --frozen-lockfile
+  CI=true NPM_CONFIG_CACHE="$npm_cache_dir" npx --yes pnpm@10.17.1 run build
 )
 
 if [ "${HEATMAP_SETUP_ONLY:-0}" = "1" ]; then
   echo "Environment setup and UI build completed."
   exit 0
 fi
+
+# Default live FYERS order submission ON for this run unless the caller already
+# set the variable (to "1" or anything else, e.g. "0" to keep it off).
+export SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS="${SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS:-1}"
 
 exec .venv/bin/python heatmap_server.py

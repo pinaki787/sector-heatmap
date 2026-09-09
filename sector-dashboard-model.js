@@ -26,14 +26,31 @@
   }
 
   function analysisStatusText(analysis, formatTime = value => value) {
-    if (analysis?.refreshing) return 'Refreshing completed bars'
-    if (!analysis || analysis.status === 'UNAVAILABLE' || analysis.error) return analysis?.error || 'Analysis unavailable'
     const updated = latestDataTimestamp(analysis)
     const suffix = updated ? ` — data through ${formatTime(updated)}` : ''
+    const refresh = analysis?.refresh_state || {}
+    if (analysis?.refreshing) {
+      const prefix = analysis?.sectors?.length ? 'Refreshing' : 'Preparing sector rotation'
+      return `${prefix} · ${refresh.message || 'Loading completed bars'}${suffix}`
+    }
+    if (refresh.phase === 'FAILED' && analysis?.refresh_error && analysis?.sectors?.length) {
+      return `Refresh failed · showing retained data${suffix}`
+    }
+    if (!analysis || analysis.status === 'UNAVAILABLE' || analysis.error) return analysis?.error || refresh.message || 'Analysis unavailable'
     if (analysis.status === 'STALE') return `DATA STALE${analysis.market_session?.status === 'CLOSED' ? ' · MARKET CLOSED' : ''}${suffix}`
     if (analysis.market_session?.status === 'CLOSED') return `MARKET CLOSED — last completed session${suffix}`
     if (analysis.status === 'DELAYED') return `MARKET OPEN · completed-bar data${suffix}`
     return `${analysis.status || 'Analysis ready'}${suffix}`
+  }
+
+  function refreshPhaseState(analysis) {
+    const order = ['CONNECTING', 'LOADING_BARS', 'CALCULATING_INDICATORS', 'READY']
+    const phase = analysis?.refresh_state?.phase || (analysis?.refreshing ? 'CONNECTING' : analysis?.error ? 'FAILED' : 'READY')
+    const activeIndex = phase === 'FAILED' ? Math.max(0, order.indexOf(analysis?.refresh_state?.last_phase || 'CONNECTING')) : order.indexOf(phase)
+    return order.map((id, index) => ({
+      id,
+      state: phase === 'FAILED' && index === activeIndex ? 'failed' : index < activeIndex || (phase === 'READY' && index === activeIndex) ? 'complete' : index === activeIndex ? 'active' : 'pending',
+    }))
   }
 
   function qualityText(quality) {
@@ -50,5 +67,41 @@
     return states.flatMap(state => overview?.[state] || []).join(', ') || 'None'
   }
 
-  return { analysisStatusText, filterAndSortSectors, latestDataTimestamp, qualityText, rotationDisplay, rotationOverviewValue }
+  function riskPolicyPreview(values, realizedLoss = 0, openWorstCaseRisk = 0) {
+    const number = key => Number(values?.[key])
+    const planningCapital = number('planningCapital')
+    const dailyLossLimit = number('dailyLossLimit')
+    const ideaRiskLimit = number('ideaRiskLimit')
+    const riskReserve = number('riskReserve')
+    const maxPositions = number('maxPositions')
+    const minimumRewardToRisk = number('minimumRewardToRisk')
+    const errors = []
+    if (!(planningCapital > 0)) errors.push('Planning capital must be positive.')
+    if (!(dailyLossLimit > 0) || dailyLossLimit > 5000) errors.push('Daily loss must be positive and no greater than ₹5,000.')
+    if (!(ideaRiskLimit > 0)) errors.push('Per-idea risk must be positive.')
+    if (!(riskReserve >= 0)) errors.push('Reserved risk cannot be negative.')
+    if (ideaRiskLimit + riskReserve > dailyLossLimit) errors.push('Per-idea risk plus reserve must fit inside the daily loss limit.')
+    if (!Number.isInteger(maxPositions) || maxPositions < 1 || maxPositions > 20) errors.push('Maximum positions must be a whole number from 1 to 20.')
+    if (!(minimumRewardToRisk >= 1 && minimumRewardToRisk <= 10)) errors.push('Minimum reward:risk must be from 1:1 to 1:10.')
+    if (!['price', 'percent'].includes(values?.stopBasis)) errors.push('Choose a supported stop basis.')
+    if (!['LIMIT', 'MARKET'].includes(values?.orderType)) errors.push('Choose a supported order preference.')
+    const usedRisk = Number(realizedLoss) + Number(openWorstCaseRisk)
+    if (!Number.isFinite(usedRisk) || usedRisk < 0) errors.push('Used risk must be a nonnegative number.')
+    if (usedRisk > dailyLossLimit) errors.push('Realized plus worst-case open risk already exceeds the daily loss limit.')
+    const perPositionCapitalCap = planningCapital > 0 && maxPositions >= 1 ? planningCapital * 0.6 / maxPositions : 0
+    const availableNewIdeaRisk = Math.max(0, Math.min(ideaRiskLimit, dailyLossLimit - usedRisk - riskReserve))
+    return {
+      valid: errors.length === 0,
+      errors,
+      usedRisk,
+      availableNewIdeaRisk,
+      perPositionCapitalCap,
+      positionSlots: maxPositions,
+      minimumRewardToRisk,
+      orderType: values?.orderType,
+      stopBasis: values?.stopBasis,
+    }
+  }
+
+  return { analysisStatusText, filterAndSortSectors, latestDataTimestamp, qualityText, refreshPhaseState, riskPolicyPreview, rotationDisplay, rotationOverviewValue }
 })
