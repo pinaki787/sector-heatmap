@@ -51,8 +51,24 @@ if "%HEATMAP_SETUP_ONLY%"=="1" (
   exit /b 0
 )
 
+call :load_runtime_switches
+if errorlevel 1 exit /b 1
+
 ".venv\Scripts\python.exe" heatmap_server.py
 exit /b %errorlevel%
+
+:load_runtime_switches
+if not defined SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS if exist ".env" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=" ".env"') do set "SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=%%B"
+if not defined SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS if exist ".env" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=" ".env"') do set "SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=%%B"
+if not defined SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS set "SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=0"
+if not defined SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS set "SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=0"
+if not "%SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS%"=="0" if not "%SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS%"=="1" goto runtime_switch_invalid
+if not "%SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS%"=="0" if not "%SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS%"=="1" goto runtime_switch_invalid
+exit /b 0
+
+:runtime_switch_invalid
+echo Live-order switches must each be 0 or 1. 1>&2
+exit /b 1
 
 :python_missing
 echo Python 3.9 or newer is required. 1>&2

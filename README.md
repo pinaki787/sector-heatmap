@@ -17,6 +17,14 @@ They stop immediately if dependency installation or the UI build fails.
 For CI or setup validation without starting the long-running server, set
 `HEATMAP_SETUP_ONLY=1` before invoking either script.
 
+For a transferred archive, extract it into an ordinary writable directory. Copy
+`.fyers.env.example` to `.fyers.env` and enter the destination terminal's FYERS
+application settings, or use one of the user-level configuration locations below.
+Copy `.env.example` to `.env` only when runtime switches are needed. Both setup
+scripts and both fast launchers read the same two live-order switches; they default
+to `0` on a fresh terminal and reject values other than `0` or `1`. Never copy an
+access token or another terminal's private `.env` into a transfer archive.
+
 For later launches that do not need dependency or UI build validation, use the
 lighter launchers:
 
