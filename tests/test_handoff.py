@@ -60,6 +60,7 @@ class HandoffRiskTests(unittest.TestCase):
     def policy(self):
         return validate_risk_policy({"planning_capital": 100000, "daily_loss_limit": 5000, "idea_risk_limit": 2000,
             "risk_reserve": 1000, "max_simultaneous_positions": 3, "minimum_reward_to_risk": 1.5,
+            "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True,
             "stop_basis": "price", "order_type": "LIMIT"})
 
     def test_equity_proposal_recommends_structure_but_requires_acceptance(self):
@@ -107,7 +108,7 @@ class HandoffRiskTests(unittest.TestCase):
         candidate = {"price": 100, "direction": "BULLISH"}
         missing = size_equity_candidate(candidate, {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees"})
         self.assertEqual(missing["status"], "REQUIRES_RISK_INPUTS")
-        sized = size_equity_candidate(candidate, {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 95})
+        sized = size_equity_candidate(candidate, {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 95, "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True, "minimum_reward_to_risk": 1})
         self.assertEqual(sized["status"], "SIZED")
         self.assertEqual(sized["minimum_target"], 105.0)
         self.assertEqual(sized["quantity"], 200)  # 20% per-idea capital cap is tighter than risk quantity.
@@ -124,7 +125,7 @@ class HandoffRiskTests(unittest.TestCase):
         policy = validate_risk_policy({
             "planning_capital": 100000, "daily_loss_limit": 4000, "idea_risk_limit": 1500,
             "risk_reserve": 500, "max_simultaneous_positions": 5,
-            "minimum_reward_to_risk": 2, "stop_basis": "percent", "order_type": "LIMIT",
+            "minimum_reward_to_risk": 2, "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True, "stop_basis": "percent", "order_type": "LIMIT",
         })
         sized = size_equity_candidate(
             {"price": 100, "direction": "BULLISH"},
@@ -160,7 +161,7 @@ class DefinedRiskSpreadTests(unittest.TestCase):
     def test_spreads_require_exact_contracts_greeks_liquidity_and_reward_gate(self):
         result = build_defined_risk_spreads(
             self.chain, self.expiry, self.master, "BULLISH",
-            {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 95},
+            {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 95, "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True, "minimum_reward_to_risk": 1},
         )
         self.assertEqual(result["status"], "READY")
         self.assertEqual(result["expiry_iso"], "2026-09-03")
@@ -176,7 +177,7 @@ class DefinedRiskSpreadTests(unittest.TestCase):
     def test_user_minimum_reward_gate_and_percent_invalidation_are_applied(self):
         result = build_defined_risk_spreads(
             self.chain, self.expiry, self.master, "BULLISH",
-            {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 5, "stop_basis": "percent", "minimum_reward_to_risk": 2.5},
+            {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees", "invalidation": 5, "stop_basis": "percent", "minimum_reward_to_risk": 2.5, "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True},
         )
         self.assertEqual(result["status"], "UNAVAILABLE")
         self.assertTrue(result["rejected_proposals"])

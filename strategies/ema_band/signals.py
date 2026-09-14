@@ -21,6 +21,6 @@ def evaluate(bars, position=0):
     if position > 0 and low_band[i] <= closes[i] <= high_band[i]: return Signal(None, True)
     if position < 0 and low_band[i] <= closes[i] <= high_band[i]: return Signal(None, True)
     midpoint = (highs[prior] + lows[prior]) / 2
-    long = opens[prior] <= high_band[prior] and closes[prior] > high_band[prior] and closes[i] > opens[i] and opens[i] > midpoint
-    short = opens[prior] >= low_band[prior] and closes[prior] < low_band[prior] and closes[i] < opens[i] and opens[i] < midpoint
+    long = opens[prior] <= high_band[prior] and closes[prior] > high_band[prior] and closes[i] > midpoint
+    short = opens[prior] >= low_band[prior] and closes[prior] < low_band[prior] and closes[i] < midpoint
     return Signal('BUY' if position == 0 and long else 'SELL' if position == 0 and short else None)

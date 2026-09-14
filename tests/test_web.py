@@ -110,7 +110,7 @@ class RealizedPnlReportTests(unittest.TestCase):
 
     def test_dashboard_asset_version_identifies_route_split(self):
         index = (Path(__file__).resolve().parents[1] / "index.html").read_text(encoding="utf-8")
-        self.assertIn("live-quote-v23", index)
+        self.assertIn("ema-position-registry-oi-v1", index)
 
     def test_ema_band_stock_option_search_excludes_futures_in_the_same_fo_master(self):
         future = ["token", "NIFTY 30 Sep 26 FUT", "11", "65", "0.05", "", "", "", "", "NSE:NIFTY26SEPFUT", "10", "11", "", "NIFTY", "", "-1", "XX"]
@@ -205,7 +205,7 @@ class RealizedPnlReportTests(unittest.TestCase):
         self.assertTrue(checklist["checks"]["sufficient_completed_history"]["pass"])
         self.assertTrue(checklist["checks"]["current_candle_completed"]["pass"])
         self.assertIn("prior_body_crosses_ema_high_long", checklist["checks"])
-        self.assertIn("current_open_beyond_midpoint_short", checklist["checks"])
+        self.assertIn("current_close_below_midpoint_short", checklist["checks"])
         self.assertEqual(checklist["checks"]["session_gate"]["value"], "disabled")
 
     def test_ema_runner_clears_stale_context_before_quote_or_exit_management(self):
@@ -263,6 +263,21 @@ class RealizedPnlReportTests(unittest.TestCase):
         self.assertIn('Start Runner', dashboard)
         self.assertIn('/api/ema-band/runner/start', dashboard)
         self.assertIn("window.confirm('Start the LIVE EMA Band runner?", dashboard)
+
+    def test_ema_chart_requests_oi_and_exposes_retained_position_registry(self):
+        backend = (Path(__file__).resolve().parents[1] / "sector_heatmap" / "web.py").read_text(encoding="utf-8")
+        dashboard = (Path(__file__).resolve().parents[1] / "dashboard-enhancements.js").read_text(encoding="utf-8")
+        self.assertIn('"oi_flag": 1', backend)
+        self.assertIn('"open_interest": float(row[6])', backend)
+        self.assertIn('path == "/api/ema-band/tracked-positions"', backend)
+        self.assertIn('PAPER_ENTRY_RECORDED', backend)
+        self.assertIn('def ema_rsi_series', backend)
+        self.assertIn('"rsi_14"', backend)
+        self.assertIn('id="ema-band-position-cards"', dashboard)
+        self.assertIn('loadEmaTrackedPositions', dashboard)
+        self.assertIn('green long buildup, red short buildup, blue short covering, and amber long unwinding', dashboard)
+        self.assertIn('oiProfile', dashboard)
+        self.assertIn('RSI ${rsiLength}', dashboard)
 
     def test_stopping_ema_runner_clears_only_transient_display_context(self):
         backend = (Path(__file__).resolve().parents[1] / "sector_heatmap" / "web.py").read_text(encoding="utf-8")
@@ -327,7 +342,9 @@ class RealizedPnlReportTests(unittest.TestCase):
         self.assertIn("/api/trade-ticket/prepare-batch", dashboard)
         self.assertIn("Select all high-conviction equities", dashboard)
         self.assertIn("Clear selection", dashboard)
-        self.assertIn("screenerAnalysisResults.forEach(plan => screenerSelectedPlans.set(plan.symbol, plan))", dashboard)
+        self.assertIn("allocateScreenerPlansByFunds", dashboard)
+        self.assertIn("Allocated from fresh FYERS available funds", dashboard)
+        self.assertIn("suggested_quantity", dashboard)
         self.assertIn("#screener-analysis-results .screener-plan-select", dashboard)
 
     def test_nifty_straddle_ui_exposes_the_external_runner_options(self):
@@ -352,10 +369,15 @@ class RealizedPnlReportTests(unittest.TestCase):
         self.assertIn("read-only advisory · no automatic selection or order authority", dashboard)
         self.assertIn("Non-actionable · no selection, ticket, or live-order path", dashboard)
 
-    def test_one_screener_analysis_click_runs_all_safe_batches(self):
+    def test_screener_analysis_runs_only_selected_symbols_in_safe_batches(self):
         dashboard = (Path(__file__).resolve().parents[1] / "dashboard-enhancements.js").read_text(encoding="utf-8")
         self.assertIn("await analyzeScreenerCandidates(false)", dashboard)
-        self.assertIn("${screenerAnalysisOffset}/${source.result.candidates.length} complete", dashboard)
+        self.assertIn('class="screener-candidate-select"', dashboard)
+        self.assertIn('screener-source-select-all', dashboard)
+        self.assertIn("screenerAnalysisSymbols = [...screenerCandidateSelections]", dashboard)
+        self.assertIn("symbols: screenerAnalysisSymbols", dashboard)
+        self.assertIn("Analyze selected symbols", dashboard)
+        self.assertIn("${screenerAnalysisOffset}/${screenerAnalysisSymbols.length} complete", dashboard)
         self.assertIn("screenerAnalysisCancelled = true", dashboard)
         self.assertIn("Complete · ${screenerAnalysisOffset}/${data.total} analyzed", dashboard)
 

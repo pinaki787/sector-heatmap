@@ -40,7 +40,7 @@
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
   const initialStraddleMarket = storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'screener', 'settings'].includes(storedView)
+  const initialView = ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
     : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors'
   let straddleRunnerState = { available: false, running: false }
@@ -105,7 +105,7 @@
         <div class="handoff-banner"><div class="handoff-mark">↗</div><div><strong>Preview and transmission are separate actions</strong><span>Choosing ChatGPT or Codex only labels the local packet. Preview, copy and download remain on this device. Account funds enter a packet only after both inclusion and confirmation are checked.</span></div></div>
         <div class="handoff-grid">
           <section class="panel"><div class="step-title"><div><span class="label">1 · CHOOSE ROUTE & COLLECT</span><h2>Full-alignment stock candidates</h2><small class="muted">Completed 15m, 1H, Daily and Weekly evidence only.</small></div><button type="button" class="button" id="collect-candidates">Collect cash equity matches</button></div><span class="label" style="margin-top:14px">INSTRUMENT ROUTE — REQUIRED</span><div class="option-set execution route-set"><label class="option-card"><input type="radio" name="instrument-route" value="cash_equity" checked><b>Cash equity</b><small>Entry, structural stop, target, shares and cash-risk sizing only. No calls, puts or spreads.</small></label><label class="option-card"><input type="radio" name="instrument-route" value="stock_options"><b>Stock options</b><small>Validated stock-option contracts and defined-risk spreads only. No cash-share plan.</small></label></div><div id="candidate-status" class="handoff-status">Choose one route, then collect matches.</div><div id="candidate-list" class="candidate-list"></div><div id="candidate-batch-actions" class="packet-actions" hidden style="margin-top:12px"><button type="button" class="button secondary" id="select-all-candidates">Select all eligible</button><button type="button" class="button secondary" id="clear-candidate-selection">Clear selection</button><button type="button" class="button" id="prepare-handoff-batch">Prepare selected FYERS batch</button></div></section>
-          <section class="panel"><span class="label">2 · SET RISK & DELIVERY</span><h2>Explicit inputs</h2><div class="field-grid" style="margin-top:12px"><label class="field">Planning capital (₹)<input id="planning-capital" type="number" min="1" step="1000" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="daily-loss-limit" type="number" min="1" max="5000" step="100" value="5000"></label><label class="field">Per-idea risk allocation (₹)<input id="idea-risk-limit" type="number" min="1" step="100" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="risk-reserve" type="number" min="0" step="100" value="1000"></label><label class="field">Maximum simultaneous positions<input id="max-positions" type="number" min="1" max="20" step="1" value="3"></label><label class="field">Minimum reward:risk<input id="minimum-rr" type="number" min="1" max="10" step="0.1" value="1.5"></label><label class="field">Stop / invalidation basis<select id="stop-basis"><option value="price">Exact price level</option><option value="percent">Percent from entry / spot</option></select></label><label class="field">Order-type preference<select id="order-type"><option value="LIMIT">Limit (default, live eligible)</option><option value="MARKET">Market (preview only)</option></select></label></div><div id="policy-impact" class="risk-strip" aria-live="polite"></div><div id="policy-validation" class="handoff-status" role="status"></div><p class="muted">Aggregate realized loss plus worst-case open risk may never exceed the selected daily limit, capped at ₹5,000. Size remains unavailable until each idea has a valid stop. Calculated quantities and prices round down to valid share/lot and tick increments.</p>
+          <section class="panel"><span class="label">2 · OPTIONAL PLANNING PREFERENCES</span><h2>Your sizing and reward preferences</h2><label class="field" style="margin-top:12px"><input id="enforce-risk-controls" type="checkbox"> Apply these capital limits to analysis and ticket sizing</label><div class="field-grid" style="margin-top:12px"><label class="field">Planning capital (₹)<input id="planning-capital" type="number" min="1" step="1000" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="daily-loss-limit" type="number" min="1" step="100" value="5000"></label><label class="field">Per-idea risk allocation (₹)<input id="idea-risk-limit" type="number" min="1" step="100" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="risk-reserve" type="number" min="0" step="100" value="1000"></label><label class="field">Maximum simultaneous positions<input id="max-positions" type="number" min="1" step="1" value="3"></label><label class="field">Optional minimum reward:risk (0 = no gate)<input id="minimum-rr" type="number" min="0" step="0.1" value="0"></label><label class="field">Stop / invalidation basis<select id="stop-basis"><option value="price">Exact price level</option><option value="percent">Percent from entry / spot</option></select></label><label class="field">Order-type preference<select id="order-type"><option value="LIMIT">Limit (default, live eligible)</option><option value="MARKET">Market (preview only)</option></select></label></div><div id="policy-impact" class="risk-strip" aria-live="polite"></div><div id="policy-validation" class="handoff-status" role="status"></div><p class="muted">Capital values are used only if you enable capital controls. A reward:risk value is considered only when you enter one above zero. Validated spreads default to one lot and cash ideas to one share; choose a larger quantity in the ticket. Fresh FYERS contract, quote, liquidity, funds/margin and confirmation checks always apply.</p>
           <span class="label" style="margin-top:14px">RECIPIENT — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="recipient" value="chatgpt"> ChatGPT</label><label class="choice"><input type="radio" name="recipient" value="codex" checked> Codex</label></div>
           <span class="label" style="margin-top:14px">LOCAL ACTION — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="handoff-action" value="preview"> Preview only</label><label class="choice"><input type="radio" name="handoff-action" value="export"> Prepare export</label></div>
           <div class="privacy-gate"><label class="choice"><input id="include-funds" type="checkbox"> Include freshly read FYERS available funds</label><label class="choice"><input id="confirm-funds" type="checkbox" disabled> I confirm funds may be included in this local packet</label></div>
@@ -141,11 +141,26 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'screener' ? 'active' : ''}" data-view="screener" aria-pressed="${initialView === 'screener'}">Screener</button>`)
   document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'settings' ? 'active' : ''}" data-view="settings" aria-pressed="${initialView === 'settings'}">Risk Guardrails</button>`)
   document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'ema-band' ? 'active' : ''}" data-view="ema-band" aria-pressed="${initialView === 'ema-band'}">EMA Band</button>`)
-  document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="ema-band" class="view ${initialView === 'ema-band' ? 'active' : ''}"><header class="head"><div><span class="label">RESEARCH WORKBENCH · PAPER ONLY</span><h1>EMA Band</h1><small class="muted">Independent completed-candle research panel. It does not connect to or control either Long Straddles runner.</small></div><div class="status">Paper default · optional live auto-trading</div></header><section class="panel"><div class="step-title"><div><span class="label">CONFIGURATION</span><h2>Trend-following EMA band</h2><small class="muted">Use the band as a directional research framework, not a profitability claim or an order instruction.</small></div><span class="badge">PAPER DEFAULT · LIVE OPTIONAL</span></div><div class="field-grid" style="margin-top:14px"><label class="field">Segment<select id="ema-band-segment"><option value="index">Cash / index</option><option value="fno">F&amp;O</option><option value="commodity">Commodities</option><option value="stock-option">Stock options</option></select></label><label class="field">Broker-master instrument<select id="ema-band-underlying" disabled><option>Refresh the official cache to search instruments</option></select></label><label class="field" style="grid-column:1/-1">Broker-supported symbol or option search<input id="ema-band-search" autocomplete="off" placeholder="Search exact broker/master instrument; option symbols are never constructed here"><small>For stock options, enter the underlying or exact master search. Expiry, strike, call/put, lot size and tick must be returned by broker metadata before research is enabled.</small></label><div id="ema-band-contract" class="ticket-warning" style="grid-column:1/-1"><b>Contract context: not validated.</b> Metadata and quotes are unavailable until an explicit, fresh broker/master validation. The EMA Band stays paper-only and fail-closed.</div><div class="packet-actions" style="grid-column:1/-1"><button type="button" class="button secondary" id="ema-band-master-refresh">Refresh official FYERS master cache</button><span id="ema-band-master-status" class="handoff-status">Cache status loading…</span></div><label class="field">Research timeframe<select id="ema-band-timeframe"><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select></label><label class="field">EMA band length (High / Low)<input id="ema-band-length" type="number" value="21" min="1" max="500"><small>Applies separately to High and Low, exactly as the Pine source.</small></label><label class="field">Same-direction re-entry cooldown (bars)<input id="ema-band-cooldown" type="number" value="0" min="0"></label><label class="field">Entry session (IST)<input id="ema-band-session" type="text" value="0915-1515"><small>Optional Pine entry filter; exits remain active outside it.</small></label><label class="field">Signal confirmation<select id="ema-band-confirmation"><option>Completed candle only</option></select></label></div><div class="risk-strip" style="margin-top:14px"><div><b id="ema-band-direction">WATCH</b><small>Current research direction</small></div><div><b>EMA 21 High / Low</b><small>Band inputs</small></div><div><b>Completed close</b><small>Signal confirmation</small></div><div><b>PAPER</b><small>Execution state</small></div></div><div class="ticket-warning">Paper mode has no broker or order route. Live mode (selected below) adds Start/Stop controls that automatically submit real FYERS BUY/SELL orders on validated signals; a valid paper study still requires completed candles, explicit transaction costs, and out-of-sample validation.</div><div id="ema-band-status" class="handoff-status" role="status"><b>Python strategy: READY · PAPER ONLY</b><br>Completed 5-minute candles only: prior candle crosses EMA-21 High/Low; following candle confirms direction and opens beyond the prior range midpoint. Paper fills use next-bar open; EMA-band exits and 15:20 IST square-off remain required. Backtest waits for a fresh, validated FYERS instrument and historical response. No market data or broker request has been made.</div></section><section class="panel" style="margin-top:15px"><span class="label">RESEARCH CHECKLIST</span><h2>Interpretation guardrails</h2><div class="choice-row" style="margin-top:12px"><span class="choice">Long: prior completed body crosses EMA High; following completed candle is bullish and opens above its midpoint.</span><span class="choice">Short mirrors EMA Low.</span><span class="choice">Exit: completed close inside the EMA High/Low band.</span></div></section></section>`)
+  document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'kama' ? 'active' : ''}" data-view="kama" aria-pressed="${initialView === 'kama'}">KAMA Strategy</button>`)
+  document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'trade-parser' ? 'active' : ''}" data-view="trade-parser" aria-pressed="${initialView === 'trade-parser'}">Trade Parser</button>`)
+  document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="trade-parser" class="view ${initialView === 'trade-parser' ? 'active' : ''}"><header class="head"><div><span class="label">FYERS CONTRACT RESOLUTION · CONFIRMATION-GATED</span><h1>Trade Recommendation Parser</h1><small class="muted">Paste a message, map it to the official FYERS master, then prepare and submit an exact limit-order ticket.</small></div><div class="status">FYERS order route</div></header><section class="panel"><div class="step-title"><div><span class="label">PASTE RECOMMENDATION</span><h2>Review a text-based trade call</h2><small class="muted">Recognizes BUY/SELL, C/P or CE/PE, expiry, entry, stop loss, and targets. An exact contract is required for an order preview.</small></div><span class="badge">FYERS ONLY</span></div><label class="field" style="margin-top:14px">Recommendation text<textarea id="trade-parser-input" rows="8" placeholder="Example: BUY MCX CRUDEOIL 17-SEP CE 9100 AT 253.30 SL 235 TGT 285"></textarea><small>Verify the source independently. The ticket uses the FYERS master and a fresh FYERS quote.</small></label><div class="packet-actions" style="margin-top:12px"><button type="button" class="button" id="trade-parser-run">Parse recommendation</button><button type="button" class="button secondary" id="trade-parser-clear">Clear</button></div><div id="trade-parser-status" class="handoff-status" role="status">Paste a recommendation to begin.</div><div id="trade-parser-result" class="packet-preview" hidden style="margin-top:12px"></div><section id="trade-parser-order" class="ticket-warning" hidden style="margin-top:12px"><b>FYERS order route</b><div class="field-grid" style="margin-top:10px"><label class="field">Lots<input id="trade-parser-lots" type="number" min="1" step="1" value="1"></label></div><div class="packet-actions" style="margin-top:10px"><button type="button" class="button secondary" id="trade-parser-prepare-order">Prepare FYERS order</button><button type="button" class="button danger" id="trade-parser-submit-order" disabled>Submit confirmed order</button></div><div id="trade-parser-order-status" class="handoff-status">An exact contract match is required before an FYERS order preview can be prepared.</div></section></section></section>`)
+  $('trade-parser-result').insertAdjacentHTML('afterend', '<div id="trade-parser-ai-result" class="ticket-warning" hidden style="margin-top:12px"></div>')
+  $('trade-parser-lots').closest('.field-grid').insertAdjacentHTML('beforeend', '<label class="field">Entry type<select id="trade-parser-entry-mode"><option value="LIMIT">Limit</option><option value="STOP_LIMIT">Stop-limit</option></select><small id="trade-parser-entry-help">Limit buys at or below the stated price.</small></label><label class="field">Trigger price<input id="trade-parser-trigger-price" type="number" step="any"></label><label class="field">Limit price<input id="trade-parser-limit-price" type="number" step="any"></label>')
+  $('trade-parser-prepare-order').textContent = 'Submit FYERS order'
+  $('trade-parser-submit-order').hidden = true
+  document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="ema-band" class="view ${initialView === 'ema-band' ? 'active' : ''}"><header class="head"><div><span class="label">RESEARCH WORKBENCH · PAPER ONLY</span><h1>EMA Band</h1><small class="muted">Independent completed-candle research panel. It does not connect to or control either Long Straddles runner.</small></div><div class="status">Paper default · optional live auto-trading</div></header><section class="panel"><div class="step-title"><div><span class="label">CONFIGURATION</span><h2>Trend-following EMA band</h2><small class="muted">Use the band as a directional research framework, not a profitability claim or an order instruction.</small></div><span class="badge">PAPER DEFAULT · LIVE OPTIONAL</span></div><div class="field-grid" style="margin-top:14px"><label class="field">Segment<select id="ema-band-segment"><option value="index">Cash / index</option><option value="fno">F&amp;O</option><option value="commodity">Commodities</option><option value="stock-option">Stock options</option></select></label><label class="field">Broker-master instrument<select id="ema-band-underlying" disabled><option>Refresh the official cache to search instruments</option></select></label><label class="field" style="grid-column:1/-1">Broker-supported symbol or option search<input id="ema-band-search" autocomplete="off" placeholder="Search exact broker/master instrument; option symbols are never constructed here"><small>For stock options, enter the underlying or exact master search. Expiry, strike, call/put, lot size and tick must be returned by broker metadata before research is enabled.</small></label><div id="ema-band-contract" class="ticket-warning" style="grid-column:1/-1"><b>Contract context: not validated.</b> Metadata and quotes are unavailable until an explicit, fresh broker/master validation. The EMA Band stays paper-only and fail-closed.</div><div class="packet-actions" style="grid-column:1/-1"><button type="button" class="button secondary" id="ema-band-master-refresh">Refresh official FYERS master cache</button><span id="ema-band-master-status" class="handoff-status">Cache status loading…</span></div><label class="field">Research timeframe<select id="ema-band-timeframe"><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select></label><label class="field">EMA band length (High / Low)<input id="ema-band-length" type="number" value="21" min="1" max="500"><small>Applies separately to High and Low, exactly as the Pine source.</small></label><label class="field">Chart timeframe<select id="ema-band-chart-timeframe"><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select><small>Display only; this never changes the runner’s timeframe or trade logic.</small></label><label class="field">Chart history<select id="ema-band-chart-bars"><option value="80">80 candles</option><option value="160">160 candles</option><option value="240">240 candles</option><option value="320" selected>320 candles</option><option value="500">500 candles</option></select><small>Controls the displayed FYERS history only.</small></label><label class="field">Same-direction re-entry cooldown (bars)<input id="ema-band-cooldown" type="number" value="0" min="0"></label><label class="field">Entry session (IST)<input id="ema-band-session" type="text" value="0915-1515"><small>Optional Pine entry filter; exits remain active outside it.</small></label><label class="field">Signal confirmation<select id="ema-band-confirmation"><option>Completed candle only</option></select></label></div><div class="risk-strip" style="margin-top:14px"><div><b id="ema-band-direction">WATCH</b><small>Current research direction</small></div><div><b>EMA 21 High / Low</b><small>Band inputs</small></div><div><b>Completed close</b><small>Signal confirmation</small></div><div><b>PAPER</b><small>Execution state</small></div></div><div class="ticket-warning">Paper mode has no broker or order route. Live mode (selected below) adds Start/Stop controls that automatically submit real FYERS BUY/SELL orders on validated signals; a valid paper study still requires completed candles, explicit transaction costs, and out-of-sample validation.</div><div id="ema-band-status" class="handoff-status" role="status"><b>Python strategy: READY · PAPER ONLY</b><br>Completed 5-minute candles only: a prior candle crosses EMA-21 High or Low; the following candle's completed close must be beyond that signal candle's midpoint—above for long, below for short—regardless of candle color. Paper fills use next-bar open; EMA-band exits and 15:20 IST square-off remain required. Backtest waits for a fresh, validated FYERS instrument and historical response. No market data or broker request has been made.</div></section><section class="panel" style="margin-top:15px"><span class="label">RESEARCH CHECKLIST</span><h2>Interpretation guardrails</h2><div class="choice-row" style="margin-top:12px"><span class="choice">Long: prior completed body crosses EMA High; following completed candle closes above that signal candle's midpoint, regardless of color.</span><span class="choice">Short: prior completed body crosses EMA Low; following completed candle closes below that signal candle's midpoint, regardless of color.</span><span class="choice">Exit: completed close inside the EMA High/Low band.</span></div></section></section>`)
+  document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="kama" class="view ${initialView === 'kama' ? 'active' : ''}"><header class="head"><div><span class="label">INDEPENDENT STRATEGY · PAPER DEFAULT</span><h1>KAMA Strategy</h1><small class="muted">A separate completed-candle KAMA V6 lifecycle. EMA only screens the broker-master symbol; it never authorizes a KAMA trade.</small></div><div class="status" id="kama-capability">Loading policy…</div></header><section class="panel"><div class="step-title"><div><span class="label">RUNNER CONFIGURATION</span><h2>Kaufman Adaptive Moving Average</h2><small class="muted">KAMA direction, efficiency, breakout/reclaim and KAMA exits alone decide position state.</small></div><span class="badge">NO MANUAL TICKETS</span></div><div class="field-grid" style="margin-top:14px"><label class="field">Exact broker-master underlying<input id="kama-underlying" autocomplete="off" placeholder="NSE:RELIANCE-EQ"><small>Screened against the current master only.</small></label><label class="field">Timeframe<select id="kama-timeframe"><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select></label><label class="field">KAMA efficiency length<input id="kama-length" type="number" value="10" min="1"></label><label class="field">Fast / slow lengths<div class="choice-row"><input id="kama-fast" type="number" value="2" min="1"><input id="kama-slow" type="number" value="30" min="2"></div></label><label class="field">Minimum efficiency ratio<input id="kama-efficiency" type="number" value="0.35" min="0" max="1" step="0.05"></label><label class="field">Breakout / cooldown bars<div class="choice-row"><input id="kama-breakout" type="number" value="5" min="2"><input id="kama-cooldown" type="number" value="2" min="0"></div></label><label class="choice"><input id="kama-reclaims" type="checkbox" checked> Allow KAMA reclaim entries</label><label class="field">Mode<select id="kama-mode"><option value="PAPER">Paper</option><option value="LIVE" disabled>Live — operator-gated</option></select></label><label class="field kama-live-setting" hidden>Quantity<input id="kama-quantity" type="number" min="1" step="1" placeholder="Whole units"></label><label class="field kama-live-setting" hidden>Invalidation / stop price<input id="kama-invalidation" type="number" min="0.01" step="0.05" placeholder="Required for live"></label><label class="field kama-live-setting" hidden>Maximum idea risk (₹)<input id="kama-idea-risk" type="number" min="1" step="1" value="2000"></label></div><div class="risk-strip"><div><b>ENTRY</b><small>Completed KAMA V6 only</small></div><div><b>HOLD</b><small>KAMA position state only</small></div><div><b>EXIT</b><small>Reversal or 15:15 square-off</small></div><div><b>RISK</b><small>Fresh preflight, broker confirmation and reconciliation</small></div></div><div class="packet-actions"><button type="button" class="button secondary" id="kama-runner-toggle">Start paper runner</button></div><div id="kama-runner-status" class="handoff-status" role="status">Runner stopped. No broker order route is active.</div></section><section class="panel" style="margin-top:15px"><span class="label">OBSERVABILITY</span><h2>Current KAMA runner</h2><div id="kama-policy" class="ticket-warning">Policy loads from the KAMA-only API.</div><section id="kama-chart" class="chart-card premium-chart" style="margin-top:12px"><div class="chart-empty">Chart starts only after completed KAMA candles are received.</div></section><pre id="kama-state" class="packet-preview">No current runner state.</pre><h3>Lifecycle events</h3><pre id="kama-events" class="packet-preview runner-log">No KAMA events.</pre></section></section>`)
+  $('kama-underlying').closest('label').outerHTML = '<label class="field">Execution instrument<select id="kama-execution-mode"><option value="EQUITY">Equity / Futures</option><option value="OPTIONS">Options — automatic ATM Call / Put</option></select><small>Options mode uses the KAMA direction on the selected underlying.</small></label><label class="field" style="grid-column:1/-1">Search underlying<input id="kama-underlying-search" autocomplete="off" placeholder="Search RELIANCE, NIFTY, SENSEX, CRUDEOIL…"><small>Searches current NSE, BSE, and MCX FYERS masters; exact symbol formatting is not required.</small></label><label class="field">FYERS underlying<select id="kama-underlying" disabled><option value="">Type at least two characters to search</option></select><small id="kama-underlying-status">Choose Equity / Futures or Options, then search.</small></label>'
+  $('kama-quantity').closest('label').id = 'kama-size-field'
+  $('kama-quantity').insertAdjacentHTML('afterend', '<small id="kama-size-help">Shares for equities; lots for MCX futures.</small>')
+  $('kama-invalidation').insertAdjacentHTML('afterend', '<small id="kama-invalidation-help">Price invalidation for the directly traded instrument.</small>')
+  document.querySelector('#kama .risk-strip div:nth-child(3) small').id = 'kama-exit-session'
+  $('ema-band-length').closest('label').insertAdjacentHTML('afterend', '<label class="field">EMA slope lookback (completed bars)<input id="ema-band-slope-lookback" type="number" value="8" min="2" max="100"><small>Measures the EMA-band midpoint; this blocks flat conditions only.</small></label><label class="field">Minimum slope (ATR per bar)<input id="ema-band-minimum-slope-atr" type="number" value="0.10" min="0" step="0.01" max="2"><small>0.10 is the default; raise it to reject more sideways conditions.</small></label>')
+  $('ema-band-slope-lookback').closest('label').insertAdjacentHTML('afterend', '<label class="field"><input id="ema-band-resistance-volume-exit" type="checkbox"> Protect a profitable long at weak resistance</label><label class="field">Resistance breakout volume<input id="ema-band-resistance-volume-multiple" type="number" value="1.5" min="0" step="0.1" max="10"><small>Required multiple of the prior average volume.</small></label><label class="field">Resistance volume lookback<input id="ema-band-resistance-volume-lookback" type="number" value="20" min="2" max="100"><small>Completed candles used for the volume average.</small></label>')
   document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="screener" class="view ${initialView === 'screener' ? 'active' : ''}"><header class="head"><div><span class="label">CHARTINK · SOURCE ONLY</span><h1>Screener</h1><small class="muted">A dedicated source view for user-provided Chartink screeners.</small></div><div class="status">Awaiting screener URLs</div></header><section class="panel"><span class="label">NO SOURCES CONFIGURED</span><h2>Chartink candidates will appear here</h2><p class="muted">Provide the exact Chartink screener URLs you want to use. This view will not invent URLs, scrape pages, or refresh automatically.</p><div class="ticket-warning">Imported results will remain source-only and separate from Analysis Handoff and broker order planning until you explicitly review and select them.</div></section></section>`)
   const chartinkSourceUrl = 'https://chartink.com/screener/independent-indicator-signals-daily-or'
   document.querySelector('#screener .status').textContent = '1 source configured'
-  document.querySelector('#screener .panel').innerHTML = `<span class="label">MANAGED SOURCES · LOCAL ONLY</span><h2>Chartink screeners</h2><div class="field-grid"><label class="field">Friendly label (optional)<input id="screener-label" placeholder="My daily scan"></label><label class="field">Chartink screener URL<input id="screener-url" type="url" placeholder="https://chartink.com/screener/..."></label></div><div class="packet-actions" style="margin-top:10px"><button type="button" class="button" id="add-screener">Add source</button><button type="button" class="button secondary" id="refresh-screeners">Refresh all</button><button type="button" class="button secondary" id="analyze-screeners">Analyze screener candidates</button></div><div id="screener-status" class="handoff-status"></div><div id="screener-sources" class="candidate-list"></div><section id="screener-analysis" class="analysis-panel" hidden><div class="step-title"><div><span class="label">READ-ONLY ADVISORY</span><h2>Screener candidate analysis</h2></div></div><div id="screener-analysis-status" class="handoff-status"></div><div id="screener-bulk-selection" class="packet-actions" style="margin:12px 0"><button type="button" class="button secondary" id="screener-select-all">Select all high-conviction equities</button><button type="button" class="button secondary" id="screener-clear-selection">Clear selection</button><span id="screener-selected-count" class="status" aria-live="polite">0 selected</span></div><div id="screener-analysis-results" class="analysis-board"></div><div class="packet-actions"><button type="button" class="button secondary" id="screener-analysis-next" hidden>Analyze next 12</button></div></section><div class="ticket-warning">Results are source-only candidate inputs. Source auto-refresh can only update Chartink membership and read-only quote fields; it never analyzes, selects, prepares, or submits an order.</div>`
+  document.querySelector('#screener .panel').innerHTML = `<span class="label">MANAGED SOURCES · LOCAL ONLY</span><h2>Chartink screeners</h2><div class="field-grid"><label class="field">Friendly label (optional)<input id="screener-label" placeholder="My daily scan"></label><label class="field">Chartink screener URL<input id="screener-url" type="url" placeholder="https://chartink.com/screener/..."></label></div><div class="packet-actions" style="margin-top:10px"><button type="button" class="button" id="add-screener">Add source</button><button type="button" class="button secondary" id="refresh-screeners">Refresh all</button><button type="button" class="button secondary" id="analyze-screeners" disabled>Analyze selected symbols (0)</button></div><div id="screener-status" class="handoff-status"></div><div id="screener-sources" class="candidate-list"></div><section id="screener-analysis" class="analysis-panel" hidden><div class="step-title"><div><span class="label">READ-ONLY ADVISORY</span><h2>Screener candidate analysis</h2></div></div><div id="screener-analysis-status" class="handoff-status"></div><div id="screener-bulk-selection" class="packet-actions" style="margin:12px 0"><button type="button" class="button secondary" id="screener-select-all">Select all high-conviction equities</button><button type="button" class="button secondary" id="screener-clear-selection">Clear selection</button><span id="screener-selected-count" class="status" aria-live="polite">0 selected</span></div><div id="screener-analysis-results" class="analysis-board"></div><div class="packet-actions"><button type="button" class="button secondary" id="screener-analysis-next" hidden>Analyze next 12</button></div></section><div class="ticket-warning">Source auto-refresh can only update Chartink membership and read-only quote fields; it never analyzes, selects, prepares, or submits an order. Select source candidates first: analysis uses only those selected symbols.</div>`
   document.querySelector('#screener .panel').insertAdjacentHTML('beforeend', `<section id="screener-order" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN PREVIEW · FYERS</span><h2>Consolidated FYERS batch preview</h2><small class="muted">Selected High-Conviction plans and the aggregate batch must pass fresh validation.</small></div><div class="status">FYERS is the default broker</div></div><div class="field-grid" style="margin-top:12px"><label class="field">Broker<input value="FYERS" readonly></label><label class="field">Cash product<select id="screener-order-product"><option value="INTRADAY">Intraday</option><option value="CNC">Delivery (CNC)</option></select></label><label class="field">Declared external open risk (₹)<input id="screener-order-external-risk" type="number" min="0" step="100" placeholder="Required when FYERS has open positions"></label></div><div id="screener-batch-selection" class="handoff-status" style="margin-top:12px">No High-Conviction plans selected.</div><button type="button" class="button" id="prepare-screener-order" style="margin-top:12px">Prepare FYERS batch preview</button><div id="screener-order-status" class="handoff-status" role="status" aria-live="polite">No plans selected. No broker action has occurred.</div><div id="screener-order-review" hidden><pre id="screener-order-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact fresh confirmation phrase<input id="screener-order-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-screener-order" disabled style="margin-top:10px">Submit confirmed FYERS batch</button></div></section>`)
   $('stop-straddle').insertAdjacentHTML('afterend', '<button type="button" class="button danger" id="squareoff-straddle">Stop &amp; square off</button>')
   $('straddle-action-status').insertAdjacentHTML('afterend', '<section id="straddle-squareoff-review" class="automation-panel" hidden><pre id="straddle-squareoff-preview" class="packet-preview"></pre><label class="field">Exact exit confirmation<input id="straddle-squareoff-confirmation" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="confirm-straddle-squareoff" disabled>Confirm stop &amp; square off</button></section>')
@@ -214,6 +229,222 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
     return data
   }
+  // KAMA has no ticket/confirmation controls: its completed-candle runner owns
+  // every paper lifecycle transition.  This UI intentionally never invokes a
+  // broker order endpoint.
+  const renderKamaRunner = state => {
+    $('kama-runner-toggle').textContent = state.running ? 'Stop runner' : `Start ${$('kama-mode').value.toLowerCase()} runner`
+    $('kama-runner-status').textContent = `${state.status || 'STOPPED'}${state.last_event?.signal?.message ? ` · ${state.last_event.signal.message}` : state.last_event?.error ? ` · ${state.last_event.error}` : ''}`
+    $('kama-state').textContent = JSON.stringify(state, null, 2)
+    $('kama-policy').textContent = state.config
+      ? `${state.policy?.signal_authority || 'KAMA completed candles only'} · ${state.policy?.risk_policy || 'policy unavailable'}`
+      : 'No active KAMA runner. Historical events are a journal, never an active position.'
+    const candles = state.chart?.candles || []
+    const signal = state.chart?.signal || state.last_event?.signal
+    $('kama-chart').innerHTML = candles.length
+      ? `<b>${escapeHtml(state.chart.symbol)} · ${escapeHtml(state.chart.timeframe)}</b><small class="muted">Completed-candle KAMA: ${escapeHtml(signal?.action || 'WAIT')} · ${escapeHtml(signal?.message || '')}</small><div class="premium-chart-stats"><div><small>Candles</small><b>${candles.length}</b></div><div><small>KAMA</small><b>${signal?.kama ?? '—'}</b></div><div><small>Efficiency</small><b>${signal?.efficiency ?? '—'}</b></div></div><div class="chart-empty">KAMA chart state is sourced from completed candles only.</div>`
+      : '<div class="chart-empty">Chart starts only after completed KAMA candles are received.</div>'
+    $('kama-events').textContent = state.events?.length
+      ? state.events.map(event => `${event.at}  ${event.lifecycle || event.status || 'WATCH'}  ${event.signal?.action || event.error || ''}`).join('\n')
+      : 'No KAMA events.'
+  }
+  const loadKamaRunner = async () => {
+    try { renderKamaRunner(await fetchJson('/api/kama/runner')) }
+    catch (error) { $('kama-runner-status').textContent = `KAMA state unavailable: ${error.message}` }
+  }
+  const loadKamaCapability = async () => {
+    try {
+      const capability = await fetchJson('/api/kama/live-capability')
+      $('kama-capability').textContent = capability.live_submission_enabled ? 'Live runner available' : 'Paper default · live gated off'
+      $('kama-mode').querySelector('option[value="LIVE"]').disabled = !capability.live_submission_enabled
+      $('kama-policy').textContent = capability.message
+    } catch (error) { $('kama-capability').textContent = 'Policy unavailable' }
+  }
+  const updateKamaMode = () => {
+    const live = $('kama-mode').value === 'LIVE'
+    document.querySelectorAll('.kama-live-setting').forEach(field => { field.hidden = !live })
+    if (!$('kama-runner-toggle').disabled) $('kama-runner-toggle').textContent = `Start ${live ? 'live' : 'paper'} runner`
+  }
+  let kamaUnderlyingSearchGeneration = 0
+  const searchKamaUnderlyings = async () => {
+    const query = $('kama-underlying-search').value.trim()
+    const picker = $('kama-underlying')
+    const executionMode = $('kama-execution-mode').value
+    const generation = ++kamaUnderlyingSearchGeneration
+    if (query.length < 2) {
+      picker.innerHTML = '<option value="">Type at least two characters to search</option>'
+      picker.disabled = true
+      $('kama-underlying-status').textContent = 'Type at least two characters to search the selected route.'
+      return
+    }
+    $('kama-underlying-status').textContent = 'Searching the current FYERS master…'
+    try {
+      const data = await fetchJson(`/api/kama/underlying-search?q=${encodeURIComponent(query)}&execution_mode=${encodeURIComponent(executionMode)}`)
+      if (generation !== kamaUnderlyingSearchGeneration) return
+      picker.innerHTML = '<option value="">Choose a FYERS underlying</option>' + data.matches.map(item => `<option value="${escapeHtml(item.symbol)}" data-underlying="${escapeHtml(JSON.stringify(item))}">${escapeHtml(item.underlying_kind.replaceAll('_', ' '))} · ${escapeHtml(item.description)} · ${escapeHtml(item.symbol)}</option>`).join('')
+      picker.disabled = !data.status?.usable || !data.matches.length
+      $('kama-underlying-status').textContent = data.matches.length ? `${data.matches.length} current master match${data.matches.length === 1 ? '' : 'es'}. Select one.` : 'No eligible current FYERS underlying matched that route and search.'
+    } catch (error) {
+      picker.innerHTML = '<option value="">KAMA equity search unavailable</option>'
+      picker.disabled = true
+      $('kama-underlying-status').textContent = `Search blocked: ${error.message}`
+    }
+  }
+  $('kama-underlying-search').addEventListener('input', searchKamaUnderlyings)
+  const syncKamaSelectedUnderlying = () => {
+    const selected = JSON.parse($('kama-underlying').selectedOptions[0]?.dataset.underlying || 'null')
+    $('kama-exit-session').textContent = selected?.underlying_kind === 'COMMODITY_FUTURE' ? 'Reversal or 23:30 square-off' : 'Reversal or 15:15 square-off'
+  }
+  $('kama-underlying').addEventListener('change', syncKamaSelectedUnderlying)
+  const syncKamaExecutionMode = () => {
+    const options = $('kama-execution-mode').value === 'OPTIONS'
+    $('kama-size-field').childNodes[0].textContent = options ? 'Option lots' : 'Quantity / lots'
+    $('kama-size-help').textContent = options ? 'The exact quantity is calculated from the selected ATM contract lot size.' : 'Shares for NSE/BSE equities; lots for MCX futures.'
+    $('kama-invalidation-help').textContent = options ? 'Required live stop price for the selected option premium.' : 'Required live stop price for the directly traded instrument.'
+    $('kama-underlying').innerHTML = '<option value="">Search and select for this route</option>'
+    $('kama-underlying').disabled = true
+    syncKamaSelectedUnderlying()
+    searchKamaUnderlyings()
+  }
+  $('kama-execution-mode').addEventListener('change', syncKamaExecutionMode)
+  $('kama-mode').addEventListener('change', updateKamaMode)
+  $('kama-runner-toggle').addEventListener('click', async () => {
+    const button = $('kama-runner-toggle')
+    button.disabled = true
+    try {
+      const current = await fetchJson('/api/kama/runner')
+      const state = current.running ? await postJson('/api/kama/runner/stop', {}) : await postJson('/api/kama/runner/start', {
+        mode: $('kama-mode').value, execution_mode: $('kama-execution-mode').value,
+        underlying: $('kama-underlying').value, timeframe: $('kama-timeframe').value,
+        kama_length: $('kama-length').value, fast_length: $('kama-fast').value, slow_length: $('kama-slow').value,
+        minimum_efficiency: $('kama-efficiency').value, breakout_bars: $('kama-breakout').value,
+        cooldown_bars: $('kama-cooldown').value, allow_reclaims: $('kama-reclaims').checked,
+        quantity: $('kama-quantity').value, invalidation: $('kama-invalidation').value,
+        idea_risk_limit: $('kama-idea-risk').value,
+      })
+      renderKamaRunner(state)
+    } catch (error) { $('kama-runner-status').textContent = `Runner action blocked: ${error.message}` }
+    finally { button.disabled = false }
+  })
+  syncKamaExecutionMode(); updateKamaMode(); loadKamaCapability(); loadKamaRunner(); setInterval(() => { if (!document.hidden) loadKamaRunner() }, 5000)
+  const renderTradeRecommendation = data => {
+    const parsed = data.parsed || {}
+    const mapping = data.mapping || {}
+    const output = $('trade-parser-result')
+    const fields = [
+      ['Action', parsed.action || 'not found'],
+      ['Underlying', parsed.underlying || 'not found'],
+      ['Option', parsed.option_type ? `${parsed.strike ?? '—'} ${parsed.option_type}` : 'cash / futures not identified'],
+      ['Entry', parsed.entry ?? 'not found'],
+      ['Entry type', parsed.entry_instruction === 'STOP_LIMIT' ? 'stop-limit trigger' : 'limit'],
+      ['Stop loss', parsed.stop_loss ?? 'not found'],
+      ['Targets', (parsed.targets || []).length ? parsed.targets.join(' → ') : 'none found'],
+    ]
+    const contract = mapping.contract
+    const candidateLines = (mapping.candidates || []).map(item => `${item.symbol} · ${item.description} · expiry ${item.expiry || 'n/a'} · lot ${item.lot_size}`).join('\n')
+    const stages = (data.trailing_plan || []).map((stage, index) => `T${index + 1} ${stage.target}: ${stage.action}`).join('\n')
+    output.textContent = [
+      'REVIEW-ONLY PARSED TICKET',
+      ...fields.map(([label, value]) => `${label}: ${value}`),
+      '',
+      `FYERS mapping: ${mapping.status || 'UNRESOLVED'}`,
+      contract ? `${contract.symbol} · ${contract.description} · expiry ${contract.expiry || 'n/a'} · lot ${contract.lot_size} · tick ${contract.tick_size}` : (mapping.message || 'No exact broker contract found.'),
+      candidateLines ? `\nPossible FYERS contracts — add expiry to your text to make this exact:\n${candidateLines}` : '',
+      stages ? `\nSuggested staged stop plan (review only):\n${stages}` : '',
+      parsed.missing?.length ? `\nMissing fields: ${parsed.missing.join(', ')}` : '',
+      '\nNo order, stop, or trailing instruction has been sent to FYERS.'
+    ].filter(Boolean).join('\n')
+    output.hidden = false
+    $('trade-parser-order').hidden = mapping.status !== 'EXACT'
+    $('trade-parser-submit-order').disabled = true
+    const inferredStopLimit = parsed.entry_instruction === 'STOP_LIMIT'
+    const tickSize = Number(contract?.tick_size) || 0
+    const isBuy = (parsed.action || 'BUY') === 'BUY'
+    $('trade-parser-entry-mode').value = inferredStopLimit ? 'STOP_LIMIT' : 'LIMIT'
+    $('trade-parser-trigger-price').value = parsed.entry ?? ''
+    $('trade-parser-limit-price').value = parsed.entry == null ? '' : (inferredStopLimit && tickSize > 0 ? Number(parsed.entry) + (isBuy ? tickSize : -tickSize) : parsed.entry)
+    const updateEntryHelp = () => {
+      const stopLimit = $('trade-parser-entry-mode').value === 'STOP_LIMIT'
+      $('trade-parser-entry-help').textContent = stopLimit
+        ? `FYERS stop-limit: trigger first, then submit a ${parsed.action || 'BUY'} limit price. For BUY, limit must be above trigger; SELL, below.`
+        : `FYERS limit: ${parsed.action === 'SELL' ? 'sell at or above' : 'buy at or below'} the stated price.`
+    }
+    updateEntryHelp()
+    $('trade-parser-order-status').textContent = mapping.status === 'EXACT'
+      ? 'Exact FYERS contract found. Choose lots and prepare a fresh limit-order preview.'
+      : 'Order preparation is blocked until the recommendation maps to exactly one active FYERS contract.'
+  }
+  $('trade-parser-run').addEventListener('click', async () => {
+    const button = $('trade-parser-run')
+    const status = $('trade-parser-status')
+    const text = $('trade-parser-input').value.trim()
+    if (!text) { status.textContent = 'Paste a trade recommendation first.'; return }
+    button.disabled = true; status.textContent = 'Parsing text and checking the FYERS master cache…'
+    try {
+      const data = await postJson('/api/trade-recommendation/parse', { text })
+      renderTradeRecommendation(data)
+      if (data.mapping?.status === 'EXACT') {
+        const ai = await postJson('/api/trade-recommendation/ai-analysis', { text })
+        renderTradeRecommendationAi(ai)
+        status.textContent = 'Parsed ticket and AI analysis are ready. Review them before preparing an order.'
+      } else status.textContent = 'Parser result needs review; AI analysis requires one exact active FYERS contract.'
+    } catch (error) { status.textContent = `Parser blocked: ${error.message}` }
+    finally { button.disabled = false }
+  })
+  $('trade-parser-clear').addEventListener('click', () => {
+    $('trade-parser-input').value = ''; $('trade-parser-result').hidden = true; $('trade-parser-result').textContent = ''; $('trade-parser-ai-result').hidden = true; $('trade-parser-ai-result').textContent = ''; $('trade-parser-order').hidden = true; $('trade-parser-status').textContent = 'Paste a recommendation to begin.'
+  })
+  const renderTradeRecommendationAi = data => {
+      const output = $('trade-parser-ai-result')
+      const evidence = data.evidence || {}; const trend = evidence.trend || {}
+      output.textContent = [
+        `AI FEEDBACK: ${data.verdict === 'FAVOURABLE' ? 'FAVOURABLE — PROCEED' : 'NOT FAVOURABLE'}${data.verdict === 'WAIT_FOR_TRIGGER' ? ' — WAIT FOR TRIGGER' : data.verdict === 'MIXED' ? ' — WAIT FOR ALIGNMENT' : data.verdict === 'NOT_FAVOURABLE' ? ' — DO NOT PROCEED' : ''}`,
+        `Trend: ${trend.state || 'unavailable'} · ${trend.normalized_slope ?? '—'} ATR per candle`,
+        `Latest completed option close: ${evidence.last_completed_close ?? '—'}`,
+        `Entry instruction: ${evidence.entry_instruction === 'STOP_LIMIT' ? 'stop-limit' : 'limit'} · ${String(evidence.entry_state || 'unavailable').replaceAll('_', ' ')}`,
+        `Entry distance: ${evidence.entry_gap_pct ?? '—'}%`,
+        `First target distance: ${evidence.target_distance_atr ?? '—'} ATR`,
+        ...(data.reasons || []),
+        'No capital, lot-sizing, or reward-to-risk rule was applied. This is completed-candle evidence, not a target guarantee.'
+      ].join('\n')
+      const favourable = data.verdict === 'FAVOURABLE'
+      output.style.borderColor = favourable ? '#35b878' : '#df5b67'
+      output.style.background = favourable ? 'linear-gradient(135deg,#102d24,#0a1f19)' : 'linear-gradient(135deg,#351920,#241116)'
+      output.style.color = favourable ? '#b9f4d2' : '#ffc2c8'
+      output.hidden = false
+  }
+  let tradeParserOrderPreview = null
+  $('trade-parser-prepare-order').addEventListener('click', async () => {
+    const status = $('trade-parser-order-status'); const button = $('trade-parser-prepare-order')
+    button.disabled = true; status.textContent = 'Refreshing FYERS contract and quote, then submitting the exact order…'
+    try {
+      const result = await postJson('/api/trade-recommendation/submit-direct', { text: $('trade-parser-input').value.trim(), lots: $('trade-parser-lots').value, entry_mode: $('trade-parser-entry-mode').value, trigger_price: $('trade-parser-trigger-price').value, limit_price: $('trade-parser-limit-price').value })
+      tradeParserOrderPreview = null
+      status.textContent = result.message || 'FYERS received the order; reconcile its status in the broker.'
+    } catch (error) { tradeParserOrderPreview = null; status.textContent = `Order preparation blocked: ${error.message}` }
+    finally { button.disabled = false }
+  })
+  $('trade-parser-submit-order').addEventListener('click', async () => {
+    const status = $('trade-parser-order-status'); const button = $('trade-parser-submit-order')
+    if (!tradeParserOrderPreview) { status.textContent = 'Prepare a fresh order ticket first.'; return }
+    button.disabled = true; status.textContent = 'Submitting the reviewed FYERS limit order…'
+    try {
+      const result = await postJson('/api/trade-recommendation/submit-order', { preview_id: tradeParserOrderPreview.preview_id, confirmation: tradeParserOrderPreview.confirmation_phrase })
+      status.textContent = result.message || 'FYERS received the order; reconcile its status in the broker.'
+      tradeParserOrderPreview = null
+    } catch (error) {
+      const replacement = error.payload?.replacement_preview
+      if (replacement) { tradeParserOrderPreview = replacement; $('trade-parser-submit-order').disabled = !replacement.live_submission_enabled; status.textContent = 'FYERS state changed. Review the replacement ticket, then submit it directly.' }
+      else status.textContent = `Submission blocked: ${error.message}`
+    }
+  })
+  $('trade-parser-entry-mode').addEventListener('change', () => {
+    const stopLimit = $('trade-parser-entry-mode').value === 'STOP_LIMIT'
+    const action = ($('trade-parser-result').textContent.match(/Action: (BUY|SELL)/) || [])[1] || 'BUY'
+    $('trade-parser-entry-help').textContent = stopLimit
+      ? `FYERS stop-limit: trigger first, then submit a ${action} limit price. For BUY, limit must be above trigger; SELL, below.`
+      : `FYERS limit: ${action === 'SELL' ? 'sell at or above' : 'buy at or below'} the stated price.`
+  })
   const screenerStorageKey = 'sector-pulse:chartink-sources'
   const screenerRefreshIntervals = [0, 5, 15, 30, 60].map(minutes => minutes * 60 * 1000)
   const defaultScreenerRefreshMs = 15 * 60 * 1000
@@ -241,6 +472,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const screenerFilterState = new Map()
   const screenerRefreshInFlight = new Set()
   let screenerAnalysisOffset = 0
+  let screenerAnalysisSymbols = []
   let screenerAnalysisResults = []
   let screenerWatchlistResults = []
   let screenerAnalysisDiagnostics = { analyzed: 0, watchlist: 0, rejected: 0 }
@@ -249,6 +481,32 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   let screenerAnalysisRunning = false
   let screenerAnalysisCancelled = false
   let screenerSchedulerTimer = null
+  const screenerReadySymbols = () => new Set(screenerSources.flatMap(source => source.result?.status === 'READY' && Array.isArray(source.result.candidates) ? source.result.candidates : []).map(symbol => String(symbol).trim()).filter(Boolean))
+  const screenerCandidateSelections = new Set()
+  const pruneScreenerCandidateSelections = () => {
+    const ready = screenerReadySymbols()
+    screenerCandidateSelections.forEach(symbol => { if (!ready.has(symbol)) screenerCandidateSelections.delete(symbol) })
+  }
+  const syncScreenerCandidateSelectionUi = () => {
+    pruneScreenerCandidateSelections()
+    const count = screenerCandidateSelections.size
+    const button = $('analyze-screeners')
+    button.disabled = !count || screenerAnalysisRunning
+    button.textContent = screenerAnalysisRunning ? `Analyzing ${screenerAnalysisSymbols.length} selected symbol${screenerAnalysisSymbols.length === 1 ? '' : 's'}…` : `Analyze selected symbols (${count})`
+    document.querySelectorAll('.screener-candidate-select').forEach(control => { control.checked = screenerCandidateSelections.has(control.value) })
+    document.querySelectorAll('.screener-source-select-all').forEach(control => {
+      const sourceSymbols = (screenerSources.find(source => source.id === control.dataset.sourceId)?.result?.candidates || []).map(symbol => String(symbol).trim()).filter(Boolean)
+      control.disabled = sourceSymbols.length === 0 || sourceSymbols.every(symbol => screenerCandidateSelections.has(symbol))
+    })
+    document.querySelectorAll('.screener-source-clear-selection').forEach(control => {
+      const sourceSymbols = (screenerSources.find(source => source.id === control.dataset.sourceId)?.result?.candidates || []).map(symbol => String(symbol).trim()).filter(Boolean)
+      control.disabled = !sourceSymbols.some(symbol => screenerCandidateSelections.has(symbol))
+    })
+    document.querySelectorAll('.screener-source-selected-count').forEach(node => {
+      const sourceSymbols = (screenerSources.find(source => source.id === node.dataset.sourceId)?.result?.candidates || []).map(symbol => String(symbol).trim()).filter(Boolean)
+      node.textContent = `${sourceSymbols.filter(symbol => screenerCandidateSelections.has(symbol)).length} selected`
+    })
+  }
   const screenerBlockedReason = source => {
     const status = String(source.result?.status || '').toUpperCase()
     const error = String(source.result?.error || '')
@@ -353,7 +611,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         ? `${escapeHtml(result.market_data_provider || 'Market data')} · ${escapeHtml(result.market_data_available || 0)} of ${escapeHtml(result.count)} rows · as of ${escapeHtml(time(result.market_data_as_of))}`
         : escapeHtml(result.market_data_error || 'FYERS price enrichment unavailable for this refresh.')
       const results = state === 'READY'
-        ? `<details class="screener-results"><summary>View ${escapeHtml(result.count)} candidates</summary><small>${marketDataNote}</small><small>Sector, volume and market cap: Chartink source when returned. Market cap is ₹ crore as of ${escapeHtml(time(result.fetched_at))}; unavailable values are not estimated.</small><div class="screener-filters"><label class="field">Symbol search<input class="screener-symbol-filter" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.search)}" placeholder="Filter symbols"></label><label class="field">Sector<select class="screener-sector-filter" data-source-id="${escapeHtml(source.id)}"><option value="">All sectors</option>${sectorOptions.map(sector => `<option value="${escapeHtml(sector)}" ${filter.sector === sector ? 'selected' : ''}>${escapeHtml(sector)}</option>`).join('')}</select></label><label class="field">Minimum market cap (₹ cr)<input type="number" min="0" step="1" class="screener-market-cap-min" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.minMarketCap)}" placeholder="Any"></label><label class="field">Maximum market cap (₹ cr)<input type="number" min="0" step="1" class="screener-market-cap-max" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.maxMarketCap)}" placeholder="Any"></label><label class="field">Minimum volume<input type="number" min="0" step="1" class="screener-volume-filter" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.minVolume)}" placeholder="Any volume"></label><span class="screener-visible-count">${symbols.length} of ${sourceSymbols.length} visible</span></div><div class="screener-result-table"><table><thead><tr>${screenerSortHeader(source.id, 'sector', 'Sector', sort)}${screenerSortHeader(source.id, 'symbol', 'Symbol', sort)}${screenerSortHeader(source.id, 'market_cap', 'Market Cap (₹ cr)', sort)}${screenerSortHeader(source.id, 'price', 'Last price', sort)}${screenerSortHeader(source.id, 'change', 'Day change', sort)}${screenerSortHeader(source.id, 'change_pct', 'Day change %', sort)}${screenerSortHeader(source.id, 'volume', 'Volume', sort)}${screenerSortHeader(source.id, 'timestamp', 'Price as of', sort)}</tr></thead><tbody>${symbols.map(symbol => { const quote = marketData[symbol]; const sectorOrigin = sectorOrigins[symbol] === 'CHARTINK_SOURCE' ? 'Chartink source' : sectorOrigins[symbol] === 'NSE_INDEX_FALLBACK' ? 'NSE index fallback' : ''; const volume = sourceVolumes[symbol] ?? quote?.volume; const volumeOrigin = sourceVolumes[symbol] != null ? 'Chartink source' : quote?.volume != null ? 'FYERS quote' : ''; const marketCap = sourceMarketCaps[symbol]; return `<tr><td>${escapeHtml(sectorData[symbol] || 'Unavailable')}${sectorOrigin ? `<small>${escapeHtml(sectorOrigin)}</small>` : ''}</td><td><b>${escapeHtml(symbol)}</b></td><td>${marketCap == null ? 'Unavailable' : `₹${escapeHtml(Number(marketCap).toLocaleString('en-IN', { maximumFractionDigits: 2 }))} cr<small>Chartink · ${escapeHtml(time(result.fetched_at))}</small>`}</td><td>${quote ? money(quote.last_price) : 'Unavailable'}</td><td class="${quote ? stateClass(quote.day_change) : ''}">${quote ? money(quote.day_change) : 'Unavailable'}</td><td class="${quote ? stateClass(quote.day_change_pct) : ''}">${quote ? percent(quote.day_change_pct) : 'Unavailable'}</td><td>${volume == null ? 'Unavailable' : escapeHtml(Number(volume).toLocaleString('en-IN'))}${volumeOrigin ? `<small>${escapeHtml(volumeOrigin)}</small>` : ''}</td><td>${quote?.provider_timestamp ? escapeHtml(time(quote.provider_timestamp)) : 'Unavailable'}</td></tr>` }).join('')}</tbody></table></div><div class="screener-validation">Chartink determines membership and supplies sector, volume and market cap when returned; the official NSE index mapping is only a labelled sector fallback. FYERS supplies timestamped read-only price enrichment during source refresh. Filtering and sorting change display order only; no candidate is selected automatically. Completed-candle and fresh-market-data validation is required before analysis.</div></details>`
+        ? `<details class="screener-results"><summary>View ${escapeHtml(result.count)} candidates</summary><small>${marketDataNote}</small><small>Sector, volume and market cap: Chartink source when returned. Market cap is ₹ crore as of ${escapeHtml(time(result.fetched_at))}; unavailable values are not estimated.</small><div class="packet-actions" style="margin-top:10px"><button type="button" class="button secondary screener-source-select-all" data-source-id="${escapeHtml(source.id)}">Select all symbols</button><button type="button" class="button secondary screener-source-clear-selection" data-source-id="${escapeHtml(source.id)}">Clear source selection</button><span class="status screener-source-selected-count" data-source-id="${escapeHtml(source.id)}">${sourceSymbols.filter(symbol => screenerCandidateSelections.has(symbol)).length} selected</span></div><div class="screener-filters"><label class="field">Symbol search<input class="screener-symbol-filter" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.search)}" placeholder="Filter symbols"></label><label class="field">Sector<select class="screener-sector-filter" data-source-id="${escapeHtml(source.id)}"><option value="">All sectors</option>${sectorOptions.map(sector => `<option value="${escapeHtml(sector)}" ${filter.sector === sector ? 'selected' : ''}>${escapeHtml(sector)}</option>`).join('')}</select></label><label class="field">Minimum market cap (₹ cr)<input type="number" min="0" step="1" class="screener-market-cap-min" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.minMarketCap)}" placeholder="Any"></label><label class="field">Maximum market cap (₹ cr)<input type="number" min="0" step="1" class="screener-market-cap-max" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.maxMarketCap)}" placeholder="Any"></label><label class="field">Minimum volume<input type="number" min="0" step="1" class="screener-volume-filter" data-source-id="${escapeHtml(source.id)}" value="${escapeHtml(filter.minVolume)}" placeholder="Any volume"></label><span class="screener-visible-count">${symbols.length} of ${sourceSymbols.length} visible</span></div><div class="screener-result-table"><table><thead><tr>${screenerSortHeader(source.id, 'sector', 'Sector', sort)}${screenerSortHeader(source.id, 'symbol', 'Symbol', sort)}${screenerSortHeader(source.id, 'market_cap', 'Market Cap (₹ cr)', sort)}${screenerSortHeader(source.id, 'price', 'Last price', sort)}${screenerSortHeader(source.id, 'change', 'Day change', sort)}${screenerSortHeader(source.id, 'change_pct', 'Day change %', sort)}${screenerSortHeader(source.id, 'volume', 'Volume', sort)}${screenerSortHeader(source.id, 'timestamp', 'Price as of', sort)}<th>Select</th></tr></thead><tbody>${symbols.map(symbol => { const quote = marketData[symbol]; const sectorOrigin = sectorOrigins[symbol] === 'CHARTINK_SOURCE' ? 'Chartink source' : sectorOrigins[symbol] === 'NSE_INDEX_FALLBACK' ? 'NSE index fallback' : ''; const volume = sourceVolumes[symbol] ?? quote?.volume; const volumeOrigin = sourceVolumes[symbol] != null ? 'Chartink source' : quote?.volume != null ? 'FYERS quote' : ''; const marketCap = sourceMarketCaps[symbol]; return `<tr><td>${escapeHtml(sectorData[symbol] || 'Unavailable')}${sectorOrigin ? `<small>${escapeHtml(sectorOrigin)}</small>` : ''}</td><td><b>${escapeHtml(symbol)}</b></td><td>${marketCap == null ? 'Unavailable' : `₹${escapeHtml(Number(marketCap).toLocaleString('en-IN', { maximumFractionDigits: 2 }))} cr<small>Chartink · ${escapeHtml(time(result.fetched_at))}</small>`}</td><td>${quote ? money(quote.last_price) : 'Unavailable'}</td><td class="${quote ? stateClass(quote.day_change) : ''}">${quote ? money(quote.day_change) : 'Unavailable'}</td><td class="${quote ? stateClass(quote.day_change_pct) : ''}">${quote ? percent(quote.day_change_pct) : 'Unavailable'}</td><td>${volume == null ? 'Unavailable' : escapeHtml(Number(volume).toLocaleString('en-IN'))}${volumeOrigin ? `<small>${escapeHtml(volumeOrigin)}</small>` : ''}</td><td>${quote?.provider_timestamp ? escapeHtml(time(quote.provider_timestamp)) : 'Unavailable'}</td><td><input type="checkbox" class="screener-candidate-select" value="${escapeHtml(symbol)}" aria-label="Select ${escapeHtml(symbol)} for analysis" ${screenerCandidateSelections.has(symbol) ? 'checked' : ''}></td></tr>` }).join('')}</tbody></table></div><div class="screener-validation">Select one or more symbols, or use Select all symbols, then analyze only that selection. Filtering and sorting change display order only; they do not change an existing selection. Completed-candle and fresh-market-data validation is required before analysis.</div></details>`
         : state === 'EMPTY'
           ? '<div class="screener-results muted">The source executed successfully and returned exactly 0 candidates.</div>'
           : state !== 'NOT_REFRESHED' && state !== 'LOADING'
@@ -362,6 +620,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const blocked = screenerBlockedReason(source)
       return `<article class="candidate-card screener-source"><div class="screener-source-head"><span><b>${escapeHtml(source.label || 'Chartink screener')}</b><small><a class="provenance-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a></small><small>${escapeHtml(state)} · ${escapeHtml(detail)}${result.fetched_at ? ` · refreshed ${escapeHtml(time(result.fetched_at))}` : ''}</small><small class="screener-schedule ${blocked ? 'paused' : ''}" data-schedule-source-id="${escapeHtml(source.id)}">${escapeHtml(scheduleText(source))}</small></span><div class="screener-source-actions"><label class="screener-refresh-setting">Auto-refresh<select class="screener-refresh-interval" data-source-id="${escapeHtml(source.id)}" aria-label="Auto-refresh interval for ${escapeHtml(source.label || 'Chartink screener')}">${screenerRefreshIntervals.map(interval => `<option value="${interval}" ${Number(source.refresh_interval_ms) === interval ? 'selected' : ''}>${refreshIntervalLabel(interval)}</option>`).join('')}</select></label>${source.refresh_interval_ms ? `<button type="button" class="button secondary stop-screener-refresh" data-source-id="${escapeHtml(source.id)}">Stop</button>` : ''}<button type="button" class="button secondary refresh-screener" data-source-id="${escapeHtml(source.id)}" ${screenerRefreshInFlight.has(source.id) ? 'disabled' : ''}>Refresh</button><button type="button" class="button secondary remove-screener" data-source-id="${escapeHtml(source.id)}">Remove</button></div></div>${results}</article>`
     }).join('') : '<div class="empty">No Chartink sources configured.</div>'
+    syncScreenerCandidateSelectionUi()
     screenerSources.forEach(source => {
       const intervalSelect = document.querySelector(`.screener-refresh-interval[data-source-id="${CSS.escape(source.id)}"]`)
       if (intervalSelect) {
@@ -466,14 +725,16 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     screenerSchedulerTimer = setTimeout(runScreenerScheduler, 1000)
   }
   const analyzeScreenerCandidates = async reset => {
-    const source = screenerSources.find(item => item.result?.status === 'READY')
-    if (!source) { $('screener-status').textContent = 'Refresh a Chartink source before analysis.'; return }
+    const readySources = screenerSources.filter(item => item.result?.status === 'READY')
+    if (!readySources.length) { $('screener-status').textContent = 'Refresh a Chartink source before analysis.'; return }
     if (reset) {
       if (screenerAnalysisRunning) return
+      pruneScreenerCandidateSelections()
+      screenerAnalysisSymbols = [...screenerCandidateSelections]
+      if (!screenerAnalysisSymbols.length) { $('screener-status').textContent = 'Select at least one screener symbol before analysis.'; syncScreenerCandidateSelectionUi(); return }
       screenerAnalysisRunning = true
       screenerAnalysisCancelled = false
-      $('analyze-screeners').disabled = true
-      $('analyze-screeners').textContent = 'Analyzing all candidates…'
+      syncScreenerCandidateSelectionUi()
       screenerAnalysisOffset = 0
       screenerSelectedPlans.clear()
       screenerAnalysisResults = []
@@ -482,11 +743,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       syncScreenerSelectionUi('A fresh read-only analysis is starting; any earlier preview was cleared.')
     }
     $('screener-analysis').hidden = false
-    $('screener-analysis-status').textContent = `Analyzing completed 15m, 1h, Daily and Weekly candles · ${screenerAnalysisOffset}/${source.result.candidates.length} complete · next ${screenerAnalysisOffset + 1}–${Math.min(screenerAnalysisOffset + 12, source.result.candidates.length)}…`
+    $('screener-analysis-status').textContent = `Analyzing only your ${screenerAnalysisSymbols.length} selected symbol${screenerAnalysisSymbols.length === 1 ? '' : 's'} with completed 15m, 1h, Daily and Weekly candles · ${screenerAnalysisOffset}/${screenerAnalysisSymbols.length} complete · next ${screenerAnalysisOffset + 1}–${Math.min(screenerAnalysisOffset + 12, screenerAnalysisSymbols.length)}…`
     $('screener-analysis-next').hidden = false
     try {
-      const prices = Object.fromEntries(Object.entries(source.result.market_data || {}).map(([symbol, quote]) => [symbol, quote.last_price]))
-      const data = await postJson('/api/chartink/analyze', { symbols: source.result.candidates, prices, offset: screenerAnalysisOffset, limit: 12 })
+      const prices = Object.fromEntries(readySources.flatMap(source => Object.entries(source.result.market_data || {})).map(([symbol, quote]) => [symbol, quote.last_price]))
+      const data = await postJson('/api/chartink/analyze', { symbols: screenerAnalysisSymbols, prices, offset: screenerAnalysisOffset, limit: 12 })
       const qualified = data.results.filter(item => item.decision === 'PASS' && item.conviction?.rating === 'High')
       const watchlist = data.results.filter(item => item.decision === 'WATCHLIST')
       screenerAnalysisResults = reset ? qualified : screenerAnalysisResults.concat(qualified)
@@ -514,8 +775,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         await analyzeScreenerCandidates(false)
       } else {
         screenerAnalysisRunning = false
-        $('analyze-screeners').disabled = false
-        $('analyze-screeners').textContent = 'Analyze screener candidates'
+        syncScreenerCandidateSelectionUi()
         $('screener-analysis-next').hidden = true
         $('screener-analysis-next').disabled = false
         $('screener-analysis-status').textContent = screenerAnalysisCancelled
@@ -525,11 +785,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       }
     } catch (error) {
       screenerAnalysisRunning = false
-      $('analyze-screeners').disabled = false
-      $('analyze-screeners').textContent = 'Analyze screener candidates'
+      syncScreenerCandidateSelectionUi()
       $('screener-analysis-next').hidden = true
       $('screener-analysis-next').disabled = false
-      $('screener-analysis-status').className = 'handoff-status error'; $('screener-analysis-status').textContent = `Analysis stopped after ${screenerAnalysisOffset}/${source.result.candidates.length}: ${error.message}`
+      $('screener-analysis-status').className = 'handoff-status error'; $('screener-analysis-status').textContent = `Analysis stopped after ${screenerAnalysisOffset}/${screenerAnalysisSymbols.length}: ${error.message}`
     }
   }
   const analyzeScreenerOptionPlans = async () => {
@@ -565,7 +824,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('screener-clear-selection').disabled = count === 0
     $('screener-select-all').disabled = screenerAnalysisResults.length === 0 || count === screenerAnalysisResults.length
     $('screener-order').hidden = count === 0
-    $('screener-batch-selection').textContent = `${count} plan(s) selected: ${[...screenerSelectedPlans.keys()].join(', ') || 'none'}. Quantities will be calculated from fresh FYERS funds, quotes, stops and risk limits.`
+    const allocation = [...screenerSelectedPlans.values()].map(plan => `${plan.symbol} × ${plan.suggested_quantity || 1}`).join(', ')
+    $('screener-batch-selection').textContent = `${count} plan(s) selected: ${allocation || 'none'}. Quantities are allocated from fresh FYERS funds and conviction, then remain editable in the reviewed ticket.`
     document.querySelectorAll('#screener-analysis-results .screener-plan-select').forEach(control => { control.checked = screenerSelectedPlans.has(control.value) })
     invalidateScreenerOrderPreview(message || 'Selection changed. Prepare a new consolidated FYERS preview; no broker action has occurred.')
     if (scroll && count) $('screener-order').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
@@ -573,6 +833,36 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const selectScreenerOrderPlan = (plan, selected, control) => {
     if (selected) screenerSelectedPlans.set(plan.symbol, plan); else screenerSelectedPlans.delete(plan.symbol)
     syncScreenerSelectionUi(null, true)
+  }
+  const allocateScreenerPlansByFunds = async () => {
+    const account = await fetchJson('/api/account')
+    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'FYERS available funds are unavailable for allocation.')
+    let remaining = Number(account.available_funds)
+    const ranked = [...screenerAnalysisResults].filter(plan => plan.decision === 'PASS' && Number(plan.entry) > 0).sort((left, right) => {
+      const a = Number(left.conviction?.score || 0); const b = Number(right.conviction?.score || 0)
+      return b - a || Number(left.entry) - Number(right.entry) || String(left.symbol).localeCompare(String(right.symbol))
+    })
+    for (const plan of ranked) {
+      const entry = Number(plan.entry)
+      const score = Math.max(1, Number(plan.conviction?.score || 1))
+      plan.suggested_quantity = remaining >= entry ? 1 : 0
+      plan.allocation_notional = plan.suggested_quantity * entry
+      plan.allocation_weight = score
+      if (plan.suggested_quantity) remaining -= entry
+    }
+    const funded = ranked.filter(plan => plan.suggested_quantity > 0)
+    const totalWeight = funded.reduce((sum, plan) => sum + plan.allocation_weight, 0)
+    for (const plan of funded) {
+      const extra = Math.floor((remaining * plan.allocation_weight / totalWeight) / Number(plan.entry))
+      if (extra > 0) {
+        plan.suggested_quantity += extra
+        plan.allocation_notional += extra * Number(plan.entry)
+        remaining -= extra * Number(plan.entry)
+      }
+    }
+    screenerSelectedPlans.clear()
+    funded.forEach(plan => screenerSelectedPlans.set(plan.symbol, plan))
+    syncScreenerSelectionUi(`Allocated from fresh FYERS available funds of ${money(account.available_funds)} by conviction. Higher-conviction plans receive priority; suggested quantities remain editable.`)
   }
   const prepareScreenerOrder = async () => {
     const button = $('prepare-screener-order')
@@ -583,13 +873,16 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('screener-order-status').className = 'handoff-status'
       $('screener-order-status').textContent = 'Validating FYERS auth, security master, live two-sided quote, market state, product, side, quantity, funds, positions, orders and risk ledger.'
       const external = $('screener-order-external-risk').value
-      const items = [...screenerSelectedPlans.values()].map(plan => ({
-        broker: 'fyers', underlying: `NSE:${plan.symbol}-EQ`, proposal: { kind: 'EQUITY', label: `Screener ${plan.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: plan.direction, quantity: 1, entry: plan.entry, target: plan.target },
-        invalidation: Number(plan.stop), quantity: 1, cash_product: $('screener-order-product').value,
+      const items = [...screenerSelectedPlans.values()].map(plan => {
+        const quantity = Math.max(1, Math.floor(Number(plan.suggested_quantity || 1)))
+        return {
+        broker: 'fyers', underlying: `NSE:${plan.symbol}-EQ`, proposal: { kind: 'EQUITY', label: `Screener ${plan.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: plan.direction, quantity, entry: plan.entry, target: plan.target },
+        invalidation: Number(plan.stop), quantity, cash_product: $('screener-order-product').value,
         daily_loss_limit: policy.dailyLossLimit, idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
-        max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk, order_type: policy.orderType,
+        max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
+        enforce_risk_controls: policy.enforceRiskControls, enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0, order_type: policy.orderType,
         external_open_risk: external === '' ? null : Number(external), require_market_open: true,
-      }))
+      }})
       const preview = await postJson('/api/trade-ticket/prepare-batch', { items })
       screenerOrderPreview = preview
       $('screener-order-preview').textContent = JSON.stringify(preview, null, 2)
@@ -1086,6 +1379,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       riskReserve: Number($('risk-reserve').value),
       maxPositions: Number($('max-positions').value),
       minimumRewardToRisk: Number($('minimum-rr').value),
+      enforceRiskControls: $('enforce-risk-controls').checked,
       stopBasis: $('stop-basis').value,
       orderType: $('order-type').value,
     }
@@ -1098,18 +1392,19 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       planningCapital: Number($('planning-capital').value), dailyLossLimit: Number($('daily-loss-limit').value),
       ideaRiskLimit: Number($('idea-risk-limit').value), riskReserve: Number($('risk-reserve').value),
       maxPositions: Number($('max-positions').value), minimumRewardToRisk: Number($('minimum-rr').value),
+      enforceRiskControls: $('enforce-risk-controls').checked,
       stopBasis: $('stop-basis').value, orderType: $('order-type').value,
     }
     const preview = riskPolicyPreview(values)
     $('policy-impact').innerHTML = [
-      ['New-idea risk now', money(preview.availableNewIdeaRisk)],
-      ['Capital cap / position', money(preview.perPositionCapitalCap)],
-      ['Concurrent slots', Number.isFinite(preview.positionSlots) ? String(preview.positionSlots) : '—'],
-      ['Minimum R:R', Number.isFinite(preview.minimumRewardToRisk) ? `1:${preview.minimumRewardToRisk}` : '—'],
+      ['Capital sizing', values.enforceRiskControls ? money(preview.availableNewIdeaRisk) : 'User-controlled'],
+      ['Capital cap / position', values.enforceRiskControls ? money(preview.perPositionCapitalCap) : 'Not applied'],
+      ['Concurrent slots', values.enforceRiskControls && Number.isFinite(preview.positionSlots) ? String(preview.positionSlots) : 'Not applied'],
+      ['Minimum R:R', values.minimumRewardToRisk > 0 ? `1:${values.minimumRewardToRisk}` : 'Not applied'],
     ].map(([label, value]) => `<div><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></div>`).join('')
     $('policy-validation').className = `handoff-status${preview.valid ? '' : ' error'}`
     $('policy-validation').textContent = preview.valid
-      ? `${preview.orderType === 'LIMIT' ? 'Limit orders are eligible for final preflight.' : 'Market preference is preview-only; live submission will be blocked.'} Stops use ${preview.stopBasis === 'price' ? 'exact prices' : 'percent distance from entry or spot'}.`
+      ? `${preview.orderType === 'LIMIT' ? 'Limit orders are eligible for final preflight.' : 'Market preference is preview-only; live submission will be blocked.'} Capital controls are ${values.enforceRiskControls ? 'enabled' : 'not applied'}. Stops use ${preview.stopBasis === 'price' ? 'exact prices' : 'percent distance from entry or spot'}.`
       : preview.errors.join(' ')
   }
   const renderCandidates = () => {
@@ -1123,7 +1418,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const stopCopy = derivedReady
         ? `Auto · ${escapeHtml(derived.basis || 'completed-candle structure')}`
         : `Blocked · ${escapeHtml(derived.reason || 'no completed-candle structural stop')}`
-      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${derivedReady ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
+      const suggestedQuantity = Number(candidate.allocation?.suggested_quantity)
+      const allocationCopy = Number.isInteger(suggestedQuantity) && suggestedQuantity > 0
+        ? `Funds-weighted suggestion: ${suggestedQuantity} ${candidate.kind === 'stock' ? 'shares' : 'lots'} · ₹${number(candidate.allocation.estimated_notional)}`
+        : candidate.allocation?.reason || 'Quantity is set when you rank selected candidates by FYERS funds.'
+      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${derivedReady ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small><small>${escapeHtml(allocationCopy)}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
     }).join('') : '<div class="empty">No sectors or scanned stocks currently meet exact full alignment.</div>'
     document.querySelectorAll('.candidate-select').forEach(input => {
       input.addEventListener('change', () => {
@@ -1140,9 +1439,70 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     planning_capital: policy.planningCapital, daily_loss_limit: policy.dailyLossLimit,
     idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
     max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
+    enforce_risk_controls: policy.enforceRiskControls,
+    enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0,
     stop_basis: policy.stopBasis, order_type: policy.orderType,
   })
   const selectedInstrumentRoute = () => document.querySelector('input[name="instrument-route"]:checked')?.value || ''
+  const rankCandidatesForSelection = async () => {
+    if (!candidateCollection || !analysisRun) throw new Error('Collect fresh candidates before ranking them.')
+    const account = await fetchJson('/api/account')
+    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'FYERS available funds are unavailable for ranking.')
+    const availableFunds = Number(account.available_funds)
+    const byKey = new Map((analysisRun.cards || []).map(card => [card.candidate_key, card]))
+    const route = selectedInstrumentRoute()
+    const ranked = [...candidateCollection.candidates].sort((left, right) => {
+      const meta = candidate => {
+        const card = byKey.get(candidate.key)
+        const conviction = Number(card?.analysis?.conviction?.score || 0)
+        const proposal = card?.analysis?.proposal
+        const required = route === 'stock_options'
+          ? Number(proposal?.minimum_cash_required || proposal?.max_loss_per_lot || Infinity)
+          : Number(candidate.price || Infinity)
+        return { conviction, required, affordable: Number.isFinite(required) && required <= availableFunds }
+      }
+      const a = meta(left); const b = meta(right)
+      return Number(b.affordable) - Number(a.affordable) || b.conviction - a.conviction || a.required - b.required || String(left.name).localeCompare(String(right.name))
+    })
+    if (route === 'cash_equity') {
+      let remaining = availableFunds
+      const fundable = ranked.filter(candidate => Number(candidate.price) > 0 && candidate.derived_invalidation?.status === 'READY')
+      // Give each ranked candidate one share first, then distribute the rest
+      // by conviction. This uses actual available funds, not a risk-cap proxy.
+      for (const candidate of fundable) {
+        const price = Number(candidate.price)
+        candidate.allocation = remaining >= price
+          ? { suggested_quantity: 1, estimated_notional: price, conviction_weight: Number(byKey.get(candidate.key)?.analysis?.conviction?.score || 1) }
+          : { suggested_quantity: 0, estimated_notional: 0, reason: 'No available FYERS funds remain after higher-conviction allocations.' }
+        if (candidate.allocation.suggested_quantity) remaining -= price
+      }
+      const allocated = fundable.filter(candidate => candidate.allocation?.suggested_quantity > 0)
+      const totalWeight = allocated.reduce((sum, candidate) => sum + Math.max(1, Number(candidate.allocation.conviction_weight || 1)), 0)
+      for (const candidate of allocated) {
+        const price = Number(candidate.price)
+        const weight = Math.max(1, Number(candidate.allocation.conviction_weight || 1))
+        const additional = Math.floor((remaining * weight / totalWeight) / price)
+        if (additional > 0) {
+          candidate.allocation.suggested_quantity += additional
+          candidate.allocation.estimated_notional += additional * price
+          remaining -= additional * price
+        }
+      }
+    }
+    candidateCollection.candidates = ranked
+    renderCandidates()
+    document.querySelectorAll('.candidate-select:not(:disabled)').forEach(input => {
+      const candidate = ranked.find(item => item.key === input.value)
+      input.checked = route !== 'cash_equity' || Number(candidate?.allocation?.suggested_quantity) > 0
+    })
+    document.querySelector('.candidate-select:not(:disabled)')?.dispatchEvent(new Event('change'))
+    const top = ranked.filter(candidate => candidate.derived_invalidation?.status === 'READY').slice(0, 3).map((candidate, index) => {
+      const card = byKey.get(candidate.key); const score = card?.analysis?.conviction?.score ?? 0
+      return `#${index + 1} ${candidate.name} (conviction ${score})`
+    })
+    const allocatedTotal = route === 'cash_equity' ? ranked.reduce((sum, candidate) => sum + Number(candidate.allocation?.estimated_notional || 0), 0) : 0
+    $('candidate-status').textContent = `Ranked using fresh FYERS available funds of ${money(availableFunds)} and conviction. Take first: ${top.join(' · ')}. ${route === 'cash_equity' ? `Suggested allocation totals ${money(allocatedTotal)} and remains editable.` : 'Each validated spread starts at one editable lot.'} All selections still require their own fresh ticket preview.`
+  }
   const selectedCashProduct = () => document.querySelector('input[name="cash-product"]:checked')?.value || 'INTRADAY'
   const selectedCashExitPlan = () => document.querySelector('input[name="cash-exit-plan"]:checked')?.value || 'FIXED_TARGET'
   const instrumentRouteLabel = route => route === 'stock_options' ? 'Stock options' : 'Cash equity'
@@ -1320,6 +1680,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         protected_daily_buffer: policy.riskReserve,
         max_simultaneous_positions: policy.maxPositions,
         minimum_reward_to_risk: policy.minimumRewardToRisk,
+        enforce_risk_controls: policy.enforceRiskControls,
+        enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0,
         order_type: policy.orderType,
       }
     }
@@ -1344,7 +1706,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
           proposal: { kind: 'EQUITY', label: `Analysis Handoff ${candidate.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: candidate.direction, quantity: 1, entry: plan.entry, target: plan.target },
           invalidation, quantity: 1, cash_product: selectedCashProduct(),
           daily_loss_limit: policy.dailyLossLimit, idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
-          max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk, order_type: policy.orderType,
+          max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
+          enforce_risk_controls: policy.enforceRiskControls, enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0, order_type: policy.orderType,
           external_open_risk: external === '' ? null : Number(external), require_market_open: true,
         }
       })
@@ -1399,6 +1762,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
           risk_reserve: policy.riskReserve,
           max_simultaneous_positions: policy.maxPositions,
           minimum_reward_to_risk: policy.minimumRewardToRisk,
+          enforce_risk_controls: policy.enforceRiskControls,
+          enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0,
           stop_basis: policy.stopBasis,
           order_type: policy.orderType,
         },
@@ -1471,6 +1836,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         risk_reserve: policy.riskReserve,
         max_simultaneous_positions: policy.maxPositions,
         minimum_reward_to_risk: policy.minimumRewardToRisk,
+        enforce_risk_controls: policy.enforceRiskControls,
+        enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0,
         order_type: policy.orderType,
         external_open_risk: externalValue === '' ? null : Number(externalValue),
         cash_product: selectedInstrumentRoute() === 'cash_equity' ? selectedCashProduct() : undefined,
@@ -1582,6 +1949,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('#ema-band .panel').insertAdjacentHTML('afterend', '<section class="panel" style="margin-top:15px"><span class="label">EXECUTION LOG</span><h2>Paper and live entries/exits</h2><small class="muted">Newest first. Paper rows are local forward-test records; Live rows are real FYERS order submissions.</small><pre id="ema-band-execution-log" class="packet-preview runner-log" style="margin-top:10px">Waiting for runner activity…</pre></section>')
   $('ema-band-target-pct').closest('label').insertAdjacentHTML('afterend', '<label class="field">Profit-protection risk unit (%)<input id="ema-band-profit-protection-pct" type="number" min="0.1" max="99.9" step="0.1" value="20"><small>Initial 1R loss cap; breakeven at +1R, lock +0.5R at +1.5R, then a 40% giveback trail.</small></label>')
   $('ema-band-runner-toggle').parentElement.insertAdjacentHTML('beforebegin', '<section id="ema-band-broker-chart" class="chart-card premium-chart" style="grid-column:1/-1; margin:14px 0"><div class="chart-empty">Broker chart will load from the selected FYERS contract.</div></section><div class="ticket-warning" style="grid-column:1/-1"><b>Live mode places real FYERS orders with real money.</b> The runner submits a BUY entry for the chosen lots on a fresh completed-candle signal, then automatically submits a SELL exit once the EMA Band indicator signals an exit (a completed candle closing back inside the band), or once your optional stop-loss/target percentage is hit, whichever comes first. A SELL is only ever sent after FYERS confirms the matching BUY position is open. There is no per-order manual confirmation.</div>')
+  $('ema-band-pnl-chart').insertAdjacentHTML('afterend', '<section id="ema-band-tracked-positions" class="panel" style="margin-top:14px"><div class="step-title"><div><span class="label">POSITION REGISTRY · READ ONLY</span><h3>Tracked paper and FYERS positions</h3><small class="muted">Each card has its own symbol, entry reference and current P&amp;L. Only an explicitly configured EMA worker may manage its own exit.</small></div></div><div id="ema-band-position-cards" class="analysis-board"><div class="empty">Loading retained paper and broker positions…</div></div></section>')
   document.querySelector('#ema-band .head .status').textContent = 'Paper default · optional live auto-trading'
   const showEmaMasterStatus = status => {
     const ready = status?.fresh === true
@@ -1634,7 +2002,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const mode = $('ema-band-mode').value
     $('ema-band-contract').textContent = 'Resolving the nearest valid ATM contract from FYERS…'
     try {
-      const data = await fetchJson(`/api/ema-band/atm-option?underlying=${encodeURIComponent(underlying.symbol)}&timeframe=${encodeURIComponent($('ema-band-timeframe').value)}&ema_length=${encodeURIComponent($('ema-band-length').value)}&mode=${encodeURIComponent(mode)}`)
+      const data = await fetchJson(`/api/ema-band/atm-option?underlying=${encodeURIComponent(underlying.symbol)}&timeframe=${encodeURIComponent($('ema-band-timeframe').value)}&ema_length=${encodeURIComponent($('ema-band-length').value)}&slope_lookback=${encodeURIComponent($('ema-band-slope-lookback').value)}&minimum_slope_atr=${encodeURIComponent($('ema-band-minimum-slope-atr').value)}&mode=${encodeURIComponent(mode)}`)
       const contract = data.contract
       const expiry = new Date(contract.expiry_epoch * 1000).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })
       const choice = data.direction === 'BULLISH' ? 'Bullish EMA Band signal → Call (CE)' : 'Bearish EMA Band signal → Put (PE)'
@@ -1674,6 +2042,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('ema-band-mode').addEventListener('change', async () => { await loadEmaModeCapability(); resolveEmaAtmContract() })
   $('ema-band-timeframe').addEventListener('change', resolveEmaAtmContract)
   $('ema-band-length').addEventListener('change', resolveEmaAtmContract)
+  ;['ema-band-slope-lookback', 'ema-band-minimum-slope-atr'].forEach(id => $(id).addEventListener('change', resolveEmaAtmContract))
   const renderEmaBandChart = chart => {
     const el = $('ema-band-pnl-chart')
     if (!el) return
@@ -1700,57 +2069,294 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const statusLabel = closed ? `Closed · ${chart.exit_reason || ''}` : 'Open'
     el.innerHTML = `<div class="premium-chart-stats"><div><b>${number(chart.ltp ?? points[currentIndex])}</b><small>${closed ? 'Exit price' : 'Live price'}</small></div><div><b class="${pnlClass}">${Number(pnlRupees) >= 0 ? '+' : ''}${money(pnlRupees)}</b><small>${pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${number(pnlPct)}%` : statusLabel}</small></div><div><b>${statusLabel}</b><small>${chart.symbol || ''}</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Live EMA Band option P&amp;L chart"><line x1="${left}" x2="${left}" y1="${top}" y2="${height - bottom}" stroke="#294766"/><line x1="${left}" x2="${width - right}" y1="${height - bottom}" y2="${height - bottom}" stroke="#294766"/>${reference(chart.entry_price, 'Entry', '#91a7c4')}${reference(chart.stop_price, 'Stop', '#e2685a')}${reference(chart.target_price, 'Target', '#60dca9')}<path d="${pathFor(points)}" fill="none" stroke="#72c7ff" stroke-width="3" stroke-linejoin="round"/><circle cx="${x(currentIndex)}" cy="${y(points[currentIndex])}" r="5" fill="#edf4ff" stroke="#2678be" stroke-width="3"/><text x="4" y="${top + 8}" fill="#91a7c4" font-size="10">${maxY.toFixed(2)}</text><text x="4" y="${height - bottom}" fill="#91a7c4" font-size="10">${minY.toFixed(2)}</text><text x="${width - right}" y="${height - 7}" text-anchor="end" fill="#edf4ff" font-size="10">${closed ? 'CLOSED' : 'LIVE'}</text></svg>`
   }
+  const renderEmaTrackedPositions = snapshot => {
+    const el = $('ema-band-position-cards')
+    if (!el) return
+    const positions = snapshot?.positions || []
+    if (!positions.length) { el.innerHTML = '<div class="empty">No retained paper or open FYERS positions.</div>'; return }
+    el.innerHTML = positions.map(position => {
+      const pnl = Number(position.pnl)
+      const hasPnl = Number.isFinite(pnl)
+      const direction = Number(position.quantity) > 0 ? 'Long' : 'Short'
+      const management = position.managed_by_ema ? 'EMA-managed independently' : 'Displayed only · no EMA exit authority'
+      return `<article class="opportunity-card"><div class="opportunity-head"><div><b>${escapeHtml(position.description || position.symbol)}</b><small>${escapeHtml(position.source)} · ${direction} ${escapeHtml(Math.abs(Number(position.quantity) || 0))}</small></div><span class="conviction">${escapeHtml(management)}</span></div><div class="decision-metrics"><div><small>Entry</small><b>${number(position.entry_price)}</b></div><div><small>Latest price</small><b>${number(position.ltp)}</b></div><div><small>Current P&amp;L</small><b class="${hasPnl ? stateClass(pnl) : 'neutral'}">${hasPnl ? money(pnl) : 'Unavailable'}</b></div><div><small>Opened</small><b>${position.opened_at ? escapeHtml(time(position.opened_at)) : 'FYERS position'}</b></div></div><small class="muted">A detailed price chart is retained for a position while its own EMA worker is running. Historical paper entries remain visible after a dashboard restart.</small></article>`
+    }).join('')
+  }
+  // The live quote refreshes every second.  Do not replace the SVG while the
+  // user is inspecting it: replacing the DOM would make the crosshair and
+  // tooltip disappear even though the pointer never left the chart.
+  let emaBrokerHoverActive = false
+  let pendingEmaBrokerSnapshot = null
+  let emaBrokerHistoryStart = null
   const renderEmaBrokerChart = snapshot => {
+    if (emaBrokerHoverActive) {
+      pendingEmaBrokerSnapshot = snapshot
+      return
+    }
     const el = $('ema-band-broker-chart')
-    const candles = snapshot?.candles || []
-    if (!el || !candles.length) { if (el) el.innerHTML = '<div class="chart-empty">Broker chart unavailable until FYERS returns completed candles.</div>'; return }
-    const width = 920, height = 360, left = 54, right = 18, top = 34, bottom = 74
+    const allCandles = snapshot?.candles || []
+    if (!el || !allCandles.length) { if (el) el.innerHTML = '<div class="chart-empty">Broker chart unavailable until FYERS returns completed candles.</div>'; return }
+    // Keep a readable fixed-width viewport and expose the rest through the
+    // history scrollbar.  A full 160–500 bar series in the same SVG is too
+    // compressed to inspect like a broker chart.
+    const visibleCandleCount = Math.min(80, allCandles.length)
+    const latestStart = Math.max(0, allCandles.length - visibleCandleCount)
+    const historyStart = Math.max(0, Math.min(emaBrokerHistoryStart == null ? latestStart : emaBrokerHistoryStart, latestStart))
+    const candles = allCandles.slice(historyStart, historyStart + visibleCandleCount)
+    // Keep volume in its own time-based panel.  FYERS' OI Profile is instead
+    // price-anchored, so reserve the right edge for horizontal OI build-up /
+    // unwind bars by price zone.
+    // Give the OI profile enough dedicated room to be read at a glance.  The
+    // price plot remains wider than the old chart even after reserving this
+    // larger right-hand panel.
+    const width = 1160, height = 400, left = 54, right = 18, top = 56, bottom = 74, oiProfileWidth = 276
     const levels = snapshot?.levels || []
     const values = candles.flatMap(c => [Number(c.high), Number(c.low), Number(c.ema_high), Number(c.ema_low)]).concat(levels.map(level => Number(level.price))).filter(Number.isFinite)
     const low = Math.min(...values), high = Math.max(...values), pad = Math.max((high - low) * .08, 1)
-    const minY = low - pad, maxY = high + pad, plotW = width - left - right, plotH = height - top - bottom
+    const minY = low - pad, maxY = high + pad, priceRight = width - right - oiProfileWidth, plotW = priceRight - left, plotH = height - top - bottom
     const x = i => left + (i + .5) * (plotW / candles.length)
     const y = price => top + (maxY - price) * plotH / (maxY - minY)
     const candleW = Math.max(2, Math.min(10, plotW / candles.length * .62))
     const path = field => candles.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(Number(c[field])).toFixed(1)}`).join(' ')
-    const grid = [0, .25, .5, .75, 1].map(t => { const price = maxY - t * (maxY - minY), yy = y(price); return `<line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" stroke="#21334a" stroke-dasharray="3 5"/><text x="4" y="${yy+4}" fill="#91a7c4" font-size="10">${price.toFixed(1)}</text>` }).join('')
-    const levelLines = levels.map(level => { const support = level.label === 'SUPPORT'; const color = support ? '#48c78e' : '#ef6b73'; const yy = y(Number(level.price)); return `<line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" stroke="${color}" stroke-width="1.5" stroke-dasharray="7 4"/><rect x="2" y="${yy-12}" width="${left-4}" height="14" rx="3" fill="#102035"/><text x="${left-4}" y="${yy-2}" text-anchor="end" fill="${color}" font-size="9" font-weight="700">${support ? 'S' : 'R'} ${number(level.price)}</text>` }).join('')
+    const grid = [0, .25, .5, .75, 1].map(t => { const price = maxY - t * (maxY - minY), yy = y(price); return `<line x1="${left}" x2="${priceRight}" y1="${yy}" y2="${yy}" stroke="#21334a" stroke-dasharray="3 5"/><text x="4" y="${yy+4}" fill="#91a7c4" font-size="10">${price.toFixed(1)}</text>` }).join('')
+    const levelLines = levels.map(level => { const support = level.label === 'SUPPORT'; const color = support ? '#48c78e' : '#ef6b73'; const yy = y(Number(level.price)); return `<line x1="${left}" x2="${priceRight}" y1="${yy}" y2="${yy}" stroke="${color}" stroke-width="1.5" stroke-dasharray="7 4"/><rect x="2" y="${yy-12}" width="${left-4}" height="14" rx="3" fill="#102035"/><text x="${left-4}" y="${yy-2}" text-anchor="end" fill="${color}" font-size="9" font-weight="700">${support ? 'S' : 'R'} ${number(level.price)}</text>` }).join('')
     const sticks = candles.map((c, i) => { const open=Number(c.open), close=Number(c.close), hi=Number(c.high), lo=Number(c.low), up=close>=open, color=up?'#48c78e':'#ef6b73', xx=x(i), bodyY=y(Math.max(open,close)), bodyH=Math.max(1,y(Math.min(open,close))-bodyY), forming=Boolean(c.is_forming); return `<line x1="${xx}" x2="${xx}" y1="${y(hi)}" y2="${y(lo)}" stroke="${color}"${forming?' stroke-dasharray="3 2"':''}/><rect x="${xx-candleW/2}" y="${bodyY}" width="${candleW}" height="${bodyH}" fill="${forming?'none':color}" stroke="${color}" stroke-width="${forming?'2':'0'}"/>` }).join('')
     const maxVolume = Math.max(...candles.map(c => Number(c.volume) || 0), 1), volumeBase = height - 26, volumeTop = height - bottom + 8, volumeHeight = volumeBase - volumeTop
     const volumeBars = candles.map((c, i) => { const up = Number(c.close) >= Number(c.open), color = up ? '#48c78e' : '#ef6b73', barH = Math.max(1, (Number(c.volume) || 0) / maxVolume * volumeHeight), xx = x(i); return `<rect x="${xx-candleW/2}" y="${volumeBase-barH}" width="${candleW}" height="${barH}" fill="${color}" opacity="${c.is_forming ? '.35' : '.65'}"/>` }).join('')
+    const oiValues = candles.map(c => Number(c.open_interest)).filter(Number.isFinite)
+    const oiBucketCount = 12
+    const oiProfile = Array.from({ length: oiBucketCount }, () => ({ longBuildup: 0, shortBuildup: 0, shortCovering: 0, longUnwinding: 0 }))
+    const oiStateEvents = []
+    for (let i = 1; i < candles.length; i += 1) {
+      const oi = Number(candles[i].open_interest), priorOi = Number(candles[i - 1].open_interest)
+      if (!Number.isFinite(oi) || !Number.isFinite(priorOi)) continue
+      const typicalPrice = (Number(candles[i].high) + Number(candles[i].low) + Number(candles[i].close)) / 3
+      const bucket = Math.max(0, Math.min(oiBucketCount - 1, Math.floor((typicalPrice - minY) / (maxY - minY) * oiBucketCount)))
+      const delta = oi - priorOi
+      const priceUp = Number(candles[i].close) >= Number(candles[i - 1].close)
+      const state = delta >= 0 && priceUp ? 'longBuildup' : delta >= 0 ? 'shortBuildup' : priceUp ? 'shortCovering' : 'longUnwinding'
+      const magnitude = Math.abs(delta)
+      oiProfile[bucket][state] += magnitude
+      oiStateEvents.push({ state, magnitude })
+    }
+    const oiStateKeys = ['longBuildup', 'shortBuildup', 'shortCovering', 'longUnwinding']
+    const oiStateLabels = { longBuildup: 'LB long buildup', shortBuildup: 'SB short buildup', shortCovering: 'SC short covering', longUnwinding: 'LU long unwinding' }
+    const oiStateColors = { longBuildup: '#48c78e', shortBuildup: '#ef6b73', shortCovering: '#72c7ff', longUnwinding: '#f0b44d' }
+    const oiTrendWindow = Math.min(12, Math.floor(oiStateEvents.length / 2))
+    const oiStateMomentum = Object.fromEntries(oiStateKeys.map(state => {
+      const recent = oiStateEvents.slice(-oiTrendWindow).filter(event => event.state === state).reduce((sum, event) => sum + event.magnitude, 0)
+      const previous = oiStateEvents.slice(-oiTrendWindow * 2, -oiTrendWindow).filter(event => event.state === state).reduce((sum, event) => sum + event.magnitude, 0)
+      const change = recent - previous, tolerance = Math.max(1, previous * .05)
+      return [state, { recent, previous, change, direction: change > tolerance ? '↑ Increasing' : change < -tolerance ? '↓ Decreasing' : '→ Stable' }]
+    }))
+    const maxOiProfile = Math.max(...oiProfile.flatMap(bin => [bin.longBuildup, bin.shortBuildup, bin.shortCovering, bin.longUnwinding]), 1)
+    const oiProfileBars = oiValues.length ? oiProfile.map((bin, index) => {
+      const bucketPrice = minY + (index + .5) * (maxY - minY) / oiBucketCount
+      const yy = y(bucketPrice), rowH = Math.max(18, plotH / oiBucketCount - 3), maxBar = oiProfileWidth - 88
+      const bar = (value, offset, color) => `<rect x="${priceRight + 78}" y="${yy + offset}" width="${Math.max(0, value / maxOiProfile * maxBar)}" height="5" rx="2" fill="${color}" opacity=".98"/>`
+      const zoneLow = minY + index * (maxY - minY) / oiBucketCount, zoneHigh = minY + (index + 1) * (maxY - minY) / oiBucketCount
+      return `<g data-oi-profile-zone="${index}"><rect x="${priceRight + 7}" y="${yy-rowH/2}" width="${oiProfileWidth-14}" height="${rowH}" rx="3" fill="${index % 2 ? '#0d1d30' : '#10243a'}" stroke="#28445f" stroke-width=".6"/><text x="${priceRight + 13}" y="${yy-3}" fill="#d8e7f7" font-size="9" font-weight="700">${number(zoneLow)}–${number(zoneHigh)}</text><text x="${priceRight + 13}" y="${yy+8}" fill="#91a7c4" font-size="8">LB  SB  SC  LU</text>${bar(bin.longBuildup, -10, '#48c78e')}${bar(bin.shortBuildup, -3, '#ef6b73')}${bar(bin.shortCovering, 4, '#72c7ff')}${bar(bin.longUnwinding, 11, '#f0b44d')}</g>`
+    }).join('') : ''
     const markers = candles.map((c, i) => { if (!c.marker) return ''; const buy=c.marker==='BUY', exit=c.marker.startsWith('EXIT'), yy=buy?y(Number(c.low))+15:y(Number(c.high))-8, color=buy?'#48c78e':exit?'#f0b44d':'#ef6b73'; return `<text x="${x(i)}" y="${yy}" text-anchor="middle" fill="${color}" font-size="9" font-weight="700">${c.marker}</text>` }).join('')
     const first = new Date(Number(candles[0].timestamp) * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), last = new Date(Number(candles.at(-1).timestamp) * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
     const forming = candles.at(-1)?.is_forming
-    el.innerHTML = `<div class="premium-chart-stats"><div><b>${escapeHtml(snapshot.symbol)}</b><small>FYERS fixed contract · ${escapeHtml(snapshot.timeframe)}</small></div><div><b>EMA ${snapshot.ema_length} High / Low</b><small>Signals use completed candles only</small></div><div><b>${number(snapshot.live_price ?? candles.at(-1).close)}</b><small>${forming ? 'Live quote · refreshed each second' : 'Last completed close'}</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="FYERS candlestick chart with EMA high and low bands">${grid}${levelLines}<path d="${path('ema_high')}" fill="none" stroke="#ef6b73" stroke-width="2"/><path d="${path('ema_low')}" fill="none" stroke="#48c78e" stroke-width="2"/>${sticks}${markers}<line x1="${left}" x2="${width-right}" y1="${volumeBase}" y2="${volumeBase}" stroke="#294766"/><text x="4" y="${volumeTop+9}" fill="#91a7c4" font-size="10">VOL</text><text x="${left}" y="${volumeTop+9}" fill="#91a7c4" font-size="10">${Math.round(maxVolume)}</text>${volumeBars}<text x="${left}" y="${height-9}" fill="#91a7c4" font-size="10">${first}</text><text x="${width-right}" y="${height-9}" text-anchor="end" fill="#91a7c4" font-size="10">${last}</text></svg><small class="muted">Outlined final candle follows the FYERS live quote every second. EMA signals remain restricted to completed candles.</small>`
+    const rsiLength = Number(snapshot.rsi_length) || 14, rsiValues = candles.map(c => Number(c.rsi_14))
+    const rsiTop = 34, rsiHeight = 244, rsiBottom = 36, rsiPlotHeight = rsiHeight - rsiTop - rsiBottom
+    const rsiY = value => rsiTop + (100 - value) * rsiPlotHeight / 100
+    let rsiStarted = false
+    const rsiPath = rsiValues.map((value, index) => {
+      if (!Number.isFinite(value)) { rsiStarted = false; return '' }
+      const point = `${x(index).toFixed(1)},${rsiY(value).toFixed(1)}`
+      const command = rsiStarted ? 'L' : 'M'; rsiStarted = true
+      return `${command}${point}`
+    }).join(' ')
+    const latestRsi = [...rsiValues].reverse().find(Number.isFinite)
+    const rsiPanel = `<svg viewBox="0 0 ${width} ${rsiHeight}" role="img" aria-label="RSI ${rsiLength} on FYERS fixed-contract closes"><rect x="${left}" y="${rsiTop}" width="${priceRight-left}" height="${rsiPlotHeight}" rx="5" fill="#091625" stroke="#4a7296" stroke-width="1.2"/><rect x="${left}" y="${rsiTop}" width="${priceRight-left}" height="${rsiY(60)-rsiTop}" fill="#512430" opacity=".5"/><rect x="${left}" y="${rsiY(60)}" width="${priceRight-left}" height="${rsiY(40)-rsiY(60)}" fill="#123451" opacity=".68"/><rect x="${left}" y="${rsiY(40)}" width="${priceRight-left}" height="${rsiTop+rsiPlotHeight-rsiY(40)}" fill="#174437" opacity=".48"/>${[100, 80, 60, 40, 0].map(level => `<line x1="${left}" x2="${priceRight}" y1="${rsiY(level)}" y2="${rsiY(level)}" stroke="${level === 60 || level === 40 ? '#d3b56a' : '#536d88'}" stroke-width="${level === 60 || level === 40 ? '1.4' : '1'}" stroke-dasharray="${level === 60 || level === 40 ? '7 4' : '2 3'}"/><text x="8" y="${rsiY(level)+4}" fill="#e1edf8" font-size="12" font-weight="700">${level}</text>`).join('')}<path d="${rsiPath}" fill="none" stroke="#f2d16c" stroke-width="3.4"/><circle cx="${x(candles.length-1)}" cy="${Number.isFinite(latestRsi) ? rsiY(latestRsi) : rsiY(50)}" r="4.5" fill="#f2d16c" stroke="#fff3bd" stroke-width="1.3"/><text x="${left+12}" y="${rsiTop+20}" fill="#f2d16c" font-size="14" font-weight="700">RSI ${rsiLength}</text><text x="${priceRight-12}" y="${rsiTop+20}" text-anchor="end" fill="#f2d16c" font-size="14" font-weight="700">${Number.isFinite(latestRsi) ? latestRsi.toFixed(1) : 'Warming up'}</text><text x="${left+12}" y="${rsiTop+39}" fill="#ffb1bb" font-size="10" font-weight="700">UPPER ZONE</text><text x="${left+12}" y="${rsiTop+rsiPlotHeight-9}" fill="#93e1bd" font-size="10" font-weight="700">LOWER ZONE</text><text x="${left}" y="${rsiHeight-11}" fill="#91a7c4" font-size="11">${first}</text><text x="${priceRight}" y="${rsiHeight-11}" text-anchor="end" fill="#91a7c4" font-size="11">${last}</text></svg>`
+    const oiDetailHeight = 334, oiDetailTop = 82, oiDetailRowH = 19, oiDetailBarX = 210, oiDetailBarW = width - oiDetailBarX - right - 12
+    const oiDetailRows = oiValues.length ? oiProfile.map((bin, index) => {
+      const yy = oiDetailTop + index * oiDetailRowH
+      const zoneLow = minY + index * (maxY - minY) / oiBucketCount, zoneHigh = minY + (index + 1) * (maxY - minY) / oiBucketCount
+      const bar = (value, offset, color) => `<rect x="${oiDetailBarX}" y="${yy + offset}" width="${Math.max(0, value / maxOiProfile * oiDetailBarW)}" height="3.5" rx="1.75" fill="${color}"/>`
+      return `<g data-oi-detail-zone="${index}"><rect x="${left}" y="${yy-4}" width="${width-left-right}" height="${oiDetailRowH-1}" rx="3" fill="${index % 2 ? '#0b192a' : '#102138'}"/><text x="${left+8}" y="${yy+8}" fill="#e1edf8" font-size="10" font-weight="700">${number(zoneLow)}–${number(zoneHigh)}</text>${bar(bin.longBuildup, 0, '#48c78e')}${bar(bin.shortBuildup, 4.5, '#ef6b73')}${bar(bin.shortCovering, 9, '#72c7ff')}${bar(bin.longUnwinding, 13.5, '#f0b44d')}</g>`
+    }).join('') : `<text x="${left+10}" y="${oiDetailTop+20}" fill="#91a7c4" font-size="12">FYERS did not return historical open interest for this contract.</text>`
+    const oiMomentumLegend = oiStateKeys.map((state, index) => `<text x="${520 + (index % 2) * 300}" y="${index < 2 ? '25' : '43'}" fill="${oiStateColors[state]}" font-size="10" font-weight="700">${oiStateLabels[state]}: ${oiStateMomentum[state].direction}</text>`).join('')
+    const oiDetailPanel = `<svg viewBox="0 0 ${width} ${oiDetailHeight}" role="img" aria-label="Expanded open interest profile by price zone"><rect x="${left}" y="8" width="${width-left-right}" height="${oiDetailHeight-18}" rx="5" fill="#081524" stroke="#4a7296" stroke-width="1.2"/><text x="${left+10}" y="25" fill="#e5c68b" font-size="14" font-weight="700">EXPANDED OPEN INTEREST PROFILE</text><text x="${left+10}" y="43" fill="#91a7c4" font-size="9">Latest ${oiTrendWindow || 0} updates vs prior ${oiTrendWindow || 0}</text>${oiMomentumLegend}${oiDetailRows}</svg>`
+    el.innerHTML = `<div class="premium-chart-stats"><div><b>${escapeHtml(snapshot.symbol)}</b><small>FYERS fixed contract · ${escapeHtml(snapshot.timeframe)}</small></div><div><b>EMA ${snapshot.ema_length} High / Low</b><small>Signals use completed candles only</small></div><div><b>${number(snapshot.live_price ?? candles.at(-1).close)}</b><small>${forming ? 'Live quote · refreshed each second' : 'Last completed close'}</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="FYERS candlestick chart with EMA high and low bands, volume, and classified price-anchored open interest profile">${grid}${levelLines}<path d="${path('ema_high')}" fill="none" stroke="#ef6b73" stroke-width="2"/><path d="${path('ema_low')}" fill="none" stroke="#48c78e" stroke-width="2"/>${sticks}${markers}<line x1="${left}" x2="${priceRight}" y1="${volumeBase}" y2="${volumeBase}" stroke="#294766"/><text x="4" y="${volumeTop+9}" fill="#91a7c4" font-size="10">VOL</text><text x="${left}" y="${volumeTop+9}" fill="#91a7c4" font-size="10">${Math.round(maxVolume)}</text>${volumeBars}<rect x="${priceRight+4}" y="${top-46}" width="${oiProfileWidth-7}" height="${plotH+46}" rx="5" fill="#091625" stroke="#4a7296" stroke-width="1.2"/><text x="${priceRight+11}" y="${top-31}" fill="#e5c68b" font-size="13" font-weight="700">OPEN INTEREST PROFILE</text><text x="${priceRight+11}" y="${top-18}" fill="#48c78e" font-size="9" font-weight="700">LB long build</text><text x="${priceRight+98}" y="${top-18}" fill="#ef6b73" font-size="9" font-weight="700">SB short build</text><text x="${priceRight+11}" y="${top-6}" fill="#72c7ff" font-size="9" font-weight="700">SC short cover</text><text x="${priceRight+98}" y="${top-6}" fill="#f0b44d" font-size="9" font-weight="700">LU long unwind</text>${oiProfileBars}<text x="${left}" y="${height-9}" fill="#91a7c4" font-size="10">${first}</text><text x="${priceRight}" y="${height-9}" text-anchor="end" fill="#91a7c4" font-size="10">${last}</text></svg>${rsiPanel}${oiDetailPanel}<small class="muted">RSI ${rsiLength} uses the same FYERS fixed-contract closes and is display-only; EMA signals still use completed candles. Volume remains time-based below the candles. The OI Profile at right groups historical OI change by price zone: green long buildup, red short buildup, blue short covering, and amber long unwinding. It is unavailable when FYERS does not provide historical OI.</small>`
+    const fullscreenButton = document.createElement('button')
+    fullscreenButton.type = 'button'
+    fullscreenButton.className = 'button secondary'
+    fullscreenButton.textContent = '⛶ Full-screen chart'
+    fullscreenButton.title = 'Open the EMA chart, RSI and OI Profile in full screen'
+    fullscreenButton.style.margin = '0 0 10px auto'
+    fullscreenButton.style.display = 'block'
+    fullscreenButton.addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement === el) await document.exitFullscreen()
+        else if (el.requestFullscreen) await el.requestFullscreen()
+      } catch (_) {
+        fullscreenButton.textContent = 'Full screen unavailable in this browser'
+      }
+    })
+    document.addEventListener('fullscreenchange', () => {
+      const active = document.fullscreenElement === el
+      fullscreenButton.textContent = active ? '⤢ Exit full screen' : '⛶ Full-screen chart'
+      el.style.background = active ? '#071322' : ''
+      el.style.padding = active ? '24px' : ''
+      el.style.overflowY = active ? 'auto' : ''
+    }, { once: false })
+    el.prepend(fullscreenButton)
+    const historyNavigation = document.createElement('div')
+    historyNavigation.className = 'field'
+    historyNavigation.style.cssText = 'display:block;margin:0 0 12px;max-width:none;padding:9px 12px;border:1px solid #4a7296;border-radius:7px;background:#0b1a2b'
+    historyNavigation.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><b style="letter-spacing:.08em;color:#d9f2ff">HISTORY NAVIGATOR</b><button type="button" class="button secondary" data-history-older style="padding:3px 9px">◀ Older</button><button type="button" class="button secondary" data-history-latest style="padding:3px 9px">Latest ▶</button><small style="margin-left:auto">${historyStart + 1}–${historyStart + candles.length} of ${allCandles.length} candles</small></div><input type="range" min="0" max="${latestStart}" value="${historyStart}" step="1" aria-label="Chart history scrollbar: drag left for older candles and right for latest candles" style="width:100%;height:18px;accent-color:#72c7ff"><small>Drag the blue handle left for older candles; drag right to return to the latest candles.</small>`
+    const historySlider = historyNavigation.querySelector('input')
+    const navigateHistory = start => {
+      // Navigation is an explicit user action.  It must take precedence over
+      // the hover lock that protects the inspection tooltip from live refresh.
+      emaBrokerHistoryStart = start
+      emaBrokerHoverActive = false
+      pendingEmaBrokerSnapshot = null
+      renderEmaBrokerChart(snapshot)
+    }
+    historySlider.addEventListener('input', () => {
+      navigateHistory(Number(historySlider.value))
+    })
+    historyNavigation.querySelector('[data-history-older]').addEventListener('click', () => {
+      navigateHistory(Math.max(0, historyStart - 20))
+    })
+    historyNavigation.querySelector('[data-history-latest]').addEventListener('click', () => {
+      navigateHistory(latestStart)
+    })
+    fullscreenButton.insertAdjacentElement('afterend', historyNavigation)
     const svg = el.querySelector('svg')
+    const rsiSvg = [...el.querySelectorAll('svg')].find(node => node.getAttribute('aria-label') === `RSI ${rsiLength} on FYERS fixed-contract closes`)
+    const guide = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    guide.setAttribute('x1', left); guide.setAttribute('x2', priceRight); guide.setAttribute('stroke', '#d9f2ff'); guide.setAttribute('stroke-width', '1'); guide.setAttribute('stroke-dasharray', '4 3'); guide.setAttribute('opacity', '0')
+    svg.appendChild(guide)
+    const candleGuide = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    candleGuide.setAttribute('y1', top); candleGuide.setAttribute('y2', top + plotH); candleGuide.setAttribute('stroke', '#d9f2ff'); candleGuide.setAttribute('stroke-width', '1'); candleGuide.setAttribute('stroke-dasharray', '4 3'); candleGuide.setAttribute('opacity', '0')
+    svg.appendChild(candleGuide)
+    const candleTimeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    candleTimeLabel.setAttribute('y', height - 9); candleTimeLabel.setAttribute('text-anchor', 'middle'); candleTimeLabel.setAttribute('fill', '#d9f2ff'); candleTimeLabel.setAttribute('font-size', '11'); candleTimeLabel.setAttribute('font-weight', '700'); candleTimeLabel.setAttribute('opacity', '0')
+    svg.appendChild(candleTimeLabel)
+    const rsiGuide = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    const rsiDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    if (rsiSvg) {
+      rsiGuide.setAttribute('y1', rsiTop); rsiGuide.setAttribute('y2', rsiTop + rsiPlotHeight); rsiGuide.setAttribute('stroke', '#d9f2ff'); rsiGuide.setAttribute('stroke-width', '1'); rsiGuide.setAttribute('stroke-dasharray', '4 3'); rsiGuide.setAttribute('opacity', '0')
+      rsiDot.setAttribute('r', '5'); rsiDot.setAttribute('fill', '#f2d16c'); rsiDot.setAttribute('stroke', '#fff3bd'); rsiDot.setAttribute('stroke-width', '1.3'); rsiDot.setAttribute('opacity', '0')
+      rsiSvg.append(rsiGuide, rsiDot)
+    }
+    let highlightedOiZone = null
     const hover = document.createElement('div')
     hover.className = 'handoff-status'
     hover.style.marginTop = '8px'
-    hover.textContent = 'Hover over a candle to inspect its exact FYERS time and OHLC values.'
+    hover.textContent = 'Hover over a candle or an OI Profile row to inspect the matching FYERS values.'
     el.appendChild(hover)
+    el.style.position = 'relative'
+    const crosshairCard = document.createElement('div')
+    crosshairCard.style.cssText = 'display:none;position:absolute;z-index:3;left:14px;top:142px;max-width:410px;padding:9px 11px;border:1px solid #7ba8ca;border-radius:7px;background:#071322ee;color:#edf4ff;font-size:12px;line-height:1.55;box-shadow:0 8px 24px #0008;pointer-events:none;white-space:pre-line'
+    el.appendChild(crosshairCard)
+    const showCandleDetails = (candle, index) => {
+      const time = new Date(Number(candle.timestamp) * 1000).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+      const shortTime = new Date(Number(candle.timestamp) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const priorOi = index ? Number(candles[index - 1].open_interest) : null
+      const oi = Number(candle.open_interest)
+      const oiText = Number.isFinite(oi) ? `OI ${number(oi)}${Number.isFinite(priorOi) ? ` · ΔOI ${number(oi - priorOi)}` : ''}` : 'OI unavailable'
+      const detail = `${time} · O ${number(candle.open)} · H ${number(candle.high)} · L ${number(candle.low)} · C ${number(candle.close)} · RSI ${number(candle.rsi_14)} · EMA High ${number(candle.ema_high)} · EMA Low ${number(candle.ema_low)} · ${oiText}${candle.marker ? ` · ${candle.marker}` : ''}`
+      hover.textContent = detail
+      crosshairCard.textContent = `${time}\nO ${number(candle.open)}  H ${number(candle.high)}  L ${number(candle.low)}  C ${number(candle.close)}\nRSI ${number(candle.rsi_14)}  ·  EMA High ${number(candle.ema_high)}  ·  EMA Low ${number(candle.ema_low)}\n${oiText}${candle.marker ? `  ·  ${candle.marker}` : ''}`
+      crosshairCard.style.display = 'block'
+      candleTimeLabel.setAttribute('x', x(index)); candleTimeLabel.textContent = shortTime; candleTimeLabel.setAttribute('opacity', '1')
+    }
+    const hideCandleDetails = () => {
+      crosshairCard.style.display = 'none'
+      candleTimeLabel.setAttribute('opacity', '0')
+      hover.textContent = 'Hover over a candle or an OI Profile row to inspect the matching FYERS values.'
+    }
+    el.addEventListener('mouseenter', () => { emaBrokerHoverActive = true })
+    el.addEventListener('mouseleave', () => {
+      emaBrokerHoverActive = false
+      guide.setAttribute('opacity', '0')
+      candleGuide.setAttribute('opacity', '0')
+      rsiGuide.setAttribute('opacity', '0')
+      rsiDot.setAttribute('opacity', '0')
+      svg.querySelectorAll('[data-oi-profile-zone]').forEach(node => node.setAttribute('opacity', '1'))
+      highlightedOiZone = null
+      hideCandleDetails()
+      if (pendingEmaBrokerSnapshot) {
+        const pending = pendingEmaBrokerSnapshot
+        pendingEmaBrokerSnapshot = null
+        renderEmaBrokerChart(pending)
+      }
+    })
     svg.addEventListener('mousemove', event => {
       const box = svg.getBoundingClientRect()
       const pointer = (event.clientX - box.left) * width / box.width
+      const pointerY = (event.clientY - box.top) * height / box.height
+      const inOiProfile = pointer >= priceRight + 4 && pointer <= width - right && pointerY >= top && pointerY <= top + plotH
+      if (inOiProfile && oiValues.length) {
+        const hoveredPrice = maxY - (pointerY - top) * (maxY - minY) / plotH
+        const zone = Math.max(0, Math.min(oiBucketCount - 1, Math.floor((hoveredPrice - minY) / (maxY - minY) * oiBucketCount)))
+        const zoneLow = minY + zone * (maxY - minY) / oiBucketCount, zoneHigh = minY + (zone + 1) * (maxY - minY) / oiBucketCount
+        const zonePrice = (zoneLow + zoneHigh) / 2, bin = oiProfile[zone]
+        guide.setAttribute('y1', y(zonePrice)); guide.setAttribute('y2', y(zonePrice)); guide.setAttribute('opacity', '1')
+        if (highlightedOiZone !== zone) {
+          svg.querySelectorAll('[data-oi-profile-zone]').forEach(node => node.setAttribute('opacity', node.dataset.oiProfileZone === String(zone) ? '1' : '.28'))
+          highlightedOiZone = zone
+        }
+        hover.textContent = `OI Profile ${number(zoneLow)}–${number(zoneHigh)} · Long buildup ${number(bin.longBuildup)} · Short buildup ${number(bin.shortBuildup)} · Short covering ${number(bin.shortCovering)} · Long unwinding ${number(bin.longUnwinding)}`
+        return
+      }
+      guide.setAttribute('opacity', '0')
       const index = Math.max(0, Math.min(candles.length - 1, Math.floor((pointer - left) / plotW * candles.length)))
       const candle = candles[index]
-      const time = new Date(Number(candle.timestamp) * 1000).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-      hover.textContent = `${time} · O ${number(candle.open)} · H ${number(candle.high)} · L ${number(candle.low)} · C ${number(candle.close)} · EMA High ${number(candle.ema_high)} · EMA Low ${number(candle.ema_low)}${candle.marker ? ` · ${candle.marker}` : ''}`
+      candleGuide.setAttribute('x1', x(index)); candleGuide.setAttribute('x2', x(index)); candleGuide.setAttribute('opacity', '1')
+      if (rsiSvg && Number.isFinite(Number(candle.rsi_14))) {
+        rsiGuide.setAttribute('x1', x(index)); rsiGuide.setAttribute('x2', x(index)); rsiGuide.setAttribute('opacity', '1')
+        rsiDot.setAttribute('cx', x(index)); rsiDot.setAttribute('cy', rsiY(Number(candle.rsi_14))); rsiDot.setAttribute('opacity', '1')
+      }
+      if (highlightedOiZone !== null) { svg.querySelectorAll('[data-oi-profile-zone]').forEach(node => node.setAttribute('opacity', '1')); highlightedOiZone = null }
+      showCandleDetails(candle, index)
     })
-    svg.addEventListener('mouseleave', () => { hover.textContent = 'Hover over a candle to inspect its exact FYERS time and OHLC values.' })
+    if (rsiSvg) {
+      rsiSvg.addEventListener('mousemove', event => {
+        const box = rsiSvg.getBoundingClientRect()
+        const pointer = (event.clientX - box.left) * width / box.width
+        const index = Math.max(0, Math.min(candles.length - 1, Math.floor((pointer - left) / plotW * candles.length)))
+        const candle = candles[index]
+        const rsiValue = Number(candle.rsi_14)
+        candleGuide.setAttribute('x1', x(index)); candleGuide.setAttribute('x2', x(index)); candleGuide.setAttribute('opacity', '1')
+        rsiGuide.setAttribute('x1', x(index)); rsiGuide.setAttribute('x2', x(index)); rsiGuide.setAttribute('opacity', '1')
+        if (Number.isFinite(rsiValue)) {
+          rsiDot.setAttribute('cx', x(index)); rsiDot.setAttribute('cy', rsiY(rsiValue)); rsiDot.setAttribute('opacity', '1')
+        } else rsiDot.setAttribute('opacity', '0')
+        showCandleDetails(candle, index)
+      })
+    }
   }
   const loadEmaBrokerChart = async state => {
     const config = state?.config
-    const query = config?.underlying ? `?symbol=${encodeURIComponent(config.underlying)}&timeframe=${encodeURIComponent(config.timeframe)}&ema_length=${encodeURIComponent(config.ema_length)}` : ''
+    const chartTimeframe = $('ema-band-chart-timeframe')?.value || config?.timeframe || '5 minutes'
+    const chartBars = $('ema-band-chart-bars')?.value || '320'
+    const symbol = config?.underlying || $('ema-band-underlying-picker')?.selectedOptions?.[0]?.value || ''
+    const emaLength = config?.ema_length || $('ema-band-length')?.value || 21
+    const params = new URLSearchParams({ timeframe: chartTimeframe, ema_length: String(emaLength), bars: String(chartBars) })
+    if (symbol) params.set('symbol', symbol)
+    const query = `?${params.toString()}`
     try { renderEmaBrokerChart(await fetchJson(`/api/ema-band/chart${query}`)) }
     catch (error) { const el = $('ema-band-broker-chart'); if (el) el.innerHTML = `<div class="chart-empty">Broker chart unavailable: ${escapeHtml(error.message)}</div>` }
   }
+  ;['ema-band-chart-timeframe', 'ema-band-chart-bars'].forEach(id => {
+    $(id).addEventListener('change', () => loadEmaBrokerChart(currentEmaRunnerState))
+  })
   let currentEmaRunnerState = null
   const emaChecklistText = checklist => {
     if (!checklist?.checks) return ''
     const labels = {
       sufficient_completed_history: 'history', current_candle_completed: 'completed', flat_no_runner_position: 'flat', session_gate: 'session', same_direction_cooldown: 'cooldown',
+      ema_slope_regime: 'EMA slope regime',
       prior_body_crosses_ema_high_long: 'long EMA High cross', prior_body_crosses_ema_low_short: 'short EMA Low cross',
-      current_candle_direction_long: 'bullish candle', current_candle_direction_short: 'bearish candle', current_open_beyond_midpoint_long: 'long midpoint', current_open_beyond_midpoint_short: 'short midpoint'
+      current_close_above_midpoint_long: 'long close above midpoint', current_close_below_midpoint_short: 'short close below midpoint'
     }
     return Object.entries(checklist.checks).map(([key, item]) => `${item.pass ? 'PASS' : 'FAIL'} ${labels[key] || key}${item.value ? ` (${item.value})` : ''}`).join(' · ')
   }
@@ -1772,6 +2378,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     renderEmaBandChart(running ? state?.chart : null)
   }
   const loadEmaRunner = async () => { try { renderEmaRunner(await fetchJson('/api/ema-band/runner')) } catch (error) { $('ema-band-runner-status').textContent = `Runner status unavailable: ${error.message}` } }
+  const loadEmaTrackedPositions = async () => {
+    try { renderEmaTrackedPositions(await fetchJson('/api/ema-band/tracked-positions')) }
+    catch (error) { const el = $('ema-band-position-cards'); if (el) el.innerHTML = `<div class="empty error">Tracked positions unavailable: ${escapeHtml(error.message)}</div>` }
+  }
   const renderEmaExecutionLog = entries => {
     const el = $('ema-band-execution-log')
     if (!el) return
@@ -1806,7 +2416,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         ? await postJson('/api/ema-band/runner/stop', {})
         : await postJson('/api/ema-band/runner/start', (() => {
             const mode = $('ema-band-mode').value
-            const body = { underlying: selected?.symbol, timeframe: $('ema-band-timeframe').value, ema_length: $('ema-band-length').value, entry_session: $('ema-band-session').value, mode }
+            const body = { underlying: selected?.symbol, timeframe: $('ema-band-timeframe').value, ema_length: $('ema-band-length').value, slope_lookback: $('ema-band-slope-lookback').value, minimum_slope_atr: $('ema-band-minimum-slope-atr').value, resistance_volume_exit: $('ema-band-resistance-volume-exit').checked, resistance_volume_multiple: $('ema-band-resistance-volume-multiple').value, resistance_volume_lookback: $('ema-band-resistance-volume-lookback').value, entry_session: $('ema-band-session').value, mode }
             const protectionPct = $('ema-band-profit-protection-pct').value.trim()
             Object.assign(body, { lots: $('ema-band-lots').value })
             if (protectionPct !== '') body.profit_protection_pct = protectionPct
@@ -1824,9 +2434,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   loadEmaMasterStatus()
   loadEmaModeCapability()
   loadEmaRunner()
+  loadEmaTrackedPositions()
   loadEmaExecutionLog()
   setTimeout(() => loadEmaBrokerChart(currentEmaRunnerState), 600)
   setInterval(loadEmaRunner, 5000)
+  setInterval(() => { if (!document.hidden) loadEmaTrackedPositions() }, 15000)
   setInterval(loadEmaExecutionLog, 15000)
   setInterval(() => { if (!document.hidden) loadEmaBrokerChart(currentEmaRunnerState) }, 1000)
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)) }); document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view)); try { localStorage.setItem(viewStorageKey, button.dataset.view) } catch {} }))
@@ -1854,9 +2466,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('sector-filter').addEventListener('change', renderTable)
   $('sector-sort').addEventListener('change', renderTable)
   $('collect-candidates').addEventListener('click', collectCandidates)
-  $('select-all-candidates').addEventListener('click', () => {
-    document.querySelectorAll('.candidate-select:not(:disabled)').forEach(input => { input.checked = true })
-    document.querySelector('.candidate-select:not(:disabled)')?.dispatchEvent(new Event('change'))
+  $('select-all-candidates').addEventListener('click', async () => {
+    const button = $('select-all-candidates')
+    try {
+      button.disabled = true; button.textContent = 'Ranking with FYERS funds…'
+      await rankCandidatesForSelection()
+    } catch (error) {
+      $('candidate-status').className = 'handoff-status error'; $('candidate-status').textContent = error.message
+    } finally { button.disabled = false; button.textContent = 'Select all eligible' }
   })
   $('clear-candidate-selection').addEventListener('click', () => {
     document.querySelectorAll('.candidate-select').forEach(input => { input.checked = false })
@@ -1902,10 +2519,13 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('prepare-screener-order').addEventListener('click', prepareScreenerOrder)
   $('analyze-screener-options').addEventListener('click', analyzeScreenerOptionPlans)
   $('submit-screener-order').addEventListener('click', submitScreenerOrder)
-  $('screener-select-all').addEventListener('click', () => {
-    screenerSelectedPlans.clear()
-    screenerAnalysisResults.forEach(plan => screenerSelectedPlans.set(plan.symbol, plan))
-    syncScreenerSelectionUi('All currently eligible High-Conviction equities selected. Prepare a consolidated preview to refresh FYERS funds, quotes and risk; no broker action has occurred.')
+  $('screener-select-all').addEventListener('click', async () => {
+    const button = $('screener-select-all')
+    try {
+      button.disabled = true; button.textContent = 'Allocating with FYERS funds…'
+      await allocateScreenerPlansByFunds()
+    } catch (error) { $('screener-analysis-status').className = 'handoff-status error'; $('screener-analysis-status').textContent = error.message }
+    finally { button.disabled = false; button.textContent = 'Select all eligible' }
   })
   $('screener-clear-selection').addEventListener('click', () => {
     screenerSelectedPlans.clear()
@@ -1920,6 +2540,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const stop = event.target.closest('.stop-screener-refresh')
     const remove = event.target.closest('.remove-screener')
     const sortButton = event.target.closest('.screener-sort')
+    const selectAll = event.target.closest('.screener-source-select-all')
+    const clearSelection = event.target.closest('.screener-source-clear-selection')
     if (refresh) refreshScreenerSource(refresh.dataset.sourceId)
     if (stop) {
       const source = screenerSources.find(item => item.id === stop.dataset.sourceId)
@@ -1931,6 +2553,16 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       screenerSortState.set(sortButton.dataset.sourceId, { key: sortButton.dataset.sortKey, direction: current.key === sortButton.dataset.sortKey && current.direction === 'asc' ? 'desc' : 'asc' })
       renderScreenerSources()
       document.querySelector(`.screener-sort[data-source-id="${CSS.escape(sortButton.dataset.sourceId)}"]`)?.closest('details')?.setAttribute('open', '')
+    }
+    if (selectAll) {
+      const source = screenerSources.find(item => item.id === selectAll.dataset.sourceId)
+      ;(source?.result?.candidates || []).map(symbol => String(symbol).trim()).filter(Boolean).forEach(symbol => screenerCandidateSelections.add(symbol))
+      syncScreenerCandidateSelectionUi()
+    }
+    if (clearSelection) {
+      const source = screenerSources.find(item => item.id === clearSelection.dataset.sourceId)
+      ;(source?.result?.candidates || []).map(symbol => String(symbol).trim()).filter(Boolean).forEach(symbol => screenerCandidateSelections.delete(symbol))
+      syncScreenerCandidateSelectionUi()
     }
   })
   $('screener-sources').addEventListener('input', event => {
@@ -1973,6 +2605,12 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     replacement?.focus()
   })
   $('screener-sources').addEventListener('change', event => {
+    const candidate = event.target.closest('.screener-candidate-select')
+    if (candidate) {
+      if (candidate.checked) screenerCandidateSelections.add(candidate.value); else screenerCandidateSelections.delete(candidate.value)
+      syncScreenerCandidateSelectionUi()
+      return
+    }
     const dynamic = event.target.closest('.screener-dynamic-filter')
     if (dynamic) { dynamic.dispatchEvent(new Event('input', { bubbles: true })); return }
     const refreshInterval = event.target.closest('.screener-refresh-interval')
@@ -2017,11 +2655,17 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('nifty-straddle-squareoff-confirmation').addEventListener('input', event => { $('confirm-nifty-straddle-squareoff').disabled = event.target.value !== straddleSquareoffPreviews.nifty?.confirmation_phrase || !straddleSquareoffPreviews.nifty?.submission_eligible })
   $('confirm-straddle-squareoff').addEventListener('click', () => submitStraddleSquareoff('sensex'))
   $('confirm-nifty-straddle-squareoff').addEventListener('click', () => submitStraddleSquareoff('nifty'))
-  ;['planning-capital', 'daily-loss-limit', 'idea-risk-limit', 'risk-reserve', 'max-positions', 'minimum-rr', 'stop-basis', 'order-type'].forEach(id => $(id).addEventListener('input', renderPolicyImpact))
-  ;['planning-capital', 'daily-loss-limit', 'idea-risk-limit', 'risk-reserve', 'max-positions', 'minimum-rr', 'stop-basis', 'order-type'].forEach(id => $(id).addEventListener('change', () => { if (analysisRun) collectCandidates() }))
+  ;['planning-capital', 'daily-loss-limit', 'idea-risk-limit', 'risk-reserve', 'max-positions', 'minimum-rr', 'enforce-risk-controls', 'stop-basis', 'order-type'].forEach(id => $(id).addEventListener('input', renderPolicyImpact))
+  ;['planning-capital', 'daily-loss-limit', 'idea-risk-limit', 'risk-reserve', 'max-positions', 'minimum-rr', 'enforce-risk-controls', 'stop-basis', 'order-type'].forEach(id => $(id).addEventListener('change', () => { renderPolicyImpact(); if (analysisRun) collectCandidates() }))
   $('reauth').addEventListener('click', async () => {
-    const button = $('reauth'); button.disabled = true; button.textContent = 'Opening FYERS login…'
-    try { const data = await fetchJson('/api/auth/start'); window.location.assign(data.url) } catch (error) { $('broker-state').textContent = error.message; button.disabled = false; button.textContent = 'Refresh authentication' }
+    const button = $('reauth'); button.disabled = true; button.textContent = 'Checking FYERS session…'
+    try {
+      const status = await fetchJson('/api/auth/status')
+      if (status.authenticated) { $('broker-state').textContent = status.message; return }
+      if (!status.ready) throw new Error(status.message || 'FYERS OAuth configuration is not ready.')
+      button.textContent = 'Opening FYERS login…'
+      const data = await fetchJson('/api/auth/start'); window.location.assign(data.url)
+    } catch (error) { $('broker-state').textContent = error.message; button.disabled = false; button.textContent = 'Refresh authentication' }
   })
 
   document.addEventListener('visibilitychange', () => {
@@ -2029,7 +2673,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     if (!document.hidden) runScreenerScheduler()
   })
 
-  syncStraddleOptions(); syncNiftyStraddleOptions(); renderPolicyImpact(); loadAutomationPolicy(); refreshAnalysis(); refreshAccount(); refreshClosed(); refreshTicketCapabilities(); refreshStraddle(); refreshNiftyStraddle(); runScreenerScheduler()
+  syncStraddleOptions(); syncNiftyStraddleOptions(); renderPolicyImpact(); loadAutomationPolicy(); refreshAnalysis(); refreshAccount(); refreshClosed(); refreshTicketCapabilities(); loadKamaRunner(); refreshStraddle(); refreshNiftyStraddle(); runScreenerScheduler()
   setInterval(refreshAccount, accountRefreshMs)
   setInterval(refreshStraddle, straddleRefreshMs)
   setInterval(refreshNiftyStraddle, straddleRefreshMs)

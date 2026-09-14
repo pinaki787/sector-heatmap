@@ -87,6 +87,8 @@ class FyersExecutionTests(unittest.TestCase):
             "broker": "fyers", "underlying": "NSE:TEST-EQ", "expiry": "2026-09-03",
             "proposal": debit_proposal(), "invalidation": 94, "lots": 1,
             "daily_loss_limit": 5000, "idea_risk_limit": 2000, "risk_reserve": 1000,
+            "enforce_risk_controls": True, "enforce_minimum_reward_to_risk": True,
+            "minimum_reward_to_risk": 1,
         }
 
     def test_screener_order_preview_fails_closed_when_market_is_not_open(self):
@@ -125,7 +127,8 @@ class FyersExecutionTests(unittest.TestCase):
         def item(symbol, stop, target):
             return {"broker": "fyers", "underlying": symbol, "invalidation": stop, "quantity": 1,
                     "proposal": {"kind": "EQUITY", "label": "Screener long", "direction": "BULLISH", "quantity": 1, "target": target},
-                    "daily_loss_limit": 5000, "idea_risk_limit": 2000, "risk_reserve": 1000, "max_simultaneous_positions": 3}
+                    "daily_loss_limit": 5000, "idea_risk_limit": 2000, "risk_reserve": 1000, "max_simultaneous_positions": 3,
+                    "enforce_risk_controls": True}
         preview = self.make_service(FakeClient()).prepare_batch({"items": [item("NSE:TEST-EQ", 95, 110), item("NSE:TEST2-EQ", 195, 210)]})
         self.assertEqual(preview["aggregate"]["selected_count"], 2)
         self.assertEqual(preview["allocation"]["margin_assumption"], "NONE_FULL_CASH")
@@ -167,10 +170,10 @@ class FyersExecutionTests(unittest.TestCase):
             service.prepare(self.payload())
 
     @patch("sector_heatmap.fyers_execution.load_config", return_value={"FYERS_ACCESS_TOKEN": "APP:token"})
-    def test_hard_daily_limit_cannot_be_raised(self, _):
+    def test_user_enabled_daily_limit_is_not_clamped_to_a_hidden_cap(self, _):
         payload = self.payload(); payload["daily_loss_limit"] = 6000
-        with self.assertRaisesRegex(ValueError, "no greater than"):
-            self.make_service(FakeClient()).prepare(payload)
+        preview = self.make_service(FakeClient()).prepare(payload)
+        self.assertEqual(preview["daily_risk_ledger"]["hard_daily_loss_limit"], 6000)
 
     @patch("sector_heatmap.fyers_execution.load_config", return_value={"FYERS_ACCESS_TOKEN": "APP:token"})
     def test_master_expiry_must_match_fresh_chain(self, _):

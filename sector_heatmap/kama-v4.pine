@@ -1,0 +1,63 @@
+//@version=6
+strategy("KAMA Trend Filter v4", overlay=true, pyramiding=0, process_orders_on_close=false)
+// KAMA qualifies directional regime; price action creates the entry.
+kamaLength = input.int(10, "KAMA efficiency ratio", minval=1)
+fastLength = input.int(2, "KAMA fast length", minval=1)
+slowLength = input.int(30, "KAMA slow length", minval=2)
+slopeBars = input.int(1, "Slope lookback bars", minval=1)
+minimumSlopeATR = input.float(0.10, "Minimum KAMA slope ATR per bar", minval=0.0, step=0.01)
+breakoutBars = input.int(5, "Breakout lookback bars", minval=2)
+cooldownBars = input.int(2, "Same-direction cooldown bars", minval=0)
+allowReclaims = input.bool(true, "Allow KAMA reclaim entries")
+entrySession = input.session("0915-1515", "Entry window (IST)")
+squareOffSession = input.session("1520-1530", "Square-off window (IST)")
+change = math.abs(close - close[kamaLength])
+noise = math.sum(math.abs(close - close[1]), kamaLength)
+efficiency = not na(noise) and noise != 0 ? change / noise : 0.0
+fastSC = 2.0 / (fastLength + 1.0)
+slowSC = 2.0 / (slowLength + 1.0)
+smoothing = math.pow(efficiency * (fastSC - slowSC) + slowSC, 2)
+var float kama = na
+if bar_index < kamaLength
+    kama := na
+else if na(kama[1])
+    kama := close
+else
+    kama := kama[1] + smoothing * (close - kama[1])
+atr = ta.atr(14)
+slope = (kama - kama[slopeBars]) / slopeBars
+upTrend = not na(slope) and slope > minimumSlopeATR * atr
+downTrend = not na(slope) and slope < -minimumSlopeATR * atr
+inEntryWindow = not na(time(timeframe.period, entrySession))
+inSquareOffWindow = not na(time(timeframe.period, squareOffSession))
+priorHigh = ta.highest(high, breakoutBars)[1]
+priorLow = ta.lowest(low, breakoutBars)[1]
+longBreakout = close > priorHigh
+shortBreakout = close < priorLow
+longReclaim = allowReclaims and low <= kama and close > kama
+shortReclaim = allowReclaims and high >= kama and close < kama
+var int lastLongExitBar = na
+var int lastShortExitBar = na
+longCooldownPassed = na(lastLongExitBar) or bar_index - lastLongExitBar > cooldownBars
+shortCooldownPassed = na(lastShortExitBar) or bar_index - lastShortExitBar > cooldownBars
+longEntry = barstate.isconfirmed and inEntryWindow and strategy.position_size == 0 and longCooldownPassed and upTrend and (longBreakout or longReclaim)
+shortEntry = barstate.isconfirmed and inEntryWindow and strategy.position_size == 0 and shortCooldownPassed and downTrend and (shortBreakout or shortReclaim)
+longExit = barstate.isconfirmed and strategy.position_size > 0 and (close < kama or downTrend)
+shortExit = barstate.isconfirmed and strategy.position_size < 0 and (close > kama or upTrend)
+if inSquareOffWindow and strategy.position_size != 0
+    strategy.close_all(comment="15:20 IST square-off")
+else if longExit
+    strategy.close("Long")
+    lastLongExitBar := bar_index
+else if shortExit
+    strategy.close("Short")
+    lastShortExitBar := bar_index
+else if longEntry
+    strategy.entry("Long", strategy.long)
+else if shortEntry
+    strategy.entry("Short", strategy.short)
+plot(kama, "KAMA", color=color.orange, linewidth=2)
+plot(priorHigh, "Prior breakout high", color=color.new(color.green, 55), style=plot.style_linebr)
+plot(priorLow, "Prior breakout low", color=color.new(color.red, 55), style=plot.style_linebr)
+plotshape(longEntry, title="Long", text="LONG", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+plotshape(shortEntry, title="Short", text="SHORT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white)

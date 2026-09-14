@@ -76,13 +76,15 @@
     const maxPositions = number('maxPositions')
     const minimumRewardToRisk = number('minimumRewardToRisk')
     const errors = []
-    if (!(planningCapital > 0)) errors.push('Planning capital must be positive.')
-    if (!(dailyLossLimit > 0) || dailyLossLimit > 5000) errors.push('Daily loss must be positive and no greater than ₹5,000.')
-    if (!(ideaRiskLimit > 0)) errors.push('Per-idea risk must be positive.')
-    if (!(riskReserve >= 0)) errors.push('Reserved risk cannot be negative.')
-    if (ideaRiskLimit + riskReserve > dailyLossLimit) errors.push('Per-idea risk plus reserve must fit inside the daily loss limit.')
-    if (!Number.isInteger(maxPositions) || maxPositions < 1 || maxPositions > 20) errors.push('Maximum positions must be a whole number from 1 to 20.')
-    if (!(minimumRewardToRisk >= 1 && minimumRewardToRisk <= 10)) errors.push('Minimum reward:risk must be from 1:1 to 1:10.')
+    if (values?.enforceRiskControls) {
+      if (!(planningCapital > 0)) errors.push('Planning capital must be positive when capital controls are enabled.')
+      if (!(dailyLossLimit > 0)) errors.push('Daily loss must be positive when capital controls are enabled.')
+      if (!(ideaRiskLimit > 0)) errors.push('Per-idea risk must be positive when capital controls are enabled.')
+      if (!(riskReserve >= 0)) errors.push('Reserved risk cannot be negative.')
+      if (ideaRiskLimit + riskReserve > dailyLossLimit) errors.push('Per-idea risk plus reserve must fit inside the daily loss limit.')
+      if (!Number.isInteger(maxPositions) || maxPositions < 1) errors.push('Maximum positions must be a whole number when capital controls are enabled.')
+    }
+    if (minimumRewardToRisk < 0) errors.push('Minimum reward:risk cannot be negative.')
     if (!['price', 'percent'].includes(values?.stopBasis)) errors.push('Choose a supported stop basis.')
     if (!['LIMIT', 'MARKET'].includes(values?.orderType)) errors.push('Choose a supported order preference.')
     const usedRisk = Number(realizedLoss) + Number(openWorstCaseRisk)

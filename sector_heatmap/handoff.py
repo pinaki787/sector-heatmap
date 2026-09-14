@@ -59,8 +59,10 @@ def risk_budget(planning_capital, max_loss_value, max_loss_unit):
 
 
 def validate_risk_policy(policy):
-    """Validate user-editable planning controls without weakening hard safety caps."""
+    """Validate optional user planning preferences, not hidden eligibility caps."""
     policy = policy if isinstance(policy, dict) else {}
+    enforce_risk_controls = policy.get("enforce_risk_controls") is True
+    enforce_minimum_rr = policy.get("enforce_minimum_reward_to_risk") is True
     planning_capital = _positive_number(policy.get("planning_capital"))
     daily_loss_limit = _positive_number(policy.get("daily_loss_limit"))
     idea_risk_limit = _positive_number(policy.get("idea_risk_limit"))
@@ -68,16 +70,17 @@ def validate_risk_policy(policy):
     max_positions_value = _positive_number(policy.get("max_simultaneous_positions"))
     minimum_rr = _positive_number(policy.get("minimum_reward_to_risk"))
     max_positions = int(max_positions_value or 0)
-    if planning_capital is None:
-        raise ValueError("Planning capital must be positive.")
-    if daily_loss_limit is None or daily_loss_limit > MAX_DAILY_LOSS:
-        raise ValueError(f"Daily loss must be positive and no greater than ₹{MAX_DAILY_LOSS:.0f}.")
-    if idea_risk_limit is None or not math.isfinite(reserve) or reserve < 0 or idea_risk_limit + reserve > daily_loss_limit:
-        raise ValueError("Per-idea risk and a nonnegative reserve must fit inside the daily loss limit.")
-    if max_positions_value != max_positions or not 1 <= max_positions <= MAX_CONFIGURED_POSITIONS:
-        raise ValueError(f"Maximum simultaneous positions must be a whole number from 1 to {MAX_CONFIGURED_POSITIONS}.")
-    if minimum_rr is None or not 1 <= minimum_rr <= 10:
-        raise ValueError("Minimum reward-to-risk must be from 1:1 to 1:10.")
+    if enforce_risk_controls:
+        if planning_capital is None:
+            raise ValueError("Planning capital must be positive when capital controls are enabled.")
+        if daily_loss_limit is None:
+            raise ValueError("Daily loss must be positive when capital controls are enabled.")
+        if idea_risk_limit is None or not math.isfinite(reserve) or reserve < 0 or idea_risk_limit + reserve > daily_loss_limit:
+            raise ValueError("Per-idea risk and a nonnegative reserve must fit inside the daily loss limit.")
+        if max_positions_value != max_positions or not 1 <= max_positions <= MAX_CONFIGURED_POSITIONS:
+            raise ValueError(f"Maximum simultaneous positions must be a whole number from 1 to {MAX_CONFIGURED_POSITIONS} when capital controls are enabled.")
+    if enforce_minimum_rr and minimum_rr is None:
+        raise ValueError("Enter a positive minimum reward-to-risk when that preference is enabled.")
     stop_basis = str(policy.get("stop_basis") or "").lower()
     if stop_basis not in {"price", "percent"}:
         raise ValueError("Stop basis must be exact price or percent from entry/spot.")
@@ -87,7 +90,10 @@ def validate_risk_policy(policy):
     return {
         "planning_capital": planning_capital, "daily_loss_limit": daily_loss_limit,
         "idea_risk_limit": idea_risk_limit, "risk_reserve": reserve,
-        "max_simultaneous_positions": max_positions, "minimum_reward_to_risk": minimum_rr,
+        "max_simultaneous_positions": max_positions if enforce_risk_controls else None,
+        "minimum_reward_to_risk": minimum_rr if enforce_minimum_rr else None,
+        "enforce_risk_controls": enforce_risk_controls,
+        "enforce_minimum_reward_to_risk": enforce_minimum_rr,
         "stop_basis": stop_basis, "order_type": order_type,
     }
 
@@ -107,12 +113,17 @@ def _invalidation_price(entry, direction, risk):
 
 
 def size_equity_candidate(candidate, risk, available_funds=None):
-    """Calculate shares from explicit max loss and directional invalidation only."""
+    """Size equity only when the user has opted into capital controls.
+
+    Otherwise show a one-share editable starting point.  Broker funds are
+    still rechecked later during an actual ticket preview.
+    """
     entry = _positive_number(candidate.get("price"))
     invalidation, invalidation_error = _invalidation_price(entry, candidate.get("direction"), risk) if entry is not None else (None, None)
+    enforce_risk_controls = risk.get("enforce_risk_controls") is True
     budget, error = risk_budget(
         risk.get("planning_capital"), risk.get("max_loss_value"), risk.get("max_loss_unit")
-    )
+    ) if enforce_risk_controls else (None, None)
     reasons = []
     if error:
         reasons.append(error)
@@ -130,6 +141,16 @@ def size_equity_candidate(candidate, risk, available_funds=None):
         return {"status": "REQUIRES_RISK_INPUTS", "quantity": None, "reasons": reasons}
 
     per_share_risk = abs(entry - invalidation)
+    if not enforce_risk_controls:
+        return {
+            "status": "USER_SIZED", "quantity": 1, "entry_reference": entry,
+            "invalidation": invalidation, "risk_budget": None,
+            "per_share_risk": round(per_share_risk, 4),
+            "estimated_max_loss": round(per_share_risk, 2),
+            "estimated_notional": round(entry, 2), "limited_by": "user quantity",
+            "minimum_reward_to_risk": None, "minimum_target": None,
+            "capital_assumption": None,
+        }
     risk_quantity = math.floor(budget / per_share_risk)
     planning_capital = _positive_number(risk.get("planning_capital"))
     capital_base = planning_capital
@@ -214,7 +235,7 @@ def build_equity_opportunity(candidate, policy):
         "name": candidate.get("name"), "direction": direction,
         "thesis": f"{candidate.get('mtf_alignment')} across completed 15m, 1h, Daily and Weekly bars with {daily.get('relative_strength_state', 'available relative-strength')} evidence.",
         "entry": round(trigger, 2), "entry_trigger": trigger_text, "current_price": live_price,
-        "stop_invalidation": None, "target": None, "reward_to_risk": float(policy["minimum_reward_to_risk"]),
+        "stop_invalidation": None, "target": None, "reward_to_risk": policy.get("minimum_reward_to_risk"),
         "quantity": None, "estimated_max_loss": None, "estimated_notional": None,
         "invalidation_choices": {
             "structure": {"label": "Completed-candle structure", "suggested_price": round(structure_invalidation, 2), "basis": "Daily EMA20 or 1×ATR alignment-break level"},
@@ -271,16 +292,16 @@ def apply_invalidation_choice(candidate, opportunity, policy, selection, tick_si
     if direction == "BULLISH" and invalidation >= entry or direction == "BEARISH" and invalidation <= entry:
         raise ValueError("The selected invalidation is on the wrong side of the current entry/spot.")
     risk_points = abs(entry - invalidation)
-    minimum_rr = float(policy["minimum_reward_to_risk"])
-    target = entry + minimum_rr * risk_points if direction == "BULLISH" else entry - minimum_rr * risk_points
-    if target <= 0:
+    minimum_rr = policy.get("minimum_reward_to_risk")
+    target = entry + minimum_rr * risk_points if minimum_rr is not None and direction == "BULLISH" else entry - minimum_rr * risk_points if minimum_rr is not None else None
+    if target is not None and target <= 0:
         raise ValueError("The selected invalidation produces a nonpositive target.")
     result = {
         "method": method, "input_value": input_value, "price": invalidation, "tick_size": tick,
-        "risk_points": round(risk_points, 4), "target": round(target, 6), "reward_to_risk": minimum_rr,
+        "risk_points": round(risk_points, 4), "target": round(target, 6) if target is not None else None, "reward_to_risk": minimum_rr,
     }
     if option_proposal:
-        lots = math.floor(float(policy["idea_risk_limit"]) / float(option_proposal["max_loss_per_lot"]))
+        lots = math.floor(float(policy["idea_risk_limit"]) / float(option_proposal["max_loss_per_lot"])) if policy.get("enforce_risk_controls") else 1
         if lots < 1:
             raise ValueError("Configured per-idea risk does not support one validated spread lot.")
         result.update({
@@ -294,7 +315,7 @@ def apply_invalidation_choice(candidate, opportunity, policy, selection, tick_si
             "max_loss_unit": "rupees", "invalidation": invalidation, "stop_basis": "price",
             "max_simultaneous_positions": policy["max_simultaneous_positions"], "minimum_reward_to_risk": minimum_rr,
         })
-        if sizing.get("status") != "SIZED":
+        if sizing.get("status") not in {"SIZED", "USER_SIZED"}:
             raise ValueError("; ".join(sizing.get("reasons") or ["Configured risk does not support one share."]))
         result.update({"quantity": sizing["quantity"], "estimated_max_loss": sizing["estimated_max_loss"], "estimated_notional": sizing["estimated_notional"]})
     return result
@@ -551,11 +572,12 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
                 proposals.append(proposal)
                 break
 
+    enforce_risk_controls = (risk or {}).get("enforce_risk_controls") is True
     budget, budget_error = risk_budget(
         (risk or {}).get("planning_capital"),
         (risk or {}).get("max_loss_value"),
         (risk or {}).get("max_loss_unit"),
-    )
+    ) if enforce_risk_controls else (None, None)
     invalidation, invalidation_error = _invalidation_price(spot, direction, risk or {})
     for proposal in proposals:
         reasons = []
@@ -565,6 +587,13 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
             reasons.append(invalidation_error)
         if reasons:
             proposal["sizing"] = {"status": "REQUIRES_RISK_INPUTS", "lots": None, "reasons": reasons}
+        elif not enforce_risk_controls:
+            proposal["sizing"] = {
+                "status": "USER_SIZED", "lots": 1, "quantity": proposal["lot_size"],
+                "risk_budget": None, "underlying_invalidation": invalidation,
+                "estimated_max_loss": round(proposal["max_loss_per_lot"], 2),
+                "funding_validation": "One lot is a user-editable starting point; fresh FYERS funds and margin are required at ticket preview.",
+            }
         else:
             lots = math.floor(budget / proposal["max_loss_per_lot"])
             proposal["sizing"] = {
@@ -578,9 +607,9 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
             }
     below_reward_gate = []
     eligible_proposals = []
-    minimum_rr = _positive_number((risk or {}).get("minimum_reward_to_risk")) or MIN_REWARD_TO_RISK
+    minimum_rr = _positive_number((risk or {}).get("minimum_reward_to_risk")) if (risk or {}).get("enforce_minimum_reward_to_risk") is True else None
     for proposal in proposals:
-        if proposal["reward_to_risk"] < minimum_rr:
+        if minimum_rr is not None and proposal["reward_to_risk"] < minimum_rr:
             below_reward_gate.append({
                 "proposal_id": proposal["proposal_id"],
                 "label": proposal["label"],
@@ -592,7 +621,7 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
             eligible_proposals.append(proposal)
     proposals = eligible_proposals
 
-    capital = _positive_number((risk or {}).get("planning_capital"))
+    capital = _positive_number((risk or {}).get("planning_capital")) if enforce_risk_controls else None
     max_positions = int(_positive_number((risk or {}).get("max_simultaneous_positions")) or MAX_SIMULTANEOUS_IDEAS)
     per_idea_capital = (
         capital * MAX_INITIAL_GROSS_EXPOSURE_PCT / 100 / max_positions

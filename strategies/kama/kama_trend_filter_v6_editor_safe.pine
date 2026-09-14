@@ -1,0 +1,53 @@
+//@version=6
+strategy("KAMA Trend Filter v6 - Efficiency Breakout", overlay=true, pyramiding=0, process_orders_on_close=true)
+
+// Editor-safe V6: identical entry filters, with no indentation-sensitive blocks.
+kamaLength = input.int(10, "KAMA efficiency ratio length", minval=1)
+fastLength = input.int(2, "KAMA fast length", minval=1)
+slowLength = input.int(30, "KAMA slow length", minval=2)
+minimumEfficiency = input.float(0.35, "Minimum KAMA efficiency ratio", minval=0.0, maxval=1.0, step=0.05)
+breakoutBars = input.int(5, "Breakout lookback bars", minval=2)
+cooldownBars = input.int(2, "Same-direction cooldown bars", minval=0)
+allowReclaims = input.bool(true, "Allow KAMA reclaim entries")
+entrySession = input.session("0915-1510", "Entry window (IST, 5-minute chart)")
+squareOffSession = input.session("1515-1530", "Forced square-off window (IST)")
+
+change = math.abs(close - close[kamaLength])
+noise = math.sum(math.abs(close - close[1]), kamaLength)
+efficiency = not na(noise) and noise != 0 ? change / noise : 0.0
+fastSC = 2.0 / (fastLength + 1.0)
+slowSC = 2.0 / (slowLength + 1.0)
+smoothing = math.pow(efficiency * (fastSC - slowSC) + slowSC, 2)
+var float kama = na
+kama := bar_index < kamaLength ? na : na(kama[1]) ? close : kama[1] + smoothing * (close - kama[1])
+
+kamaRising = not na(kama[1]) and kama > kama[1]
+kamaFalling = not na(kama[1]) and kama < kama[1]
+trendQuality = efficiency >= minimumEfficiency
+inEntryWindow = not na(time(timeframe.period, entrySession))
+inSquareOffWindow = not na(time(timeframe.period, squareOffSession))
+priorHigh = ta.highest(high, breakoutBars)[1]
+priorLow = ta.lowest(low, breakoutBars)[1]
+longBreakout = close > priorHigh
+shortBreakout = close < priorLow
+longReclaim = allowReclaims and low <= kama and close > kama
+shortReclaim = allowReclaims and high >= kama and close < kama
+barsSinceExit = ta.barssince(strategy.position_size[1] != 0 and strategy.position_size == 0)
+cooldownPassed = na(barsSinceExit) or barsSinceExit > cooldownBars
+longEntry = barstate.isconfirmed and inEntryWindow and strategy.position_size == 0 and cooldownPassed and trendQuality and kamaRising and (longBreakout or longReclaim)
+shortEntry = barstate.isconfirmed and inEntryWindow and strategy.position_size == 0 and cooldownPassed and trendQuality and kamaFalling and (shortBreakout or shortReclaim)
+longExit = barstate.isconfirmed and strategy.position_size > 0 and close < kama and kamaFalling
+shortExit = barstate.isconfirmed and strategy.position_size < 0 and close > kama and kamaRising
+longCloseNow = inSquareOffWindow or longExit
+shortCloseNow = inSquareOffWindow or shortExit
+
+strategy.order("Long exit", strategy.short, qty=longCloseNow ? math.abs(strategy.position_size) : 0, comment=inSquareOffWindow ? "Intraday square-off" : "KAMA reversal")
+strategy.order("Short exit", strategy.long, qty=shortCloseNow ? math.abs(strategy.position_size) : 0, comment=inSquareOffWindow ? "Intraday square-off" : "KAMA reversal")
+strategy.entry("Long", strategy.long, qty=longEntry ? 1 : 0)
+strategy.entry("Short", strategy.short, qty=shortEntry ? 1 : 0)
+
+plot(kama, "KAMA", color=color.orange, linewidth=2)
+plot(priorHigh, "Prior breakout high", color=color.new(color.green, 55), style=plot.style_linebr)
+plot(priorLow, "Prior breakout low", color=color.new(color.red, 55), style=plot.style_linebr)
+plotshape(longEntry, title="Long", text="LONG", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+plotshape(shortEntry, title="Short", text="SHORT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white)

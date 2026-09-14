@@ -1,0 +1,145 @@
+//@version=6
+strategy("EMA High/Low Band - Sector Pulse Runner Logic", shorttitle="EMA Band Latest", overlay=true, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+
+// This strategy mirrors the current Sector Pulse EMA-band decision logic on
+// the charted underlying. All signals use completed candles only.
+// It intentionally does not submit or model option-contract orders.
+
+// === Active runner entry settings ===
+emaLength = input.int(21, "EMA band length", minval=1, group="EMA band")
+useEntrySession = input.bool(true, "Enable entry-session gate", group="Entry gate")
+entrySession = input.session("0915-1515", "Entry session", group="Entry gate", tooltip="IST on NSE/BSE charts. The runner uses 0915-2330 for MCX underlyings. Exits remain active outside this session.")
+useSlopeFilter = input.bool(true, "Enable flat-market slope gate", group="Entry gate")
+slopeLookback = input.int(8, "EMA midpoint slope lookback", minval=2, group="Entry gate")
+minimumSlopeAtr = input.float(0.10, "Minimum slope (ATR per bar)", minval=0.0, step=0.01, group="Entry gate", tooltip="Runner default: 0.10. The absolute EMA-band midpoint slope must meet this ATR-normalized threshold.")
+
+// The dashboard runner currently has no same-direction re-entry cooldown.
+// Retain this source-strategy control at its active default of zero.
+reentryCooldownBars = input.int(0, "Same-direction re-entry cooldown", minval=0, group="Entry gate")
+
+// === Active optional resistance-volume exit settings ===
+useResistanceVolumeExit = input.bool(false, "Enable failed resistance-volume exit", group="Optional exit")
+resistanceVolumeLookback = input.int(20, "Volume lookback", minval=2, group="Optional exit")
+resistanceVolumeMultiple = input.float(1.5, "Breakout volume multiple", minval=0.0, step=0.1, group="Optional exit")
+resistanceProximityAtr = input.float(0.25, "Resistance proximity (ATR)", minval=0.0, step=0.05, group="Optional exit")
+
+// The following safeguards correspond to optional runner fields. They are off
+// by default because the live runner evaluates them against the selected option
+// contract, whereas this chart strategy can only evaluate its own chart price.
+useStopLoss = input.bool(false, "Use chart-price stop loss", group="Optional chart-price safeguards")
+stopLossPct = input.float(20.0, "Stop loss (%)", minval=0.1, maxval=99.9, step=0.1, group="Optional chart-price safeguards")
+useTarget = input.bool(false, "Use chart-price target", group="Optional chart-price safeguards")
+targetPct = input.float(20.0, "Target (%)", minval=0.1, step=0.1, group="Optional chart-price safeguards")
+useProfitProtection = input.bool(false, "Use chart-price profit protection", group="Optional chart-price safeguards")
+profitProtectionRiskPct = input.float(20.0, "Initial risk unit (%)", minval=0.1, maxval=99.9, step=0.1, group="Optional chart-price safeguards", tooltip="Runner default: 20. At +1R it moves to breakeven; at +1.5R it locks +0.5R; then it trails 40% from the peak.")
+
+showExitMarkers = input.bool(true, "Show exit markers", group="Display")
+showEma200 = input.bool(true, "Show EMA 200 (display only)", group="Display")
+
+emaHigh = ta.ema(high, emaLength)
+emaLow = ta.ema(low, emaLength)
+emaMidpoint = (emaHigh + emaLow) / 2.0
+ema200 = ta.ema(close, 200)
+confirmedBar = barstate.isconfirmed
+entryTimePass = not useEntrySession or not na(time(timeframe.period, entrySession))
+
+// Python runner parity: slope = difference in EMA-band midpoint / bars, and
+// ATR is the arithmetic average true range for the same lookback.
+slopeAtr = ta.sma(ta.tr(true), slopeLookback)
+midpointSlope = (emaMidpoint - emaMidpoint[slopeLookback]) / slopeLookback
+slopeNormalized = slopeAtr > 0 ? math.abs(midpointSlope) / slopeAtr : 0.0
+slopePass = not useSlopeFilter or slopeNormalized >= minimumSlopeAtr
+
+// The immediately preceding completed candle must body-cross an EMA edge.
+// Its next completed candle confirms by closing beyond its full-range midpoint;
+// confirmation candle direction and opening price do not matter.
+longSignalCandle = open[1] <= emaHigh[1] and close[1] > emaHigh[1]
+shortSignalCandle = open[1] >= emaLow[1] and close[1] < emaLow[1]
+signalCandleMidpoint = (high[1] + low[1]) / 2.0
+
+var int lastLongExitBar = na
+var int lastShortExitBar = na
+longReentryPass = na(lastLongExitBar) or bar_index - lastLongExitBar > reentryCooldownBars
+shortReentryPass = na(lastShortExitBar) or bar_index - lastShortExitBar > reentryCooldownBars
+
+longEntry = confirmedBar and entryTimePass and slopePass and strategy.position_size == 0 and longSignalCandle and close > signalCandleMidpoint and longReentryPass
+shortEntry = confirmedBar and entryTimePass and slopePass and strategy.position_size == 0 and shortSignalCandle and close < signalCandleMidpoint and shortReentryPass
+
+// Core indicator exit: completed close back inside the EMA High/Low band.
+insideBand = close >= emaLow and close <= emaHigh
+longIndicatorExit = confirmedBar and strategy.position_size > 0 and insideBand
+shortIndicatorExit = confirmedBar and strategy.position_size < 0 and insideBand
+
+// Runner-equivalent failed resistance test: confirmed 2-left/2-right pivot,
+// price probes resistance but lacks both a close above it and 1.5x volume.
+pivotResistance = ta.pivothigh(high, 2, 2)
+var float latestResistance = na
+if not na(pivotResistance)
+    latestResistance := pivotResistance
+resistanceAtr = ta.sma(ta.tr(true), resistanceVolumeLookback)
+averageVolume = ta.sma(volume, resistanceVolumeLookback)
+nearResistance = not na(latestResistance) and high >= latestResistance - resistanceAtr * resistanceProximityAtr
+breakoutVolume = volume >= averageVolume * resistanceVolumeMultiple
+failedResistanceBreak = nearResistance and not (close > latestResistance and breakoutVolume)
+longResistanceExit = confirmedBar and useResistanceVolumeExit and strategy.position_size > 0 and close > strategy.position_avg_price and failedResistanceBreak
+
+// Optional chart-price version of runner protection. Long and short handling is
+// symmetric here; the production runner buys CE/PE, so its option price is long.
+entryPrice = strategy.position_avg_price
+longStop = entryPrice * (1.0 - stopLossPct / 100.0)
+shortStop = entryPrice * (1.0 + stopLossPct / 100.0)
+longTarget = entryPrice * (1.0 + targetPct / 100.0)
+shortTarget = entryPrice * (1.0 - targetPct / 100.0)
+longStopExit = confirmedBar and useStopLoss and strategy.position_size > 0 and close <= longStop
+shortStopExit = confirmedBar and useStopLoss and strategy.position_size < 0 and close >= shortStop
+longTargetExit = confirmedBar and useTarget and strategy.position_size > 0 and close >= longTarget
+shortTargetExit = confirmedBar and useTarget and strategy.position_size < 0 and close <= shortTarget
+
+var float longPeak = na
+var float shortTrough = na
+if strategy.position_size > 0
+    longPeak := na(longPeak) ? high : math.max(longPeak, high)
+else
+    longPeak := na
+if strategy.position_size < 0
+    shortTrough := na(shortTrough) ? low : math.min(shortTrough, low)
+else
+    shortTrough := na
+
+riskUnit = profitProtectionRiskPct / 100.0
+longProfit = entryPrice > 0 ? (longPeak / entryPrice - 1.0) : 0.0
+shortProfit = entryPrice > 0 ? (entryPrice / shortTrough - 1.0) : 0.0
+longProtectionStop = longProfit >= 1.5 * riskUnit ? math.max(entryPrice * (1.0 + 0.5 * riskUnit), entryPrice + 0.60 * (longPeak - entryPrice)) : longProfit >= riskUnit ? entryPrice : entryPrice * (1.0 - riskUnit)
+shortProtectionStop = shortProfit >= 1.5 * riskUnit ? math.min(entryPrice * (1.0 - 0.5 * riskUnit), entryPrice - 0.60 * (entryPrice - shortTrough)) : shortProfit >= riskUnit ? entryPrice : entryPrice * (1.0 + riskUnit)
+longProtectionExit = confirmedBar and useProfitProtection and strategy.position_size > 0 and close <= longProtectionStop
+shortProtectionExit = confirmedBar and useProfitProtection and strategy.position_size < 0 and close >= shortProtectionStop
+
+longExit = longIndicatorExit or longResistanceExit or longStopExit or longTargetExit or longProtectionExit
+shortExit = shortIndicatorExit or shortStopExit or shortTargetExit or shortProtectionExit
+
+if longExit
+    lastLongExitBar := bar_index
+    strategy.close("BUY", comment=longIndicatorExit ? "INDICATOR EXIT" : longResistanceExit ? "RESISTANCE/VOLUME EXIT" : longStopExit ? "STOP LOSS" : longTargetExit ? "TARGET" : "PROFIT PROTECTION")
+else if shortExit
+    lastShortExitBar := bar_index
+    strategy.close("SELL", comment=shortIndicatorExit ? "INDICATOR EXIT" : shortStopExit ? "STOP LOSS" : shortTargetExit ? "TARGET" : "PROFIT PROTECTION")
+else if longEntry
+    strategy.entry("BUY", strategy.long, comment="BUY")
+else if shortEntry
+    strategy.entry("SELL", strategy.short, comment="SELL")
+
+upperBand = plot(emaHigh, "EMA High", color=color.red, linewidth=2)
+lowerBand = plot(emaLow, "EMA Low", color=color.green, linewidth=2)
+fill(upperBand, lowerBand, title="EMA Band", color=color.new(color.blue, 88))
+plot(showEma200 ? ema200 : na, "EMA 200 (display only)", color=color.blue, linewidth=2)
+plot(useResistanceVolumeExit ? latestResistance : na, "Latest resistance", color=color.new(color.red, 25), style=plot.style_linebr)
+
+plotshape(longEntry, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, size=size.small)
+plotshape(shortEntry, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+plotshape(showExitMarkers and longExit, title="Exit BUY", text="EXIT BUY", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
+plotshape(showExitMarkers and shortExit, title="Exit SELL", text="EXIT SELL", style=shape.labelup, location=location.belowbar, color=color.orange, textcolor=color.white, size=size.tiny)
+
+alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: completed EMA-band confirmation passed.")
+alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: completed EMA-band confirmation passed.")
+alertcondition(longExit, title="Exit BUY Alert", message="EXIT BUY {{ticker}} {{interval}}: EMA-band exit condition passed.")
+alertcondition(shortExit, title="Exit SELL Alert", message="EXIT SELL {{ticker}} {{interval}}: EMA-band exit condition passed.")

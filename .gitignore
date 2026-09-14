@@ -1,4 +1,5 @@
 .venv/
+.env
 .fyers.env
 .private/
 outputs/
@@ -6,3 +7,14 @@ outputs/
 __pycache__/
 *.log
 .pnpm-store/
+
+# Local generated research artifacts (keep source scripts tracked).
+backtesting/sensex_dhan_real_options/cache/
+backtesting/sensex_dhan_real_options/*_trades/
+backtesting/sensex_dhan_real_options/*_optimization.csv
+backtesting/sensex_dhan_real_options/*_sensitivity.html
+backtesting/sensex_dhan_real_options/*_equity.html
+backtesting/sensex_dhan_real_options/*_trades.csv
+
+# Superseded local launcher; setup_and_run.sh is the supported entry point.
+run_kama_live_heatmap.sh

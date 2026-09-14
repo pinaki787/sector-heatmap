@@ -8,7 +8,8 @@ and writes a paper trade journal without broker calls.
 
 The entry/exit rules intentionally mirror ema_band_midpoint_alerts.pine:
 previous candle body-crosses the EMA edge; the following completed candle
-confirms direction and opens beyond the prior full-range midpoint; an open
+closes beyond the prior full-range midpoint (above for long, below for short,
+regardless of candle color); an open
 position exits on a completed close inside the EMA band.
 """
 from __future__ import annotations
@@ -221,9 +222,9 @@ def build_events(frame: pd.DataFrame, ema_length: int, session: str, cooldown: i
             short_cross = prior.open >= prior.ema_low and prior.close < prior.ema_low
             long_cooldown_ok = last_long_exit is None or i - last_long_exit > cooldown
             short_cooldown_ok = last_short_exit is None or i - last_short_exit > cooldown
-            if long_cross and current.close > current.open and current.open > midpoint and long_cooldown_ok:
+            if long_cross and current.close > midpoint and long_cooldown_ok:
                 position, event = 1, "BUY"
-            elif short_cross and current.close < current.open and current.open < midpoint and short_cooldown_ok:
+            elif short_cross and current.close < midpoint and short_cooldown_ok:
                 position, event = -1, "SELL"
         if event:
             events.append(Signal(timestamp.isoformat(), event, float(current.close), float(current.ema_high), float(current.ema_low), position, mode))
@@ -242,8 +243,8 @@ def print_candle_check(frame: pd.DataFrame, args: argparse.Namespace) -> None:
     midpoint = (setup.high + setup.low) / 2.0
     long_cross = setup.open <= setup.ema_high and setup.close > setup.ema_high
     short_cross = setup.open >= setup.ema_low and setup.close < setup.ema_low
-    long_confirm = completed.close > completed.open and completed.open > midpoint
-    short_confirm = completed.close < completed.open and completed.open < midpoint
+    long_confirm = completed.close > midpoint
+    short_confirm = completed.close < midpoint
     buy_candidate = bool(long_cross and long_confirm and session_pass(checked.index[-2], args.session))
     sell_candidate = bool(short_cross and short_confirm and session_pass(checked.index[-2], args.session))
     payload = {

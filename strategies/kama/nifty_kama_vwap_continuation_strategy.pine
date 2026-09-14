@@ -1,0 +1,112 @@
+//@version=6
+strategy("NIFTY KAMA VWAP Continuation", shorttitle="KAMA VWAP", overlay=true, pyramiding=0, process_orders_on_close=false, initial_capital=100000)
+
+// Pine translation of the existing Sector Pulse NIFTY 15-minute KAMA research.
+// Use on a 15-minute NIFTY chart. Orders fill at the following bar's open,
+// matching the research convention. It is a research strategy, not a live runner.
+groupCore = "Core settings"
+erLength = input.int(10, "KAMA efficiency-ratio length", minval=1, group=groupCore)
+fastLength = input.int(2, "KAMA fast length", minval=1, group=groupCore)
+slowLength = input.int(30, "KAMA slow length", minval=2, group=groupCore)
+dailyEmaLength = input.int(20, "Prior daily EMA bias", minval=1, group=groupCore)
+openingRangeBars = input.int(2, "Opening-range bars", minval=1, group=groupCore)
+minimumOpeningRange = input.float(0.25, "Minimum opening range (%)", minval=0.0, step=0.05, group=groupCore) / 100.0
+
+groupRisk = "Risk and session"
+atrLength = input.int(14, "ATR length", minval=1, group=groupRisk)
+atrStopMultiple = input.float(0.75, "ATR stop multiple", minval=0.0, step=0.05, group=groupRisk)
+minimumStop = input.float(0.25, "Minimum stop (%)", minval=0.0, step=0.05, group=groupRisk) / 100.0
+rewardRisk = input.float(2.0, "Reward / risk", minval=0.1, step=0.1, group=groupRisk)
+entrySession = input.session("0915-1515", "Entry session", group=groupRisk)
+exitSession = input.session("1515-1530", "Session-exit window", group=groupRisk)
+
+groupSlope = "KAMA slope filter"
+useSlopeFilter = input.bool(true, "Enable KAMA slope filter", group=groupSlope)
+slopeLookback = input.int(1, "Slope lookback bars", minval=1, group=groupSlope)
+minimumSlopeAtr = input.float(0.10, "Minimum slope (ATR per bar)", minval=0.0, step=0.01, group=groupSlope)
+
+// Custom KAMA allows the research settings ER 10, fast 2, slow 30 to be explicit.
+change = math.abs(close - close[erLength])
+volatility = ta.sum(math.abs(close - close[1]), erLength)
+efficiency = not na(volatility) and volatility != 0 ? change / volatility : 0.0
+fastSC = 2.0 / (fastLength + 1.0)
+slowSC = 2.0 / (slowLength + 1.0)
+smoothingConstant = math.pow(efficiency * (fastSC - slowSC) + slowSC, 2)
+var float kama = na
+if bar_index == erLength
+    kama := close
+else if bar_index > erLength
+    kama := kama[1] + smoothingConstant * (close - kama[1])
+
+vwap = ta.vwap(hlc3)
+atr = ta.sma(ta.tr(true), atrLength)
+priorDailyEma = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength)[1], lookahead=barmerge.lookahead_on)
+priorDailyClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+dailyBias = priorDailyClose > priorDailyEma ? 1 : priorDailyClose < priorDailyEma ? -1 : 0
+
+inEntrySession = not na(time(timeframe.period, entrySession))
+inExitSession = not na(time(timeframe.period, exitSession))
+newDay = ta.change(time("D")) != 0
+var int sessionBars = 0
+var float openingHigh = na
+var float openingLow = na
+var bool brokeOpeningRange = false
+var bool enteredToday = false
+if newDay
+    sessionBars := 0
+    openingHigh := na
+    openingLow := na
+    brokeOpeningRange := false
+    enteredToday := false
+if inEntrySession
+    sessionBars += 1
+    if sessionBars <= openingRangeBars
+        openingHigh := na(openingHigh) ? high : math.max(openingHigh, high)
+        openingLow := na(openingLow) ? low : math.min(openingLow, low)
+
+openingRangeReady = sessionBars > openingRangeBars and not na(openingHigh) and not na(openingLow)
+openingRangePass = openingRangeReady and (openingHigh - openingLow) / open >= minimumOpeningRange
+kamaLong = not na(kama) and close > kama
+kamaShort = not na(kama) and close < kama
+kamaSlope = not na(kama[slopeLookback]) ? (kama - kama[slopeLookback]) / slopeLookback : na
+slopeThreshold = minimumSlopeAtr * atr
+longSlopePass = not useSlopeFilter or (not na(kamaSlope) and kamaSlope > slopeThreshold)
+shortSlopePass = not useSlopeFilter or (not na(kamaSlope) and kamaSlope < -slopeThreshold)
+
+longBreak = dailyBias == 1 and close > openingHigh and kamaLong and longSlopePass
+shortBreak = dailyBias == -1 and close < openingLow and kamaShort and shortSlopePass
+if inEntrySession and openingRangePass and not brokeOpeningRange and not enteredToday and (longBreak or shortBreak)
+    brokeOpeningRange := true
+
+longReclaim = dailyBias == 1 and low <= vwap and close > vwap and kamaLong and longSlopePass
+shortReclaim = dailyBias == -1 and high >= vwap and close < vwap and kamaShort and shortSlopePass
+longEntry = barstate.isconfirmed and inEntrySession and brokeOpeningRange and not enteredToday and strategy.position_size == 0 and longReclaim
+shortEntry = barstate.isconfirmed and inEntrySession and brokeOpeningRange and not enteredToday and strategy.position_size == 0 and shortReclaim
+
+if longEntry
+    strategy.entry("Long", strategy.long)
+    enteredToday := true
+if shortEntry
+    strategy.entry("Short", strategy.short)
+    enteredToday := true
+
+// A fixed stop/target is created from the actual filled average price. This
+// avoids assuming the next bar's opening fill while the signal bar is closing.
+if strategy.position_size > 0 and not na(atr)
+    risk = math.max(minimumStop * strategy.position_avg_price, atrStopMultiple * atr)
+    strategy.exit("Long risk exit", "Long", stop=strategy.position_avg_price - risk, limit=strategy.position_avg_price + rewardRisk * risk)
+if strategy.position_size < 0 and not na(atr)
+    risk = math.max(minimumStop * strategy.position_avg_price, atrStopMultiple * atr)
+    strategy.exit("Short risk exit", "Short", stop=strategy.position_avg_price + risk, limit=strategy.position_avg_price - rewardRisk * risk)
+if barstate.isconfirmed and inExitSession and strategy.position_size != 0
+    strategy.close_all(comment="15:15 session exit")
+
+plot(kama, "KAMA", color=color.orange, linewidth=2)
+plot(vwap, "Session VWAP", color=color.aqua, linewidth=2)
+plot(openingRangeReady ? openingHigh : na, "Opening range high", color=color.new(color.green, 35), style=plot.style_linebr)
+plot(openingRangeReady ? openingLow : na, "Opening range low", color=color.new(color.red, 35), style=plot.style_linebr)
+plotshape(longEntry, title="Long entry", text="LONG", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+plotshape(shortEntry, title="Short entry", text="SHORT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white)
+
+alertcondition(longEntry, "KAMA long", "KAMA/VWAP long continuation signal on {{ticker}}.")
+alertcondition(shortEntry, "KAMA short", "KAMA/VWAP short continuation signal on {{ticker}}.")

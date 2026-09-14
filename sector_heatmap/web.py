@@ -13,7 +13,7 @@ import threading
 import html as html_lib
 from urllib.parse import parse_qs, urlparse
 from .config import ROOT, load_config
-from .authentication import authorization_url, exchange_auth_code
+from .authentication import authorization_url, exchange_auth_code, validated_config
 from .market_data import FyersLiveFeed, is_token_error, tick_timestamp_iso
 from .market_calendar import market_session
 from .official_weights import OFFICIAL_WEIGHT_SET
@@ -21,6 +21,7 @@ from .sectors import SECTOR_DEFINITIONS
 from .sector_service import SectorAnalysisService
 from .sensex_straddle import SensexStraddleService
 from .nifty_straddle import NiftyStraddleService
+from .kama_strategy import kama_v6_signal, kama_exit_state_machine
 from .straddle_squareoff import StraddleSquareOffService
 from .fyers_execution import FyersExecutionService, FyersExecutionUnavailable, PreviewChanged, available_funds
 from .automation import AutomationPolicyService
@@ -59,6 +60,25 @@ def ema_candle_in_entry_session(timestamp, entry_session):
     moment = datetime.fromtimestamp(float(timestamp), tz=EMA_IST)
     value = moment.hour * 60 + moment.minute
     return start_hour * 60 + start_minute <= value <= end_hour * 60 + end_minute
+
+
+def ema_rsi_series(values, length=14):
+    """Wilder RSI aligned to every close; warm-up values remain unavailable."""
+    closes = [float(value) for value in values]
+    result = [None] * len(closes)
+    if len(closes) <= length:
+        return result
+    changes = [current - previous for previous, current in zip(closes, closes[1:])]
+    gains = [max(change, 0.0) for change in changes]
+    losses = [max(-change, 0.0) for change in changes]
+    average_gain = sum(gains[:length]) / length
+    average_loss = sum(losses[:length]) / length
+    for index in range(length, len(closes)):
+        if index > length:
+            average_gain = ((average_gain * (length - 1)) + gains[index - 1]) / length
+            average_loss = ((average_loss * (length - 1)) + losses[index - 1]) / length
+        result[index] = 100.0 if average_loss == 0 and average_gain else (50.0 if average_loss == 0 else 100.0 - 100.0 / (1.0 + average_gain / average_loss))
+    return result
 
 
 def ema_profit_protection(entry_price, ltp, risk_unit_pct, peak_price=None, prior_stop=None):
@@ -293,7 +313,66 @@ def select_ema_atm_option(rows, underlying, direction, spot, now_epoch):
     return min(candidates, key=lambda contract: (abs(contract["strike"] - reference_price), contract["strike"], contract["symbol"]))
 
 
-def ema_band_strategy_signal(candles, ema_length=21, entry_session=None):
+def ema_band_slope_regime(candles, ema_length=21, lookback=8, minimum_atr_per_bar=0.10):
+    """Classify the EMA-band midpoint using completed candles only.
+
+    The slope is normalized by recent ATR so the same setting works across
+    instruments with very different price scales.  It blocks only flat regimes;
+    directional EMA-band rules still choose long versus short.
+    """
+    length = int(ema_length)
+    lookback = max(2, int(lookback))
+    minimum = max(0.0, float(minimum_atr_per_bar))
+    required = max(length + 1, lookback + 2)
+    if len(candles) < required:
+        if minimum == 0:
+            return {"pass": True, "state": "DISABLED", "message": "EMA slope filter is disabled."}
+        return {"pass": False, "state": "INSUFFICIENT_HISTORY", "message": "EMA slope filter needs more completed candles."}
+    alpha = 2 / (length + 1)
+    high_ema = low_ema = None
+    midpoint = []
+    for candle in candles:
+        high = float(candle["high"]); low = float(candle["low"])
+        high_ema = high if high_ema is None else alpha * high + (1 - alpha) * high_ema
+        low_ema = low if low_ema is None else alpha * low + (1 - alpha) * low_ema
+        midpoint.append((high_ema + low_ema) / 2)
+    ranges = []
+    for index in range(-lookback, 0):
+        candle, previous = candles[index], candles[index - 1]
+        ranges.append(max(float(candle["high"]) - float(candle["low"]), abs(float(candle["high"]) - float(previous["close"])), abs(float(candle["low"]) - float(previous["close"]))))
+    atr = sum(ranges) / len(ranges)
+    slope = (midpoint[-1] - midpoint[-1 - lookback]) / lookback
+    normalized = abs(slope) / atr if atr > 0 else 0.0
+    state = "RISING" if slope > 0 else "FALLING" if slope < 0 else "FLAT"
+    passes = normalized >= minimum
+    return {"pass": passes, "state": state if passes else "FLAT", "slope": round(slope, 6), "atr": round(atr, 6), "normalized_slope": round(normalized, 4), "lookback": lookback, "minimum_atr_per_bar": minimum,
+            "message": f"EMA midpoint {state.lower()} at {normalized:.3f} ATR per candle." if passes else f"EMA midpoint is flat at {normalized:.3f} ATR per candle; the minimum is {minimum:.3f}."}
+
+
+def ema_band_resistance_volume_exit(candles, volume_lookback=20, volume_multiple=1.5, proximity_atr=0.25):
+    """Detect a failed, low-volume resistance break on completed FYERS candles."""
+    lookback = max(2, int(volume_lookback))
+    if len(candles) < lookback + 5:
+        return {"exit": False, "message": "Waiting for enough completed candles for the resistance-volume check."}
+    current = candles[-1]
+    true_ranges = [max(float(c["high"]) - float(c["low"]), abs(float(c["high"]) - float(p["close"])), abs(float(c["low"]) - float(p["close"]))) for p, c in zip(candles[-lookback-1:-1], candles[-lookback:])]
+    atr = sum(true_ranges) / len(true_ranges)
+    pivots = []
+    for index in range(2, len(candles) - 2):
+        high = float(candles[index]["high"])
+        if high > max(float(candles[i]["high"]) for i in (index - 2, index - 1, index + 1, index + 2)):
+            pivots.append(high)
+    resistance = min((level for level in pivots if level >= float(current["close"]) - atr * float(proximity_atr)), default=None)
+    average_volume = sum(float(candle.get("volume") or 0) for candle in candles[-lookback-1:-1]) / lookback
+    breakout_volume = float(current.get("volume") or 0) >= average_volume * float(volume_multiple)
+    near_resistance = resistance is not None and float(current["high"]) >= resistance - atr * float(proximity_atr)
+    closes_above = resistance is not None and float(current["close"]) > resistance
+    failed_break = near_resistance and not (closes_above and breakout_volume)
+    return {"exit": failed_break, "resistance": round(resistance, 4) if resistance is not None else None, "atr": round(atr, 4), "volume": float(current.get("volume") or 0), "average_volume": round(average_volume, 4), "required_volume": round(average_volume * float(volume_multiple), 4), "breakout_volume": breakout_volume, "near_resistance": near_resistance,
+            "message": "Low-volume resistance test failed; protect the profitable long." if failed_break else "Resistance-volume exit not triggered."}
+
+
+def ema_band_strategy_signal(candles, ema_length=21, entry_session=None, slope_lookback=8, minimum_slope_atr=0.0):
     """Derive a CE/PE direction only from the completed EMA Band entry signal."""
     try:
         length = int(ema_length)
@@ -315,9 +394,13 @@ def ema_band_strategy_signal(candles, ema_length=21, entry_session=None):
     setup, completed = candles[-2], candles[-1]
     setup_index, completed_index = len(candles) - 2, len(candles) - 1
     midpoint = (float(setup["high"]) + float(setup["low"])) / 2
-    bullish = float(setup["open"]) <= high_band[setup_index] and float(setup["close"]) > high_band[setup_index] and float(completed["close"]) > float(completed["open"]) and float(completed["open"]) > midpoint
-    bearish = float(setup["open"]) >= low_band[setup_index] and float(setup["close"]) < low_band[setup_index] and float(completed["close"]) < float(completed["open"]) and float(completed["open"]) < midpoint
+    bullish = float(setup["open"]) <= high_band[setup_index] and float(setup["close"]) > high_band[setup_index] and float(completed["close"]) > midpoint
+    bearish = float(setup["open"]) >= low_band[setup_index] and float(setup["close"]) < low_band[setup_index] and float(completed["close"]) < midpoint
     direction = "BULLISH" if bullish else "BEARISH" if bearish else None
+    regime = ema_band_slope_regime(candles, length, slope_lookback, minimum_slope_atr)
+    if direction and not regime["pass"]:
+        return {"status": "NO_SIGNAL", "direction": None, "completed_candle": completed.get("timestamp"), "setup_candle": setup.get("timestamp"), "ema_high": round(high_band[completed_index], 4), "ema_low": round(low_band[completed_index], 4), "regime": regime,
+                "message": f"No completed EMA Band entry signal; flat-market filter blocked this setup. {regime['message']}"}
     if direction and entry_session and not ema_candle_in_entry_session(completed.get("timestamp"), entry_session):
         return {
             "status": "NO_SIGNAL", "direction": None, "completed_candle": completed.get("timestamp"),
@@ -329,20 +412,22 @@ def ema_band_strategy_signal(candles, ema_length=21, entry_session=None):
         "status": "SIGNAL" if direction else "NO_SIGNAL", "direction": direction,
         "completed_candle": completed.get("timestamp"), "setup_candle": setup.get("timestamp"),
         "ema_high": round(high_band[completed_index], 4), "ema_low": round(low_band[completed_index], 4),
-        "message": f"Completed EMA Band {direction.lower()} entry signal." if direction else "No completed EMA Band entry signal; ATM contract selection is blocked.",
+        "regime": regime, "message": f"Completed EMA Band {direction.lower()} entry signal. {regime['message']}" if direction else "No completed EMA Band entry signal; ATM contract selection is blocked.",
     }
 
 
-def ema_band_entry_checklist(candles, ema_length=21, has_active_position=False):
+def ema_band_entry_checklist(candles, ema_length=21, has_active_position=False, slope_lookback=8, minimum_slope_atr=0.0):
     """Explain the completed-candle EMA entry gate without changing its signal."""
     length = int(ema_length)
     required = max(length + 1, 3)
     count = len(candles)
+    regime = ema_band_slope_regime(candles, length, slope_lookback, minimum_slope_atr) if count >= required else {"pass": False, "message": "waiting for completed candles"}
     checks = {"sufficient_completed_history": {"pass": count >= required, "value": f"{count}/{required} completed candles"},
               "current_candle_completed": {"pass": True, "value": "FYERS in-progress candle excluded"},
               "flat_no_runner_position": {"pass": not has_active_position, "value": "flat" if not has_active_position else "runner position active"},
               "session_gate": {"pass": True, "value": "disabled"},
-              "same_direction_cooldown": {"pass": True, "value": "disabled"}}
+              "same_direction_cooldown": {"pass": True, "value": "disabled"},
+              "ema_slope_regime": {"pass": regime["pass"], "value": regime["message"]}}
     if count < required:
         return {"ready": False, "completed_candle": candles[-1].get("timestamp") if candles else None, "checks": checks}
     def series(field):
@@ -358,18 +443,15 @@ def ema_band_entry_checklist(candles, ema_length=21, has_active_position=False):
     midpoint = (float(setup["high"]) + float(setup["low"])) / 2
     long_cross = float(setup["open"]) <= high_band[-2] and float(setup["close"]) > high_band[-2]
     short_cross = float(setup["open"]) >= low_band[-2] and float(setup["close"]) < low_band[-2]
-    bullish, bearish = float(current["close"]) > float(current["open"]), float(current["close"]) < float(current["open"])
-    long_mid, short_mid = float(current["open"]) > midpoint, float(current["open"]) < midpoint
+    long_mid, short_mid = float(current["close"]) > midpoint, float(current["close"]) < midpoint
     checks.update({
         "prior_body_crosses_ema_high_long": {"pass": long_cross, "value": f"open {setup['open']}, close {setup['close']}, EMA high {round(high_band[-2], 4)}"},
         "prior_body_crosses_ema_low_short": {"pass": short_cross, "value": f"open {setup['open']}, close {setup['close']}, EMA low {round(low_band[-2], 4)}"},
-        "current_candle_direction_long": {"pass": bullish, "value": f"open {current['open']}, close {current['close']}"},
-        "current_candle_direction_short": {"pass": bearish, "value": f"open {current['open']}, close {current['close']}"},
-        "current_open_beyond_midpoint_long": {"pass": long_mid, "value": f"open {current['open']}, midpoint {round(midpoint, 4)}"},
-        "current_open_beyond_midpoint_short": {"pass": short_mid, "value": f"open {current['open']}, midpoint {round(midpoint, 4)}"},
+        "current_close_above_midpoint_long": {"pass": long_mid, "value": f"close {current['close']}, midpoint {round(midpoint, 4)}"},
+        "current_close_below_midpoint_short": {"pass": short_mid, "value": f"close {current['close']}, midpoint {round(midpoint, 4)}"},
     })
-    long_ready = all(checks[key]["pass"] for key in ("sufficient_completed_history", "current_candle_completed", "flat_no_runner_position", "session_gate", "same_direction_cooldown", "prior_body_crosses_ema_high_long", "current_candle_direction_long", "current_open_beyond_midpoint_long"))
-    short_ready = all(checks[key]["pass"] for key in ("sufficient_completed_history", "current_candle_completed", "flat_no_runner_position", "session_gate", "same_direction_cooldown", "prior_body_crosses_ema_low_short", "current_candle_direction_short", "current_open_beyond_midpoint_short"))
+    long_ready = all(checks[key]["pass"] for key in ("sufficient_completed_history", "current_candle_completed", "flat_no_runner_position", "session_gate", "same_direction_cooldown", "ema_slope_regime", "prior_body_crosses_ema_high_long", "current_close_above_midpoint_long"))
+    short_ready = all(checks[key]["pass"] for key in ("sufficient_completed_history", "current_candle_completed", "flat_no_runner_position", "session_gate", "same_direction_cooldown", "ema_slope_regime", "prior_body_crosses_ema_low_short", "current_close_below_midpoint_short"))
     return {"ready": long_ready or short_ready, "long_ready": long_ready, "short_ready": short_ready,
             "completed_candle": current.get("timestamp"), "checks": checks}
 
@@ -706,6 +788,24 @@ def run_server():
     ema_master_dir = ROOT / ".private" / "ema-band-masters"
     live_pnl_snapshot_path = ROOT / ".private" / "live-pnl.json"
     ema_chart_cache = {"key": None, "snapshot": None, "refreshed_at": None}
+    parser_order_previews = {}
+    parser_trailing_positions = {}
+    parser_trailing_lock = threading.Lock()
+
+    def parser_target_trail(entry, targets, ltp, peak_price=None):
+        """Long-option T1/T2/T3 ladder followed by an open-ended T2-T3 interval trail."""
+        entry = float(entry); levels = [float(value) for value in targets]
+        if len(levels) < 3 or not (levels[0] > entry and levels[1] > levels[0] and levels[2] > levels[1]):
+            raise ValueError("Automatic target trailing needs three increasing targets above a BUY entry.")
+        peak = max(float(peak_price or entry), float(ltp))
+        step = levels[2] - levels[1]
+        stop, stage = entry, "T1_BREAKEVEN"
+        if peak >= levels[1]: stop, stage = levels[0], "T2_LOCK_T1"
+        if peak >= levels[2]:
+            completed_steps = int((peak - levels[2]) // step)
+            stop, stage = levels[1] + completed_steps * step, f"T3_PLUS_{completed_steps}_INTERVALS"
+        return {"peak_price": round(peak, 4), "stop_price": round(stop, 4), "stage": stage, "step": round(step, 4), "exit": float(ltp) <= stop}
+    parser_live_submission_enabled = os.getenv("SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS") == "1"
 
     def publish_live_pnl_snapshot(account):
         """Publish the small shared P&L feed atomically for all dashboard views."""
@@ -770,6 +870,340 @@ def run_server():
                 matches.append({"segment": item["segment"], "symbol": row[9], "description": row[1], "underlying": row[13], "lot_size": row[3], "tick_size": row[4], "expiry": row[8], "strike": row[15], "option_type": row[16]})
         matches.sort(key=lambda item: ema_master_search_rank(item, needle))
         return {"matches": matches[:20], "status": state}
+
+    def parse_trade_recommendation(text):
+        """Parse a pasted human recommendation into a *non-executable* review ticket.
+
+        This intentionally does not create an order preview.  A message can be
+        incomplete or refer to more than one active option expiry, so a parser
+        result is useful only after an exact FYERS-master match is established.
+        """
+        raw = str(text or "").strip()
+        if not raw:
+            raise ValueError("Paste a trade recommendation to parse.")
+        if len(raw) > 12_000:
+            raise ValueError("Trade recommendation text is limited to 12,000 characters.")
+        normalized = re.sub(r"\s+", " ", raw.upper())
+        action_match = re.search(r"\b(BUY|SELL|SHORT)\b", normalized)
+        # Advisory messages often omit an action; the agreed parser default is
+        # BUY, while an explicit SELL or SHORT always overrides it.
+        action = {"SHORT": "SELL"}.get(action_match.group(1), action_match.group(1)) if action_match else "BUY"
+        # Common advisor format: "MCX CRUDEOIL 17-SEP CE 9100".  It puts
+        # expiry and option side before the strike, unlike broker symbols.
+        dated_option_match = re.search(r"\b(?:MCX\s+)?([A-Z][A-Z0-9& .-]{0,30}?)\s+(\d{1,2})[-\s]+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[-\s]+(\d{2,4}))?\s+(CE|PE|C|P|CALL|PUT)\s+(\d{3,7}(?:\.\d+)?)\b", normalized)
+        side_before_strike_match = re.search(r"\b(?:MCX\s+)?([A-Z][A-Z0-9& .-]{0,30}?)\s+(CE|PE|C|P|CALL|PUT)\s+(\d{3,7}(?:\.\d+)?)\b", normalized)
+        option_match = re.search(r"\b([A-Z][A-Z0-9& .-]{0,38}?)\s+(\d{3,7}(?:\.\d+)?)\s*(CE|PE|C|P|CALL|PUT)\b", normalized)
+        option_type = None
+        underlying = None
+        strike = None
+        if dated_option_match:
+            underlying = re.sub(r"\b(?:COMMODITY|OPTIONS?|INTRADAY|BUY|SELL|SHORT|MCX|TRADE)\b", "", dated_option_match.group(1)).strip(" .-")
+            strike = float(dated_option_match.group(6))
+            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(dated_option_match.group(5), dated_option_match.group(5))
+        elif side_before_strike_match:
+            underlying = re.sub(r"\b(?:COMMODITY|OPTIONS?|INTRADAY|BUY|SELL|SHORT|MCX|TRADE)\b", "", side_before_strike_match.group(1)).strip(" .-")
+            strike = float(side_before_strike_match.group(3))
+            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(side_before_strike_match.group(2), side_before_strike_match.group(2))
+        elif option_match:
+            underlying = re.sub(r"\b(?:BUY|SELL|SHORT|TRADE|CALL|PUT)\b", "", option_match.group(1)).strip(" .-")
+            strike = float(option_match.group(2))
+            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(option_match.group(3), option_match.group(3))
+        else:
+            symbols = re.findall(r"\b[A-Z][A-Z0-9&-]{1,29}\b", normalized)
+            ignored = {"BUY", "SELL", "SHORT", "ENTRY", "ABOVE", "AT", "SL", "STOP", "LOSS", "TARGET", "TARGETS", "CMP", "CALL", "PUT"}
+            underlying = next((item for item in symbols if item not in ignored), None)
+
+        def amount(pattern):
+            match = re.search(pattern, normalized)
+            return float(match.group(1)) if match else None
+
+        entry_match = re.search(r"\b(ENTRY|ABOVE|BELOW|BREAKOUT|TRIGGER|AT|CMP)\s*(?:PRICE\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)", normalized)
+        entry = float(entry_match.group(2)) if entry_match else None
+        # Advisor language such as BUY ABOVE or SELL BELOW is a trigger, not an
+        # immediately executable limit.  Preserve that distinction through the
+        # review ticket and the eventual FYERS order payload.
+        entry_instruction = "STOP_LIMIT" if entry_match and entry_match.group(1) in {"ABOVE", "BELOW", "BREAKOUT", "TRIGGER"} else "LIMIT"
+        stop_loss = amount(r"\b(?:SL|STOP(?:\s+LOSS)?|STOPLOSS)\s*(?:AT\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)")
+        targets = []
+        for match in re.finditer(r"\b(?:(?:TARGET|TGT|TP)(?:\s*[1-9](?!\d))?|T[1-9])\s*(?:AT\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)", normalized):
+            value = float(match.group(1))
+            if value not in targets:
+                targets.append(value)
+        block = re.search(r"\b(?:TARGETS?|TGTS?)\s*(?:AT\s*)?[:=@-]?\s*([0-9.,/\- ]+)", normalized)
+        if block:
+            for value in re.findall(r"\d+(?:\.\d+)?", block.group(1)):
+                number = float(value)
+                if number not in targets:
+                    targets.append(number)
+
+        expiry_hint = None
+        month_names = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+        expiry_match = re.search(rf"\b(\d{{1,2}})[-\s]*({month_names})(?:[-\s]*(\d{{2,4}}))?\b", normalized)
+        if expiry_match:
+            expiry_hint = {"day": int(expiry_match.group(1)), "month": expiry_match.group(2), "year": expiry_match.group(3)}
+        return {
+            "source_text": raw, "action": action, "underlying": underlying, "option_type": option_type,
+            "strike": strike, "entry": entry, "entry_instruction": entry_instruction, "stop_loss": stop_loss, "targets": targets,
+            "expiry_hint": expiry_hint,
+            "missing": [name for name, value in (("action", action), ("underlying", underlying), ("entry", entry), ("stop loss", stop_loss)) if value is None],
+        }
+
+    def trade_recommendation_contracts(parsed):
+        """Map a parsed underlying to active FYERS master rows; never construct symbols."""
+        status = ema_master_status()
+        if not status["usable"]:
+            raise RuntimeError("FYERS master cache is missing or older than 72 hours. Contract mapping is blocked until it refreshes.")
+        underlying = re.sub(r"[^A-Z0-9]", "", str(parsed.get("underlying") or "").upper())
+        if not underlying:
+            return []
+        option_type = parsed.get("option_type")
+        strike = parsed.get("strike")
+        now_epoch = datetime.now().timestamp()
+        candidates = []
+        for segment in ("NSE_CM", "BSE_CM", "NSE_FO", "BSE_FO", "MCX_COM"):
+            for row in csv.reader(io.StringIO((ema_master_dir / f"{segment}.csv").read_text(encoding="utf-8"))):
+                if len(row) < 17:
+                    continue
+                row_underlying = re.sub(r"[^A-Z0-9]", "", str(row[13] or "").upper())
+                symbol = str(row[9] or "").upper()
+                if option_type:
+                    if str(row[16]).upper() != option_type or row_underlying != underlying:
+                        continue
+                    try:
+                        if abs(float(row[15]) - float(strike)) > 0.0001 or float(row[8]) <= now_epoch:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                else:
+                    if str(row[16]).upper() != "XX" or not (row_underlying == underlying or re.sub(r"[^A-Z0-9]", "", symbol.split(":", 1)[-1].replace("-EQ", "")) == underlying):
+                        continue
+                try:
+                    expiry_epoch = float(row[8]) if row[8] else None
+                except (TypeError, ValueError):
+                    expiry_epoch = None
+                hint = parsed.get("expiry_hint") or {}
+                if option_type and hint:
+                    expiry_date = datetime.fromtimestamp(expiry_epoch, tz=EMA_IST) if expiry_epoch else None
+                    month_matches = expiry_date and expiry_date.strftime("%b").upper() == hint.get("month")
+                    day_matches = expiry_date and expiry_date.day == hint.get("day")
+                    year_value = hint.get("year")
+                    year_matches = not year_value or expiry_date.year == int(year_value[-2:]) + 2000
+                    if not (month_matches and day_matches and year_matches):
+                        continue
+                candidates.append({
+                    "segment": segment, "symbol": row[9], "description": row[1], "underlying": row[13],
+                    "expiry": datetime.fromtimestamp(expiry_epoch, tz=EMA_IST).strftime("%d %b %Y") if expiry_epoch else None,
+                    "expiry_epoch": expiry_epoch, "strike": row[15], "option_type": row[16],
+                    "lot_size": row[3], "tick_size": row[4],
+                })
+        return sorted(candidates, key=lambda item: (item["expiry_epoch"] or 0, item["symbol"]))[:20]
+
+    def trade_recommendation_preview(payload):
+        parsed = parse_trade_recommendation(payload.get("text"))
+        candidates = trade_recommendation_contracts(parsed)
+        if len(candidates) == 1:
+            mapping = {"status": "EXACT", "contract": candidates[0], "message": "One active FYERS-master contract matches the recommendation."}
+        elif candidates and parsed.get("option_type") and not parsed.get("expiry_hint"):
+            # The user chose nearest-expiry behaviour for messages that omit an
+            # expiry.  The master records are already sorted by active expiry.
+            mapping = {"status": "EXACT", "contract": candidates[0], "expiry_inferred": True,
+                       "message": f"Expiry was omitted; selected the nearest active FYERS expiry, {candidates[0]['expiry']}."}
+        elif candidates:
+            mapping = {"status": "AMBIGUOUS", "candidates": candidates, "message": "More than one active FYERS contract matches. Include the expiry or select an exact contract before any order review."}
+        else:
+            mapping = {"status": "UNRESOLVED", "message": "No active FYERS-master contract matches the extracted fields. Check the underlying, expiry, strike and option side."}
+        targets = parsed["targets"]
+        stages = []
+        if len(targets) > 1:
+            for index, target in enumerate(targets):
+                if index == 0:
+                    stop = parsed["entry"]
+                    label = "move stop to entry"
+                else:
+                    stop = targets[index - 1]
+                    label = f"move stop to prior target {targets[index - 1]:g}"
+                stages.append({"target": target, "suggested_stop": stop, "action": label})
+        return {"status": "REVIEW_ONLY", "parsed": parsed, "mapping": mapping, "trailing_plan": stages,
+                "message": "This is a parsed review ticket only. It creates no FYERS order, stop order or trailing order."}
+
+    def trade_recommendation_ai_analysis(payload):
+        """Evidence-based AI-style check of the parsed contract, with no sizing gates.
+
+        The result deliberately assesses the exact option's completed-candle
+        trend and the supplied price plan.  It does not infer capital, impose
+        reward-to-risk, or promise that a target will be reached.
+        """
+        preview = trade_recommendation_preview(payload)
+        parsed, mapping = preview["parsed"], preview["mapping"]
+        contract = mapping.get("contract") if mapping.get("status") == "EXACT" else None
+        if not contract:
+            raise ValueError("AI analysis needs one exact active FYERS contract.")
+        if parsed.get("action") not in {"BUY", "SELL"} or parsed.get("entry") is None or parsed.get("stop_loss") is None:
+            raise ValueError("AI analysis needs an explicit BUY/SELL, entry and stop loss.")
+        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+        if ":" not in token:
+            raise RuntimeError("A current FYERS connection is required for AI analysis.")
+        app_id, access_token = token.split(":", 1)
+        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+        candles = ema_band_completed_candles(client, contract["symbol"], "5 minutes")
+        if len(candles) < 30:
+            raise RuntimeError("FYERS returned insufficient completed option candles for the AI analysis.")
+        regime = ema_band_slope_regime(candles, ema_length=21, lookback=8, minimum_atr_per_bar=0.03)
+        last = candles[-1]
+        ltp = float(last["close"])
+        entry, stop = float(parsed["entry"]), float(parsed["stop_loss"])
+        first_target = float(parsed["targets"][0]) if parsed.get("targets") else None
+        action = parsed["action"]
+        trend_favorable = regime["state"] == ("RISING" if action == "BUY" else "FALLING") and regime["pass"]
+        entry_gap_pct = abs(ltp - entry) / entry * 100 if entry else None
+        entry_instruction = parsed.get("entry_instruction", "LIMIT")
+        if entry_instruction == "STOP_LIMIT":
+            waiting_for_trigger = (action == "BUY" and ltp < entry) or (action == "SELL" and ltp > entry)
+            entry_state = "WAITING_FOR_TRIGGER" if waiting_for_trigger else "TRIGGER_REACHED"
+            entry_favorable = entry_gap_pct is not None and entry_gap_pct <= 3.0
+        else:
+            limit_eligible = (action == "BUY" and ltp <= entry) or (action == "SELL" and ltp >= entry)
+            entry_state = "LIMIT_ELIGIBLE" if limit_eligible else "WAITING_AT_LIMIT"
+            entry_favorable = bool(limit_eligible)
+        target_direction_valid = first_target is not None and ((action == "BUY" and first_target > entry) or (action == "SELL" and first_target < entry))
+        atr = float(regime.get("atr") or 0)
+        target_distance_atr = abs(first_target - ltp) / atr if first_target is not None and atr > 0 else None
+        target_plausible = bool(target_direction_valid and target_distance_atr is not None and target_distance_atr <= 4.0)
+        favourable = trend_favorable and entry_favorable and target_plausible
+        verdict = "WAIT_FOR_TRIGGER" if entry_instruction == "STOP_LIMIT" and entry_state == "WAITING_FOR_TRIGGER" and trend_favorable and target_plausible else "FAVOURABLE" if favourable else "MIXED" if trend_favorable and target_direction_valid else "NOT_FAVOURABLE"
+        reasons = [
+            "Completed five-minute option trend is aligned with the recommendation." if trend_favorable else f"Completed five-minute option trend is {regime['state'].lower()}, which is not aligned with {action}.",
+            (f"Stop-limit trigger has not fired; current completed option price is {entry_gap_pct:.2f}% from the trigger." if entry_instruction == "STOP_LIMIT" and entry_state == "WAITING_FOR_TRIGGER" else f"Current completed option price is {entry_gap_pct:.2f}% from the stated entry.") if entry_gap_pct is not None else "Current entry distance is unavailable.",
+            f"First target is {target_distance_atr:.2f} recent ATR from the latest completed option close." if target_distance_atr is not None else "No directionally valid first target was supplied.",
+        ]
+        return {"status": "READY", "verdict": verdict, "contract": contract, "parsed": parsed,
+                "evidence": {"timeframe": "5 minutes", "completed_candles": len(candles), "last_completed_close": ltp,
+                             "trend": regime, "entry_instruction": entry_instruction, "entry_state": entry_state, "entry_gap_pct": round(entry_gap_pct, 2) if entry_gap_pct is not None else None,
+                             "first_target": first_target, "target_distance_atr": round(target_distance_atr, 2) if target_distance_atr is not None else None},
+                "checks": {"trend_aligned": trend_favorable, "entry_near_stated_price": entry_favorable,
+                           "first_target_direction_valid": target_direction_valid, "first_target_within_four_atr": target_plausible},
+                "reasons": reasons,
+                "message": "AI analysis is a completed-candle evidence check, not a target guarantee. It applies no capital, lot-sizing or reward-to-risk gate."}
+
+    def prepare_trade_recommendation_order(payload):
+        """Build a confirmation-gated FYERS limit or stop-limit entry from an exact parser match.
+
+        Stops and targets are retained as the parsed trade plan. They are not
+        silently converted into separate broker orders: that would require a
+        position-management worker and a distinct explicit authorization.
+        """
+        preview = trade_recommendation_preview(payload)
+        parsed, mapping = preview["parsed"], preview["mapping"]
+        contract = mapping.get("contract") if mapping.get("status") == "EXACT" else None
+        if not contract:
+            raise ValueError("Resolve exactly one active FYERS contract before preparing an order.")
+        if parsed.get("action") not in {"BUY", "SELL"}:
+            raise ValueError("The recommendation must explicitly say BUY or SELL.")
+        try:
+            lots = int(payload.get("lots", 1))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Lots must be a whole number.") from error
+        if lots < 1:
+            raise ValueError("At least one lot is required.")
+        try:
+            entry = float(parsed["entry"])
+            lot_size = int(contract["lot_size"])
+            tick_size = float(contract["tick_size"])
+        except (TypeError, ValueError, KeyError) as error:
+            raise ValueError("The exact FYERS contract needs a positive entry, lot size and tick size.") from error
+        if entry <= 0 or lot_size < 1 or tick_size <= 0:
+            raise ValueError("The exact FYERS contract needs a positive entry, lot size and tick size.")
+        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+        if ":" not in token:
+            raise RuntimeError("A current FYERS connection is required before preparing an order.")
+        app_id, access_token = token.split(":", 1)
+        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+        profile = client.get_profile()
+        if not isinstance(profile, dict) or profile.get("s") != "ok":
+            raise RuntimeError("FYERS profile validation failed; refresh the broker connection before preparing an order.")
+        quote_response = client.quotes({"symbols": contract["symbol"]})
+        quote_values = next((item.get("v") or {} for item in (quote_response.get("d") or []) if (item.get("n") or (item.get("v") or {}).get("symbol")) == contract["symbol"]), {}) if isinstance(quote_response, dict) else {}
+        try:
+            ltp = float(quote_values.get("lp"))
+        except (TypeError, ValueError):
+            ltp = None
+        funds = None
+        try:
+            funds = available_funds(client.funds())
+        except Exception:
+            # Funds are shown when FYERS returns them, but are deliberately not
+            # used as a parser-side capital hard stop.
+            funds = None
+        entry_mode = str(payload.get("entry_mode") or parsed.get("entry_instruction") or "LIMIT").upper()
+        if entry_mode not in {"LIMIT", "STOP_LIMIT"}:
+            raise ValueError("Choose either LIMIT or STOP_LIMIT for the entry ticket.")
+        def tick_round(value):
+            return round(round(float(value) / tick_size) * tick_size, 6)
+        limit_price = tick_round(payload.get("limit_price", entry))
+        trigger_price = tick_round(payload.get("trigger_price", entry))
+        side = 1 if parsed["action"] == "BUY" else -1
+        if entry_mode == "STOP_LIMIT":
+            # FYERS SL-L requires Buy trigger < limit and Sell trigger > limit.
+            if "limit_price" not in payload:
+                limit_price = tick_round(trigger_price + tick_size if side == 1 else trigger_price - tick_size)
+            if (side == 1 and limit_price <= trigger_price) or (side == -1 and limit_price >= trigger_price):
+                raise ValueError("For BUY stop-limit, limit must be above trigger; for SELL stop-limit, limit must be below trigger.")
+        now = datetime.now().astimezone()
+        preview_id = f"PARSER-{now.strftime('%m%d%H%M%S')}-{secrets.token_hex(3).upper()}"
+        order = {
+            "symbol": contract["symbol"], "qty": lot_size * lots, "type": 4 if entry_mode == "STOP_LIMIT" else 1,
+            "side": side,
+            "productType": "MARGIN", "limitPrice": limit_price, "stopPrice": trigger_price if entry_mode == "STOP_LIMIT" else 0,
+            "validity": "DAY", "disclosedQty": 0, "offlineOrder": False,
+        }
+        target_trailing = None
+        if parsed["action"] == "BUY" and len(parsed.get("targets") or []) >= 3:
+            try:
+                target_trailing = parser_target_trail(entry, parsed["targets"], entry)
+            except ValueError:
+                target_trailing = None
+        ticket = {"status": "PREVIEW_ONLY", "preview_id": preview_id, "confirmation_phrase": f"CONFIRM {preview_id}",
+                  "expires_at": (now + timedelta(seconds=120)).isoformat(), "broker": "FYERS",
+                  "contract": contract, "parsed": parsed, "trailing_plan": preview["trailing_plan"], "target_trailing": target_trailing,
+                  "order": order, "fresh_quote": {"ltp": ltp, "provider_timestamp": quote_values.get("tt")},
+                  "available_funds": funds, "live_submission_enabled": parser_live_submission_enabled,
+                  "entry_mode": entry_mode,
+                  "message": f"Review the exact FYERS {'STOP-LIMIT' if entry_mode == 'STOP_LIMIT' else 'LIMIT'} order and confirm it before submission. The T1–T3 target trail is attached to this reviewed plan and activates only after FYERS confirms the fill."}
+        parser_order_previews[preview_id] = {"ticket": ticket, "payload": {"text": payload.get("text"), "lots": lots, "entry_mode": entry_mode, "trigger_price": trigger_price, "limit_price": limit_price}}
+        return ticket
+
+    def submit_trade_recommendation_direct(payload):
+        """Validate and submit one parser order in a single user-click flow."""
+        ticket = prepare_trade_recommendation_order(payload)
+        return submit_trade_recommendation_order({"preview_id": ticket["preview_id"], "confirmation": ticket["confirmation_phrase"]})
+
+    def submit_trade_recommendation_order(payload):
+        preview_id = str(payload.get("preview_id") or "")
+        stored = parser_order_previews.get(preview_id)
+        if not stored:
+            raise ValueError("The parser order preview is unknown or expired. Prepare a fresh ticket.")
+        ticket = stored["ticket"]
+        if str(payload.get("confirmation") or "") != ticket["confirmation_phrase"]:
+            raise ValueError("Type the exact confirmation phrase from the current parser ticket.")
+        if datetime.now().astimezone() >= datetime.fromisoformat(ticket["expires_at"]):
+            parser_order_previews.pop(preview_id, None)
+            raise ValueError("The parser order preview expired. Prepare a fresh ticket.")
+        if not parser_live_submission_enabled:
+            raise PermissionError("Live parser submission is disabled. Enable it deliberately before submitting a parser ticket.")
+        # Rebuild the preview against the current FYERS profile, quote and master
+        # before sending the order.  Any material contract/terms change needs a
+        # new confirmation rather than a silent execution.
+        refreshed = prepare_trade_recommendation_order(stored["payload"])
+        old_order = ticket["order"]
+        new_order = refreshed["order"]
+        if old_order != new_order or ticket["contract"]["symbol"] != refreshed["contract"]["symbol"]:
+            raise PreviewChanged(refreshed)
+        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+        app_id, access_token = token.split(":", 1)
+        response = fyersModel.FyersModel(client_id=app_id, token=access_token).place_order(old_order)
+        parser_order_previews.pop(preview_id, None)
+        return {"status": "SUBMITTED", "broker": "FYERS", "response": response,
+                "message": "FYERS received the parser order. Reconcile its fill status in the broker before relying on any target or trailing plan."}
 
     def search_ema_option_underlyings(query):
         """Offer only master-backed NSE/BSE cash/index underlyings with listed options."""
@@ -843,19 +1277,19 @@ def run_server():
         # Keep history on that exact contract as well: cont_flag=1 would splice
         # a continuous series into the calculation and can disagree with the
         # selected expiry around a roll.
-        response = client.history({"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": (now - timedelta(days=lookback_days)).date().isoformat(), "range_to": now.date().isoformat(), "cont_flag": 0})
+        response = client.history({"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": (now - timedelta(days=lookback_days)).date().isoformat(), "range_to": now.date().isoformat(), "cont_flag": 0, "oi_flag": 1})
         if not isinstance(response, dict) or response.get("s") != "ok" or not isinstance(response.get("candles"), list):
             message = response.get("message") if isinstance(response, dict) else "invalid response"
             raise RuntimeError(f"FYERS EMA Band history is unavailable: {message or 'no candles'}")
         interval_seconds = int(resolution) * 60
-        return [{"timestamp": int(row[0]), "open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]) if len(row) > 5 and row[5] is not None else 0.0, "is_forming": int(row[0]) + interval_seconds > now.timestamp()} for row in response["candles"] if len(row) >= 5 and (include_forming or int(row[0]) + interval_seconds <= now.timestamp())]
+        return [{"timestamp": int(row[0]), "open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]) if len(row) > 5 and row[5] is not None else 0.0, "open_interest": float(row[6]) if len(row) > 6 and row[6] is not None else None, "is_forming": int(row[0]) + interval_seconds > now.timestamp()} for row in response["candles"] if len(row) >= 5 and (include_forming or int(row[0]) + interval_seconds <= now.timestamp())]
 
     def ema_band_completed_candles(client, symbol, timeframe):
         return ema_band_candles(client, symbol, timeframe, include_forming=False)
 
-    def ema_band_current_signal(client, symbol, timeframe, ema_length, entry_session=None):
+    def ema_band_current_signal(client, symbol, timeframe, ema_length, entry_session=None, slope_lookback=8, minimum_slope_atr=0.10):
         completed = ema_band_completed_candles(client, symbol, timeframe)
-        return {**ema_band_strategy_signal(completed, ema_length, entry_session), "timeframe": timeframe, "completed_candles": len(completed)}
+        return {**ema_band_strategy_signal(completed, ema_length, entry_session, slope_lookback, minimum_slope_atr), "timeframe": timeframe, "completed_candles": len(completed)}
 
     def ema_band_current_exit(client, symbol, timeframe, ema_length):
         completed = ema_band_completed_candles(client, symbol, timeframe)
@@ -881,6 +1315,7 @@ def run_server():
                 high_ema = high if high_ema is None else alpha * high + (1 - alpha) * high_ema
                 low_ema = low if low_ema is None else alpha * low + (1 - alpha) * low_ema
                 high_values.append(high_ema); low_values.append(low_ema)
+            rsi_values = ema_rsi_series([candle["close"] for candle in candles])
             state, markers = 0, {}
             for index in range(1, len(candles)):
                 prior, current = candles[index - 1], candles[index]
@@ -888,13 +1323,13 @@ def run_server():
                 if state and inside_band:
                     markers[index] = "EXIT BUY" if state > 0 else "EXIT SELL"; state = 0; continue
                 midpoint = (float(prior["high"]) + float(prior["low"])) / 2
-                long_ready = state == 0 and float(prior["open"]) <= high_values[index - 1] and float(prior["close"]) > high_values[index - 1] and float(current["close"]) > float(current["open"]) and float(current["open"]) > midpoint
-                short_ready = state == 0 and float(prior["open"]) >= low_values[index - 1] and float(prior["close"]) < low_values[index - 1] and float(current["close"]) < float(current["open"]) and float(current["open"]) < midpoint
+                long_ready = state == 0 and float(prior["open"]) <= high_values[index - 1] and float(prior["close"]) > high_values[index - 1] and float(current["close"]) > midpoint
+                short_ready = state == 0 and float(prior["open"]) >= low_values[index - 1] and float(prior["close"]) < low_values[index - 1] and float(current["close"]) < midpoint
                 if long_ready:
                     markers[index] = "BUY"; state = 1
                 elif short_ready:
                     markers[index] = "SELL"; state = -1
-            start = max(0, len(candles) - max(20, min(int(bars), 200)))
+            start = max(0, len(candles) - max(20, min(int(bars), 500)))
             completed = [candle for candle in candles if not candle.get("is_forming")]
             pivots = []
             for index in range(2, len(completed) - 2):
@@ -914,7 +1349,7 @@ def run_server():
             if resistances:
                 label, price, timestamp = min(resistances, key=lambda item: item[1])
                 levels.append({"label": label, "price": round(price, 4), "timestamp": timestamp})
-            snapshot = {"symbol": symbol, "timeframe": timeframe, "ema_length": length, "source": "FYERS fixed-contract candles", "levels": levels, "candles": [{**candle, "ema_high": round(high_values[index], 4), "ema_low": round(low_values[index], 4), "marker": None if candle.get("is_forming") else markers.get(index)} for index, candle in enumerate(candles[start:], start)]}
+            snapshot = {"symbol": symbol, "timeframe": timeframe, "ema_length": length, "rsi_length": 14, "source": "FYERS fixed-contract candles", "levels": levels, "candles": [{**candle, "ema_high": round(high_values[index], 4), "ema_low": round(low_values[index], 4), "rsi_14": round(rsi_values[index], 4) if rsi_values[index] is not None else None, "marker": None if candle.get("is_forming") else markers.get(index)} for index, candle in enumerate(candles[start:], start)]}
             ema_chart_cache.update({"key": cache_key, "snapshot": snapshot, "refreshed_at": now})
         quote = client.quotes({"symbols": symbol})
         values = ((quote.get("d") or [{}])[0].get("v") or {}) if isinstance(quote, dict) and quote.get("s") == "ok" else {}
@@ -947,7 +1382,7 @@ def run_server():
                         "Live EMA Band order submission is configured but the runtime gate is off. Set SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=1 and connect a FYERS token to enable it."),
         }
 
-    def resolve_ema_atm_option(underlying_symbol, timeframe, ema_length, mode="PAPER", entry_session=None):
+    def resolve_ema_atm_option(underlying_symbol, timeframe, ema_length, mode="PAPER", entry_session=None, slope_lookback=8, minimum_slope_atr=0.10):
         """Resolve a directional ATM option from a fresh quote and the cached master."""
         mode_status = ema_band_mode_capability(mode)
         state = ema_master_status()
@@ -972,7 +1407,7 @@ def run_server():
             raise RuntimeError("FYERS authentication is required to obtain a fresh underlying quote for ATM selection.")
         app_id, access_token = token.split(":", 1)
         client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        signal = ema_band_current_signal(client, symbol, timeframe, ema_length, entry_session)
+        signal = ema_band_current_signal(client, symbol, timeframe, ema_length, entry_session, slope_lookback, minimum_slope_atr)
         if not signal.get("direction"):
             raise RuntimeError(signal["message"])
         quote = client.quotes({"symbols": symbol})
@@ -1016,6 +1451,98 @@ def run_server():
         entries.sort(key=lambda item: item.get("at") or "", reverse=True)
         return entries[:limit]
 
+    def ema_readonly_client():
+        """Return a FYERS client for position and quote reads only."""
+        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+        if not token or ":" not in token:
+            raise RuntimeError("FYERS authentication is required to load tracked EMA positions.")
+        app_id, access_token = token.split(":", 1)
+        return fyersModel.FyersModel(client_id=app_id, token=access_token)
+
+    def ema_tracked_positions_snapshot():
+        """Show durable paper positions plus every broker-open position.
+
+        This is read-only observability.  It deliberately does not adopt every
+        broker position into automated EMA exits: only a position explicitly
+        started with an EMA runner configuration can be managed automatically.
+        """
+        paper_open = {}
+        for entry in sorted(ema_execution_log(1000), key=lambda item: item.get("at") or ""):
+            if str(entry.get("source") or entry.get("mode") or "").upper() != "PAPER":
+                continue
+            status = str(entry.get("status") or "")
+            ticket = entry.get("ticket") or {}
+            position = entry.get("position") or {}
+            symbol = str(ticket.get("symbol") or position.get("symbol") or "")
+            if status == "PAPER_ENTRY_RECORDED" and symbol:
+                paper_open[symbol] = {
+                    "id": f"PAPER:{symbol}", "source": "PAPER", "symbol": symbol,
+                    "description": ticket.get("description") or symbol,
+                    "quantity": int(ticket.get("quantity") or 0),
+                    "entry_price": ticket.get("limit_price"), "opened_at": entry.get("at"),
+                    "managed_by_ema": False,
+                }
+            elif status == "PAPER_EXIT_RECORDED" and symbol:
+                paper_open.pop(symbol, None)
+
+        tracked = list(paper_open.values())
+        client = ema_readonly_client()
+        response = client.positions()
+        if not isinstance(response, dict) or response.get("s") != "ok":
+            raise RuntimeError("FYERS positions are unavailable; tracked broker positions cannot be refreshed.")
+        broker_rows = response.get("netPositions") or (response.get("data") or {}).get("netPositions") or []
+        for row in broker_rows:
+            try:
+                quantity = int(float(row.get("netQty", row.get("qty", 0)) or 0))
+            except (TypeError, ValueError):
+                continue
+            symbol = str(row.get("symbol") or "")
+            if not symbol or quantity == 0:
+                continue
+            try:
+                entry_price = float(row.get("netAvg", row.get("buyAvg", row.get("buy_rate", 0))) or 0)
+            except (TypeError, ValueError):
+                entry_price = None
+            tracked.append({
+                "id": f"BROKER:{symbol}", "source": "FYERS", "symbol": symbol,
+                "description": str(row.get("symbolName") or row.get("symbol") or ""),
+                "quantity": quantity, "entry_price": entry_price,
+                "broker_pnl": row.get("pl", row.get("pnl")), "managed_by_ema": False,
+            })
+
+        with ema_runner_lock:
+            active = ema_runner.get("position")
+            active_chart = ema_runner.get("chart")
+            if active:
+                for item in tracked:
+                    if item["symbol"] == active.get("symbol"):
+                        item["managed_by_ema"] = True
+                        item["chart"] = active_chart
+                        break
+                else:
+                    tracked.append({"id": f"RUNNER:{active.get('symbol')}", "source": ema_runner.get("config", {}).get("mode", "PAPER"),
+                                    "symbol": active.get("symbol"), "description": active.get("description") or active.get("symbol"),
+                                    "quantity": active.get("quantity"), "entry_price": active.get("entry_price"),
+                                    "managed_by_ema": True, "chart": active_chart})
+
+        symbols = sorted({item["symbol"] for item in tracked if item.get("symbol")})
+        if symbols:
+            quote = client.quotes({"symbols": ",".join(symbols)})
+            quote_rows = (quote.get("d") or []) if isinstance(quote, dict) and quote.get("s") == "ok" else []
+            quotes = {str(row.get("n") or (row.get("v") or {}).get("symbol") or ""): (row.get("v") or {}).get("lp") for row in quote_rows}
+            for item in tracked:
+                ltp = quotes.get(item["symbol"])
+                try:
+                    ltp = float(ltp)
+                except (TypeError, ValueError):
+                    ltp = None
+                item["ltp"] = ltp
+                if item["source"] == "PAPER" and ltp is not None and item.get("entry_price") is not None:
+                    item["pnl"] = round((ltp - float(item["entry_price"])) * int(item["quantity"]), 2)
+                elif item.get("broker_pnl") is not None:
+                    item["pnl"] = item["broker_pnl"]
+        return {"positions": tracked, "as_of": datetime.now().astimezone().isoformat()}
+
     def ema_runner_snapshot():
         with ema_runner_lock:
             snapshot = {key: value for key, value in ema_runner.items() if key != "thread"}
@@ -1031,6 +1558,11 @@ def run_server():
         config = {
             "underlying": str(payload.get("underlying") or "").upper(), "timeframe": str(payload.get("timeframe") or "5 minutes"),
             "ema_length": int(payload.get("ema_length") or 21), "mode": mode,
+            "slope_lookback": max(2, int(payload.get("slope_lookback") or 8)),
+            "minimum_slope_atr": max(0.0, float(payload.get("minimum_slope_atr") or 0.10)),
+            "resistance_volume_exit": bool(payload.get("resistance_volume_exit", False)),
+            "resistance_volume_lookback": max(2, int(payload.get("resistance_volume_lookback") or 20)),
+            "resistance_volume_multiple": max(0.0, float(payload.get("resistance_volume_multiple") or 1.5)),
         }
         if not config["underlying"]:
             raise ValueError("Choose an option-eligible broker-master underlying before starting the EMA Band runner.")
@@ -1134,7 +1666,7 @@ def run_server():
                 return None
             row, contract_row, quantity, entry = candidates[0]
             lot_size, tick_size = int(float(contract_row[3])), float(contract_row[4])
-            return {"symbol": str(row["symbol"]), "description": str(contract_row[1]), "quantity": quantity, "lots": max(1, quantity // lot_size), "entry_price": entry, "stop_price": None, "target_price": None, "profit_protection_pct": config["profit_protection_pct"], "profit_peak_price": entry, "profit_protection_stop": None, "adopted_manual_position": True, "opened_at": datetime.now().astimezone().isoformat(), "lot_size": lot_size, "tick_size": tick_size}
+            return {"symbol": str(row["symbol"]), "description": str(contract_row[1]), "quantity": quantity, "lots": max(1, quantity // lot_size), "entry_price": entry, "stop_price": None, "target_price": None, "profit_protection_pct": config["profit_protection_pct"], "profit_peak_price": entry, "profit_protection_stop": None, "direction": "BULLISH" if str(contract_row[16]).upper() == "CE" else "BEARISH", "adopted_manual_position": True, "opened_at": datetime.now().astimezone().isoformat(), "lot_size": lot_size, "tick_size": tick_size}
 
         def submit_live_entry(ticket):
             if os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") != "1":
@@ -1237,8 +1769,11 @@ def run_server():
                         record_ema_tick(ltp)
                         indicator_exit = ema_band_current_exit(client, config["underlying"], config["timeframe"], config["ema_length"])
                         hit_indicator = bool(indicator_exit.get("exit"))
-                        if hit_stop or hit_target or hit_indicator:
-                            reason = "PROFIT_PROTECTION" if protection and protection["exit"] else "STOP_LOSS" if hit_stop else "TARGET" if hit_target else "INDICATOR_EXIT"
+                        candles = ema_band_completed_candles(client, config["underlying"], config["timeframe"])
+                        resistance_exit = ema_band_resistance_volume_exit(candles, config["resistance_volume_lookback"], config["resistance_volume_multiple"]) if config["resistance_volume_exit"] and position.get("direction") == "BULLISH" else {"exit": False, "message": "Resistance-volume exit is inactive for this position."}
+                        hit_resistance = bool(resistance_exit.get("exit")) and ltp > position["entry_price"]
+                        if hit_stop or hit_target or hit_indicator or hit_resistance:
+                            reason = "PROFIT_PROTECTION" if protection and protection["exit"] else "STOP_LOSS" if hit_stop else "TARGET" if hit_target else "RESISTANCE_VOLUME_EXIT" if hit_resistance else "INDICATOR_EXIT"
                             try:
                                 exit_result = submit_live_exit(position, reason, ltp)
                             except PermissionError as blocked:
@@ -1255,7 +1790,7 @@ def run_server():
                             else:
                                 realized_pnl = round((ltp - position["entry_price"]) * position["quantity"], 2) if ltp is not None else None
                                 event = {"at": datetime.now().astimezone().isoformat(), "mode": "LIVE", "status": "LIVE_EXIT_SUBMITTED",
-                                          "position": position, "indicator_exit": indicator_exit, "realized_pnl_rupees": realized_pnl, **exit_result}
+                                          "position": position, "indicator_exit": indicator_exit, "resistance_exit": resistance_exit, "realized_pnl_rupees": realized_pnl, **exit_result}
                                 with ema_runner_lock:
                                     ema_runner["status"] = event["status"]
                                     ema_runner["last_event"] = event
@@ -1268,7 +1803,7 @@ def run_server():
                         else:
                             with ema_runner_lock:
                                 ema_runner["status"] = "LIVE_POSITION_OPEN"
-                                ema_runner["last_event"] = {"at": datetime.now().astimezone().isoformat(), "mode": "LIVE", "status": "LIVE_POSITION_OPEN", "position": position, "ltp": ltp, "indicator_exit": indicator_exit, "profit_protection": protection}
+                                ema_runner["last_event"] = {"at": datetime.now().astimezone().isoformat(), "mode": "LIVE", "status": "LIVE_POSITION_OPEN", "position": position, "ltp": ltp, "indicator_exit": indicator_exit, "resistance_exit": resistance_exit, "profit_protection": protection}
                     elif config["mode"] == "PAPER" and position:
                         client = live_client()
                         quote = client.quotes({"symbols": position["symbol"]})
@@ -1281,10 +1816,13 @@ def run_server():
                         position.update({"profit_peak_price": protection["peak_price"], "profit_protection_stop": protection["stop_price"], "profit_protection_stage": protection["stage"]})
                         record_ema_tick(ltp)
                         indicator_exit = ema_band_current_exit(client, config["underlying"], config["timeframe"], config["ema_length"])
-                        if protection["exit"] or indicator_exit.get("exit"):
-                            reason = "PROFIT_PROTECTION" if protection["exit"] else "INDICATOR_EXIT"
+                        candles = ema_band_completed_candles(client, config["underlying"], config["timeframe"])
+                        resistance_exit = ema_band_resistance_volume_exit(candles, config["resistance_volume_lookback"], config["resistance_volume_multiple"]) if config["resistance_volume_exit"] and position.get("direction") == "BULLISH" else {"exit": False, "message": "Resistance-volume exit is inactive for this position."}
+                        hit_resistance = bool(resistance_exit.get("exit")) and ltp > position["entry_price"]
+                        if protection["exit"] or indicator_exit.get("exit") or hit_resistance:
+                            reason = "PROFIT_PROTECTION" if protection["exit"] else "RESISTANCE_VOLUME_EXIT" if hit_resistance else "INDICATOR_EXIT"
                             realized_pnl = round((ltp - position["entry_price"]) * position["quantity"], 2)
-                            event = {"at": datetime.now().astimezone().isoformat(), "mode": "PAPER", "status": "PAPER_EXIT_RECORDED", "position": position, "exit_ltp": ltp, "exit_reason": reason, "realized_pnl_rupees": realized_pnl, "indicator_exit": indicator_exit}
+                            event = {"at": datetime.now().astimezone().isoformat(), "mode": "PAPER", "status": "PAPER_EXIT_RECORDED", "position": position, "exit_ltp": ltp, "exit_reason": reason, "realized_pnl_rupees": realized_pnl, "indicator_exit": indicator_exit, "resistance_exit": resistance_exit}
                             with ema_runner_lock:
                                 ema_runner.update({"status": event["status"], "last_event": event, "position": None})
                                 if ema_runner.get("chart"):
@@ -1302,7 +1840,7 @@ def run_server():
                                 ema_runner["last_event"] = event
                             threading.Event().wait(15)
                             continue
-                        resolved = resolve_ema_atm_option(config["underlying"], config["timeframe"], config["ema_length"], config["mode"], config["entry_session"])
+                        resolved = resolve_ema_atm_option(config["underlying"], config["timeframe"], config["ema_length"], config["mode"], config["entry_session"], config["slope_lookback"], config["minimum_slope_atr"])
                         signal_key = f"{resolved['signal']['completed_candle']}:{resolved['contract']['symbol']}"
                         event = {"at": datetime.now().astimezone().isoformat(), "signal": resolved["signal"], "contract": resolved["contract"], "underlying": resolved["underlying_symbol"], "mode": config["mode"]}
                         with ema_runner_lock:
@@ -1316,7 +1854,7 @@ def run_server():
                                 ema_runner["status"] = event["status"]
                                 ema_runner["last_event"] = event
                                 if not duplicate:
-                                    position = {"symbol": ticket["symbol"], "description": ticket["description"], "quantity": ticket["quantity"], "lots": ticket["lots"], "entry_price": ticket["limit_price"], "stop_price": ticket["stop_price"], "target_price": ticket["target_price"], "profit_protection_pct": ticket["profit_protection_pct"], "profit_peak_price": ticket["limit_price"], "profit_protection_stop": None, "opened_at": event["at"]}
+                                    position = {"symbol": ticket["symbol"], "description": ticket["description"], "quantity": ticket["quantity"], "lots": ticket["lots"], "entry_price": ticket["limit_price"], "stop_price": ticket["stop_price"], "target_price": ticket["target_price"], "profit_protection_pct": ticket["profit_protection_pct"], "profit_peak_price": ticket["limit_price"], "profit_protection_stop": None, "direction": resolved["direction"], "opened_at": event["at"]}
                                     ema_runner["position"] = position
                                     ema_runner["chart"] = {"symbol": ticket["symbol"], "description": ticket["description"], "quantity": ticket["quantity"], "entry_price": ticket["limit_price"], "stop_price": ticket["stop_price"], "target_price": ticket["target_price"], "opened_at": event["at"], "closed": False, "exit_price": None, "exit_reason": None, "realized_pnl_rupees": None, "ticks": []}
                             if not duplicate:
@@ -1328,7 +1866,7 @@ def run_server():
                             order_id = submit_live_entry(ticket)
                             position = {"symbol": ticket["symbol"], "description": ticket["description"], "quantity": ticket["quantity"],
                                         "lots": ticket["lots"], "entry_price": ticket["limit_price"], "stop_price": ticket["stop_price"],
-                                        "target_price": ticket["target_price"], "profit_protection_pct": ticket["profit_protection_pct"], "profit_peak_price": ticket["limit_price"], "profit_protection_stop": None, "entry_order_id": order_id, "opened_at": event["at"]}
+                                        "target_price": ticket["target_price"], "profit_protection_pct": ticket["profit_protection_pct"], "profit_peak_price": ticket["limit_price"], "profit_protection_stop": None, "direction": resolved["direction"], "entry_order_id": order_id, "opened_at": event["at"]}
                             event["ticket"] = ticket
                             event["order_id"] = order_id
                             event["status"] = "LIVE_ENTRY_SUBMITTED"
@@ -1355,7 +1893,7 @@ def run_server():
                     if "No completed EMA Band entry signal" in message:
                         try:
                             candles = ema_band_completed_candles(live_client(), config["underlying"], config["timeframe"])
-                            checklist = ema_band_entry_checklist(candles, config["ema_length"], has_active_position=False)
+                            checklist = ema_band_entry_checklist(candles, config["ema_length"], has_active_position=False, slope_lookback=config["slope_lookback"], minimum_slope_atr=config["minimum_slope_atr"])
                             watch_key = json.dumps({"candle": checklist.get("completed_candle"), "checks": checklist.get("checks")}, sort_keys=True)
                         except Exception as checklist_error:
                             message = f"{message}; checklist unavailable: {checklist_error}"
@@ -1427,6 +1965,454 @@ def run_server():
         runners={"sensex": sensex_straddle, "nifty": nifty_straddle},
     )
     fyers_execution = FyersExecutionService(execution_halt=automation_policy.halt)
+    # KAMA deliberately owns its state, policy, journal, and runtime gate.  It
+    # may reuse FYERS master/candle plumbing as an *eligibility/data* screen,
+    # but it never calls an EMA signal or uses EMA eligibility as an entry
+    # authorization.
+    kama_runner = {"running": False, "mode": "PAPER", "status": "STOPPED", "config": None,
+                   "position": None, "chart": None, "last_event": None, "run_started_at": None,
+                   "last_bar": None, "last_long_exit_bar": None, "last_short_exit_bar": None,
+                   "policy": {"state": "PAPER_ONLY", "live_submission": False,
+                              "fresh_preflight": "NOT_RUN", "reconciliation": "NOT_APPLICABLE",
+                              "risk_policy": "NOT_APPLICABLE"}, "events": [], "thread": None}
+    kama_runner_lock = threading.Lock()
+    kama_runner_paper_log = ROOT / ".private" / "kama-runner-paper.jsonl"
+    kama_runner_live_log = ROOT / ".private" / "kama-runner-live.jsonl"
+
+    def kama_live_capability():
+        """Report KAMA's independent, explicit live-execution gates."""
+        environment_gate = os.getenv("SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS") == "1"
+        dashboard_gate = os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") == "1"
+        configured = bool(load_config().get("FYERS_ACCESS_TOKEN", "").count(":"))
+        return {"strategy": "KAMA V6", "selected_broker": "FYERS", "fyers_configured": configured,
+                "kama_runtime_gate": environment_gate, "dashboard_runtime_gate": dashboard_gate,
+                "live_submission_enabled": bool(environment_gate and dashboard_gate and configured),
+                "supported_execution": "Direct NSE/BSE equities or MCX futures; Options mode maps bullish to ATM Call and bearish to ATM Put for NSE/BSE/MCX.",
+                "short_entry": "Direct live short remains fail-closed; bearish Options mode buys an ATM Put.",
+                "message": ("Live KAMA requires a current FYERS session plus both runtime gates. No runner has been activated."
+                            if not (environment_gate and dashboard_gate and configured) else
+                            "Live KAMA submission is available only through its completed-candle runner; starting it will submit real FYERS orders on qualifying signals.")}
+
+    def kama_live_submission_enabled():
+        return os.getenv("SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS") == "1" and os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") == "1"
+
+    def kama_runner_snapshot():
+        with kama_runner_lock:
+            result = {key: value for key, value in kama_runner.items() if key != "thread"}
+            if not result["running"]:
+                # A stopped context is not an open trade.  Events remain in the
+                # dedicated journal and are exposed as history only.
+                result.update({"status": "STOPPED", "config": None, "position": None, "chart": None,
+                               "last_event": None, "run_started_at": None})
+            return result
+
+    def kama_execution_log(limit=200):
+        records = []
+        for journal, source in ((kama_runner_paper_log, "PAPER"), (kama_runner_live_log, "LIVE")):
+            try:
+                lines = journal.read_text(encoding="utf-8").splitlines()
+            except (OSError, FileNotFoundError):
+                continue
+            for line in lines[-limit:]:
+                try:
+                    record = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(record, dict):
+                    records.append({"source": source, **record})
+        return sorted(records, key=lambda item: item.get("at") or "", reverse=True)[:limit]
+
+    def kama_append_event(event, mode):
+        journal = kama_runner_paper_log if mode == "PAPER" else kama_runner_live_log
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        with journal.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+
+    def search_kama_underlyings(query, execution_mode="EQUITY"):
+        """Search master-backed equity/index underlyings for KAMA execution."""
+        state = ema_master_status()
+        if not state["usable"]:
+            raise RuntimeError("FYERS master cache is missing or older than 72 hours. KAMA selection remains fail-closed.")
+        mode = str(execution_mode or "EQUITY").strip().upper()
+        if mode not in {"EQUITY", "OPTIONS"}:
+            raise ValueError("Choose Equity mode or Options mode.")
+        needle = str(query or "").strip().upper()
+        if len(needle) < 2:
+            return {"matches": [], "status": state, "execution_mode": mode}
+        now_epoch = datetime.now().timestamp()
+        option_underlyings = set()
+        for option_segment in ("NSE_FO", "BSE_FO", "MCX_COM"):
+            exchange = option_segment.split("_", 1)[0]
+            for row in csv.reader(io.StringIO((ema_master_dir / f"{option_segment}.csv").read_text(encoding="utf-8"))):
+                try:
+                    active_option = len(row) >= 17 and str(row[16]).upper() in {"CE", "PE"} and float(row[8]) > now_epoch
+                except (TypeError, ValueError):
+                    active_option = False
+                if active_option:
+                    option_underlyings.add((exchange, str(row[13]).strip().upper()))
+        matches = []
+        for segment in ("NSE_CM", "BSE_CM"):
+            exchange = segment.split("_", 1)[0]
+            for row in csv.reader(io.StringIO((ema_master_dir / f"{segment}.csv").read_text(encoding="utf-8"))):
+                if len(row) < 17 or needle not in " ".join(row).upper() or not ema_cash_or_index_row_matches_exchange(row, exchange):
+                    continue
+                symbol = str(row[9]).strip()
+                underlying = str(row[13]).strip().upper()
+                kind = "INDEX" if symbol.upper().endswith("-INDEX") else "EQUITY"
+                option_eligible = (exchange, underlying) in option_underlyings
+                if mode == "EQUITY" and kind != "EQUITY":
+                    continue
+                if mode == "OPTIONS" and not option_eligible:
+                    continue
+                matches.append({"underlying_kind": kind, "segment": segment, "symbol": symbol,
+                                "description": row[1], "underlying": underlying,
+                                "lot_size": row[3], "tick_size": row[4], "option_eligible": option_eligible})
+        active_mcx_futures = {}
+        for row in csv.reader(io.StringIO((ema_master_dir / "MCX_COM.csv").read_text(encoding="utf-8"))):
+            if len(row) < 17 or str(row[16]).upper() != "XX":
+                continue
+            underlying = str(row[13]).strip().upper()
+            try:
+                expiry = float(row[8])
+            except (TypeError, ValueError):
+                continue
+            if expiry <= now_epoch or ("MCX", underlying) not in option_underlyings:
+                continue
+            current = active_mcx_futures.get(underlying)
+            if current is None or expiry < current[0]:
+                active_mcx_futures[underlying] = (expiry, row)
+        for underlying, (_, row) in active_mcx_futures.items():
+            if needle not in " ".join(row).upper():
+                continue
+            matches.append({"underlying_kind": "COMMODITY_FUTURE", "segment": "MCX_COM", "symbol": row[9],
+                            "description": row[1], "underlying": underlying, "lot_size": row[3],
+                            "tick_size": row[4], "option_eligible": True})
+        matches.sort(key=lambda item: ema_master_search_rank(item, needle))
+        return {"matches": matches[:20], "status": state, "execution_mode": mode,
+                "selection_policy": "CURRENT_FYERS_MASTER_UNDERLYINGS_ONLY"}
+
+    def kama_eligible_underlying(symbol, execution_mode="EQUITY"):
+        """Use the exact master only to screen an instrument, never a signal.
+
+        This deliberately applies the same exchange and segment filters as EMA Band.
+        """
+        matches = search_kama_underlyings(symbol, execution_mode).get("matches") or []
+        return next((item for item in matches if str(item.get("symbol") or "").upper() == symbol), None)
+
+    def kama_authenticated_client():
+        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+        if not token or ":" not in token:
+            raise RuntimeError("KAMA requires a current FYERS session for broker candles and reconciliation.")
+        app_id, access_token = token.split(":", 1)
+        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+        profile = client.get_profile()
+        if not isinstance(profile, dict) or profile.get("s") != "ok":
+            raise RuntimeError("KAMA FYERS session validation failed; the runner remains fail-closed.")
+        return client
+
+    def kama_fresh_preflight(client, symbol, expected_position=None, require_two_sided=True):
+        """Read-only session, two-sided quote, and exact broker reconciliation."""
+        quote = client.quotes({"symbols": symbol})
+        values = ((quote.get("d") or [{}])[0].get("v") or {}) if isinstance(quote, dict) and quote.get("s") == "ok" else {}
+        try:
+            ltp = float(values.get("lp"))
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("KAMA fresh preflight failed: FYERS did not return a valid traded value.") from error
+        try:
+            bid = float(values.get("bid"))
+            ask = float(values.get("ask"))
+        except (TypeError, ValueError):
+            bid = ask = None
+        if ltp <= 0 or (require_two_sided and (bid is None or ask is None or min(bid, ask) <= 0 or ask < bid)):
+            raise RuntimeError("KAMA fresh preflight failed: FYERS did not return a valid executable two-sided quote.")
+        result = {"status": "READY", "symbol": symbol, "ltp": ltp, "bid": bid, "ask": ask, "provider_timestamp": values.get("tt"),
+                  "session": "VALIDATED", "quote": "FRESH_TWO_SIDED" if require_two_sided else "FRESH_TRADED_VALUE"}
+        if expected_position:
+            response = client.positions()
+            reconciliation, message = kama_position_reconciliation(response, expected_position["symbol"], expected_position["quantity"], expected_position["side"])
+            result.update({"reconciliation": reconciliation, "reconciliation_message": message})
+            if reconciliation != "CONFIRMED":
+                raise RuntimeError(f"KAMA broker reconciliation failed: {message}")
+        return result
+
+    def kama_position_reconciliation(response, symbol, minimum_quantity, expected_side):
+        """KAMA's own exact broker-position check before a management order."""
+        if not isinstance(response, dict) or response.get("s") != "ok":
+            return "UNAVAILABLE", "FYERS positions are unavailable; KAMA management is blocked."
+        for row in response.get("netPositions") or (response.get("data") or {}).get("netPositions") or []:
+            if str(row.get("symbol") or "").upper() != str(symbol).upper():
+                continue
+            try:
+                net = float(row.get("netQty", row.get("qty", 0)) or 0)
+                bought = float(row.get("buyQty", row.get("buy_qty", 0)) or 0)
+            except (TypeError, ValueError):
+                continue
+            try:
+                sold = float(row.get("sellQty", row.get("sell_qty", 0)) or 0)
+            except (TypeError, ValueError):
+                continue
+            if expected_side > 0 and net >= minimum_quantity and bought >= minimum_quantity:
+                return "CONFIRMED", "FYERS confirms KAMA's exact open long quantity."
+            if expected_side < 0 and net <= -minimum_quantity and sold >= minimum_quantity:
+                return "CONFIRMED", "FYERS confirms KAMA's exact open short quantity."
+        return "ABSENT_OR_PARTIAL", "FYERS does not confirm KAMA's full exact position; no management order is authorized."
+
+    def kama_resolve_entry_instrument(client, config, signal, underlying_quote, enforce_live=False):
+        """Map a KAMA underlying signal to the exact direct or ATM option instrument."""
+        signal_side = 1 if signal["action"] == "ENTER_LONG" else -1
+        if config["execution_mode"] == "OPTIONS":
+            exchange = config["underlying"].split(":", 1)[0]
+            option_segment = "MCX_COM" if exchange == "MCX" else f"{exchange}_FO"
+            if option_segment not in FYERS_MASTER_SOURCES:
+                raise ValueError("KAMA Options mode supports NSE, BSE, and MCX master underlyings only.")
+            rows = csv.reader(io.StringIO((ema_master_dir / f"{option_segment}.csv").read_text(encoding="utf-8")))
+            direction = "BULLISH" if signal_side > 0 else "BEARISH"
+            contract = select_ema_atm_option(rows, config["master_underlying"], direction, underlying_quote["ltp"], datetime.now().timestamp())
+            traded_quote = kama_fresh_preflight(client, contract["symbol"])
+            quantity = config["size"] * int(contract["lot_size"])
+            return {**contract, "instrument_type": "INDEX_OPTION" if config["underlying_kind"] == "INDEX" else "MCX_OPTION" if exchange == "MCX" else "STOCK_OPTION",
+                    "quantity": quantity, "side": 1, "signal_side": signal_side, "quote": traded_quote,
+                    "selection": f"ATM {contract['option_type']} from nearest unexpired FYERS expiry"}
+        if enforce_live and signal_side < 0:
+            raise PermissionError("Direct KAMA short entry remains blocked because exact intraday short-margin validation is unavailable. Use Options mode for bearish Put selection.")
+        lot_size = int(float(config.get("lot_size") or 1))
+        quantity = config["size"] * lot_size if config["underlying_kind"] == "COMMODITY_FUTURE" else config["size"]
+        return {"symbol": config["underlying"], "description": config["description"], "instrument_type": config["underlying_kind"],
+                "lot_size": lot_size, "tick_size": float(config.get("tick_size") or .05), "quantity": quantity,
+                "side": signal_side, "signal_side": signal_side, "quote": underlying_quote, "selection": "Exact selected FYERS master underlying"}
+
+    def kama_live_entry_preflight(client, config, signal, quote):
+        if not kama_live_submission_enabled():
+            raise PermissionError("KAMA live submission is disabled. Both KAMA and FYERS runtime gates must be set by the operator.")
+        positions = client.positions()
+        if not isinstance(positions, dict) or positions.get("s") != "ok":
+            raise RuntimeError("FYERS positions are unavailable; KAMA live entry is blocked.")
+        open_rows = []
+        for row in positions.get("netPositions") or (positions.get("data") or {}).get("netPositions") or []:
+            try:
+                if float(row.get("netQty", row.get("qty", 0)) or 0) != 0:
+                    open_rows.append(row)
+            except (TypeError, ValueError):
+                continue
+        if open_rows:
+            raise RuntimeError("FYERS reports an open position; KAMA will not add a live position until the account is flat.")
+        instrument = kama_resolve_entry_instrument(client, config, signal, quote, enforce_live=True)
+        orders = client.orderbook()
+        if not isinstance(orders, dict) or orders.get("s") != "ok":
+            raise RuntimeError("FYERS order state is unavailable; KAMA live entry is blocked.")
+        pending = {4, 6}
+        for row in orders.get("orderBook") or (orders.get("data") or {}).get("orderBook") or []:
+            try:
+                status = int(row.get("status"))
+            except (TypeError, ValueError):
+                status = -1
+            if str(row.get("symbol") or "").upper() == instrument["symbol"] and status in pending:
+                raise RuntimeError("FYERS has a pending order for this KAMA symbol; reconcile it before continuing.")
+        side = instrument["side"]
+        traded_quote = instrument["quote"]
+        limit_price = traded_quote["ask"] if side > 0 else traded_quote["bid"]
+        invalidation = config["invalidation"]
+        if (side > 0 and invalidation >= limit_price) or (side < 0 and invalidation <= limit_price):
+            raise RuntimeError("KAMA invalidation is not on the safe side of the fresh FYERS limit price.")
+        worst_case_risk = abs(limit_price - invalidation) * instrument["quantity"]
+        if worst_case_risk > config["idea_risk_limit"]:
+            raise RuntimeError("KAMA worst-case stop risk exceeds its configured per-idea limit.")
+        return {key: value for key, value in instrument.items() if key != "quote"} | {
+                "limit_price": limit_price, "worst_case_risk": round(worst_case_risk, 2)}
+
+    def kama_submit_live_entry(client, config, signal, quote):
+        ticket = kama_live_entry_preflight(client, config, signal, quote)
+        order = {"symbol": ticket["symbol"], "qty": ticket["quantity"], "type": 1, "side": ticket["side"],
+                 "productType": "INTRADAY", "limitPrice": ticket["limit_price"], "stopPrice": 0,
+                 "validity": "DAY", "disclosedQty": 0, "offlineOrder": False}
+        response = client.place_order(order)
+        order_ids = _ema_order_ids(response)
+        if not order_ids:
+            raise RuntimeError("FYERS did not accept the KAMA live entry order.")
+        return {**ticket, "entry_order_id": order_ids[0]}
+
+    def kama_submit_live_exit(client, position, reason, quote):
+        reconciliation, message = kama_position_reconciliation(client.positions(), position["symbol"], position["quantity"], position["side"])
+        if reconciliation != "CONFIRMED":
+            raise PermissionError(message)
+        if not kama_live_submission_enabled():
+            raise PermissionError("KAMA live submission is disabled; no exit order was sent.")
+        side = -1 if position["side"] > 0 else 1
+        order = {"symbol": position["symbol"], "qty": position["quantity"], "type": 1, "side": side,
+                 "productType": "INTRADAY", "limitPrice": quote["bid"] if side < 0 else quote["ask"], "stopPrice": 0,
+                 "validity": "DAY", "disclosedQty": 0, "offlineOrder": False}
+        response = client.place_order(order)
+        order_ids = _ema_order_ids(response)
+        if not order_ids:
+            raise RuntimeError("FYERS did not accept the KAMA live exit order.")
+        return {"exit_order_id": order_ids[0], "exit_reason": reason}
+
+    def kama_policy(config, mode):
+        return {"state": "PAPER_ONLY" if mode == "PAPER" else "LIVE_GATED",
+                "signal_authority": "KAMA V6 completed candles only",
+                "eligibility_authority": "FYERS master screen only; it cannot authorize a trade; the selected record is an exact underlying",
+                "execution_mode": config["execution_mode"],
+                "option_selection": "Bullish KAMA selects ATM Call; bearish KAMA selects ATM Put; nearest unexpired FYERS expiry" if config["execution_mode"] == "OPTIONS" else "Exact selected FYERS equity or commodity future",
+                "entry_session": config["entry_session"], "squareoff_session": config["squareoff_session"],
+                "risk_policy": "Live requires fresh session, quote, exact broker position reconciliation, bounded risk policy, and both KAMA/FYERS runtime gates.",
+                "exit_policy": "KAMA reversal or mandatory square-off; stale, missing, partial, or external broker state clears local context and blocks exit submission."}
+
+    def start_kama_runner(payload):
+        mode = str(payload.get("mode") or "PAPER").upper()
+        if mode not in {"PAPER", "LIVE"}:
+            raise ValueError("KAMA mode must be PAPER or LIVE.")
+        execution_mode = str(payload.get("execution_mode") or "EQUITY").upper()
+        if execution_mode not in {"EQUITY", "OPTIONS"}:
+            raise ValueError("Choose Equity / Futures or Options execution.")
+        symbol = str(payload.get("underlying") or "").strip().upper()
+        if not symbol:
+            raise ValueError("Choose an exact broker-master underlying before starting KAMA.")
+        # This is only an instrument screen.  The KAMA signal below is the sole
+        # authority for position selection, entry, hold, and exit.
+        eligible = kama_eligible_underlying(symbol, execution_mode)
+        if not eligible:
+            raise ValueError("Choose an exact broker-master underlying supported by the KAMA eligibility screen.")
+        try:
+            mcx = symbol.startswith("MCX:")
+            config = {"underlying": symbol, "underlying_kind": eligible["underlying_kind"],
+                      "master_underlying": eligible["underlying"], "description": eligible["description"],
+                      "lot_size": eligible.get("lot_size") or 1, "tick_size": eligible.get("tick_size") or .05,
+                      "execution_mode": execution_mode, "size": int(payload.get("quantity") or 1),
+                      "timeframe": str(payload.get("timeframe") or "5 minutes"), "mode": mode,
+                      "kama_length": int(payload.get("kama_length") or 10), "fast_length": int(payload.get("fast_length") or 2),
+                      "slow_length": int(payload.get("slow_length") or 30), "minimum_efficiency": float(payload.get("minimum_efficiency") or .35),
+                      "breakout_bars": int(payload.get("breakout_bars") or 5), "cooldown_bars": int(payload.get("cooldown_bars") or 2),
+                      "allow_reclaims": bool(payload.get("allow_reclaims", True)),
+                      "entry_session": "0915-2330" if mcx else "0915-1510",
+                      "squareoff_session": "2330-2355" if mcx else "1515-1530"}
+        except (TypeError, ValueError) as error:
+            raise ValueError("KAMA settings must be valid numeric values.") from error
+        if config["size"] < 1:
+            raise ValueError("KAMA position size or option lots must be a positive whole number.")
+        # Validate settings before a monitor can start.
+        kama_v6_signal([], **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "breakout_bars", "cooldown_bars", "allow_reclaims")})
+        if mode == "LIVE":
+            try:
+                config.update({"invalidation": float(payload.get("invalidation")), "idea_risk_limit": float(payload.get("idea_risk_limit", 2000))})
+            except (TypeError, ValueError) as error:
+                raise ValueError("KAMA LIVE requires whole quantity, explicit invalidation, and a bounded per-idea risk limit.") from error
+            if config["invalidation"] <= 0 or config["idea_risk_limit"] <= 0:
+                raise ValueError("KAMA LIVE requires a positive whole quantity, invalidation, and per-idea risk limit.")
+            if not kama_live_submission_enabled():
+                raise PermissionError("KAMA LIVE requires both operator-set environment gates before the runner can start.")
+        with kama_runner_lock:
+            if kama_runner["running"]:
+                raise RuntimeError("The KAMA runner is already active.")
+            kama_runner.update({"running": True, "mode": mode, "status": "PAPER_MONITORING" if mode == "PAPER" else "LIVE_PREFLIGHT",
+                                "config": config, "position": None, "chart": None, "last_event": None,
+                                "run_started_at": datetime.now().astimezone().isoformat(), "last_bar": None,
+                                "last_long_exit_bar": None, "last_short_exit_bar": None, "events": [],
+                                "policy": {**kama_policy(config, mode), "fresh_preflight": "PENDING", "reconciliation": "NOT_APPLICABLE" if mode == "PAPER" else "PENDING"}})
+
+        def monitor():
+            while kama_runner_snapshot()["running"]:
+                try:
+                    client = kama_authenticated_client()
+                    with kama_runner_lock:
+                        current = kama_runner["position"]
+                    preflight = kama_fresh_preflight(client, symbol, current if mode == "LIVE" else None,
+                                                     require_two_sided=config["execution_mode"] != "OPTIONS")
+                    candles = ema_band_completed_candles(client, symbol, config["timeframe"])
+                    with kama_runner_lock:
+                        long_exit, short_exit = kama_runner["last_long_exit_bar"], kama_runner["last_short_exit_bar"]
+                    signal = kama_v6_signal(candles, position=(current or {}).get("signal_side", (current or {}).get("side", 0)), last_long_exit_bar=long_exit,
+                                            last_short_exit_bar=short_exit, **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "breakout_bars", "cooldown_bars", "allow_reclaims", "entry_session", "squareoff_session")})
+                    bar = candles[-1]["timestamp"] if candles else None
+                    event = {"at": datetime.now().astimezone().isoformat(), "mode": mode, "bar": bar, "signal": signal,
+                             "preflight": preflight, "lifecycle": "WATCH", "instrument": symbol}
+                    with kama_runner_lock:
+                        is_new_bar = bar is not None and bar != kama_runner["last_bar"]
+                        position = kama_runner["position"]
+                        if is_new_bar and position is None and signal["action"] in {"ENTER_LONG", "ENTER_SHORT"}:
+                            if mode == "PAPER":
+                                selected = kama_resolve_entry_instrument(client, config, signal, preflight)
+                                kama_runner["position"] = {"symbol": selected["symbol"], "side": selected["side"],
+                                                           "signal_side": selected["signal_side"], "quantity": selected["quantity"],
+                                                           "entry_price": selected["quote"]["ask"] if selected["side"] > 0 else selected["quote"]["bid"],
+                                                           "instrument_type": selected["instrument_type"], "option_type": selected.get("option_type"),
+                                                           "opened_at": event["at"], "mode": mode}
+                                event["selected_instrument"] = {key: value for key, value in selected.items() if key != "quote"}
+                                event["lifecycle"] = "PAPER_ENTRY"
+                            else:
+                                ticket = kama_submit_live_entry(client, config, signal, preflight)
+                                kama_runner["position"] = {"symbol": ticket["symbol"], "side": ticket["side"], "signal_side": ticket["signal_side"],
+                                                           "quantity": ticket["quantity"], "instrument_type": ticket["instrument_type"],
+                                                           "option_type": ticket.get("option_type"),
+                                                           "entry_price": ticket["limit_price"], "entry_order_id": ticket["entry_order_id"],
+                                                           "opened_at": event["at"], "mode": mode}
+                                event.update({"lifecycle": "LIVE_ENTRY_SUBMITTED", "ticket": ticket})
+                        elif is_new_bar and position and signal["action"] in {"EXIT_LONG", "EXIT_SHORT", "SQUARE_OFF"}:
+                            if position.get("signal_side", position["side"]) > 0: kama_runner["last_long_exit_bar"] = len(candles) - 1
+                            else: kama_runner["last_short_exit_bar"] = len(candles) - 1
+                            if mode == "PAPER":
+                                kama_runner["position"] = None
+                                event["lifecycle"] = "PAPER_EXIT"
+                            else:
+                                exit_quote = kama_fresh_preflight(client, position["symbol"], position)
+                                exit_result = kama_submit_live_exit(client, position, signal["action"], exit_quote)
+                                kama_runner["position"] = None
+                                event.update({"lifecycle": "LIVE_EXIT_SUBMITTED", **exit_result})
+                        kama_runner["last_bar"] = bar
+                        kama_runner["chart"] = {"symbol": symbol, "timeframe": config["timeframe"], "candles": candles[-80:], "signal": signal,
+                                                "position": kama_runner["position"], "mode": mode}
+                        kama_runner["policy"] = {**kama_policy(config, mode), "fresh_preflight": "PASSED", "reconciliation": preflight.get("reconciliation", "NOT_APPLICABLE"),
+                                                 "risk_policy": "ENFORCED_FOR_LIVE" if mode == "LIVE" else "NOT_APPLICABLE"}
+                        kama_runner["status"] = ("PAPER_POSITION_OPEN" if kama_runner["position"] else "PAPER_MONITORING") if mode == "PAPER" else ("LIVE_POSITION_PENDING_CONFIRMATION" if kama_runner["position"] else "LIVE_WATCHING_NO_POSITION")
+                        kama_runner["last_event"] = event
+                        kama_runner["events"] = ([event] + kama_runner["events"])[:100]
+                    kama_append_event(event, mode)
+                except Exception as error:
+                    event = {"at": datetime.now().astimezone().isoformat(), "mode": mode, "lifecycle": "BLOCKED", "error": str(error)}
+                    with kama_runner_lock:
+                        # Do not retain a possibly external/stale live position.
+                        if mode == "LIVE": kama_runner["position"] = None
+                        kama_runner["status"] = "LIVE_RECONCILIATION_BLOCKED" if mode == "LIVE" else "PAPER_BLOCKED"
+                        kama_runner["last_event"] = event; kama_runner["events"] = ([event] + kama_runner["events"])[:100]
+                    kama_append_event(event, mode)
+                threading.Event().wait(15)
+        thread = threading.Thread(target=monitor, daemon=True, name="kama-runner")
+        with kama_runner_lock: kama_runner["thread"] = thread
+        thread.start()
+        return kama_runner_snapshot()
+
+    def stop_kama_runner():
+        with kama_runner_lock:
+            kama_runner.update({"running": False, "status": "STOPPED", "config": None, "position": None, "chart": None,
+                                "last_event": None, "run_started_at": None, "thread": None})
+        return kama_runner_snapshot()
+
+    def fyers_auth_status():
+        """Check local OAuth readiness and reuse a valid daily token when possible.
+
+        FYERS renders its login page on a third-party origin, so the dashboard
+        cannot observe or auto-click its error screen.  This check prevents
+        unnecessary visits to that page and proves the callback configuration
+        before a user is sent there.
+        """
+        try:
+            cfg = validated_config(expected_port=port)
+        except Exception as error:
+            return {"ready": False, "authenticated": False, "message": str(error)}
+        token = str(cfg.get("FYERS_ACCESS_TOKEN") or "")
+        if ":" not in token:
+            return {"ready": True, "authenticated": False,
+                    "message": "FYERS callback is ready; no current access token is available."}
+        app_id, access_token = token.split(":", 1)
+        try:
+            profile = fyersModel.FyersModel(client_id=app_id, token=access_token).get_profile()
+        except Exception:
+            profile = None
+        if isinstance(profile, dict) and profile.get("s") == "ok":
+            return {"ready": True, "authenticated": True,
+                    "message": "FYERS session is already valid; no browser login is needed."}
+        return {"ready": True, "authenticated": False,
+                "message": "FYERS callback is ready, but the saved session is expired or could not be validated. Login is required."}
+
     analysis_runs = {}
     screener_analysis_cache = {}
 
@@ -1715,6 +2701,8 @@ def run_server():
                 "protected_daily_buffer": policy["risk_reserve"],
                 "max_simultaneous_positions": policy["max_simultaneous_positions"],
                 "minimum_reward_to_risk": policy["minimum_reward_to_risk"],
+                "enforce_risk_controls": policy["enforce_risk_controls"],
+                "enforce_minimum_reward_to_risk": policy["enforce_minimum_reward_to_risk"],
                 "stop_basis": submitted_risk.get("stop_basis", policy["stop_basis"]),
                 "order_type": policy["order_type"],
             }
@@ -1851,6 +2839,8 @@ def run_server():
                         "max_loss_unit": "rupees", "invalidation": invalidation, "stop_basis": "price",
                         "max_simultaneous_positions": policy["max_simultaneous_positions"],
                         "minimum_reward_to_risk": policy["minimum_reward_to_risk"],
+                        "enforce_risk_controls": policy["enforce_risk_controls"],
+                        "enforce_minimum_reward_to_risk": policy["enforce_minimum_reward_to_risk"],
                     }
                     try:
                         chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
@@ -1859,11 +2849,12 @@ def run_server():
                         ready = []
                         for proposal in options.get("proposals") or []:
                             sizing = proposal.get("sizing") or {}
-                            if sizing.get("status") != "SIZED" or not sizing.get("lots"):
+                            if sizing.get("status") not in {"SIZED", "USER_SIZED"} or not sizing.get("lots"):
                                 exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": "A validated spread exists but the configured risk/capital does not support one lot."})
                                 continue
-                            target_profit_per_lot = min(proposal["max_profit_per_lot"], proposal["max_loss_per_lot"] * policy["minimum_reward_to_risk"])
-                            target_points = proposal["entry_points"] + target_profit_per_lot / proposal["lot_size"] if proposal["structure"] == "DEBIT" else max(0, proposal["entry_points"] - target_profit_per_lot / proposal["lot_size"])
+                            minimum_rr = policy.get("minimum_reward_to_risk")
+                            target_profit_per_lot = min(proposal["max_profit_per_lot"], proposal["max_loss_per_lot"] * minimum_rr) if minimum_rr is not None else None
+                            target_points = (proposal["entry_points"] + target_profit_per_lot / proposal["lot_size"] if proposal["structure"] == "DEBIT" else max(0, proposal["entry_points"] - target_profit_per_lot / proposal["lot_size"])) if target_profit_per_lot is not None else None
                             ready.append({
                                 **proposal,
                                 "underlying": candidate["symbol"], "expiry": options.get("expiry"), "expiry_iso": options.get("expiry_iso"),
@@ -1871,7 +2862,7 @@ def run_server():
                                 "underlying_invalidation": invalidation,
                                 "exit_conditions": [
                                     f"Exit if the underlying reaches invalidation ₹{invalidation:.2f}." if invalidation else "No valid underlying invalidation; do not trade.",
-                                    f"Target spread value {target_points:.2f} points while preserving at least 1:{policy['minimum_reward_to_risk']} planned reward:risk.",
+                                    f"Target spread value {target_points:.2f} points from your selected 1:{minimum_rr:g} reward:risk preference." if target_points is not None else "No reward:risk target was imposed; choose an exit objective when you prepare the ticket.",
                                     "Exit/stand aside if any leg quote, liquidity, Greeks/OI/volume, expiry, or completed-candle alignment becomes stale or invalid.",
                                 ],
                                 "liquidity_evidence": {"rules": options.get("liquidity_rules"), "legs": [{"symbol": leg.get("symbol"), "bid": leg.get("bid"), "ask": leg.get("ask"), "spread_pct": leg.get("spread_pct"), "open_interest": leg.get("open_interest"), "volume": leg.get("volume"), "greeks": leg.get("greeks"), "lot_size": leg.get("lot_size"), "tick_size": leg.get("tick_size")} for leg in proposal.get("legs", [])]},
@@ -1963,10 +2954,18 @@ def run_server():
 
         def send_json(self, status, payload):
             body = json.dumps(payload).encode()
-            self.send_response(status); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            try:
+                self.send_response(status); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                # A browser navigation or cancelled fetch can close the local
+                # socket before a response is written.  The request is already
+                # abandoned, so avoid polluting the dashboard terminal output.
+                return
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            if path == "/api/auth/status":
+                self.send_json(200, fyers_auth_status()); return
             if path == "/api/ema-band/master-status":
                 self.send_json(200, ema_master_status()); return
             if path == "/api/ema-band/master-search":
@@ -1987,7 +2986,7 @@ def run_server():
             if path == "/api/ema-band/atm-option":
                 try:
                     query = parse_qs(urlparse(self.path).query)
-                    self.send_json(200, resolve_ema_atm_option((query.get("underlying") or [""])[0], (query.get("timeframe") or ["5 minutes"])[0], (query.get("ema_length") or ["21"])[0], (query.get("mode") or ["PAPER"])[0]))
+                    self.send_json(200, resolve_ema_atm_option((query.get("underlying") or [""])[0], (query.get("timeframe") or ["5 minutes"])[0], (query.get("ema_length") or ["21"])[0], (query.get("mode") or ["PAPER"])[0], None, (query.get("slope_lookback") or ["8"])[0], (query.get("minimum_slope_atr") or ["0.10"])[0]))
                 except Exception as error:
                     self.send_json(409, {"error": str(error), "status": ema_master_status()})
                 return
@@ -2000,6 +2999,12 @@ def run_server():
                 return
             if path == "/api/ema-band/runner":
                 self.send_json(200, ema_runner_snapshot())
+                return
+            if path == "/api/ema-band/tracked-positions":
+                try:
+                    self.send_json(200, ema_tracked_positions_snapshot())
+                except Exception as error:
+                    self.send_json(409, {"error": str(error)})
                 return
             if path == "/api/ema-band/chart":
                 try:
@@ -2018,12 +3023,16 @@ def run_server():
                                 break
                     timeframe = str((query.get("timeframe") or [config.get("timeframe") or "5 minutes"])[0])
                     ema_length = int((query.get("ema_length") or [config.get("ema_length") or 21])[0])
+                    try:
+                        bars = max(20, min(int((query.get("bars") or [320])[0]), 500))
+                    except (TypeError, ValueError):
+                        raise ValueError("Chart history must be between 20 and 500 candles.")
                     token = load_config().get("FYERS_ACCESS_TOKEN", "")
                     if not symbol or ":" not in token:
                         raise RuntimeError("Start the EMA runner or select a FYERS instrument before loading its broker chart.")
                     app_id, access_token = token.split(":", 1)
                     client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-                    self.send_json(200, ema_band_chart_snapshot(client, symbol, timeframe, ema_length))
+                    self.send_json(200, ema_band_chart_snapshot(client, symbol, timeframe, ema_length, bars=bars))
                 except Exception as error:
                     self.send_json(409, {"error": str(error)})
                 return
@@ -2105,6 +3114,28 @@ def run_server():
             if path == "/api/trade-ticket/capabilities":
                 self.send_json(200, fyers_execution.capabilities())
                 return
+            if path == "/api/kama/live-capability":
+                self.send_json(200, kama_live_capability())
+                return
+            if path == "/api/kama/underlying-search":
+                try:
+                    query_values = parse_qs(urlparse(self.path).query)
+                    query = (query_values.get("q") or [""])[0]
+                    execution_mode = (query_values.get("execution_mode") or ["EQUITY"])[0]
+                    self.send_json(200, search_kama_underlyings(query, execution_mode))
+                except Exception as error:
+                    self.send_json(409, {"error": str(error), "status": ema_master_status()})
+                return
+            if path == "/api/kama/runner":
+                self.send_json(200, kama_runner_snapshot())
+                return
+            if path == "/api/kama/execution-log":
+                try:
+                    limit = int((parse_qs(urlparse(self.path).query).get("limit") or ["200"])[0])
+                except ValueError:
+                    limit = 200
+                self.send_json(200, {"entries": kama_execution_log(max(1, min(limit, 1000)))})
+                return
             if path == "/api/automation/profile":
                 self.send_json(200, automation_policy.current())
                 return
@@ -2156,6 +3187,31 @@ def run_server():
                     return
                 if path == "/api/ema-band/runner/stop":
                     self.send_json(200, stop_ema_runner())
+                    return
+                if path == "/api/kama/runner/start":
+                    self.send_json(200, start_kama_runner(payload)); return
+                if path == "/api/kama/runner/stop":
+                    self.send_json(200, stop_kama_runner()); return
+                if path == "/api/trade-recommendation/parse":
+                    self.send_json(200, trade_recommendation_preview(payload))
+                    return
+                if path == "/api/trade-recommendation/ai-analysis":
+                    self.send_json(200, trade_recommendation_ai_analysis(payload))
+                    return
+                if path == "/api/trade-recommendation/prepare-order":
+                    self.send_json(200, prepare_trade_recommendation_order(payload))
+                    return
+                if path == "/api/trade-recommendation/submit-order":
+                    try:
+                        self.send_json(200, submit_trade_recommendation_order(payload))
+                    except PreviewChanged as error:
+                        self.send_json(409, {"error": str(error), "replacement_preview": error.preview})
+                    return
+                if path == "/api/trade-recommendation/submit-direct":
+                    try:
+                        self.send_json(200, submit_trade_recommendation_direct(payload))
+                    except PreviewChanged as error:
+                        self.send_json(409, {"error": str(error), "replacement_preview": error.preview})
                     return
                 if path == "/api/analysis-handoff/preview":
                     self.send_json(200, analysis_packet(payload))

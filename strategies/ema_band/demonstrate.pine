@@ -31,8 +31,8 @@ shortReentryPass = na(lastShortExitBar) or bar_index - lastShortExitBar > reentr
 longExit = confirmedBar and positionState == 1 and close >= emaLow and close <= emaHigh
 shortExit = confirmedBar and positionState == -1 and close >= emaLow and close <= emaHigh
 
-longEntry = confirmedBar and entryTimePass and positionState == 0 and close > open and longSignalCandle and open > signalCandleMidpoint and longReentryPass
-shortEntry = confirmedBar and entryTimePass and positionState == 0 and close < open and shortSignalCandle and open < signalCandleMidpoint and shortReentryPass
+longEntry = confirmedBar and entryTimePass and positionState == 0 and longSignalCandle and close > signalCandleMidpoint and longReentryPass
+shortEntry = confirmedBar and entryTimePass and positionState == 0 and shortSignalCandle and close < signalCandleMidpoint and shortReentryPass
 
 // Exit takes precedence. An exit candle never silently reverses or re-enters.
 if longExit
@@ -55,7 +55,7 @@ plotshape(shortEntry, title="SELL", text="SELL", style=shape.labeldown, location
 plotshape(longExit, title="EXIT BUY", text="EXIT BUY", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
 plotshape(shortExit, title="EXIT SELL", text="EXIT SELL", style=shape.labelup, location=location.belowbar, color=color.orange, textcolor=color.white, size=size.tiny)
 
-alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: bullish confirmation candle after the EMA High cross and midpoint confirmation.")
-alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: bearish confirmation candle after the EMA Low cross and midpoint confirmation.")
+alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: completed confirmation close above the signal-candle midpoint after the EMA High cross.")
+alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: completed confirmation close below the signal-candle midpoint after the EMA Low cross.")
 alertcondition(longExit, title="EXIT BUY Alert", message="EXIT BUY {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")
 alertcondition(shortExit, title="EXIT SELL Alert", message="EXIT SELL {{ticker}} {{interval}}: the candle closed inside the EMA High/Low band.")

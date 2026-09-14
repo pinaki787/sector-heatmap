@@ -1,0 +1,33 @@
+//@version=6
+indicator("Pinaki Das Supertrend", shorttitle="PD Supertrend", overlay=true, max_labels_count=500)
+
+// Original completed-candle trend indicator. It combines Supertrend direction
+// with an EMA slope gate so flat, whipsaw-prone regimes are visibly filtered.
+atrLength = input.int(14, "ATR length", minval=1)
+factor = input.float(3.0, "ATR factor", minval=0.1, step=0.1)
+emaLength = input.int(21, "Trend EMA length", minval=1)
+slopeBars = input.int(8, "EMA slope lookback", minval=1)
+minimumSlopeAtr = input.float(0.10, "Minimum slope in ATR", minval=0.0, step=0.01)
+showSignals = input.bool(true, "Show confirmed signals")
+
+[supertrend, direction] = ta.supertrend(factor, atrLength)
+trendEma = ta.ema(close, emaLength)
+atr = ta.atr(atrLength)
+slopeInAtr = not na(atr[slopeBars]) and atr[slopeBars] > 0 ? (trendEma - trendEma[slopeBars]) / atr[slopeBars] : 0.0
+
+upSlope = slopeInAtr >= minimumSlopeAtr
+downSlope = slopeInAtr <= -minimumSlopeAtr
+longSignal = barstate.isconfirmed and ta.change(direction) < 0 and close > trendEma and upSlope
+shortSignal = barstate.isconfirmed and ta.change(direction) > 0 and close < trendEma and downSlope
+flatRegime = not upSlope and not downSlope
+
+trendColor = direction < 0 ? color.lime : color.red
+plot(supertrend, "Supertrend", color=trendColor, linewidth=2, style=plot.style_linebr)
+plot(trendEma, "Trend EMA", color=color.aqua, linewidth=1)
+bgcolor(flatRegime ? color.new(color.gray, 92) : na, title="Flat EMA regime")
+
+plotshape(showSignals and longSignal, title="Confirmed buy", text="BUY", style=shape.labelup, location=location.belowbar, color=color.lime, textcolor=color.black, size=size.small)
+plotshape(showSignals and shortSignal, title="Confirmed sell", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+
+alertcondition(longSignal, "Pinaki Das Supertrend BUY", "Confirmed BUY: Supertrend turned bullish and EMA slope passed the filter.")
+alertcondition(shortSignal, "Pinaki Das Supertrend SELL", "Confirmed SELL: Supertrend turned bearish and EMA slope passed the filter.")

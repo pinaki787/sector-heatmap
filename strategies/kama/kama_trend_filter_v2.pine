@@ -1,0 +1,80 @@
+//@version=6
+strategy("KAMA Trend Filter v2", overlay=true, pyramiding=0, process_orders_on_close=false)
+
+// Research variant: reduce trend-churn without changing the original script.
+kamaLength = input.int(10, "KAMA efficiency ratio", minval=1)
+fastLength = input.int(2, "KAMA fast length", minval=1)
+slowLength = input.int(30, "KAMA slow length", minval=2)
+slopeBars = input.int(1, "Slope lookback bars", minval=1)
+minimumSlopeATR = input.float(0.10, "Minimum KAMA slope ATR per bar", minval=0.0, step=0.01)
+cooldownBars = input.int(4, "Same-direction cooldown bars", minval=0)
+allowLongs = input.bool(true, "Enable longs")
+allowShorts = input.bool(true, "Enable shorts")
+entrySession = input.session("0915-1515", "Entry window (IST)")
+squareOffSession = input.session("1520-1530", "Square-off window (IST)")
+
+change = math.abs(close - close[kamaLength])
+noise = math.sum(math.abs(close - close[1]), kamaLength)
+efficiency = not na(noise) and noise != 0 ? change / noise : 0.0
+fastSC = 2.0 / (fastLength + 1.0)
+slowSC = 2.0 / (slowLength + 1.0)
+smoothing = math.pow(efficiency * (fastSC - slowSC) + slowSC, 2)
+
+var float kama = na
+if bar_index < kamaLength
+    kama := na
+else if na(kama[1])
+    kama := close
+else
+    kama := kama[1] + smoothing * (close - kama[1])
+
+atr = ta.atr(14)
+vwap = ta.vwap(hlc3)
+slope = (kama - kama[slopeBars]) / slopeBars
+upTrend = not na(slope) and slope > minimumSlopeATR * atr
+downTrend = not na(slope) and slope < -minimumSlopeATR * atr
+inEntryWindow = not na(time(timeframe.period, entrySession))
+inSquareOffWindow = not na(time(timeframe.period, squareOffSession))
+
+// A cross arms one setup. A later completed reclaim, not another bar above/below
+// KAMA, is required for entry. This eliminates repeated same-trend entries.
+var bool longArmed = false
+var bool shortArmed = false
+var int lastLongExitBar = na
+var int lastShortExitBar = na
+
+if ta.crossover(close, kama) and upTrend
+    longArmed := true
+    shortArmed := false
+if ta.crossunder(close, kama) and downTrend
+    shortArmed := true
+    longArmed := false
+
+longCooldownPassed = na(lastLongExitBar) or bar_index - lastLongExitBar > cooldownBars
+shortCooldownPassed = na(lastShortExitBar) or bar_index - lastShortExitBar > cooldownBars
+longReclaim = longArmed and low <= vwap and close > vwap and close > kama and upTrend
+shortReclaim = shortArmed and high >= vwap and close < vwap and close < kama and downTrend
+longEntry = barstate.isconfirmed and allowLongs and inEntryWindow and strategy.position_size == 0 and longCooldownPassed and longReclaim
+shortEntry = barstate.isconfirmed and allowShorts and inEntryWindow and strategy.position_size == 0 and shortCooldownPassed and shortReclaim
+longExit = barstate.isconfirmed and strategy.position_size > 0 and (close < kama or downTrend)
+shortExit = barstate.isconfirmed and strategy.position_size < 0 and (close > kama or upTrend)
+
+if inSquareOffWindow and strategy.position_size != 0
+    strategy.close_all(comment="15:20 IST square-off")
+else if longExit
+    strategy.close("Long")
+    lastLongExitBar := bar_index
+else if shortExit
+    strategy.close("Short")
+    lastShortExitBar := bar_index
+else if longEntry
+    strategy.entry("Long", strategy.long)
+    longArmed := false
+else if shortEntry
+    strategy.entry("Short", strategy.short)
+    shortArmed := false
+
+plot(kama, "KAMA", color=color.orange, linewidth=2)
+plot(vwap, "Session VWAP", color=color.aqua, linewidth=2)
+plotshape(longEntry, title="Long", text="LONG", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+plotshape(shortEntry, title="Short", text="SHORT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white)

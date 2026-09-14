@@ -190,13 +190,16 @@ def _order_ids(response):
 class FyersExecutionService:
     """Creates exact limit-order tickets and requires a second fresh-state check."""
 
-    def __init__(self, client_factory=None, master=None, cm_master=None, ledger=None, now=None, execution_halt=None):
+    def __init__(self, client_factory=None, master=None, cm_master=None, ledger=None, now=None, execution_halt=None,
+                 live_gate_name="SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS", live_gate=None):
         self.client_factory = client_factory
         self.master = master or FyersFoMaster()
         self.cm_master = cm_master or FyersCmMaster()
         self.ledger = ledger or DailyRiskLedger()
         self.now = now or datetime.now
         self.execution_halt = execution_halt
+        self.live_gate_name = str(live_gate_name)
+        self.live_gate = live_gate
         self.lock = Lock()
         self.previews = {}
 
@@ -211,31 +214,40 @@ class FyersExecutionService:
         return {
             "selected_broker": "fyers",
             "fyers_configured": configured,
-            "live_submission_enabled": os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") == "1",
+            "live_submission_enabled": self._live_submission_enabled(),
+            "live_gate_name": self.live_gate_name,
             "message": message,
         }
 
+    def _live_submission_enabled(self):
+        if self.live_gate is not None:
+            return bool(self.live_gate())
+        return os.getenv(self.live_gate_name) == "1"
+
     @staticmethod
     def _risk_settings(payload):
+        enforce_risk_controls = payload.get("enforce_risk_controls") is True
+        enforce_minimum_rr = payload.get("enforce_minimum_reward_to_risk") is True
         daily_limit = _number(payload.get("daily_loss_limit"), HARD_MAX_DAILY_LOSS)
         idea_limit = _number(payload.get("idea_risk_limit"), DEFAULT_IDEA_RISK)
         reserve = _number(payload.get("risk_reserve"), DEFAULT_RISK_RESERVE)
         external_open_risk = _number(payload.get("external_open_risk"))
         max_positions_value = _number(payload.get("max_simultaneous_positions"), 3)
-        minimum_rr = _number(payload.get("minimum_reward_to_risk"), MIN_REWARD_TO_RISK)
+        minimum_rr = _number(payload.get("minimum_reward_to_risk")) if enforce_minimum_rr else None
         order_type = str(payload.get("order_type") or "LIMIT").upper()
-        if daily_limit <= 0 or daily_limit > HARD_MAX_DAILY_LOSS:
-            raise ValueError(f"Daily loss limit must be positive and no greater than ₹{HARD_MAX_DAILY_LOSS:.0f}.")
-        if idea_limit <= 0 or reserve < 0 or idea_limit + reserve > daily_limit:
-            raise ValueError("Per-idea risk plus the protected reserve must fit inside the daily limit.")
         max_positions = int(max_positions_value or 0)
-        if max_positions_value != max_positions or not 1 <= max_positions <= 20:
-            raise ValueError("Maximum simultaneous positions must be a whole number from 1 to 20.")
-        if minimum_rr is None or not 1 <= minimum_rr <= 10:
-            raise ValueError("Minimum reward-to-risk must be from 1:1 to 1:10.")
+        if enforce_risk_controls:
+            if daily_limit <= 0:
+                raise ValueError("Daily loss limit must be positive when capital controls are enabled.")
+            if idea_limit <= 0 or reserve < 0 or idea_limit + reserve > daily_limit:
+                raise ValueError("Per-idea risk plus the protected reserve must fit inside the daily limit.")
+            if max_positions_value != max_positions or not 1 <= max_positions <= 20:
+                raise ValueError("Maximum simultaneous positions must be a whole number from 1 to 20 when capital controls are enabled.")
+        if enforce_minimum_rr and minimum_rr is None:
+            raise ValueError("Minimum reward-to-risk must be positive when enabled.")
         if order_type != "LIMIT":
             raise ValueError("Market-order preference is preview-only; live FYERS tickets require bounded LIMIT prices.")
-        return daily_limit, idea_limit, reserve, external_open_risk, max_positions, minimum_rr, order_type
+        return enforce_risk_controls, daily_limit, idea_limit, reserve, external_open_risk, max_positions, minimum_rr, order_type
 
     def _preflight_option_spread(self, client, payload, proposal, minimum_rr):
         underlying_symbol = str(payload.get("underlying") or "")
@@ -320,7 +332,7 @@ class FyersExecutionService:
         if min(entry_points, max_loss_points, max_profit_points) <= 0:
             raise FyersExecutionUnavailable("Fresh FYERS prices no longer form the selected spread.")
         reward_to_risk = max_profit_points / max_loss_points
-        if reward_to_risk < minimum_rr:
+        if minimum_rr is not None and reward_to_risk < minimum_rr:
             raise FyersExecutionUnavailable(f"Fresh reward-to-risk {reward_to_risk:.2f} is below 1:{minimum_rr}.")
         return {
             "kind": "OPTION_SPREAD", "contracts": sorted(contracts, key=lambda item: 0 if item["action"] == "BUY" else 1),
@@ -374,7 +386,7 @@ class FyersExecutionService:
         per_share_risk = abs(limit_price - invalidation)
         per_share_reward = abs(target - limit_price)
         reward_to_risk = per_share_reward / per_share_risk
-        if reward_to_risk < minimum_rr:
+        if minimum_rr is not None and reward_to_risk < minimum_rr:
             raise FyersExecutionUnavailable(f"Fresh reward-to-risk {reward_to_risk:.2f} is below 1:{minimum_rr}.")
         cash_required = limit_price * quantity if action == "BUY" else 0.0
         funding_label = "DELIVERY_CASH_FUNDED" if product_type == "CNC" else "CASH_FUNDED"
@@ -397,7 +409,7 @@ class FyersExecutionService:
         invalidation = _number(payload.get("invalidation"))
         if invalidation is None or invalidation <= 0:
             raise ValueError("An explicit positive stop/invalidation is required.")
-        daily_limit, idea_limit, reserve, external_open_risk, max_positions, minimum_rr, order_type = self._risk_settings(payload)
+        enforce_risk_controls, daily_limit, idea_limit, reserve, external_open_risk, max_positions, minimum_rr, order_type = self._risk_settings(payload)
         client = _current_client(self.client_factory)
         profile = client.get_profile()
         if not _ok(profile):
@@ -412,9 +424,9 @@ class FyersExecutionService:
         available_balance = available_funds(funds_response)
         positions, orders = _positions(positions_response), _orders(orders_response)
         open_positions = [item for item in positions if _number(item.get("netQty", item.get("net_qty", 0)), 0) != 0]
-        if len(open_positions) >= max_positions:
+        if enforce_risk_controls and len(open_positions) >= max_positions:
             raise FyersExecutionUnavailable(f"Fresh FYERS state has {len(open_positions)} open position rows, meeting the configured maximum of {max_positions}.")
-        if open_positions and external_open_risk is None:
+        if enforce_risk_controls and open_positions and external_open_risk is None:
             raise FyersExecutionUnavailable("Open FYERS positions exist. Declare their current worst-case stop risk before preparing a new ticket.")
         external_open_risk = external_open_risk or 0.0
         symbols = {item["symbol"] for item in instrument["contracts"]}
@@ -425,11 +437,11 @@ class FyersExecutionService:
         realized_loss = _realized_loss(positions)
         app_open_risk = self.ledger.open_risk(self.now().date())
         used = realized_loss + app_open_risk + external_open_risk
-        if used > daily_limit:
+        if enforce_risk_controls and used > daily_limit:
             raise FyersExecutionUnavailable("Realized loss plus worst-case open risk already exceeds the configured daily loss limit.")
-        remaining_before_reserve = max(0.0, daily_limit - used)
-        available_new_risk = min(idea_limit, max(0.0, remaining_before_reserve - reserve))
-        if instrument["worst_case_risk"] > available_new_risk + 1e-9:
+        remaining_before_reserve = max(0.0, daily_limit - used) if enforce_risk_controls else None
+        available_new_risk = min(idea_limit, max(0.0, remaining_before_reserve - reserve)) if enforce_risk_controls else None
+        if enforce_risk_controls and instrument["worst_case_risk"] > available_new_risk + 1e-9:
             raise FyersExecutionUnavailable(f"Worst-case risk ₹{instrument['worst_case_risk']:.2f} exceeds available new-idea risk ₹{available_new_risk:.2f}.")
         if instrument["minimum_cash_required"] > available_balance:
             raise FyersExecutionUnavailable("Fresh FYERS funds do not cover the protection-first premium requirement.")
@@ -443,12 +455,12 @@ class FyersExecutionService:
             "underlying_invalidation": invalidation, "instrument": instrument,
             "funds_margin": {"available_funds": available_balance, "minimum_cash_required": instrument["minimum_cash_required"], **instrument["margin"]},
             "daily_risk_ledger": {
-                "hard_daily_loss_limit": daily_limit, "realized_loss": realized_loss,
+                "capital_controls_enabled": enforce_risk_controls, "hard_daily_loss_limit": daily_limit if enforce_risk_controls else None, "realized_loss": realized_loss,
                 "app_open_worst_case_risk": app_open_risk, "declared_external_open_risk": external_open_risk,
-                "protected_reserve": reserve, "remaining_before_reserve": round(remaining_before_reserve, 2),
-                "available_for_new_idea": round(available_new_risk, 2),
-                "remaining_after_proposal": round(remaining_before_reserve - reserve - instrument["worst_case_risk"], 2),
-                "maximum_simultaneous_positions": max_positions,
+                "protected_reserve": reserve if enforce_risk_controls else None, "remaining_before_reserve": round(remaining_before_reserve, 2) if remaining_before_reserve is not None else None,
+                "available_for_new_idea": round(available_new_risk, 2) if available_new_risk is not None else None,
+                "remaining_after_proposal": round(remaining_before_reserve - reserve - instrument["worst_case_risk"], 2) if remaining_before_reserve is not None else None,
+                "maximum_simultaneous_positions": max_positions if enforce_risk_controls else None,
             },
             "fresh_state": {
                 "profile": "validated", "symbol_master": f"FYERS daily {'NSE_CM' if instrument['kind'] == 'EQUITY' else 'NSE_FO'} master",
@@ -466,7 +478,7 @@ class FyersExecutionService:
                 "automatic_retry": False,
             },
             "submission_eligible": instrument["submission_eligible"],
-            "live_submission_enabled": os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") == "1",
+            "live_submission_enabled": self._live_submission_enabled(),
         }
         preview["state_digest"] = hashlib.sha256(json.dumps(preview, sort_keys=True, default=str).encode()).hexdigest()
         return preview
@@ -496,14 +508,14 @@ class FyersExecutionService:
                 raise FyersExecutionUnavailable(f"Batch item {index} ({symbols[index - 1] or 'unknown'}): {error}") from error
             per_share_risk = probe["instrument"]["worst_case_risk"]
             idea_limit = probe["daily_risk_ledger"]["available_for_new_idea"]
-            quantity = math.floor(idea_limit / per_share_risk) if per_share_risk > 0 else 0
+            quantity = math.floor(idea_limit / per_share_risk) if idea_limit is not None and per_share_risk > 0 else 1
             if quantity < 1:
                 raise FyersExecutionUnavailable(f"Batch item {index} ({symbols[index - 1]}): risk-based sizing produced zero whole shares.")
             preferred.append(({**item, "quantity": quantity, "proposal": {**(item.get("proposal") or {}), "quantity": quantity}}, quantity, probe))
         ledger = preferred[0][2]["daily_risk_ledger"]
         funds = preferred[0][2]["funds_margin"]["available_funds"]
         open_positions = preferred[0][2]["fresh_state"]["positions_count"]
-        if open_positions + len(preferred) > ledger["maximum_simultaneous_positions"]:
+        if ledger["maximum_simultaneous_positions"] is not None and open_positions + len(preferred) > ledger["maximum_simultaneous_positions"]:
             raise FyersExecutionUnavailable("The selected batch plus current FYERS positions exceeds the maximum simultaneous-position guardrail.")
         buffer = round(max(500.0, funds * 0.05), 2)
         estimated_preferred_notional = sum(item[1] * item[2]["instrument"]["entry_price"] for item in preferred)
@@ -511,7 +523,7 @@ class FyersExecutionService:
         estimated_preferred_risk = sum(item[1] * item[2]["instrument"]["worst_case_risk"] for item in preferred)
         spendable = max(0.0, funds - buffer)
         cash_scale = spendable / (estimated_preferred_notional * 1.002 + 20 * len(preferred)) if estimated_preferred_notional else 0.0
-        risk_scale = ledger["available_for_new_idea"] / estimated_preferred_risk if estimated_preferred_risk else 0.0
+        risk_scale = ledger["available_for_new_idea"] / estimated_preferred_risk if ledger["available_for_new_idea"] is not None and estimated_preferred_risk else 1.0
         scale = min(1.0, cash_scale, risk_scale)
         adjusted_payloads, excluded = [], []
         for item, preferred_quantity, probe in preferred:
@@ -533,7 +545,7 @@ class FyersExecutionService:
         total_notional = round(sum(item["instrument"]["minimum_cash_required"] for item in previews), 2)
         estimated_costs = round(total_notional * 0.002 + 20 * len(previews), 2)
         cash_reserved = round(total_notional + estimated_costs + buffer, 2)
-        if total_risk > ledger["available_for_new_idea"] + 1e-9:
+        if ledger["available_for_new_idea"] is not None and total_risk > ledger["available_for_new_idea"] + 1e-9:
             raise FyersExecutionUnavailable(f"Aggregate batch risk ₹{total_risk:.2f} exceeds available new risk ₹{ledger['available_for_new_idea']:.2f}.")
         if cash_reserved > funds + 1e-9:
             raise FyersExecutionUnavailable(f"Aggregate cash, estimated costs and buffer ₹{cash_reserved:.2f} exceed fresh FYERS funds ₹{funds:.2f}.")
@@ -547,7 +559,7 @@ class FyersExecutionService:
             "aggregate": {"order_count": len(previews), "selected_count": len(items), "total_worst_case_risk": total_risk,
                           "total_minimum_cash_required": total_notional, "estimated_costs": estimated_costs, "cash_buffer": buffer,
                           "cash_reserved": cash_reserved, "available_funds": funds, "available_new_risk": ledger["available_for_new_idea"]},
-            "submission_eligible": True, "live_submission_enabled": os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") == "1",
+            "submission_eligible": True, "live_submission_enabled": self._live_submission_enabled(),
         }
 
     def prepare_batch(self, payload):
@@ -561,8 +573,8 @@ class FyersExecutionService:
         return preview
 
     def submit_batch(self, preview_id, confirmation):
-        if os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") != "1":
-            raise PermissionError("Live FYERS submission is disabled. Enable it intentionally before submitting a reviewed batch.")
+        if not self._live_submission_enabled():
+            raise PermissionError(f"Live FYERS submission is disabled. Enable {self.live_gate_name}=1 intentionally before submitting a reviewed batch.")
         with self.lock:
             stored = self.previews.get(preview_id)
         if not stored or not stored.get("batch"):
@@ -594,8 +606,8 @@ class FyersExecutionService:
                 "message": "FYERS accepted the complete basket; reconcile every order before further action." if status == "PENDING" else "Batch execution status is uncertain; reconcile FYERS and do not retry automatically."}
 
     def submit(self, preview_id, confirmation):
-        if os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") != "1":
-            raise PermissionError("Live FYERS submission is disabled. The account holder must intentionally set SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=1 before starting the dashboard.")
+        if not self._live_submission_enabled():
+            raise PermissionError(f"Live FYERS submission is disabled. The account holder must intentionally set {self.live_gate_name}=1 before starting the dashboard.")
         with self.lock:
             stored = self.previews.get(preview_id)
         if not stored:

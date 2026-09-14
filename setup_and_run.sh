@@ -48,8 +48,14 @@ if [ "${HEATMAP_SETUP_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
-# Default live FYERS order submission ON for this run unless the caller already
-# set the variable (to "1" or anything else, e.g. "0" to keep it off).
-export SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS="${SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS:-1}"
+# Load local runtime preferences without committing them. Live submission stays
+# fail-closed unless the caller or the ignored .env file explicitly enables it.
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+export SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS="${SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS:-0}"
+export SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS="${SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS:-0}"
 
 exec .venv/bin/python heatmap_server.py

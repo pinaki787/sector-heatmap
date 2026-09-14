@@ -1,0 +1,64 @@
+//@version=6
+strategy("Sector Pulse EMA Band Runtime", shorttitle="SP EMA Band", overlay=true, pyramiding=0, process_orders_on_close=true)
+
+// Faithful chart-underlying model of the active Sector Pulse EMA-band signal.
+// The runner's CE/PE contract selection and option-premium protections are
+// deliberately excluded: they cannot be reproduced from an underlying chart.
+emaLength = input.int(21, "EMA band length", minval=1, group="Sector Pulse runtime")
+useEntrySession = input.bool(true, "Enable entry-session gate", group="Sector Pulse runtime")
+entrySession = input.session("0915-1515", "Entry session", group="Sector Pulse runtime")
+useFlatMarketGate = input.bool(true, "Enable flat-market gate", group="Sector Pulse runtime")
+slopeLookback = input.int(8, "EMA midpoint slope lookback", minval=2, group="Sector Pulse runtime")
+minimumSlopeAtr = input.float(0.10, "Minimum slope (ATR per bar)", minval=0.0, step=0.01, group="Sector Pulse runtime")
+showEma200 = input.bool(true, "Show EMA 200 (display only)", group="Display")
+
+emaHigh = ta.ema(high, emaLength)
+emaLow = ta.ema(low, emaLength)
+emaMidpoint = (emaHigh + emaLow) / 2.0
+ema200 = ta.ema(close, 200)
+confirmed = barstate.isconfirmed
+entryTimePass = not useEntrySession or not na(time(timeframe.period, entrySession))
+
+// Exact runtime interpretation: this is a flat-market veto, not a directional
+// trend filter. Both rising and falling bands pass when their magnitude meets
+// the threshold; long/short direction comes only from the EMA-band setup.
+atrForSlope = ta.sma(ta.tr(true), slopeLookback)
+midpointSlope = (emaMidpoint - emaMidpoint[slopeLookback]) / slopeLookback
+flatMarketPass = not useFlatMarketGate or (atrForSlope > 0 and math.abs(midpointSlope) / atrForSlope >= minimumSlopeAtr)
+
+// Previous completed candle body-crosses the applicable EMA edge. The current
+// completed candle confirms by closing beyond the previous candle's midpoint.
+// Its own colour and opening price are intentionally not filters.
+longSetup = open[1] <= emaHigh[1] and close[1] > emaHigh[1]
+shortSetup = open[1] >= emaLow[1] and close[1] < emaLow[1]
+setupMidpoint = (high[1] + low[1]) / 2.0
+longEntry = confirmed and entryTimePass and flatMarketPass and strategy.position_size == 0 and longSetup and close > setupMidpoint
+shortEntry = confirmed and entryTimePass and flatMarketPass and strategy.position_size == 0 and shortSetup and close < setupMidpoint
+
+// Exact indicator exit used by the runner: completed close back inside the
+// EMA High/Low band. Exit has precedence over a new entry on the same bar.
+insideBand = close >= emaLow and close <= emaHigh
+longExit = confirmed and strategy.position_size > 0 and insideBand
+shortExit = confirmed and strategy.position_size < 0 and insideBand
+
+if longExit
+    strategy.close("BUY", comment="INDICATOR EXIT")
+else if shortExit
+    strategy.close("SELL", comment="INDICATOR EXIT")
+else if longEntry
+    strategy.entry("BUY", strategy.long, comment="BUY")
+else if shortEntry
+    strategy.entry("SELL", strategy.short, comment="SELL")
+
+upperBand = plot(emaHigh, "EMA High", color=color.red, linewidth=2)
+lowerBand = plot(emaLow, "EMA Low", color=color.green, linewidth=2)
+fill(upperBand, lowerBand, title="EMA Band", color=color.new(color.blue, 88))
+plot(showEma200 ? ema200 : na, "EMA 200 (display only)", color=color.blue, linewidth=2)
+plotshape(longEntry, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+plotshape(shortEntry, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white)
+plotshape(longExit, title="Exit BUY", text="EXIT BUY", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
+plotshape(shortExit, title="Exit SELL", text="EXIT SELL", style=shape.labelup, location=location.belowbar, color=color.orange, textcolor=color.white, size=size.tiny)
+
+alertcondition(longEntry, title="BUY Alert", message="BUY {{ticker}} {{interval}}: completed Sector Pulse EMA-band bullish signal.")
+alertcondition(shortEntry, title="SELL Alert", message="SELL {{ticker}} {{interval}}: completed Sector Pulse EMA-band bearish signal.")
+alertcondition(longExit or shortExit, title="Exit Alert", message="EXIT {{ticker}} {{interval}}: completed close returned inside the EMA band.")
