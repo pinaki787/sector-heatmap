@@ -10,12 +10,16 @@ import requests
 import secrets
 import re
 import threading
+import time
 import html as html_lib
 from urllib.parse import parse_qs, urlparse
 from .config import ROOT, load_config
 from .authentication import authorization_url, exchange_auth_code, validated_config
 from .market_data import FyersLiveFeed, is_token_error, tick_timestamp_iso
 from .market_calendar import market_session
+from .rsi_table import RsiTable
+from strategies.ema_crossover.runner import Runner as EmaCrossoverRunner
+from strategies.ema_crossover.broker import FyersBroker as EmaCrossoverBroker
 from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import SECTOR_DEFINITIONS
 from .sector_service import SectorAnalysisService
@@ -1267,20 +1271,80 @@ def run_server():
             return (2, item["underlying"], symbol)
         return {"matches": sorted(matches.values(), key=rank)[:20], "status": state}
 
+    ema_history_cache = {}
+    ema_history_lock = threading.RLock()
+    ema_quote_cache = {}
+    ema_daily_reference_cache = {}
+    rsi_table = RsiTable()
+    ema_chart_tick_cache = {}
+    ema_chart_stream_bars = {}
+    ema_chart_stream_lock = threading.Lock()
+    ema_chart_stream = None
+    ema_chart_stream_volumes = {}
+
+    def chart_stream_tick(tick):
+        symbol = tick.get('symbol')
+        stamp = tick.get('exch_feed_time', tick.get('last_traded_time'))
+        price = tick.get('ltp')
+        if not isinstance(stamp,(int,float)) or not isinstance(price,(int,float)) or price <= 0 or abs(time.time()-stamp)>60:
+            return
+        with ema_chart_stream_lock:
+            total_volume = tick.get('vol_traded_today')
+            previous_volume = ema_chart_stream_volumes.get(symbol)
+            delta_volume = max(0,total_volume-previous_volume) if isinstance(total_volume,(int,float)) and isinstance(previous_volume,(int,float)) else 0
+            if isinstance(total_volume,(int,float)):
+                ema_chart_stream_volumes[symbol] = total_volume
+            for (selected,seconds), bars in ema_chart_stream_bars.items():
+                if selected != symbol:
+                    continue
+                opening = int(stamp)//seconds*seconds
+                candle = bars.get(opening)
+                if candle is None:
+                    candle = {'timestamp':opening,'open':price,'high':price,'low':price,'close':price,'volume':0,'stream_partial':True}
+                    bars[opening] = candle
+                candle.update(high=max(candle['high'],price),low=min(candle['low'],price),close=price)
+                candle['volume'] = candle.get('volume',0) + delta_volume
+                candle['stream_received_at'] = time.time()
+                for old in sorted(bars)[:-3]:
+                    del bars[old]
+
+
+
     def ema_band_candles(client, symbol, timeframe, include_forming=False):
-        resolution = {"5 minutes": "5", "15 minutes": "15", "1 hour": "60"}.get(str(timeframe))
+        resolution = {"1 minute": "1", "2 minutes": "2", "3 minutes": "3", "5 minutes": "5", "10 minutes": "10", "15 minutes": "15", "30 minutes": "30", "1 hour": "60"}.get(str(timeframe))
         if not resolution:
-            raise ValueError("Choose the EMA Band 5-minute, 15-minute, or 1-hour timeframe.")
+            raise ValueError("Choose a supported minute or hourly timeframe.")
         now = datetime.now().astimezone()
-        lookback_days = 45 if resolution in {"5", "15"} else 180
+        lookback_days = 10 if resolution in {"1", "2", "3"} else 45 if resolution in {"5", "10", "15", "30"} else 180
         # The picker resolves a specific, nearest-unexpired futures contract.
         # Keep history on that exact contract as well: cont_flag=1 would splice
         # a continuous series into the calculation and can disagree with the
         # selected expiry around a roll.
-        response = client.history({"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": (now - timedelta(days=lookback_days)).date().isoformat(), "range_to": now.date().isoformat(), "cont_flag": 0, "oi_flag": 1})
-        if not isinstance(response, dict) or response.get("s") != "ok" or not isinstance(response.get("candles"), list):
-            message = response.get("message") if isinstance(response, dict) else "invalid response"
-            raise RuntimeError(f"FYERS EMA Band history is unavailable: {message or 'no candles'}")
+        key = (symbol, timeframe)
+        with ema_history_lock:
+            cached = ema_history_cache.get(key)
+            if cached and cached.get('retry_at', 0) > time.monotonic():
+                raise RuntimeError('FYERS history temporarily unavailable; waiting before retry.')
+            if cached and cached.get('refresh_bar') == int(now.timestamp())//(int(resolution)*60) and time.monotonic() - cached['at'] < int(resolution)*60:
+                response = {'candles': cached['rows']}
+            else:
+                request = {"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": (now - timedelta(days=lookback_days)).date().isoformat(), "range_to": now.date().isoformat(), "cont_flag": 0, "oi_flag": 1}
+                if cached:
+                    request['range_from'] = now.date().isoformat()
+                response = client.history(request)
+                if not isinstance(response, dict) or response.get('s') != 'ok' or not isinstance(response.get('candles'), list):
+                    if not cached:
+                        cached = {'at':0,'rows':[],'refreshed_at':None}
+                        ema_history_cache[key] = cached
+                    cached['retry_at'] = time.monotonic() + 30
+                    message = response.get('message') if isinstance(response, dict) else 'invalid response'
+                    raise RuntimeError(f"FYERS candle history unavailable: {message or 'no candles'}")
+                merged = {row[0]: row for row in cached['rows']} if cached else {}
+                for row in response['candles']:
+                    if len(row) >= 5:
+                        merged[row[0]] = row
+                response = {'candles': [merged[k] for k in sorted(merged)]}
+                ema_history_cache[key] = {'at': time.monotonic(), 'rows': response['candles'], 'refreshed_at': datetime.now().astimezone().isoformat(), 'refresh_bar':int(now.timestamp())//(int(resolution)*60)}
         interval_seconds = int(resolution) * 60
         return [{"timestamp": int(row[0]), "open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]) if len(row) > 5 and row[5] is not None else 0.0, "open_interest": float(row[6]) if len(row) > 6 and row[6] is not None else None, "is_forming": int(row[0]) + interval_seconds > now.timestamp()} for row in response["candles"] if len(row) >= 5 and (include_forming or int(row[0]) + interval_seconds <= now.timestamp())]
 
@@ -1295,16 +1359,24 @@ def run_server():
         completed = ema_band_completed_candles(client, symbol, timeframe)
         return {**ema_band_exit_signal(completed, ema_length), "timeframe": timeframe, "completed_candles": len(completed)}
 
-    def ema_band_chart_snapshot(client, symbol, timeframe, ema_length, bars=80):
+    def ema_band_chart_snapshot(client, symbol, timeframe, ema_length, bars=80, references=False):
         """Return fixed-contract FYERS candles, including a display-only forming bar."""
-        cache_key = (symbol, timeframe, int(ema_length), int(bars))
+        cache_key = (symbol, timeframe, int(ema_length), int(bars), bool(references))
         now = datetime.now().astimezone()
         cached_at = ema_chart_cache.get("refreshed_at")
         cached = ema_chart_cache.get("snapshot")
-        if ema_chart_cache.get("key") == cache_key and cached and cached_at and (now - cached_at).total_seconds() < 15:
+        if ema_chart_cache.get("key") == cache_key and cached and cached_at and (now - cached_at).total_seconds() < 1:
             snapshot = json.loads(json.dumps(cached))
         else:
-            candles = ema_band_candles(client, symbol, timeframe, include_forming=True)
+            history_error = None
+            try:
+                candles = ema_band_candles(client, symbol, timeframe, include_forming=True)
+            except RuntimeError as error:
+                if not cached or ema_chart_cache.get('key') != cache_key:
+                    raise
+                candles = [{**c} for c in cached['candles']]
+                history_error = str(error)
+
             length = int(ema_length)
             if len(candles) < max(length + 1, 3):
                 raise RuntimeError("EMA Band chart needs more completed FYERS candles.")
@@ -1349,20 +1421,88 @@ def run_server():
             if resistances:
                 label, price, timestamp = min(resistances, key=lambda item: item[1])
                 levels.append({"label": label, "price": round(price, 4), "timestamp": timestamp})
-            snapshot = {"symbol": symbol, "timeframe": timeframe, "ema_length": length, "rsi_length": 14, "source": "FYERS fixed-contract candles", "levels": levels, "candles": [{**candle, "ema_high": round(high_values[index], 4), "ema_low": round(low_values[index], 4), "rsi_14": round(rsi_values[index], 4) if rsi_values[index] is not None else None, "marker": None if candle.get("is_forming") else markers.get(index)} for index, candle in enumerate(candles[start:], start)]}
+            snapshot = {"symbol": symbol, "timeframe": timeframe, "ema_length": length, "rsi_length": 14, "source": "FYERS fixed-contract candles", "history_error":history_error, "levels": levels, "candles": [{**candle, "ema_high": round(high_values[index], 4), "ema_low": round(low_values[index], 4), "rsi_14": round(rsi_values[index], 4) if rsi_values[index] is not None else None, "marker": None if candle.get("is_forming") else markers.get(index)} for index, candle in enumerate(candles[start:], start)]}
             ema_chart_cache.update({"key": cache_key, "snapshot": snapshot, "refreshed_at": now})
-        quote = client.quotes({"symbols": symbol})
+        nonlocal ema_chart_stream
+        if ema_chart_stream is None:
+            ema_chart_stream = EmaCrossoverBroker(ema_master_dir, ema_band_candles, select_ema_atm_option, on_tick=chart_stream_tick)
+            ema_chart_stream.start()
+        try:
+            raw_tick = ema_chart_stream.tick(symbol)
+            quote = {'s':'ok','d':[{'v':{'lp':raw_tick['ltp']}}]}
+            snapshot['price_source'] = 'FYERS websocket'
+            snapshot['price_received_at'] = datetime.fromtimestamp(ema_chart_stream.ticks[symbol][1]).astimezone().isoformat()
+            snapshot['price_exchange_at'] = datetime.fromtimestamp(float(raw_tick.get('exch_feed_time',raw_tick.get('last_traded_time')))).astimezone().isoformat()
+        except ValueError:
+            snapshot['price_source'] = 'REST fallback; 10-second cache'
+            with ema_history_lock:
+                saved_quote = ema_quote_cache.get(symbol)
+                if saved_quote and time.monotonic()-saved_quote[0] < 10:
+                    quote = saved_quote[1]
+                else:
+                    quote = client.quotes({'symbols':symbol})
+                    ema_quote_cache[symbol] = (time.monotonic(),quote,datetime.now().astimezone().isoformat())
+        if ema_history_cache.get((symbol,timeframe),{}).get('retry_at',0) <= time.monotonic():
+            snapshot['history_error'] = None
+        snapshot['stream_connected'] = ema_chart_stream.stream_status()['connected']
+        seconds = int(str(timeframe).split()[0])*(3600 if 'hour' in timeframe else 60)
+        with ema_chart_stream_lock:
+            stream_bars = ema_chart_stream_bars.setdefault((symbol,seconds),{})
+            for c in snapshot['candles']:
+                if c['timestamp']+seconds > now.timestamp() and c['timestamp'] not in stream_bars:
+                    stream_bars[c['timestamp']] = {**c}
+            for stamp,c in stream_bars.items():
+                if stamp+seconds > now.timestamp():
+                    forming = {**c,'is_forming':True}
+                    if snapshot['candles'] and snapshot['candles'][-1]['timestamp']==stamp:
+                        snapshot['candles'][-1]=forming
+                    elif not snapshot['candles'] or stamp>snapshot['candles'][-1]['timestamp']:
+                        snapshot['candles'].append(forming)
+        if snapshot['price_source'].startswith('REST'):
+            snapshot['price_received_at'] = ema_quote_cache[symbol][2]
+            snapshot['price_exchange_at'] = None
+        snapshot['history_refreshed_at'] = ema_history_cache.get((symbol,timeframe),{}).get('refreshed_at')
+        snapshot['history_refresh_policy'] = 'Bootstrap and candle boundary; shared cache; 30-second error backoff'
+        snapshot['history_cache_seconds'] = seconds
+        snapshot['quote_cache_seconds'] = 10
+        completed_stamps = [c['timestamp'] for c in snapshot['candles'] if c['timestamp'] + seconds <= now.timestamp()]
+        snapshot['history_gap'] = not completed_stamps or max(completed_stamps) < int(now.timestamp())//seconds*seconds-seconds
+        if symbol not in ema_chart_tick_cache:
+            try:
+                ema_chart_tick_cache[symbol] = float(ema_crossover.adapter.underlying(symbol)[4])
+            except (ValueError, IndexError, TypeError):
+                ema_chart_tick_cache[symbol] = None
+        snapshot['tick_size'] = ema_chart_tick_cache[symbol]
         values = ((quote.get("d") or [{}])[0].get("v") or {}) if isinstance(quote, dict) and quote.get("s") == "ok" else {}
         ltp = values.get("lp")
         if ltp is not None:
             live_price = float(ltp)
             snapshot["live_price"] = live_price
-            snapshot["live_price_at"] = now.isoformat()
+            snapshot["live_price_at"] = snapshot.get("price_received_at", now.isoformat())
             if snapshot["candles"] and snapshot["candles"][-1].get("is_forming"):
                 candle = snapshot["candles"][-1]
                 candle["close"] = live_price
                 candle["high"] = max(float(candle["high"]), live_price)
                 candle["low"] = min(float(candle["low"]), live_price)
+        if references:
+            day = datetime.now(ZoneInfo('Asia/Kolkata')).date().isoformat()
+            with ema_history_lock:
+                daily = ema_daily_reference_cache.get(symbol)
+                if not daily or daily.get('day') != day or (daily.get('error') and time.monotonic() >= daily.get('retry_at',0)):
+                    raw_daily = client.history({'symbol':symbol,'resolution':'D','date_format':1,'range_from':(now-timedelta(days=45)).date().isoformat(),'range_to':day,'cont_flag':0})
+                    if isinstance(raw_daily,dict) and raw_daily.get('s')=='ok':
+                        daily={'day':day,'rows':raw_daily.get('candles',[])}
+                        ema_daily_reference_cache[symbol]=daily
+                    else:
+                        daily={'day':day,'rows':[],'error':'Daily reference history unavailable','retry_at':time.monotonic()+30}
+                        ema_daily_reference_cache[symbol]=daily
+                for row in daily.get('rows',[]):
+                    if datetime.fromtimestamp(row[0],ZoneInfo('Asia/Kolkata')).date().isoformat() == day and live_price is not None:
+                        row[2] = max(float(row[2]),live_price)
+                        row[3] = min(float(row[3]),live_price)
+                        row[4] = live_price
+                snapshot['daily_reference_candles'] = [list(row) for row in daily.get('rows',[])]
+                snapshot['daily_reference_error'] = daily.get('error')
         return snapshot
 
     def ema_band_mode_capability(mode):
@@ -2946,7 +3086,21 @@ def run_server():
             "message": "Stop selection accepted and recomputed from fresh FYERS evidence. Any earlier ticket preview or confirmation is invalid.",
         }
 
+    ema_crossover = EmaCrossoverRunner(EmaCrossoverBroker(ema_master_dir, ema_band_candles, select_ema_atm_option), ROOT / ".private" / "ema-crossover-state.json")
+
     class Handler(SimpleHTTPRequestHandler):
+        def send_head(self):
+            target = Path(self.translate_path(self.path)).resolve()
+            try:
+                relative = target.relative_to(ROOT)
+            except ValueError:
+                self.send_error(404)
+                return None
+            if any(part.startswith(".") for part in relative.parts):
+                self.send_error(404)
+                return None
+            return super().send_head()
+
         def end_headers(self):
             if not self.path.split("?", 1)[0].startswith("/api/"):
                 self.send_header("Cache-Control", "no-store")
@@ -2997,6 +3151,20 @@ def run_server():
                 except Exception as error:
                     self.send_json(409, {"error": str(error)})
                 return
+            if path == "/api/rsi-table":
+                try:
+                    query=parse_qs(urlparse(self.path).query)
+                    symbol=str((query.get('symbol') or [''])[0]).upper()
+                    if not re.fullmatch(r'[A-Z]+:[A-Z0-9&_.!\-]+',symbol):
+                        raise ValueError('Select a valid underlying symbol')
+                    result=rsi_table.snapshot(ema_readonly_client(),symbol,int((query.get('rsi_length') or ['14'])[0]),int((query.get('ma_length') or ['14'])[0]),str((query.get('ma_type') or ['SMA'])[0]))
+                    self.send_json(200,result)
+                except Exception as error:
+                    self.send_json(409,{'error':str(error)})
+                return
+            if path == "/api/ema-crossover/runner":
+                self.send_json(200, ema_crossover.snapshot())
+                return
             if path == "/api/ema-band/runner":
                 self.send_json(200, ema_runner_snapshot())
                 return
@@ -3032,7 +3200,7 @@ def run_server():
                         raise RuntimeError("Start the EMA runner or select a FYERS instrument before loading its broker chart.")
                     app_id, access_token = token.split(":", 1)
                     client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-                    self.send_json(200, ema_band_chart_snapshot(client, symbol, timeframe, ema_length, bars=bars))
+                    self.send_json(200, ema_band_chart_snapshot(client, symbol, timeframe, ema_length, bars=bars,references=(query.get('references') or ['0'])[0]=='1'))
                 except Exception as error:
                     self.send_json(409, {"error": str(error)})
                 return
@@ -3181,6 +3349,17 @@ def run_server():
                 payload = self.read_json()
                 if path == "/api/ema-band/master-refresh":
                     self.send_json(200, refresh_ema_masters())
+                    return
+                if path.startswith("/api/ema-crossover/"):
+                    origin = self.headers.get("Origin")
+                    if origin and urlparse(origin).netloc != self.headers.get("Host"):
+                        raise PermissionError("Cross-origin runner mutations are forbidden.")
+                    actions = {"/api/ema-crossover/preview": ema_crossover.preview,
+                               "/api/ema-crossover/start": ema_crossover.start,
+                               "/api/ema-crossover/stop": lambda _: ema_crossover.stop()}
+                    if path not in actions:
+                        raise ValueError("Unknown crossover action.")
+                    self.send_json(200, actions[path](payload))
                     return
                 if path == "/api/ema-band/runner/start":
                     self.send_json(200, start_ema_runner(payload))
@@ -3336,4 +3515,6 @@ def run_server():
             active_feed.stop()
         sensex_straddle.stop()
         nifty_straddle.stop()
+        if ema_chart_stream:
+            ema_chart_stream.stop()
         server.server_close()

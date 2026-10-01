@@ -1,0 +1,591 @@
+//@version=6
+indicator("Red Bar Theory - Pinaki - Floating Fib", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100, max_bars_back=250)
+
+sessionMode = input.string("Auto", "Session selection", options=["Auto", "Equity", "Commodity", "Custom"], group="Market Session", tooltip="Auto selects Commodity for MCX symbols, Equity otherwise. All times are IST.")
+equitySession = input.session("0915-1530", "Equity session (IST)", group="Market Session")
+commoditySession = input.session("0900-2330", "Commodity session (IST)", group="Market Session")
+customSession = input.session("0915-1530", "Custom session (IST)", group="Market Session")
+isCommodity = syminfo.prefix == "MCX"
+useCommoditySession = sessionMode == "Commodity" or (sessionMode == "Auto" and isCommodity)
+marketSession = sessionMode == "Custom" ? customSession : useCommoditySession ? commoditySession : equitySession
+hideDailyOverlayText = input.bool(true, "Hide overlay text on daily and higher charts", group="Label Appearance", tooltip="Keep Red Bar lines and zone boxes visible while hiding its candle, level, EMA, session and zone captions on daily, weekly and monthly charts.")
+showOverlayText = not (hideDailyOverlayText and not timeframe.isintraday)
+showSessionInfo = input.bool(true, "Show active session", group="Market Session")
+showLabels = input.bool(false, "Show fixed Fibonacci source-candle labels", group="Fibonacci Labels")
+firstFibLabelText = input.string("First 5m", "First candle label text", group="Fibonacci Labels")
+redFibLabelText = input.string("First red 5m", "First red candle label text", group="Fibonacci Labels")
+showFibLevelLabels = input.bool(false, "Show fixed Fibonacci level labels", group="Fibonacci Labels", tooltip="Show or hide fixed-set ratio and price labels without hiding the Fibonacci lines.")
+fib382LabelText = input.string("0.382", "0.382 level label", group="Fibonacci Labels")
+fib500LabelText = input.string("0.500", "0.500 level label", group="Fibonacci Labels")
+fib618LabelText = input.string("0.618", "0.618 level label", group="Fibonacci Labels")
+extendLevelsRight = input.bool(true, "Extend levels right")
+firstSetColor = input.color(color.blue, "First 5m Fibonacci color")
+redSetColor = input.color(color.red, "First red Fibonacci color")
+useFibLineGradient = input.bool(true, "Gradient colors across Fibonacci lines", group="Fibonacci Line Style", tooltip="Progressive related tones from 0.382 to 0.618 within each set. Colors vary across levels, not along each line. Turn off to use the original single color per set.")
+// This overlay is independent of both fixed sets and all existing signals.
+showFloatingFib = input.bool(true, "Show latest closed red 5m Fibonacci", group="Floating Fibonacci", tooltip="Standard 5-minute candles only. Keep one set on the globally latest confirmed red candle, including session-opening reds. Green/doji and forming candles do not move it. It persists across session boundaries.")
+floatingFibColor = input.color(color.rgb(180, 85, 220), "Floating Fibonacci color", group="Floating Fibonacci")
+showFloatingFibSourceLabel = input.bool(false, "Show latest closed red candle source label", group="Floating Fibonacci", tooltip="Show or hide the large source-candle label independently of Fibonacci lines and level labels.")
+showFloatingFibLabels = input.bool(false, "Show floating Fibonacci level labels", group="Floating Fibonacci", tooltip="Show or hide floating ratio and price labels without hiding the right-extended Fibonacci lines.")
+floatingFibLabelOffset = input.int(23, "Floating label offset (bars)", minval=1, maxval=100, group="Floating Fibonacci")
+floatingFibLabelSpacing = input.int(24, "Floating label spacing (bars)", minval=1, maxval=100, group="Floating Fibonacci")
+showEmaCloud = input.bool(true, "Show EMA cloud", group="EMA Cloud")
+showCpr = input.bool(true, "Show daily CPR", group="CPR", tooltip="Previous trading day's Central Pivot Range. Shown on intraday and daily charts.")
+cprPivotColor = input.color(color.orange, "Pivot color", group="CPR")
+cprBandColor = input.color(color.purple, "TC / BC color", group="CPR")
+showPrevDayHL = input.bool(true, "Previous day high / low", group="High / Low Levels")
+showCurrentWeekHL = input.bool(true, "Current week high / low", group="High / Low Levels")
+showCurrentMonthHL = input.bool(true, "Current month high / low", group="High / Low Levels")
+prevDayHLColor = input.color(color.orange, "Previous day color", group="High / Low Levels")
+currentWeekHLColor = input.color(color.teal, "Current week color", group="High / Low Levels")
+currentMonthHLColor = input.color(color.fuchsia, "Current month color", group="High / Low Levels")
+showSwingLevels = input.bool(true, "Show latest swing high / low", group="Swing Levels")
+swingLeftBars = input.int(2, "Pivot left bars", minval=1, maxval=100, group="Swing Levels")
+swingRightBars = input.int(2, "Pivot right bars (confirmation)", minval=1, maxval=100, group="Swing Levels", tooltip="A swing becomes available only after this many candles to its right have closed. Uses the current chart's candles and timeframe.")
+swingHighColor = input.color(color.red, "Swing high color", group="Swing Levels")
+swingLowColor = input.color(color.green, "Swing low color", group="Swing Levels")
+labelTheme = input.string("Auto", "Label theme", options=["Auto", "Light", "Dark"], group="Label Appearance", tooltip="Auto follows chart background. Light: black text on white. Dark: white text on charcoal.")
+labelSizeChoice = input.string("Normal", "Text size", options=["Small", "Normal", "Large", "Huge"], group="Label Appearance")
+chartLabelSize = switch labelSizeChoice
+    "Small" => size.small
+    "Large" => size.large
+    "Huge" => size.huge
+    => size.normal
+labelLight = labelTheme == "Light" or (labelTheme == "Auto" and (0.299 * color.r(chart.bg_color) + 0.587 * color.g(chart.bg_color) + 0.114 * color.b(chart.bg_color)) > 128)
+labelTextColor = labelLight ? color.rgb(15, 23, 42) : color.white
+labelBackground = labelLight ? color.white : color.rgb(25, 30, 40)
+sdLabelOffset = input.int(8, "Zone label offset (bars)", minval=1, maxval=100, group="Label Appearance")
+sdLabelGap = input.float(4.5, "Zone label spacing (% visible range)", minval=2, maxval=10, step=0.5, group="Label Appearance")
+referenceLabelOffset = input.int(35, "High / low label offset (bars)", minval=1, maxval=100, group="Label Appearance")
+referenceLabelSpacing = input.int(25, "Day / week / month / swing label spacing (bars)", minval=0, maxval=100, group="Label Appearance")
+
+// EMA cloud: retain the current color when the two averages are equal.
+cloudFastEma = ta.ema(close, 10)
+cloudSlowEma = ta.ema(close, 30)
+var color emaCloudColor = na
+if cloudFastEma > cloudSlowEma
+    emaCloudColor := color.green
+else if cloudFastEma < cloudSlowEma
+    emaCloudColor := color.red
+
+cloudFastPlot = plot(showEmaCloud ? cloudFastEma : na, title="10 EMA", color=color.green, linewidth=2)
+cloudSlowPlot = plot(showEmaCloud ? cloudSlowEma : na, title="30 EMA", color=color.red, linewidth=2)
+fill(cloudFastPlot, cloudSlowPlot, color=showEmaCloud ? color.new(emaCloudColor, 80) : na, title="10/30 EMA Cloud")
+
+// Confirmed daily OHLC from standard candles, including on synthetic charts.
+// The one-bar offset makes lookahead_on safe: today's CPR uses yesterday only.
+[cprPrevHigh, cprPrevLow, cprPrevClose] = request.security(ticker.standard(syminfo.tickerid), "1D", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+cprPivot = (cprPrevHigh + cprPrevLow + cprPrevClose) / 3.0
+cprMidpoint = (cprPrevHigh + cprPrevLow) / 2.0
+cprReflected = 2.0 * cprPivot - cprMidpoint
+cprTop = math.max(cprMidpoint, cprReflected)
+cprBottom = math.min(cprMidpoint, cprReflected)
+cprVisible = showCpr and (timeframe.isintraday or (timeframe.isdaily and timeframe.multiplier == 1))
+plot(cprVisible ? cprPivot : na, title="CPR Pivot", color=cprPivotColor, linewidth=2, style=plot.style_stepline)
+plot(cprVisible ? cprTop : na, title="CPR TC", color=cprBandColor, linewidth=1, style=plot.style_stepline)
+plot(cprVisible ? cprBottom : na, title="CPR BC", color=cprBandColor, linewidth=1, style=plot.style_stepline)
+
+// Latest-period reference lines only, not historical signals. Unoffset weekly
+// and monthly values intentionally show the developing period's latest range.
+// They are drawn only on the last bar, never plotted over historical bars.
+[currentWeekHigh, currentWeekLow, currentWeekStart] = request.security(ticker.standard(syminfo.tickerid), "1W", [high, low, time], lookahead=barmerge.lookahead_on)
+[currentMonthHigh, currentMonthLow, currentMonthStart] = request.security(ticker.standard(syminfo.tickerid), "1M", [high, low, time], lookahead=barmerge.lookahead_on)
+
+drawReferenceLevel(bool enabled, float price, int startTime, string caption, color levelColor, int labelColumn) =>
+    var line referenceLine = na
+    var label referenceLabel = na
+    // Seed on the last historical bar so live ticks can reuse committed IDs.
+    if barstate.islastconfirmedhistory or barstate.islast
+        if enabled and not na(price) and not na(startTime)
+            if na(referenceLine)
+                referenceLine := line.new(startTime, price, math.max(startTime + 1, time), price, xloc=xloc.bar_time, extend=extend.right, color=levelColor, style=line.style_dashed, width=2)
+                if showOverlayText
+                    referenceLabel := label.new(bar_index + referenceLabelOffset + labelColumn * referenceLabelSpacing, price, caption + "\n" + str.tostring(price, format.mintick), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=labelBackground, textcolor=labelTextColor, size=chartLabelSize)
+
+            else
+                line.set_xy1(referenceLine, startTime, price)
+                line.set_xy2(referenceLine, math.max(startTime + 1, time), price)
+                label.set_xy(referenceLabel, bar_index + referenceLabelOffset + labelColumn * referenceLabelSpacing, price)
+                label.set_text(referenceLabel, caption + "\n" + str.tostring(price, format.mintick))
+        else
+            line.delete(referenceLine)
+            label.delete(referenceLabel)
+            referenceLine := na
+            referenceLabel := na
+    0
+
+// Hide a level when the chart timeframe is larger than its source period.
+dailyHLAllowed = timeframe.in_seconds() <= timeframe.in_seconds("1D")
+weeklyHLAllowed = timeframe.in_seconds() <= timeframe.in_seconds("1W")
+monthlyHLAllowed = timeframe.in_seconds() <= timeframe.in_seconds("1M")
+drawReferenceLevel(showPrevDayHL and dailyHLAllowed, cprPrevHigh, time("1D"), "Previous Day High", prevDayHLColor, 0)
+drawReferenceLevel(showPrevDayHL and dailyHLAllowed, cprPrevLow, time("1D"), "Previous Day Low", prevDayHLColor, 0)
+drawReferenceLevel(showCurrentWeekHL and weeklyHLAllowed, currentWeekHigh, currentWeekStart, "Current Week High", currentWeekHLColor, 1)
+drawReferenceLevel(showCurrentWeekHL and weeklyHLAllowed, currentWeekLow, currentWeekStart, "Current Week Low", currentWeekHLColor, 1)
+drawReferenceLevel(showCurrentMonthHL and monthlyHLAllowed, currentMonthHigh, currentMonthStart, "Current Month High", currentMonthHLColor, 2)
+drawReferenceLevel(showCurrentMonthHL and monthlyHLAllowed, currentMonthLow, currentMonthStart, "Current Month Low", currentMonthHLColor, 2)
+
+// Keep the immediately preceding confirmed pivot of each type. Confirmation
+// happens at the close of the rightmost candle, not on the pivot candle itself.
+swingHighCandidate = ta.pivothigh(high, swingLeftBars, swingRightBars)
+swingLowCandidate = ta.pivotlow(low, swingLeftBars, swingRightBars)
+var float latestSwingHigh = na
+var float latestSwingLow = na
+var int latestSwingHighTime = na
+var int latestSwingLowTime = na
+if barstate.isconfirmed
+    if not na(swingHighCandidate)
+        latestSwingHigh := swingHighCandidate
+        latestSwingHighTime := time[swingRightBars]
+    if not na(swingLowCandidate)
+        latestSwingLow := swingLowCandidate
+        latestSwingLowTime := time[swingRightBars]
+
+drawReferenceLevel(showSwingLevels, latestSwingHigh, latestSwingHighTime, "Latest Swing High", swingHighColor, 3)
+drawReferenceLevel(showSwingLevels, latestSwingLow, latestSwingLowTime, "Latest Swing Low", swingLowColor, 3)
+
+gsShow = input.bool(true, "Show global session partitions", group="Global Sessions")
+gsDays = input.int(10, "Trading days to retain", minval=1, maxval=20, group="Global Sessions")
+gsAsia = input.bool(true, "Asia / Tokyo", inline="gsAsia", group="Global Sessions")
+gsAsiaHour = input.int(9, "Hour", minval=0, maxval=23, inline="gsAsia", group="Global Sessions")
+gsAsiaMinute = input.int(0, "Minute", minval=0, maxval=59, inline="gsAsia", group="Global Sessions")
+gsLondon = input.bool(true, "London", inline="gsLondon", group="Global Sessions")
+gsLondonHour = input.int(8, "Hour", minval=0, maxval=23, inline="gsLondon", group="Global Sessions")
+gsLondonMinute = input.int(0, "Minute", minval=0, maxval=59, inline="gsLondon", group="Global Sessions")
+gsNY = input.bool(true, "New York", inline="gsNY", group="Global Sessions")
+gsNYHour = input.int(8, "Hour", minval=0, maxval=23, inline="gsNY", group="Global Sessions")
+gsNYMinute = input.int(0, "Minute", minval=0, maxval=59, inline="gsNY", group="Global Sessions")
+gsAsiaColor = input.color(color.rgb(0, 150, 180), "Asia line", group="Global Sessions")
+gsLondonColor = input.color(color.rgb(230, 145, 20), "London line", group="Global Sessions")
+gsNYColor = input.color(color.rgb(170, 75, 210), "New York line", group="Global Sessions")
+gsWidth = input.int(1, "Line width", minval=1, maxval=3, group="Global Sessions")
+
+// Fixed global references persist across partitions until their own replacement.
+lineExtend = extend.none
+
+inSession = not na(time(timeframe.period, marketSession, "Asia/Kolkata"))
+redBarScope = input.string("Global sessions", "Red Bar reset", options=["Global sessions", "Market session"], group="Global Sessions", tooltip="Global: restart at Asia, London and New York boundaries. If an opening is outside exchange hours, use the first available chart candle of that partition. Global mode is independent of the Market Session filter.")
+rbOpening(string zone, int h, int m, int dayOffset) =>
+    timestamp(zone, year(time, "Asia/Kolkata"), month(time, "Asia/Kolkata"), dayofmonth(time, "Asia/Kolkata") + dayOffset, h, m)
+int rbKey = na
+string rbName = ""
+for d = -1 to 0
+    int a = rbOpening("Asia/Tokyo", gsAsiaHour, gsAsiaMinute, d)
+    int l = rbOpening("Europe/London", gsLondonHour, gsLondonMinute, d)
+    int n = rbOpening("America/New_York", gsNYHour, gsNYMinute, d)
+    if a <= time and (na(rbKey) or a > rbKey)
+        rbKey := a
+        rbName := "ASIA"
+    if l <= time and (na(rbKey) or l > rbKey)
+        rbKey := l
+        rbName := "LONDON"
+    if n <= time and (na(rbKey) or n > rbKey)
+        rbKey := n
+        rbName := "NEW YORK"
+var int rbLastKey = na
+var string rbActiveName = ""
+rbGlobal = redBarScope == "Global sessions" and timeframe.isintraday
+rbInSession = rbGlobal or inSession
+newSession = rbInSession and (rbGlobal ? not na(rbKey) and (na(rbLastKey) or rbKey != rbLastKey) : (not inSession[1] or timeframe.change("D")))
+
+var int firstBarIndex = na
+var bool redSetDrawn = false
+// Two slots per global session: opening and first subsequent closed red.
+// Reuse exactly six sets. Replacing one slot never clears another session.
+var array<line> fixedFibLines = array.new<line>(18, na)
+var array<label> fixedFibLabels = array.new<label>(18, na)
+var array<label> fixedFibAnchors = array.new<label>(6, na)
+var array<int> fixedFibTimes = array.new<int>(6, na)
+var array<float> fixedFibHighs = array.new<float>(6, na)
+var array<float> fixedFibLows = array.new<float>(6, na)
+showFixedFibTable = input.bool(false, "Show fixed Fibonacci reference table", group="Fibonacci Labels", tooltip="Latest opening and first subsequent closed red for each global session. A previous reference remains until that same slot has a new qualifying candle.")
+var table fixedFibTable = table.new(position.top_right, 5, 7, border_width=1)
+
+var array<line> floatingFibLines = array.new<line>()
+var array<label> floatingFibLabels = array.new<label>()
+var label floatingFibAnchor = na
+floatingFibAllowed = showFloatingFib and chart.is_standard and timeframe.isminutes and timeframe.multiplier == 5
+
+level382(float candleHigh, float candleLow) => candleHigh - (candleHigh - candleLow) * 0.382
+level500(float candleHigh, float candleLow) => candleHigh - (candleHigh - candleLow) * 0.500
+level618(float candleHigh, float candleLow) => candleHigh - (candleHigh - candleLow) * 0.618
+
+// Keep each set's color identity; only line color varies across the three ratios.
+fibLineTone(color base, int ratioIndex) =>
+    color lightTone = color.rgb(color.r(base) * 0.8 + 51, color.g(base) * 0.8 + 51, color.b(base) * 0.8 + 51)
+    color deepTone = color.rgb(color.r(base) * 0.65, color.g(base) * 0.65, color.b(base) * 0.65)
+    useFibLineGradient ? color.from_gradient(ratioIndex, 0, 2, lightTone, deepTone) : base
+
+fixedSessionName(int slot) => slot < 2 ? "ASIA" : slot < 4 ? "LONDON" : "NEW YORK"
+fixedCaption(int slot) => (rbGlobal ? fixedSessionName(slot) + " | " : "") + (slot % 2 == 0 ? firstFibLabelText : redFibLabelText)
+
+saveFixedFib(int slot) =>
+    bool opening = slot % 2 == 0
+    color shade = opening ? firstSetColor : redSetColor
+    array<float> prices = array.from(level382(high, low), level500(high, low), level618(high, low))
+    array<string> captions = array.from(fib382LabelText, fib500LabelText, fib618LabelText)
+    array.set(fixedFibTimes, slot, time)
+    array.set(fixedFibHighs, slot, high)
+    array.set(fixedFibLows, slot, low)
+    for i = 0 to 2
+        int ix = slot * 3 + i
+        float price = array.get(prices, i)
+        line ln = array.get(fixedFibLines, ix)
+        if na(ln)
+            ln := line.new(time, price, time_close, price, xloc=xloc.bar_time, color=color.new(fibLineTone(shade, i), 30), width=1, style=slot < 2 ? line.style_solid : slot < 4 ? line.style_dashed : line.style_dotted)
+            array.set(fixedFibLines, ix, ln)
+        else
+            line.set_xy1(ln, time, price)
+            line.set_xy2(ln, time_close, price)
+        if showFibLevelLabels and showOverlayText
+            string caption = (slot < 2 ? "AS" : slot < 4 ? "LDN" : "NY") + (opening ? " O " : " R ") + array.get(captions, i)
+            label tag = array.get(fixedFibLabels, ix)
+            if na(tag)
+                tag := label.new(bar_index + 8 + slot * 36 + i * 12, price, caption, style=label.style_label_left, color=labelBackground, textcolor=shade, size=size.small)
+                array.set(fixedFibLabels, ix, tag)
+            else
+                label.set_xy(tag, bar_index + 8 + slot * 36 + i * 12, price)
+                label.set_text(tag, caption)
+            label.set_tooltip(tag, fixedCaption(slot) + "\n" + str.format_time(time, "dd MMM HH:mm", "Asia/Kolkata") + " IST\nH " + str.tostring(high, format.mintick) + " / L " + str.tostring(low, format.mintick))
+    if showLabels and showOverlayText
+        label anchor = array.get(fixedFibAnchors, slot)
+        string caption = fixedCaption(slot) + "\n" + str.format_time(time, "dd MMM HH:mm", "Asia/Kolkata")
+        if na(anchor)
+            anchor := label.new(time, opening ? high : low, caption, xloc=xloc.bar_time, style=opening ? label.style_label_down : label.style_label_up, color=labelBackground, textcolor=shade, size=size.small)
+            array.set(fixedFibAnchors, slot, anchor)
+        else
+            label.set_xy(anchor, time, opening ? high : low)
+            label.set_text(anchor, caption)
+    0
+
+int fixedSessionSlot = rbGlobal ? (rbName == "ASIA" ? 0 : rbName == "LONDON" ? 2 : 4) : 0
+if newSession and barstate.isconfirmed
+    firstBarIndex := bar_index
+    redSetDrawn := false
+    rbLastKey := rbKey
+    rbActiveName := rbGlobal ? rbName + " | " : ""
+    saveFixedFib(fixedSessionSlot)
+
+// Preserve the original fixed-red rule: opening candle is excluded.
+if rbInSession and barstate.isconfirmed and not redSetDrawn and not na(firstBarIndex) and bar_index > firstBarIndex and close < open
+    redSetDrawn := true
+    saveFixedFib(fixedSessionSlot + 1)
+
+// All six latest global references extend together; market mode retains two.
+if extendLevelsRight and (rbGlobal or rbInSession)
+    for ix = 0 to 17
+        line ln = array.get(fixedFibLines, ix)
+        if not na(ln)
+            line.set_x2(ln, time_close)
+            label tag = array.get(fixedFibLabels, ix)
+            if not na(tag)
+                label.set_x(tag, bar_index + 8 + int(ix / 3) * 36 + (ix % 3) * 12)
+
+if barstate.islast
+    if showFixedFibTable and showOverlayText
+        table.cell(fixedFibTable, 0, 0, "Fixed reference", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(fixedFibTable, 1, 0, "Source IST", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(fixedFibTable, 2, 0, fib382LabelText, text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(fixedFibTable, 3, 0, fib500LabelText, text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(fixedFibTable, 4, 0, fib618LabelText, text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        for slot = 0 to (rbGlobal ? 5 : 1)
+            int sourceTime = array.get(fixedFibTimes, slot)
+            float sourceHigh = array.get(fixedFibHighs, slot)
+            float sourceLow = array.get(fixedFibLows, slot)
+            color shade = slot % 2 == 0 ? firstSetColor : redSetColor
+            table.cell(fixedFibTable, 0, slot + 1, fixedCaption(slot), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+            table.cell(fixedFibTable, 1, slot + 1, na(sourceTime) ? "Waiting" : str.format_time(sourceTime, "dd MMM HH:mm", "Asia/Kolkata"), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+            table.cell(fixedFibTable, 2, slot + 1, str.tostring(level382(sourceHigh, sourceLow), format.mintick), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+            table.cell(fixedFibTable, 3, slot + 1, str.tostring(level500(sourceHigh, sourceLow), format.mintick), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+            table.cell(fixedFibTable, 4, slot + 1, str.tostring(level618(sourceHigh, sourceLow), format.mintick), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+    else
+        table.clear(fixedFibTable, 0, 0, 4, 6)
+
+// Independent global floating set: EVERY closed red is eligible, including
+// session openings and first reds. Green/doji/forming bars retain the last set.
+if floatingFibAllowed and barstate.isconfirmed and close < open
+    array<float> prices = array.from(level382(high, low), level500(high, low), level618(high, low))
+    array<string> captions = array.from(fib382LabelText, fib500LabelText, fib618LabelText)
+    for i = 0 to 2
+        float price = array.get(prices, i)
+        if array.size(floatingFibLines) <= i
+            array.push(floatingFibLines, line.new(bar_index, price, bar_index + 1, price, xloc=xloc.bar_index, color=fibLineTone(floatingFibColor, i), width=2, style=line.style_dashed, extend=extend.right))
+        else
+            line.set_xy1(array.get(floatingFibLines, i), bar_index, price)
+            line.set_xy2(array.get(floatingFibLines, i), bar_index + 1, price)
+        if showFloatingFibLabels
+            string caption = array.get(captions, i) + "\n" + str.tostring(price, format.mintick)
+            if array.size(floatingFibLabels) <= i
+                array.push(floatingFibLabels, label.new(bar_index + floatingFibLabelOffset + i * floatingFibLabelSpacing, price, caption, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=labelBackground, textcolor=floatingFibColor, size=size.small, tooltip=rbActiveName + "Confirmed red 5m: " + str.format_time(time, "dd MMM HH:mm", "Asia/Kolkata") + " IST. High - (high - low) * ratio."))
+            else
+                label.set_xy(array.get(floatingFibLabels, i), bar_index + floatingFibLabelOffset + i * floatingFibLabelSpacing, price)
+                label.set_text(array.get(floatingFibLabels, i), caption)
+                label.set_tooltip(array.get(floatingFibLabels, i), rbActiveName + "Confirmed red 5m: " + str.format_time(time, "dd MMM HH:mm", "Asia/Kolkata") + " IST. High - (high - low) * ratio.")
+    if showFloatingFibSourceLabel
+        if na(floatingFibAnchor)
+            floatingFibAnchor := label.new(bar_index, low, "LATEST CLOSED RED 5m\n" + str.format_time(time, "HH:mm", "Asia/Kolkata") + " IST", style=label.style_label_up, color=labelBackground, textcolor=floatingFibColor, size=size.small)
+
+        else
+            label.set_xy(floatingFibAnchor, bar_index, low)
+            label.set_text(floatingFibAnchor, "LATEST CLOSED RED 5m\n" + str.format_time(time, "HH:mm", "Asia/Kolkata") + " IST")
+
+if array.size(floatingFibLines) > 0
+    for i = 0 to array.size(floatingFibLines) - 1
+        line levelLine = array.get(floatingFibLines, i)
+        line.set_x2(levelLine, math.max(line.get_x1(levelLine) + 1, bar_index))
+        if array.size(floatingFibLabels) > i
+            label.set_x(array.get(floatingFibLabels, i), bar_index + floatingFibLabelOffset + i * floatingFibLabelSpacing)
+
+
+// Supply / demand: compact base followed by a completed-candle departure.
+// Boxes begin at the base for context, but exist only after detection (label time).
+sdShow = input.bool(true, "Automatic supply / demand — chart timeframe", group="Supply / Demand", tooltip="Uses the selected standard chart candles and their ATR: daily on 1D, hourly on 1h, etc. Recalculates on timeframe changes. Zones are confirmed at candle close; no fixed five-minute data is requested.")
+sdShowLabels = input.bool(false, "Show supply / demand zone labels", group="Supply / Demand", tooltip="Optional compact captions in the right margin. Daily/higher captions also require turning off Hide overlay text on daily and higher charts.")
+sdShowDetails = input.bool(false, "Show zone source details table", group="Supply / Demand", tooltip="Optional latest six zone references with chart timeframe, base-candle date, confirmation date and price range. Independent of chart captions.")
+sdTentative = input.bool(true, "Show tentative zones", group="Supply / Demand")
+sdMaxBase = input.int(6, "Maximum base candles", minval=2, maxval=10, group="Supply / Demand")
+sdBaseAtr = input.float(1.8, "Maximum base width / ATR", minval=0.2, step=0.1, group="Supply / Demand")
+sdWeak = input.float(0.35, "Tentative departure / ATR", minval=0.1, step=0.05, group="Supply / Demand")
+sdStrong = input.float(0.9, "Strong departure / ATR", minval=0.4, step=0.1, group="Supply / Demand")
+sdKeep = input.int(6, "Maximum active zones per side", minval=1, maxval=12, group="Supply / Demand")
+sdAge = input.int(300, "Expire after chart bars", minval=10, maxval=2000, group="Supply / Demand")
+sdSupplyColor = input.color(color.red, "Supply color", group="Supply / Demand")
+sdDemandColor = input.color(color.green, "Demand color", group="Supply / Demand")
+sdAtr = ta.atr(14)
+sdAllowed = sdShow and chart.is_standard
+// Intraday retains its session discipline; daily/higher bars span sessions.
+sdInSession = not timeframe.isintraday or inSession
+
+type SDZone
+    box area
+    bool supply
+    bool strong
+    float atr
+    int born
+    int detected
+    int touches
+    bool touching
+
+var array<SDZone> sdZones = array.new<SDZone>()
+sdCaption(SDZone z) =>
+    (z.supply ? "AUTO SUPPLY " : "AUTO DEMAND ") + str.tostring(box.get_bottom(z.area), format.mintick) + " - " + str.tostring(box.get_top(z.area), format.mintick) + " | " + (z.strong ? "strong" : "tentative") + " | " + (z.touches == 0 ? "fresh" : "retests " + str.tostring(z.touches)) + " | detected " + str.format_time(z.detected, "dd MMM HH:mm", "Asia/Kolkata")
+
+bool sdNewSupply = false
+bool sdNewDemand = false
+bool sdBrokenSupply = false
+bool sdBrokenDemand = false
+bool sdRetestSupply = false
+bool sdRetestDemand = false
+
+if sdAllowed and barstate.isconfirmed
+    // Close-based invalidation; contiguous candles inside a zone count as one visit.
+    int zi = array.size(sdZones) - 1
+    while zi >= 0
+        SDZone z = array.get(sdZones, zi)
+        float top = box.get_top(z.area)
+        float bottom = box.get_bottom(z.area)
+        bool broken = z.supply ? close > top : close < bottom
+        if broken or bar_index - z.born > sdAge
+            sdBrokenSupply := sdBrokenSupply or (broken and z.supply)
+            sdBrokenDemand := sdBrokenDemand or (broken and not z.supply)
+            box.delete(z.area)
+            array.remove(sdZones, zi)
+        else
+            bool touching = high >= bottom and low <= top
+            if touching and not z.touching and bar_index > z.born
+                z.touches += 1
+                sdRetestSupply := sdRetestSupply or z.supply
+                sdRetestDemand := sdRetestDemand or not z.supply
+            z.touching := touching
+            float departure = z.supply ? bottom - close : close - top
+            if not z.strong and z.touches == 0 and bar_index - z.born <= 3 and departure >= math.max(sdStrong, sdWeak) * z.atr
+                z.strong := true
+            color zoneColor = z.supply ? sdSupplyColor : sdDemandColor
+            box.set_border_style(z.area, z.strong ? line.style_solid : line.style_dashed)
+            box.set_bgcolor(z.area, color.new(zoneColor, z.touches > 0 ? 93 : 86))
+            box.set_right(z.area, time_close)
+            box.set_text(z.area, "")
+        zi -= 1
+
+    // Search 2..N base candles, followed by up to 3 departure candles.
+    // Require overlapping adjacent candles and limited average body size.
+    bool made = false
+    if sdInSession and not na(sdAtr[sdMaxBase + 3])
+        for departureBars = 1 to 3
+            if not made
+                float baseHigh = na
+                float baseLow = na
+                float bodyHigh = na
+                float bodyLow = na
+                float bodyTotal = 0.0
+                float rangeTotal = 0.0
+                bool compact = true
+                for n = 1 to sdMaxBase
+                    int k = departureBars + n - 1
+                    baseHigh := na(baseHigh) ? high[k] : math.max(baseHigh, high[k])
+                    baseLow := na(baseLow) ? low[k] : math.min(baseLow, low[k])
+                    bodyHigh := na(bodyHigh) ? math.max(open[k], close[k]) : math.max(bodyHigh, math.max(open[k], close[k]))
+                    bodyLow := na(bodyLow) ? math.min(open[k], close[k]) : math.min(bodyLow, math.min(open[k], close[k]))
+                    bodyTotal += math.abs(close[k] - open[k])
+                    rangeTotal += high[k] - low[k]
+                    compact := compact and (not timeframe.isintraday or (inSession[k] and time("D")[k] == time("D")))
+                    if n > 1
+                        compact := compact and high[k] >= low[k - 1] and low[k] <= high[k - 1]
+                    float a = sdAtr[departureBars]
+                    float width = baseHigh - baseLow
+                    if n >= 2 and compact and width > syminfo.mintick and width <= sdBaseAtr * a and bodyTotal <= 0.6 * rangeTotal and not made
+                        bool down = close < baseLow - sdWeak * a
+                        bool up = close > baseHigh + sdWeak * a
+                        bool departureValid = down or up
+                        float impulse = 0.0
+                        for d = 0 to departureBars - 1
+                            departureValid := departureValid and (not timeframe.isintraday or (inSession[d] and time("D")[d] == time("D"))) and (down ? close[d] <= baseHigh : close[d] >= baseLow)
+                            impulse := math.max(impulse, down ? open[d] - close[d] : close[d] - open[d])
+                        float distance = down ? baseLow - close : close - baseHigh
+                        bool strong = distance >= math.max(sdStrong, sdWeak) * a and impulse >= 0.5 * a
+                        float zoneTop = down ? baseHigh : bodyHigh
+                        float zoneBottom = down ? bodyLow : baseLow
+                        bool duplicate = false
+                        int sideCount = 0
+                        int oldestSide = -1
+                        if array.size(sdZones) > 0
+                            for j = 0 to array.size(sdZones) - 1
+                                SDZone old = array.get(sdZones, j)
+                                if old.supply == down
+                                    sideCount += 1
+                                    if oldestSide == -1
+                                        oldestSide := j
+                                    duplicate := duplicate or (zoneTop >= box.get_bottom(old.area) and zoneBottom <= box.get_top(old.area))
+                        if departureValid and impulse >= 0.25 * a and (strong or sdTentative) and zoneTop - zoneBottom >= syminfo.mintick and not duplicate
+                            if sideCount >= sdKeep and oldestSide >= 0
+                                SDZone removed = array.remove(sdZones, oldestSide)
+                                box.delete(removed.area)
+                            color zoneColor = down ? sdSupplyColor : sdDemandColor
+                            box b = box.new(time[k], zoneTop, time_close, zoneBottom, xloc=xloc.bar_time, border_color=zoneColor, border_width=1, border_style=strong ? line.style_solid : line.style_dashed, bgcolor=color.new(zoneColor, 86), text_color=zoneColor, text_size=size.small, text_halign=text.align_right)
+                            SDZone z = SDZone.new(b, down, strong, a, bar_index, time_close, 0, false)
+                            box.set_text(b, "")
+                            array.push(sdZones, z)
+                            sdNewSupply := down
+                            sdNewDemand := not down
+                            made := true
+
+alertcondition(sdNewSupply, "New supply zone", "A completed candle detected a supply zone on {{ticker}} {{interval}}.")
+alertcondition(sdNewDemand, "New demand zone", "A completed candle detected a demand zone on {{ticker}} {{interval}}.")
+alertcondition(sdRetestSupply, "Supply zone retest", "A completed candle retested supply on {{ticker}} {{interval}}.")
+alertcondition(sdRetestDemand, "Demand zone retest", "A completed candle retested demand on {{ticker}} {{interval}}.")
+alertcondition(sdBrokenSupply, "Supply zone invalidated", "A candle closed above supply on {{ticker}} {{interval}}.")
+alertcondition(sdBrokenDemand, "Demand zone invalidated", "A candle closed below demand on {{ticker}} {{interval}}.")
+
+// Place current zone captions to the right; leaders retain exact price anchors.
+var array<label> sdCaptions = array.new<label>()
+var array<line> sdLeaders = array.new<line>()
+var float sdVisibleHigh = na
+var float sdVisibleLow = na
+if time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+    sdVisibleHigh := na(sdVisibleHigh) ? high : math.max(sdVisibleHigh, high)
+    sdVisibleLow := na(sdVisibleLow) ? low : math.min(sdVisibleLow, low)
+// Reuse caption/leader slots; only grow or shrink when the active count changes.
+if barstate.islastconfirmedhistory or barstate.islast
+    int captionCount = sdShowLabels and showOverlayText ? array.size(sdZones) : 0
+    while array.size(sdCaptions) > captionCount
+        label.delete(array.pop(sdCaptions))
+    while array.size(sdLeaders) > captionCount
+        line.delete(array.pop(sdLeaders))
+    array<float> mids = array.new<float>()
+    if captionCount > 0
+        for z in sdZones
+            array.push(mids, (box.get_top(z.area) + box.get_bottom(z.area)) / 2)
+        array<int> sortedZones = array.sort_indices(mids, order.ascending)
+        float lastY = na
+        float gap = math.max(nz(sdVisibleHigh - sdVisibleLow, sdAtr * 10) * sdLabelGap / 100, syminfo.mintick * 10)
+        int slot = 0
+        for idx in sortedZones
+            SDZone z = array.get(sdZones, idx)
+            float mid = array.get(mids, idx)
+            float y = na(lastY) ? mid : math.max(mid, lastY + gap)
+            lastY := y
+            string caption = (z.supply ? "SUPPLY" : "DEMAND") + " [" + timeframe.period + "]  " + (z.strong ? "Strong" : "Tentative") + "\n" + str.tostring(box.get_bottom(z.area), format.mintick) + " - " + str.tostring(box.get_top(z.area), format.mintick)
+            if array.size(sdCaptions) <= slot
+                label tag = label.new(bar_index + sdLabelOffset, y, caption, style=label.style_label_left, color=labelBackground, textcolor=labelTextColor, size=chartLabelSize, textalign=text.align_left, tooltip=sdCaption(z))
+                array.push(sdCaptions, tag)
+                array.push(sdLeaders, line.new(bar_index, mid, bar_index + sdLabelOffset, y, color=z.supply ? sdSupplyColor : sdDemandColor, width=1))
+            else
+                label tag = array.get(sdCaptions, slot)
+                label.set_xy(tag, bar_index + sdLabelOffset, y)
+                label.set_text(tag, caption)
+                label.set_tooltip(tag, sdCaption(z))
+                line leader = array.get(sdLeaders, slot)
+                line.set_xy1(leader, bar_index, mid)
+                line.set_xy2(leader, bar_index + sdLabelOffset, y)
+                line.set_color(leader, z.supply ? sdSupplyColor : sdDemandColor)
+            slot += 1
+
+// Optional audit view: source candles belong to the selected chart timeframe.
+var table sdDetails = table.new(position.top_right, 4, 7, border_width=1)
+if barstate.islast
+    table.clear(sdDetails, 0, 0, 3, 6)
+    if sdShowDetails
+        table.cell(sdDetails, 0, 0, "S/D " + timeframe.period, text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(sdDetails, 1, 0, "Base IST", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(sdDetails, 2, 0, "Confirmed IST", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        table.cell(sdDetails, 3, 0, "Low / High", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+        if array.size(sdZones) > 0
+            for row = 0 to math.min(array.size(sdZones), 6) - 1
+                SDZone z = array.get(sdZones, array.size(sdZones) - 1 - row)
+                table.cell(sdDetails, 0, row + 1, z.supply ? "Supply" : "Demand", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+                table.cell(sdDetails, 1, row + 1, str.format_time(box.get_left(z.area), "dd MMM HH:mm", "Asia/Kolkata"), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+                table.cell(sdDetails, 2, row + 1, str.format_time(z.detected, "dd MMM HH:mm", "Asia/Kolkata"), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+                table.cell(sdDetails, 3, row + 1, str.tostring(box.get_bottom(z.area), format.mintick) + " / " + str.tostring(box.get_top(z.area), format.mintick), text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+
+var table sessionInfo = table.new(position.bottom_right, 1, 1)
+if barstate.islast and showSessionInfo and showOverlayText
+    table.cell(sessionInfo, 0, 0, (sessionMode == "Custom" ? "Custom" : useCommoditySession ? "Commodity" : "Equity") + " | " + str.substring(marketSession, 0, 2) + ":" + str.substring(marketSession, 2, 4) + " - " + str.substring(marketSession, 5, 7) + ":" + str.substring(marketSession, 7, 9) + " IST", text_color=labelTextColor, bgcolor=labelBackground, text_size=size.small)
+
+// Global session openings are clock annotations, independent of signal sessions.
+// IANA time zones apply London/New York daylight-saving changes automatically.
+var array<line> gsLines = array.new<line>()
+var array<label> gsLabels = array.new<label>()
+gsDate = year(time, "Asia/Kolkata") * 10000 + month(time, "Asia/Kolkata") * 100 + dayofmonth(time, "Asia/Kolkata")
+gsOpening(bool enabled, string caption, string zone, int h, int m, color shade) =>
+    if enabled
+        int opening = timestamp(zone, year(time, "Asia/Kolkata"), month(time, "Asia/Kolkata"), dayofmonth(time, "Asia/Kolkata"), h, m)
+        array.push(gsLines, line.new(opening, low, opening, math.max(high, low + syminfo.mintick), xloc=xloc.bar_time, extend=extend.both, color=shade, style=line.style_dashed, width=gsWidth))
+        string gsCaption = caption + "\n" + str.format_time(opening, "HH:mm", "Asia/Kolkata") + " IST"
+        array.push(gsLabels, label.new(opening, low, gsCaption, xloc=xloc.bar_time, style=label.style_label_up, color=labelBackground, textcolor=labelTextColor, size=size.small, tooltip=caption + " opening: " + str.format_time(opening, "HH:mm", zone) + " " + zone + ". Scheduled boundary, not a trading signal. Outside exchange hours, TradingView may compress this time gap."))
+if gsShow and timeframe.isintraday and (barstate.isfirst or gsDate != gsDate[1])
+    gsOpening(gsAsia, "ASIA", "Asia/Tokyo", gsAsiaHour, gsAsiaMinute, gsAsiaColor)
+    gsOpening(gsLondon, "LONDON", "Europe/London", gsLondonHour, gsLondonMinute, gsLondonColor)
+    gsOpening(gsNY, "NEW YORK", "America/New_York", gsNYHour, gsNYMinute, gsNYColor)
+    while array.size(gsLines) > gsDays * ((gsAsia ? 1 : 0) + (gsLondon ? 1 : 0) + (gsNY ? 1 : 0))
+        line.delete(array.shift(gsLines))
+        label.delete(array.shift(gsLabels))
+if barstate.islast and array.size(gsLabels) > 0
+    float gsFloor = nz(sdVisibleLow, low) + nz(sdVisibleHigh - sdVisibleLow, high - low) * 0.02
+    for tag in gsLabels
+        label.set_y(tag, gsFloor)
+
+// Editable on-chart EMA captions; plot titles must remain constant in Pine.
+emaShowLabels = input.bool(true, "Show EMA labels", group="EMA Cloud")
+emaFastCaption = input.string("10 EMA", "Fast EMA label text", group="EMA Cloud")
+emaSlowCaption = input.string("30 EMA", "Slow EMA label text", group="EMA Cloud")
+emaLabelPrice = input.bool(true, "Include price in EMA labels", group="EMA Cloud")
+emaLabelOffset = input.int(5, "EMA label offset (bars)", minval=1, maxval=100, group="EMA Cloud")
+emaLabelSpacing = input.int(15, "EMA label spacing (bars)", minval=0, maxval=100, group="EMA Cloud")
+var label emaFastTag = na
+var label emaSlowTag = na
+// Reuse committed labels on live ticks; EMA calculations and captions are unchanged.
+if barstate.islastconfirmedhistory or barstate.islast
+    if showEmaCloud and emaShowLabels and showOverlayText
+        if na(emaFastTag)
+            emaFastTag := label.new(bar_index + emaLabelOffset, cloudFastEma, emaFastCaption + (emaLabelPrice ? "  " + str.tostring(cloudFastEma, format.mintick) : ""), style=label.style_label_left, color=labelBackground, textcolor=labelTextColor, size=chartLabelSize, tooltip="Fast EMA (10 periods)")
+            emaSlowTag := label.new(bar_index + emaLabelOffset + emaLabelSpacing, cloudSlowEma, emaSlowCaption + (emaLabelPrice ? "  " + str.tostring(cloudSlowEma, format.mintick) : ""), style=label.style_label_left, color=labelBackground, textcolor=labelTextColor, size=chartLabelSize, tooltip="Slow EMA (30 periods)")
+        else
+            label.set_xy(emaFastTag, bar_index + emaLabelOffset, cloudFastEma)
+            label.set_text(emaFastTag, emaFastCaption + (emaLabelPrice ? "  " + str.tostring(cloudFastEma, format.mintick) : ""))
+            label.set_xy(emaSlowTag, bar_index + emaLabelOffset + emaLabelSpacing, cloudSlowEma)
+            label.set_text(emaSlowTag, emaSlowCaption + (emaLabelPrice ? "  " + str.tostring(cloudSlowEma, format.mintick) : ""))
+    else
+        label.delete(emaFastTag)
+        label.delete(emaSlowTag)
+        emaFastTag := na
+        emaSlowTag := na

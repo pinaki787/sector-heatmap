@@ -40,7 +40,7 @@
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
   const initialStraddleMarket = storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
+  const initialView = ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
     : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors'
   let straddleRunnerState = { available: false, running: false }
@@ -2441,6 +2441,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   setInterval(() => { if (!document.hidden) loadEmaTrackedPositions() }, 15000)
   setInterval(loadEmaExecutionLog, 15000)
   setInterval(() => { if (!document.hidden) loadEmaBrokerChart(currentEmaRunnerState) }, 1000)
+  window.EmaCrossover.mount(initialView)
+  window.EmaCrossoverLive.mount()
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)) }); document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view)); try { localStorage.setItem(viewStorageKey, button.dataset.view) } catch {} }))
   document.querySelectorAll('[data-straddle-market]').forEach(button => button.addEventListener('click', () => {
     const market = button.dataset.straddleMarket
