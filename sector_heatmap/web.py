@@ -18,6 +18,7 @@ from .authentication import authorization_url, exchange_auth_code, validated_con
 from .market_data import FyersLiveFeed, is_token_error, tick_timestamp_iso
 from .market_calendar import market_session
 from .rsi_table import RsiTable
+from .delta_india import DeltaIndia
 from strategies.ema_crossover.runner import Runner as EmaCrossoverRunner
 from strategies.ema_crossover.broker import FyersBroker as EmaCrossoverBroker
 from .official_weights import OFFICIAL_WEIGHT_SET
@@ -1276,6 +1277,7 @@ def run_server():
     ema_quote_cache = {}
     ema_daily_reference_cache = {}
     rsi_table = RsiTable()
+    delta_india = DeltaIndia(ROOT / ".private" / "delta-india-paper.json",credentials=load_config)
     ema_chart_tick_cache = {}
     ema_chart_stream_bars = {}
     ema_chart_stream_lock = threading.Lock()
@@ -3151,6 +3153,18 @@ def run_server():
                 except Exception as error:
                     self.send_json(409, {"error": str(error)})
                 return
+            if path.startswith("/api/delta-india/"):
+                try:
+                    query=parse_qs(urlparse(self.path).query)
+                    symbol=str((query.get('symbol') or [''])[0])
+                    if path=="/api/delta-india/status":result=delta_india.status()
+                    elif path=="/api/delta-india/instruments":result=delta_india.catalog()
+                    elif path=="/api/delta-india/quote":result=delta_india.ticker(symbol)
+                    elif path=="/api/delta-india/chart":result=delta_india.chart(symbol,str((query.get('resolution') or ['5m'])[0]),int((query.get('rsi_length') or ['14'])[0]),int((query.get('ma_length') or ['14'])[0]),str((query.get('ma_type') or ['SMA'])[0]))
+                    else:raise ValueError('Unknown Delta India read-only route.')
+                    self.send_json(200,result)
+                except Exception as error:self.send_json(409,{"error":str(error)})
+                return
             if path == "/api/rsi-table":
                 try:
                     query=parse_qs(urlparse(self.path).query)
@@ -3350,6 +3364,13 @@ def run_server():
                 if path == "/api/ema-band/master-refresh":
                     self.send_json(200, refresh_ema_masters())
                     return
+                if path.startswith("/api/delta-india/"):
+                    if (self.headers.get("Host") or "").split(":")[0] not in ("127.0.0.1","localhost"):raise PermissionError('Delta account/execution actions require the local dashboard.')
+                    origin=self.headers.get("Origin")
+                    if origin and urlparse(origin).netloc!=self.headers.get("Host"):raise PermissionError('Cross-origin broker actions are forbidden.')
+                    actions={"/api/delta-india/verify-auth":lambda _:delta_india.verify_auth(),"/api/delta-india/paper-preview":delta_india.preview,"/api/delta-india/paper-record":delta_india.record_paper,"/api/delta-india/paper-close":delta_india.close_paper,"/api/delta-india/connect":delta_india.configure,"/api/delta-india/account":delta_india.account,"/api/delta-india/submit":delta_india.submit,"/api/delta-india/reconcile":delta_india.reconcile,"/api/delta-india/cancel":delta_india.cancel,"/api/delta-india/fills":delta_india.fills,"/api/delta-india/runner-start":delta_india.start_runner,"/api/delta-india/runner-stop":delta_india.stop_runner,"/api/delta-india/runner-close":delta_india.close_runner}
+                    if path not in actions:raise ValueError('Unknown Delta India action.')
+                    self.send_json(200,actions[path](payload));return
                 if path.startswith("/api/ema-crossover/"):
                     origin = self.headers.get("Origin")
                     if origin and urlparse(origin).netloc != self.headers.get("Host"):
