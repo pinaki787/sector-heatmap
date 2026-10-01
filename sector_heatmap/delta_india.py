@@ -6,6 +6,7 @@ from urllib.parse import urlencode,quote
 import hashlib,hmac,json,math,os,re,secrets,shlex,threading,time
 import requests
 from strategies.ema_crossover.signals import rsi_sma_series
+from . import delta_trailing
 
 BASE='https://api.india.delta.exchange'
 RESOLUTIONS={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'1d':86400,'1w':604800}
@@ -202,10 +203,7 @@ class DeltaIndia:
             if self.corrupt or not self.paper['position']:raise ValueError('No verified Delta paper position to close.')
             p=self.paper['position'];current,value=self._paper_contract(p['symbol'])
             if current['id']!=p['product_id'] or str(value)!=p['contract_value']:raise ValueError('Delta contract identity/units changed; paper close unavailable.')
-            q=self.ticker(p['symbol']);fill=q['bid'] if p['side']=='LONG' else q['ask'];change=Decimal(str(fill))-Decimal(str(p['entry_price'])) if p['side']=='LONG' else Decimal(str(p['entry_price']))-Decimal(str(fill))
-            trade=next(r for r in self.paper['trades'] if r['lifecycle_id']==p['lifecycle_id']);trade.update(status='CLOSED',exit_price=fill,exit_time=self.clock(),realized_pnl=float(change*Decimal(p['contract_value'])*p['contracts']),basis='Quote currency; before fees/funding; no INR conversion')
-            self.paper['position']=None;self._save();return self.status()
-
+            self._paper_reduce(p['contracts'],payload.get('reason','EXPLICIT_CLOSE'));return self.status()
     def _position(self,product_id):
         r=self._private('GET','/v2/positions',params={'product_id':product_id})['result']
         if not isinstance(r,dict):raise ValueError('Real-time Delta product position unavailable.')
@@ -260,7 +258,7 @@ class DeltaIndia:
             if not -2<=self.clock()-q['exchange_at']<=15:raise ValueError('Delta quote aged during preflight; submit again with fresh data.')
             if runner and payload.get('signal_close') is not None and not 0<=self.clock()-payload['signal_close']<=30:raise ValueError('Completed Delta crossover expired during preflight; no order submitted.')
             client='spdi_'+hashlib.sha256(token.encode()).hexdigest()[:26];body['client_order_id']=client
-            owned=dict(request_id=token,client_order_id=client,payload_digest=digest,request=body,symbol=p['symbol'],product=p,status='SUBMITTING',filled_contracts=0,created_at=self.clock(),quote=q,account_identity=self._identity(),strategy=payload.get('strategy','MANUAL_DELTA_LIMIT'))
+            owned=dict(request_id=token,client_order_id=client,payload_digest=digest,request=body,symbol=p['symbol'],product=p,status='SUBMITTING',filled_contracts=0,created_at=self.clock(),quote=q,account_identity=self._identity(),strategy=payload.get('strategy','MANUAL_DELTA_LIMIT'),execution_reason=payload.get('execution_reason','MANUAL'))
             self.live['orders'][token]=owned;self._save_live() # durable intent precedes financial request
             try:r=self._private('POST','/v2/orders',body=body)['result']
             except ValueError as e:owned.update(status='REJECTED',error=str(e));self._save_live();return deepcopy(owned)
@@ -316,8 +314,12 @@ class DeltaIndia:
             if 'options' in p['contract_type'] and direction!='LONG_ONLY':raise ValueError('Options runner supports selected-contract LONG_ONLY: bullish buys, bearish closes. No automatic strike mapping or option writing.')
             if mode=='LIVE' and self._position(p['id'])!=0:raise ValueError('Selected Delta product already has a broker position; runner ownership cannot be established.')
             if mode=='PAPER' and self.paper['position']:raise ValueError('Close the existing Delta paper position first.')
+            trailing_settings=delta_trailing.settings(payload)
             cfg={k:payload.get(k,d) for k,d in [('symbol',None),('resolution','5m'),('rsi_length',14),('ma_length',14),('ma_type','SMA'),('contracts',1),('direction','BOTH'),('mode','PAPER')]}
-            self.ticker(p['symbol']);last=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])['last_completed']
+            cfg.update(trailing_settings)
+            quote=self.ticker(p['symbol'])
+            if cfg['trailing_enabled'] and cfg['trailing_mode']=='POINTS' and cfg['direction']=='BOTH' and cfg['trailing_step']>=quote['bid']:raise ValueError('Short trailing price step must be smaller than the current entry quote.')
+            last=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])['last_completed']
             if not last or last.get('rsi_ma') is None:raise ValueError('Completed RSI/MA history is not warmed up.')
             self.live['runner_config']=deepcopy(cfg);self._save_live()
             self.runner={'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
@@ -331,24 +333,39 @@ class DeltaIndia:
         if o['status'] not in ('closed','cancelled','REJECTED'):self.runner['message']='Awaiting verified order completion; no further orders.';return False
         qty=o['filled_contracts'];action=self.runner['action'];p=self.live['runner_position']
         if action=='ENTRY' and qty:self.live['runner_position']={'symbol':o['symbol'],'product_id':o['request']['product_id'],'side':o['request']['side'],'contracts':qty,'entry_price':o['average_fill_price'],'mode':'LIVE','entry_request_id':token}
-        if action=='EXIT' and p:
+        if action=='ENTRY' and qty:
+            position=self.live['runner_position'];position['trailing']=delta_trailing.initial(position['entry_price'],o['product']['tick_size'],qty,position['side'],self.runner['config'])
+        if (action=='EXIT' or str(action).startswith('TRAIL_')) and p:
+            if str(action).startswith('TRAIL_') and qty:
+                stage=str(action).split('_')[1];p['trailing']['target_filled'][stage]=p['trailing']['target_filled'].get(stage,0)+qty
             p['contracts']-=qty
             if p['contracts']==0:self.live['runner_position']=None
         self.live['runner_pending']=None;self.live['runner_action']=None;self._save_live();self.runner['pending']=None;self.runner['action']=None;return True
     def _runner_order(self,side,size,reduce,action,signal_close=None):
         cfg=self.runner['config'];q=self.ticker(cfg['symbol']);p=self.product(cfg['symbol']);tick=Decimal(str(p['tick_size']));raw=Decimal(str(q['ask'] if side=='buy' else q['bid']))
+        if action=='ENTRY' and side=='sell' and cfg.get('trailing_enabled') and cfg.get('trailing_mode')=='POINTS' and Decimal(str(cfg['trailing_step']))>=raw:raise ValueError('Short trailing price step must be smaller than the fresh entry quote.')
         # Marketable tick-aligned IOC limit; at most one tick beyond the fresh quote.
         price=((raw/tick).to_integral_value(rounding='ROUND_CEILING' if side=='buy' else 'ROUND_FLOOR'))*tick
         token='runner_'+secrets.token_hex(12);self.runner['pending']=token;self.runner['action']=action;self.live['runner_pending']=token;self.live['runner_action']=action;self._save_live()
-        try:self.submit(dict(mode='LIVE',request_id=token,symbol=cfg['symbol'],side=side,contracts=size,limit_price=str(price),time_in_force='ioc',reduce_only=reduce,strategy='DELTA_COMPLETED_RSI_'+cfg['ma_type'],signal_close=signal_close),runner=True)
+        try:result=self.submit(dict(mode='LIVE',request_id=token,symbol=cfg['symbol'],side=side,contracts=size,limit_price=str(price),time_in_force='ioc',reduce_only=reduce,strategy='DELTA_COMPLETED_RSI_'+cfg['ma_type'],signal_close=signal_close,execution_reason=action),runner=True)
         except Exception:self.runner['pending']=None;self.runner['action']=None;self.live['runner_pending']=None;self.live['runner_action']=None;self._save_live();raise
         self._settle_runner()
+        if result['status']=='REJECTED':raise ValueError(result.get('error','Delta runner order rejected; runner stopped.'))
     def runner_tick(self):
         with self.lock:
             if not self.runner['running']:return
             cfg=self.runner['config']
             if cfg['mode']=='LIVE' and not self._settle_runner():return
             last=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])['last_completed']
+            p=self.live['runner_position'] if cfg['mode']=='LIVE' else self.paper['position']
+            if p and last and last['timestamp']>self.runner['last_candle'] and 0<=self.clock()-last['timestamp']-RESOLUTIONS[cfg['resolution']]<=30:
+                side=p['side'] if cfg['mode']=='LIVE' else ('buy' if p['side']=='LONG' else 'sell')
+                cross=last.get('cross_direction')
+                if (side=='buy' and cross=='BEARISH') or (side=='sell' and cross=='BULLISH'):
+                    self.runner['last_candle']=last['timestamp'];self.close_runner({'mode':cfg['mode'],'signal_close':last['timestamp']+RESOLUTIONS[cfg['resolution']],'reason':'OPPOSITE_CROSSOVER'});self.runner['message']='Opposite completed crossover closed owned residual before trailing targets.';return
+            if self._manage_trailing():
+                if last and last['timestamp']>self.runner['last_candle']:self.runner['last_candle']=last['timestamp']
+                return
             if not last or last['timestamp']<=self.runner['last_candle']:return
             self.runner['last_candle']=last['timestamp'] # consume once even if action fails
             close=last['timestamp']+RESOLUTIONS[cfg['resolution']]
@@ -358,7 +375,7 @@ class DeltaIndia:
             if p:
                 side=p['side'] if cfg['mode']=='LIVE' else ('buy' if p['side']=='LONG' else 'sell')
                 opposite=(side=='buy' and cross=='BEARISH') or (side=='sell' and cross=='BULLISH')
-                if opposite:self.close_runner({'mode':cfg['mode'],'signal_close':close});self.runner['message']='Opposite completed crossover closed owned position; no same-bar reentry.'
+                if opposite:self.close_runner({'mode':cfg['mode'],'signal_close':close,'reason':'OPPOSITE_CROSSOVER'});self.runner['message']='Opposite completed crossover closed owned position; no same-bar reentry.'
                 return
             if not desired:return
             if cfg['mode']=='LIVE':
@@ -366,6 +383,7 @@ class DeltaIndia:
                 self._runner_order(desired,cfg['contracts'],False,'ENTRY',signal_close=close)
             else:
                 v=self.preview(dict(mode='PAPER',symbol=cfg['symbol'],contracts=cfg['contracts'],side='LONG' if desired=='buy' else 'SHORT'));self.record_paper({'mode':'PAPER','preview_id':v['id']})
+                position=self.paper['position'];position['trailing']=delta_trailing.initial(position['entry_price'],self.product(cfg['symbol'])['tick_size'],position['contracts'],desired,cfg);self._save()
             self.runner['message']='Fresh completed '+str(cross)+' crossover processed.'
     def close_runner(self,payload):
         with self.lock:
@@ -376,9 +394,46 @@ class DeltaIndia:
             if not self._settle_runner():raise ValueError('Pending Delta order must settle before closing.')
             p=self.live['runner_position']
             if not p:raise ValueError('No owned Delta runner position.')
+            if p.get('trailing'):p['trailing']['exit_latched']=True;p['exit_reason']=payload.get('reason','EXPLICIT_CLOSE');self._save_live()
             self._live_ready();expected=p['contracts'] if p['side']=='buy' else -p['contracts']
             if self._position(p['product_id'])!=expected:raise ValueError('Broker position differs from runner-owned quantity; close blocked for reconciliation.')
             self._runner_order('sell' if p['side']=='buy' else 'buy',p['contracts'],True,'EXIT',signal_close=payload.get('signal_close'));return self.status()
+    def _paper_reduce(self,size,reason,stage=None):
+        p=self.paper['position']
+        if not p or not isinstance(size,int) or size<=0 or size>p['contracts']:raise ValueError('Paper exit exceeds owned contracts.')
+        current,value=self._paper_contract(p['symbol'])
+        if current['id']!=p['product_id'] or str(value)!=p['contract_value']:raise ValueError('Paper contract identity changed.')
+        q=self.ticker(p['symbol']);fill=q['bid'] if p['side']=='LONG' else q['ask'];change=(Decimal(str(fill))-Decimal(str(p['entry_price'])))*(1 if p['side']=='LONG' else -1)
+        trade=next(r for r in self.paper['trades'] if r['lifecycle_id']==p['lifecycle_id']);exits=trade.setdefault('exit_fills',[]);exits.append(dict(contracts=size,price=fill,time=self.clock(),reason=reason,pnl=float(change*value*size)))
+        trade['realized_pnl']=sum(r['pnl'] for r in exits);trade['remaining_contracts']=p['contracts']-size
+        if stage is not None:p['trailing']['target_filled'][str(stage)]=p['trailing']['target_filled'].get(str(stage),0)+size
+        p['contracts']-=size
+        if not p['contracts']:
+            trade.update(status='CLOSED',exit_time=self.clock(),exit_price=sum(r['contracts']*r['price'] for r in exits)/sum(r['contracts'] for r in exits),basis='Quote currency; before fees/funding; no INR conversion');self.paper['position']=None
+        self._save()
+    def _manage_trailing(self):
+        cfg=self.runner['config']
+        if not cfg.get('trailing_enabled'):return False
+        p=self.live['runner_position'] if cfg['mode']=='LIVE' else self.paper['position']
+        if not p or not p.get('trailing'):return False
+        state=p['trailing']
+        if state.get('exit_latched'):
+            self.close_runner({'mode':cfg['mode'],'reason':p.get('exit_reason','TRAILING_STOP')});return True
+        q=self.ticker(p['symbol']);updated,hit=delta_trailing.advance(state,q,self.clock());p['trailing']=updated
+        if cfg['mode']=='LIVE':self._save_live()
+        else:self._save()
+        if hit:
+            updated['exit_latched']=True;p['exit_reason']='TRAILING_STOP'
+            self.close_runner({'mode':cfg['mode'],'reason':'TRAILING_STOP'});self.runner['message']='Application trailing stop triggered; verified residual exit requested.';return True
+        target=delta_trailing.target(updated,p['contracts'])
+        if not target:return False
+        stage,size=target
+        if cfg['mode']=='LIVE':
+            expected=p['contracts'] if p['side']=='buy' else -p['contracts']
+            if self._position(p['product_id'])!=expected:raise ValueError('Broker position differs from trailing-owned quantity; reconciliation required.')
+            self._runner_order('sell' if p['side']=='buy' else 'buy',size,True,'TRAIL_'+str(stage))
+        else:self._paper_reduce(size,'TRAIL_TARGET_'+str(stage),stage=stage)
+        self.runner['message']='Trailing target '+str(stage)+' processed using verified contracts.';return True
     def _run(self,event):
         while not event.wait(2):
             try:
