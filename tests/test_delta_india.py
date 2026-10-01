@@ -146,3 +146,9 @@ class LiveTests(unittest.TestCase):
  def test_restart_preserves_owned_position_and_never_starts(self):
   self.arm('LIVE');self.cross('BULLISH');self.b.runner_tick();self.b.stop_runner()
   b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now);self.assertFalse(b.status()['running']);self.assertEqual(b.live['runner_position']['contracts'],3);b.close_runner({'mode':'LIVE'});self.assertEqual(self.req.position,0)
+
+ def test_verified_connection_reports_freshness_and_rechecks_before_mutation(self):
+  self.b.verify_auth();self.req.now+=61;s=self.b.status();self.assertEqual(s['authentication'],'VERIFIED_READ_ONLY');self.assertFalse(s['authentication_fresh']);self.assertTrue(s['live_available'])
+  self.req.fail_auth=True
+  with self.assertRaises(ValueError):self.b.submit(self.payload)
+  self.assertFalse(self.b.status()['live_available']);self.assertEqual(self.req.posts,0)
