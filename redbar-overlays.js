@@ -45,15 +45,31 @@
   return [...dates.values()].flatMap(p=>sessions.map(s=>({...s,timestamp:zonedTimestamp(+p.year,+p.month,+p.day,s.start,s.timezone)}))).sort((a,b)=>a.timestamp-b.timestamp);
  }
  function fibonacciReferences(candles,sessions=sessionDefaults){
-  const rows=candles.filter(c=>!c.is_forming),slots=new Map();let lastKey=null,redDone=false,slot=0,floating=null;
+  const rows=candles.filter(c=>!c.is_forming),groups=[],reds=[];let current=null,redDone=false;
   const markers=sessionMarkers(rows.length?[{timestamp:rows[0].timestamp-86400},...rows]:[],sessions);let cursor=-1;
   for(const row of rows){while(cursor+1<markers.length&&markers[cursor+1].timestamp<=row.timestamp)cursor++;const marker=markers[cursor];if(!marker)continue;
-   if(marker.timestamp!==lastKey){lastKey=marker.timestamp;redDone=false;slot=marker.name==='ASIA'?0:marker.name==='LONDON'?2:4;slots.set(slot,{name:marker.name,opening:true,...row});}
-   else if(!redDone&&row.close<row.open){redDone=true;slots.set(slot+1,{name:marker.name,opening:false,...row});}
-   if(row.close<row.open)floating=row;
+   if(!current||current.session_start!==marker.timestamp){current={session_start:marker.timestamp,session_end:markers[cursor+1]?.timestamp??Infinity,name:marker.name,source:[]};groups.push(current);redDone=false;current.source.push({...row,name:marker.name,opening:true,session_start:marker.timestamp,session_end:current.session_end});}
+   else if(!redDone&&row.close<row.open){redDone=true;current.source.push({...row,name:marker.name,opening:false,session_start:marker.timestamp,session_end:current.session_end});}
+   if(row.close<row.open)reds.push({...row,session_start:marker.timestamp,session_end:current.session_end});
   }
   const levels=row=>[.382,.5,.618].map(ratio=>({...row,ratio,price:row.high-(row.high-row.low)*ratio}));
-  return {fixed:[...slots.values()].flatMap(levels),floating:floating?levels(floating):[]};
+  const history=groups.flatMap(g=>g.source.flatMap(levels)),floatingHistory=reds.flatMap(levels);
+  const latest=current?.session_start;
+  return {fixed:history.filter(f=>f.session_start===latest),floating:reds.length?levels(reds.at(-1)):[],history,floatingHistory,markers};
+ }
+ function referencesForView(refs,candles,range){
+  if(!candles.length||!range)return {fixed:[],floating:[],markers:[]};
+  const last=candles.at(-1).timestamp,latest=range.to>=candles.length-1;
+  const left=candles[Math.max(0,Math.min(candles.length-1,Math.floor(range.from)))]?.timestamp;
+  const right=candles[Math.max(0,Math.min(candles.length-1,Math.floor(range.to)))]?.timestamp;
+  const active=refs.markers?.filter(m=>m.timestamp<=right).at(-1);
+  const day=t=>{const p=parts(ist,t);return p.year+p.month+p.day;};
+  const valid=active&&(!latest||day(active.timestamp)===day(last));
+  const fixed=(refs.history||refs.fixed).filter(f=>valid&&(latest?f.session_start===active.timestamp:f.session_start<=right&&f.session_end>left)&&f.timestamp<=right);
+  const red=(refs.floatingHistory||refs.floating).filter(f=>valid&&f.session_start===active.timestamp&&f.timestamp<=right).at(-1);
+  const floating=red?(refs.floatingHistory||refs.floating).filter(f=>f.timestamp===red.timestamp):[];
+  const markers=(refs.markers||[]).filter(m=>valid&&(latest?m.timestamp===active.timestamp:m.timestamp>=left&&m.timestamp<=right));
+  return {fixed,floating,markers};
  }
  function dailyReferences(daily,livePrice,now=Date.now()/1000){
   const today=parts(ist,now),day=today.year+today.month+today.day;const rows=daily.map(r=>{const p=parts(ist,r[0]);return {timestamp:r[0],open:r[1],high:r[2],low:r[3],close:r[4],day:p.year+p.month+p.day,year:+p.year,month:+p.month,date:+p.day};}).sort((a,b)=>a.timestamp-b.timestamp);
@@ -63,5 +79,5 @@
   for(const [name,group,color]of [['Current Week',rows.filter(r=>r.day>=week),'#26a69a'],['Current Month',rows.filter(r=>r.year===+today.year&&r.month===+today.month),'#ce72c5']])if(group.length)refs.push({group:'periods',name:name+' High',price:Math.max(...group.map(r=>r.high)),timestamp:group[0].timestamp,color},{group:'periods',name:name+' Low',price:Math.min(...group.map(r=>r.low)),timestamp:group[0].timestamp,color});
   return refs;
  }
- root.RedBarOverlays={supplyDemand,sessionMarkers,sessionDefaults,defaults,fibonacciReferences,dailyReferences};if(typeof module!=='undefined')module.exports=root.RedBarOverlays;
+ root.RedBarOverlays={supplyDemand,sessionMarkers,sessionDefaults,defaults,fibonacciReferences,referencesForView,dailyReferences};if(typeof module!=='undefined')module.exports=root.RedBarOverlays;
 })(typeof window==='undefined'?globalThis:window);

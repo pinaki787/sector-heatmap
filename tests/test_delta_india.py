@@ -1,4 +1,5 @@
 import hashlib,hmac,json,tempfile,unittest
+from unittest.mock import patch
 from pathlib import Path
 from sector_heatmap.delta_india import DeltaIndia,BASE
 
@@ -21,13 +22,17 @@ class Requests:
   raise AssertionError(url)
 class Tests(unittest.TestCase):
  def setUp(self):
+  thread_patch=patch('threading.Thread');thread_patch.start();self.addCleanup(thread_patch.stop)
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.req=Requests();self.b=DeltaIndia(Path(self.tmp.name)/'paper.json',requester=self.req,clock=lambda:self.req.now)
+ def paper_preview(self,payload):
+  side=payload.get('side','LONG');self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-310,'cross_direction':'BULLISH' if side=='LONG' else 'BEARISH','rsi_ma':50}}
+  return self.b.preview(dict(resolution='5m',rsi_length=14,ma_length=14,ma_type='SMA',signal_close=self.req.now-10)|payload)
  def test_catalog_pagination_and_cache(self):
   self.req.pages=True;c=self.b.catalog();self.assertTrue(c['complete']);self.assertEqual(len(c['instruments']),2);self.assertFalse(c['forex_supported']);calls=len(self.req.calls);self.b.catalog();self.assertEqual(calls,len(self.req.calls))
  def test_status_missing_and_live_fail_closed(self):
   s=self.b.status();self.assertEqual(s['credentials'],'MISSING');self.assertFalse(s['running']);self.assertFalse(s['live_available'])
   with self.assertRaises(PermissionError):self.b.submit({'mode':'LIVE','request_id':'missing-key-test'})
-  with self.assertRaises(PermissionError):self.b.preview({'mode':'LIVE'})
+  with self.assertRaises(PermissionError):self.paper_preview({'mode':'LIVE'})
   self.assertFalse(self.req.calls)
  def test_auth_signature_and_private_data_redaction(self):
   self.b.credentials=lambda:{'DELTA_INDIA_API_KEY':'fake-key','DELTA_INDIA_API_SECRET':'fake-secret'}
@@ -41,7 +46,7 @@ class Tests(unittest.TestCase):
   self.req.stale=False;self.req.bid=102
   with self.assertRaisesRegex(ValueError,'crossed'):self.b.ticker('BTCUSD')
  def test_paper_preview_fill_exit_units_and_no_duplicate(self):
-  p=self.b.preview(dict(mode='PAPER',symbol='BTCUSD',side='LONG',contracts=3));self.assertEqual(p['contract_units'],.003);self.assertEqual(p['entry_reference_value'],.303);self.assertIsNone(self.b.paper['position'])
+  p=self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',side='LONG',contracts=3));self.assertEqual(p['contract_units'],.003);self.assertEqual(p['entry_reference_value'],.303);self.assertIsNone(self.b.paper['position'])
   self.b.record_paper(dict(mode='PAPER',preview_id=p['id']))
   with self.assertRaises(ValueError):self.b.record_paper(dict(mode='PAPER',preview_id=p['id']))
   self.req.bid=110;self.req.ask=111;s=self.b.close_paper({'mode':'PAPER'});self.assertAlmostEqual(s['paper']['trades'][0]['realized_pnl'],.027)
@@ -50,15 +55,15 @@ class Tests(unittest.TestCase):
   restarted=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now);self.assertFalse(restarted.status()['running']);self.assertEqual(len(restarted.paper['trades']),1)
  def test_whole_contracts_expired_preview_inverse_options_writing(self):
   for n in (0,1.5,True):
-   with self.assertRaises(ValueError):self.b.preview(dict(mode='PAPER',symbol='BTCUSD',contracts=n))
-  p=self.b.preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1));self.req.now+=61
+   with self.assertRaises(ValueError):self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=n))
+  p=self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1));self.req.now+=61
   with self.assertRaises(ValueError):self.b.record_paper(dict(mode='PAPER',preview_id=p['id']))
   self.b.cache={};self.req.product['is_quanto']=True
-  with self.assertRaisesRegex(ValueError,'linear'):self.b.preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1))
+  with self.assertRaisesRegex(ValueError,'linear'):self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1))
   self.b.cache={};self.req.product.update(is_quanto=False,contract_type='call_options')
-  with self.assertRaisesRegex(ValueError,'writing'):self.b.preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1,side='SHORT'))
+  with self.assertRaisesRegex(ValueError,'writing'):self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=1,side='SHORT'))
  def test_short_futures_ask_close_and_auth_never_uses_other_host(self):
-  p=self.b.preview(dict(mode='PAPER',symbol='BTCUSD',contracts=2,side='SHORT'));self.b.record_paper(dict(mode='PAPER',preview_id=p['id']));self.req.bid=89;self.req.ask=90;s=self.b.close_paper({'mode':'PAPER'});self.assertEqual(s['paper']['trades'][0]['realized_pnl'],.02)
+  p=self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=2,side='SHORT'));self.b.record_paper(dict(mode='PAPER',preview_id=p['id']));self.req.bid=89;self.req.ask=90;s=self.b.close_paper({'mode':'PAPER'});self.assertEqual(s['paper']['trades'][0]['realized_pnl'],.02)
   self.assertTrue(all(url.startswith(BASE+'/') for url,_ in self.req.calls))
 
 class LiveRequests(Requests):
@@ -88,8 +93,24 @@ class LiveRequests(Requests):
   self.deletes+=1;body=json.loads(kw['data']);order=next(o for o in self.orders.values() if o['id']==body['id']);order['state']='cancelled';return Reply(order)
 class LiveTests(unittest.TestCase):
  def setUp(self):
+  thread_patch=patch('threading.Thread');thread_patch.start();self.addCleanup(thread_patch.stop)
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.req=LiveRequests();self.creds=lambda:{'DELTA_INDIA_API_KEY':'fake-live-key','DELTA_INDIA_API_SECRET':'fake-live-secret'};self.b=DeltaIndia(Path(self.tmp.name)/'paper.json',credentials=self.creds,requester=self.req,clock=lambda:self.req.now)
-  self.payload=dict(mode='LIVE',request_id='request-12345678',symbol='BTCUSD',side='buy',contracts=3,limit_price='101',time_in_force='ioc')
+  self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-310,'cross_direction':'BULLISH','rsi_ma':50}}
+  self.payload=dict(resolution='5m',rsi_length=14,ma_length=14,ma_type='SMA',signal_close=99990,mode='LIVE',request_id='request-12345678',symbol='BTCUSD',side='buy',contracts=3,limit_price='101',time_in_force='ioc')
+ def test_market_body_fill_reconciliation_and_idempotency(self):
+  payload={**self.payload,'order_type':'market_order','limit_price':'invalid'}
+  o=self.b.submit(payload);self.assertEqual(o['status'],'closed');self.assertEqual(o['filled_contracts'],3)
+  self.assertEqual(o['request']['order_type'],'market_order');self.assertNotIn('limit_price',o['request']);self.assertEqual(o['request']['time_in_force'],'ioc')
+  self.assertEqual(o['strategy'],'MANUAL_DELTA_MARKET');self.assertEqual(self.b.reconcile(payload)['status'],'closed')
+  self.b.submit(payload);self.assertEqual(self.req.posts,1)
+ def test_market_rejects_gtc_and_unknown_types_before_post(self):
+  for terms in ({'order_type':'market_order','time_in_force':'gtc'},{'order_type':'stop_order'}):
+   with self.assertRaises(ValueError):self.b.submit({**self.payload,**terms})
+  self.assertEqual(self.req.posts,0)
+ def test_market_partial_ioc_and_unknown_outcome(self):
+  self.req.unfilled=2;self.req.state='cancelled';self.req.unknown=True
+  payload={**self.payload,'order_type':'market_order'};o=self.b.submit(payload);self.assertEqual(o['status'],'UNKNOWN')
+  o=self.b.submit(payload);self.assertEqual(o['status'],'cancelled');self.assertEqual(o['filled_contracts'],1);self.assertEqual(self.req.posts,1)
  def test_exact_body_signature_and_direct_submit(self):
   o=self.b.submit(self.payload);self.assertEqual(o['filled_contracts'],3);self.assertEqual(o['status'],'closed');self.assertEqual(self.req.posts,1)
   url,kw=next((u,k) for u,k in self.req.calls if 'data' in k);expected=hmac.new(b'fake-live-secret',('POST100000/v2/orders'+kw['data']).encode(),hashlib.sha256).hexdigest();self.assertEqual(kw['headers']['signature'],expected);self.assertLessEqual(len(o['client_order_id']),32)
@@ -104,7 +125,7 @@ class LiveTests(unittest.TestCase):
   self.assertEqual(self.req.posts,0)
  def test_rejection_and_unknown_never_resubmit_across_restart(self):
   self.req.reject=True;o=self.b.submit(self.payload);self.assertEqual(o['status'],'REJECTED');self.b.submit(self.payload);self.assertEqual(self.req.posts,1)
-  self.req.reject=False;self.req.unknown=True;p={**self.payload,'request_id':'unknown-request'};o=self.b.submit(p);self.assertEqual(o['status'],'UNKNOWN')
+  self.req.reject=False;self.req.unknown=True;self.req.now+=300;p={**self.payload,'request_id':'unknown-request','signal_close':self.req.now-10};o=self.b.submit(p);self.assertEqual(o['status'],'UNKNOWN')
   b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now);o=b.submit(p);self.assertEqual(o['status'],'closed');self.assertEqual(self.req.posts,2);self.assertFalse(b.status()['running'])
  def test_partial_fill_pending_cancel_and_duplicate_guard(self):
   self.req.unfilled=2;self.req.state='open';o=self.b.submit(self.payload);self.assertEqual(o['filled_contracts'],1)
@@ -113,10 +134,15 @@ class LiveTests(unittest.TestCase):
   self.b.cancel({'mode':'LIVE','request_id':self.payload['request_id']});self.assertEqual(self.req.deletes,1)
   self.assertEqual(len(self.b.fills({'request_id':self.payload['request_id']})['fills']),1)
  def test_tick_whole_contract_and_reduce_only_guards(self):
-  for field,val in [('contracts',True),('contracts',1.5),('limit_price','101.1'),('order_type','market_order')]:
+  for field,val in [('contracts',True),('contracts',1.5),('limit_price','101.1'),('order_type','unsupported_order')]:
    with self.assertRaises(ValueError):self.b.submit({**self.payload,field:val})
   with self.assertRaises(ValueError):self.b.submit({**self.payload,'side':'sell','reduce_only':True})
   self.assertEqual(self.req.posts,0)
+ def test_saved_credentials_survive_restart_and_blank_update(self):
+  self.b.configure({'api_key':'local-fake-key','api_secret':'local-fake-secret'})
+  before=self.b.key_path.read_bytes();self.b.configure({'api_key':'','api_secret':''});self.assertEqual(self.b.key_path.read_bytes(),before)
+  b=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now)
+  self.assertEqual(b.status()['credentials'],'CONFIGURED');self.assertNotIn('local-fake',json.dumps(b.status()));self.assertEqual(b.key_path.stat().st_mode&0o777,0o600)
  def test_read_funds_position_and_credentials_file_masked(self):
   account=self.b.account();self.assertEqual(account['funds'][0]['asset_symbol'],'USD');self.assertNotIn('user_id',json.dumps(account))
   status=self.b.configure({'api_key':'local-fake-key','api_secret':'local-fake-secret'});self.assertNotIn('local-fake-secret',json.dumps(status));self.assertEqual(self.b.key_path.stat().st_mode&0o777,0o600)
