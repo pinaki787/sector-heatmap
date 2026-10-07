@@ -62,7 +62,7 @@ EMA exit can be disabled or use an editable period (1–1000, default 10). Optio
 
 The optional Sideways filter defaults **off**. A finalized trade with an estimated after-cost loss that touches at most three host candle buckets (editable 1–10) freezes only the underlying high/low observed during actual first-fill-to-final-exit exposure. Prior swings and historical candle extrema are excluded. New entries remain blocked inside or on that range; a fresh tick strictly beyond either boundary releases the lock and resets entry eligibility, without forcing entry or replaying an old signal. Exits and reconciliation continue normally. Extrema, duration, trigger and release evidence persist with the journal; old missing ticks remain unknown.
 
-The authoritative FYERS master exchange/segment determines the requested session deadline: NSE/BSE **15:15 Asia/Kolkata**, MCX **23:30 Asia/Kolkata**. Commodity-sector NSE/BSE stocks remain equities. A stricter verified regular-session end takes precedence. New entries are blocked at/after the applicable cutoff. Wall-clock scans mark owned exposure for timed exit independently of underlying ticks or candle closure. Pending entry remainder is cancelled and terminal/partial fills reconciled before closing only owned quantity. Overdue exposure remains an exit obligation across the local date boundary. Fresh executable option quotes and broker acknowledgements determine fill timing; an exit intent is not a guaranteed fill by the deadline. Missing/holiday/stale market data cannot authorize an entry.
+The authoritative FYERS master exchange/segment determines the requested session deadline: NSE/BSE **15:10 Asia/Kolkata**, MCX **the verified regular-session end**. Commodity-sector NSE/BSE stocks remain equities. A stricter verified regular-session end takes precedence. New entries are blocked at/after the applicable cutoff. Wall-clock scans mark owned exposure for timed exit independently of underlying ticks or candle closure. Pending entry remainder is cancelled and terminal/partial fills reconciled before closing only owned quantity. Overdue exposure remains an exit obligation across the local date boundary. Fresh executable option quotes and broker acknowledgements determine fill timing; an exit intent is not a guaranteed fill by the deadline. Missing/holiday/stale market data cannot authorize an entry.
 
 ## Controls and persistence
 
@@ -82,7 +82,7 @@ Actual trade history uses durable owned option fills: contract, Call/Put, strike
 
 ## Verification
 
-The Excel export contains an executive summary, trade register, saved indicators, order audit, estimated costs and position ranges. Gross and estimated net P&L appear inside the streamed chart. The Sensex-options cost model charges ₹15 once per executed BUY or SELL order, verified statutory charges and explicitly configured additional option premium points per side (default zero). Actual fill-price slippage is already embedded and is not deducted twice. Open liquidation separately deducts remaining entry costs and estimated exit costs using a fresh executable bid; stale marks remain unavailable. Live fees are fill-based estimates pending broker contract-note reconciliation. Rate sources, rounding and assumptions accompany each trade. The workbook is a static journal snapshot; historical chart simulations remain excluded.
+The portable Excel export contains recorded trades, order evidence and a lossless chunked raw snapshot; it no longer requires a Codex runtime. Gross and estimated net P&L appear inside the streamed chart. The Sensex-options cost model charges ₹15 once per executed BUY or SELL order, verified statutory charges and explicitly configured additional option premium points per side (default zero). Actual fill-price slippage is already embedded and is not deducted twice. Open liquidation separately deducts remaining entry costs and estimated exit costs using a fresh executable bid; stale marks remain unavailable. Live fees are fill-based estimates pending broker contract-note reconciliation. Rate sources, rounding and assumptions accompany each trade. The workbook is a static journal snapshot; historical chart simulations remain excluded.
 
 Run `python3 -m unittest discover -s strategies/renko_supertrend -t . -p 'test_*.py'` and `node --test tests/renko-chart.test.cjs`. Tests cover source recurrence, warm-up, strict widening, late qualification, EMA exit symmetry and ADX independence, fresh cloned ticks, ownership, duplicate/partial/unknown orders, no-tick deadlines, master segment policies, rearming, preference roundtrips and option P&L/IDs. Shared lifecycle regression tests remain under `strategies/ema_crossover`.
 
@@ -90,7 +90,7 @@ Run `python3 -m unittest discover -s strategies/renko_supertrend -t . -p 'test_*
 
 ## Investigation history and resume
 
-Read the [Persistent churn investigation ledger](../../docs/renko-churn-investigation-ledger.md) before reassessing entry churn. It records every assessed hypothesis, reproduction, result and accepted/rejected/unresolved conclusion, and links archived evidence and the isolated correction patch. Documentation is not deployment; preserve original rules and refresh served process/state before further changes.
+Read the private local churn investigation ledger (excluded from source release) before reassessing entry churn. It records every assessed hypothesis, reproduction, result and accepted/rejected/unresolved conclusion, and links archived evidence and the isolated correction patch. Documentation is not deployment; preserve original rules and refresh served process/state before further changes.
 # Cash equity selection and sizing
 
 The Renko Market picker includes **NSE cash equity** and **BSE cash equity**.
@@ -105,7 +105,7 @@ reconciliation compares signed quantities. Paper fills use the executable
 ask for buys and bid for sells, including short entry and buy-to-cover.
 
 Cash **Carry forward (overnight)** maps to FYERS `CNC`. Bought shares remain
-owned across the 15:15 cutoff and overnight, with signal monitoring resuming
+owned across the 15:10 cutoff and overnight, with signal monitoring resuming
 in regular market hours. New bearish CNC entries are blocked explicitly;
 bearish signals still close existing long shares. Broker holdings/day-position
 ambiguity blocks exits rather than borrowing external holdings. Delivery sell
@@ -129,3 +129,7 @@ New NSE/BSE intraday Renko configurations use a 15:10 IST strategy cutoff (norma
 MCX `INTRADAY` is a strategy session-end square-off policy; `CARRY_FORWARD` retains owned long options across session ends and local date rollover. Both use the established FYERS commodity option `MARGIN` product, never cash `CNC`. Lots, ATM CE/PE selection, stops, fresh-data gates and exact-product ownership reconciliation are unchanged. Outside verified regular sessions the carry runner waits without sending orders.
 
 Carry entries require exact option expiry from the current master. The strategy requests an exit 30 minutes before the preceding weekday session ends and blocks new entries inside that window. This conservative rule avoids intentionally carrying into option expiry/devolution; it does not guarantee a fill, account for exceptional holiday closures, or supersede earlier broker RMS action. Broker/exchange ownership changes remain reconciliation failures, not permission to trade converted futures. Missing expiry blocks further entries and requests closing the owned option in an executable session.
+
+## Canonical current reference
+
+The [technical guide](../../docs/technical-guide.md) supersedes older cutoff/workbook prose and explains every optional gate, cash/MCX/Delta holding distinction, fixed post-fill trail, strong five-minute chart zones and feed readiness. See the [deployment guide](../../docs/deployment-guide.md) for release/recovery and [source/default catalog](../../docs/source-reference.md) for exact function and setting ownership.

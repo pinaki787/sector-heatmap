@@ -6,7 +6,7 @@ if exist ".venv\Scripts\python.exe" goto python_ready
 
 where py >nul 2>nul
 if not errorlevel 1 (
-  py -3 -c "import sys; raise SystemExit(sys.version_info < (3, 9))"
+  py -3 -c "import sys; raise SystemExit(sys.version_info < (3, 10))"
   if errorlevel 1 goto python_missing
   py -3 -m venv .venv
   if errorlevel 1 goto setup_failed
@@ -15,13 +15,13 @@ if not errorlevel 1 (
 
 where python >nul 2>nul
 if errorlevel 1 goto python_missing
-python -c "import sys; raise SystemExit(sys.version_info < (3, 9))"
+python -c "import sys; raise SystemExit(sys.version_info < (3, 10))"
 if errorlevel 1 goto python_missing
 python -m venv .venv
 if errorlevel 1 goto setup_failed
 
 :python_ready
-".venv\Scripts\python.exe" -c "import sys; raise SystemExit(sys.version_info < (3, 9))"
+".venv\Scripts\python.exe" -c "import sys; raise SystemExit(sys.version_info < (3, 10))"
 if errorlevel 1 goto python_missing
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check --requirement requirements.lock
 if errorlevel 1 goto setup_failed
@@ -82,7 +82,7 @@ echo Live-order switches must each be 0 or 1. 1>&2
 exit /b 1
 
 :python_missing
-echo Python 3.9 or newer is required. 1>&2
+echo Python 3.10 or newer is required. 1>&2
 exit /b 1
 
 :node_missing

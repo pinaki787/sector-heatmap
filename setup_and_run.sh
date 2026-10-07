@@ -11,12 +11,12 @@ elif command -v python3 >/dev/null 2>&1; then
 elif command -v python >/dev/null 2>&1; then
   bootstrap_python=python
 else
-  echo "Python 3.9 or newer is required." >&2
+  echo "Python 3.10 or newer is required." >&2
   exit 1
 fi
 
-if ! "$bootstrap_python" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
-  echo "Python 3.9 or newer is required." >&2
+if ! "$bootstrap_python" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+  echo "Python 3.10 or newer is required." >&2
   exit 1
 fi
 

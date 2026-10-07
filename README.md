@@ -10,7 +10,7 @@ pnpm 10.17.1, builds the UI, and starts the dashboard.
 | Windows | `setup_and_run.bat` |
 | macOS / Linux | `sh setup_and_run.sh` |
 
-Python 3.9+ and Node.js 20.19+ (including `npx`) must already be installed. The
+Python 3.10+ and Node.js 20.19+ (including `npx`) must already be installed. The
 scripts are idempotent: rerunning them reuses `.venv` and the locked dependency
 sets. They do not read credentials aloud, place orders, or make any broker trade.
 They stop immediately if dependency installation or the UI build fails.
@@ -21,7 +21,7 @@ For a transferred archive, extract it into an ordinary writable directory. Copy
 `.fyers.env.example` to `.fyers.env` and enter the destination terminal's FYERS
 application settings, or use one of the user-level configuration locations below.
 Copy `.env.example` to `.env` only when runtime switches are needed. Both setup
-scripts and both fast launchers read the same two live-order switches; they default
+scripts and both fast launchers read the same three live-order switches; they default
 to `0` on a fresh terminal and reject values other than `0` or `1`. Never copy an
 access token or another terminal's private `.env` into a transfer archive.
 
@@ -329,3 +329,15 @@ runner state, ownership locks or polling databases. FYERS access tokens expire a
 may require browser login/2FA on the destination. Broker IP policies and native OS
 permissions must be configured on that host. No launcher starts a saved strategy
 as part of installation validation.
+
+## Canonical guides and full module reference
+
+- [Technical guide: formulas, strategies and lifecycle rules](docs/technical-guide.md)
+- [User functional guide: settings and operations](docs/user-functional-guide.md)
+- [Deployment guide: installation, credentials, updates and recovery](docs/deployment-guide.md)
+- [Generated full source/default catalog](docs/source-reference.md)
+
+Fresh installations include reviewed bundled NIFTY/SENSEX straddle sources with
+NumPy/pandas in the pinned runtime. Existing configured/legacy paths retain precedence.
+Straddle Live starts have separate explicit confirmation, not a universal EMA gate.
+The guides describe source behavior; they do not certify current runtime or profitability.

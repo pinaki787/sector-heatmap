@@ -46,3 +46,5 @@ backtesting/trailing_exit_research/*.json
 backtesting/trailing_exit_research/*.csv
 backtesting/trailing_exit_research/*.html
 backtesting/delta_indicator_grid/cache/
+strategies/long_straddle/*.json
+strategies/long_straddle/*.csv

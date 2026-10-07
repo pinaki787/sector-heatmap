@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 def readiness():
     root = Path(__file__).resolve().parents[1]
     modules = {name: importlib.util.find_spec(name) is not None for name in
-               ('fyers_apiv3', 'requests', 'websocket', 'openpyxl')}
+               ('fyers_apiv3', 'requests', 'websocket', 'openpyxl', 'numpy', 'pandas')}
     ZoneInfo('Asia/Kolkata')
     return {'runtime_modules': modules, 'timezone': True,
             'whatsapp': {'supported': platform.system() == 'Darwin',

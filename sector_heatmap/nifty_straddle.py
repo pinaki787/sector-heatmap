@@ -9,7 +9,9 @@ from threading import Thread
 from .sensex_straddle import SensexStraddleService
 
 
-DEFAULT_SCRIPT_PATH = Path("/Users/pinaki/trading/NIFTY/nifty_straddle.py")
+LEGACY_SCRIPT_PATH = Path("/Users/pinaki/trading/NIFTY/nifty_straddle.py")
+BUNDLED_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "strategies" / "long_straddle" / "nifty_straddle.py"
+DEFAULT_SCRIPT_PATH = LEGACY_SCRIPT_PATH if LEGACY_SCRIPT_PATH.is_file() else BUNDLED_SCRIPT_PATH
 
 
 class NiftyStraddleService(SensexStraddleService):
@@ -28,22 +30,22 @@ class NiftyStraddleService(SensexStraddleService):
             configured or DEFAULT_SCRIPT_PATH,
             credential_provider=credential_provider,
             process_factory=process_factory,
-            runtime_dir=runtime_dir,
+            runtime_dir=runtime_dir or (Path(__file__).resolve().parents[1] / ".private" / "nifty-straddle" if Path(configured or DEFAULT_SCRIPT_PATH).resolve() == BUNDLED_SCRIPT_PATH.resolve() else None),
         )
         self.active_stoploss = None
         self.active_target = None
 
     @property
     def state_path(self):
-        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_position_state.json"
+        return (self.runtime_dir if self.active_mode=="PAPER" or self.script_path == BUNDLED_SCRIPT_PATH.resolve() else self.script_path.parent) / "live_position_state.json"
 
     @property
     def trades_path(self):
-        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_trade_log.csv"
+        return (self.runtime_dir if self.active_mode=="PAPER" or self.script_path == BUNDLED_SCRIPT_PATH.resolve() else self.script_path.parent) / "live_trade_log.csv"
 
     @property
     def chart_path(self):
-        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_premium_chart.json"
+        return (self.runtime_dir if self.active_mode=="PAPER" or self.script_path == BUNDLED_SCRIPT_PATH.resolve() else self.script_path.parent) / "live_premium_chart.json"
 
     def snapshot(self):
         with self.lock:
@@ -131,6 +133,7 @@ class NiftyStraddleService(SensexStraddleService):
                 raise FileNotFoundError(f"NIFTY runner not found: {self.script_path}")
             env = os.environ.copy()
             self.runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["NIFTY_STRADDLE_RUNTIME_DIR"] = str(self.runtime_dir)
             token = str(self.credential_provider() or "")
             if token and ":" in token:
                 app_id, access_token = token.split(":", 1)

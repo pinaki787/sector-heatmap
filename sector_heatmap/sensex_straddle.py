@@ -12,7 +12,9 @@ import sys
 from threading import Lock, Thread
 
 
-DEFAULT_SCRIPT_PATH = Path("/Users/pinaki/trading/SENSEX/sensex_straddle.py")
+LEGACY_SCRIPT_PATH = Path("/Users/pinaki/trading/SENSEX/sensex_straddle.py")
+BUNDLED_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "strategies" / "long_straddle" / "sensex_straddle.py"
+DEFAULT_SCRIPT_PATH = LEGACY_SCRIPT_PATH if LEGACY_SCRIPT_PATH.is_file() else BUNDLED_SCRIPT_PATH
 
 
 class SensexStraddleService:
@@ -31,7 +33,7 @@ class SensexStraddleService:
         self.script_path = Path(configured or DEFAULT_SCRIPT_PATH).expanduser().resolve()
         self.credential_provider = credential_provider or (lambda: "")
         self.process_factory = process_factory or subprocess.Popen
-        self.runtime_dir = Path(runtime_dir or self.script_path.parent).expanduser().resolve()
+        self.runtime_dir = Path(runtime_dir or (Path(__file__).resolve().parents[1] / ".private" / "sensex-straddle" if self.script_path == BUNDLED_SCRIPT_PATH.resolve() else self.script_path.parent)).expanduser().resolve()
         self.process = None
         self.started_at = None
         self.active_mode = None
