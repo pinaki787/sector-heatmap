@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import csv
+import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import requests
@@ -14,19 +16,29 @@ import time
 import html as html_lib
 from urllib.parse import parse_qs, urlparse
 from .config import ROOT, load_config
+from .whatsapp_polling import WhatsAppPolling
+from .whatsapp_source import NativeWhatsAppSource
+from .parser_lifecycle import ParserLifecycle, protection_plan
+from .parser_protection_broker import ParserProtectionBroker
+from .parser_quote import fetch_parser_quote
+from .trade_advisory import analyze as analyze_trade_advisory
 from .authentication import authorization_url, exchange_auth_code, validated_config
 from .market_data import FyersLiveFeed, is_token_error, tick_timestamp_iso
 from .market_calendar import market_session
 from .rsi_table import RsiTable
 from .delta_india import DeltaIndia
-from strategies.ema_crossover.runner import Runner as EmaCrossoverRunner
-from strategies.ema_crossover.broker import FyersBroker as EmaCrossoverBroker
 from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import SECTOR_DEFINITIONS
 from .sector_service import SectorAnalysisService
 from .sensex_straddle import SensexStraddleService
 from .nifty_straddle import NiftyStraddleService
-from .kama_strategy import kama_v6_signal, kama_exit_state_machine
+from strategies.ema_crossover.runner import Runner as EmaCrossoverRunner
+from strategies.ema_crossover.broker import FyersBroker as EmaCrossoverBroker
+from strategies.renko_supertrend.runner import provisional as renko_provisional
+from strategies.renko_supertrend.runner import Runner as RenkoSupertrendRunner, Broker as RenkoSupertrendBroker, analysis as renko_supertrend_analysis
+from strategies.renko_supertrend.signals import settings as renko_supertrend_settings
+from strategies.renko_supertrend.chart_history import ChartHistory as RenkoChartHistory
+from .kama_strategy import kama_v6_signal, kama_exit_state_machine, kama_series
 from .straddle_squareoff import StraddleSquareOffService
 from .fyers_execution import FyersExecutionService, FyersExecutionUnavailable, PreviewChanged, available_funds
 from .automation import AutomationPolicyService
@@ -780,6 +792,79 @@ def fetch_realized_pnl_report(app_id, access_token, start, end, requester=None):
             break
     return {"supported": True, "message": payload.get("message"), "data": records, "summary_data": summary}
 
+
+def kama_trade_report(records):
+    """Pair KAMA lifecycle events into user-facing paper/live trade rows."""
+    trades = []
+    open_trades = {}
+    for event in sorted(records or [], key=lambda item: item.get("at") or ""):
+        lifecycle = str(event.get("lifecycle") or "")
+        source = str(event.get("source") or event.get("mode") or "PAPER").upper()
+        position = event.get("position") or {}
+        details = position or event.get("selected_instrument") or event.get("ticket") or {}
+        if lifecycle in {"PAPER_ENTRY", "LIVE_ENTRY_SUBMITTED"}:
+            trade_id = str(position.get("trade_id") or event.get("trade_id") or event.get("at") or f"{source}-{len(trades)}")
+            trade = {
+                "trade_id": trade_id, "mode": source, "status": "OPEN", "opened_at": event.get("at"),
+                "closed_at": None, "entry_bar": event.get("bar"), "exit_bar": None,
+                "signal": (event.get("signal") or {}).get("action"),
+                "symbol": details.get("symbol"), "description": details.get("description"),
+                "quantity": details.get("quantity"), "entry_price": event.get("entry_price", details.get("entry_price", details.get("limit_price"))),
+                "last_price": None, "exit_price": None, "unrealized_pnl_rupees": None,
+                "realized_pnl_rupees": None, "exit_reason": None,
+            }
+            trades.append(trade)
+            open_trades[(source, trade_id)] = trade
+            open_trades[(source, "LATEST")] = trade
+        elif lifecycle == "WATCH" and position:
+            trade = open_trades.get((source, str(position.get("trade_id") or ""))) or open_trades.get((source, "LATEST"))
+            mark = event.get("paper_mark") or {}
+            if trade and mark.get("status") == "READY":
+                trade["last_price"] = mark.get("price")
+                trade["unrealized_pnl_rupees"] = mark.get("unrealized_pnl_rupees")
+        elif lifecycle in {"PAPER_EXIT", "LIVE_EXIT_SUBMITTED"}:
+            trade_id = str(position.get("trade_id") or event.get("trade_id") or "")
+            trade = open_trades.get((source, trade_id)) or open_trades.get((source, "LATEST"))
+            if trade:
+                trade.update({
+                    "status": "CLOSED", "closed_at": event.get("at"),
+                    "exit_bar": event.get("bar"),
+                    "exit_price": event.get("exit_price"), "last_price": event.get("exit_price"),
+                    "unrealized_pnl_rupees": None, "realized_pnl_rupees": event.get("realized_pnl_rupees"),
+                    "exit_reason": event.get("exit_reason") or (event.get("signal") or {}).get("action"),
+                })
+                open_trades.pop((source, trade.get("trade_id")), None)
+                open_trades.pop((source, "LATEST"), None)
+    closed = [item for item in trades if item.get("status") == "CLOSED"]
+    opened = [item for item in trades if item.get("status") == "OPEN"]
+    realized = [float(item["realized_pnl_rupees"]) for item in closed if item.get("realized_pnl_rupees") is not None]
+    unrealized = [float(item["unrealized_pnl_rupees"]) for item in opened if item.get("unrealized_pnl_rupees") is not None]
+    return {
+        "trades": list(reversed(trades)),
+        "summary": {"total_trades": len(trades), "open_trades": len(opened), "closed_trades": len(closed),
+                    "realized_pnl_rupees": round(sum(realized), 2) if len(realized) == len(closed) else None,
+                    "unrealized_pnl_rupees": round(sum(unrealized), 2) if len(unrealized) == len(opened) else None,
+                    "realized_pnl_complete": len(realized) == len(closed), "unrealized_pnl_complete": len(unrealized) == len(opened)},
+    }
+
+
+def kama_scheduled_squareoff_due(position, now=None):
+    """Return whether an open KAMA position has reached its exchange cutoff."""
+    if not position:
+        return False
+    moment = (now or datetime.now(tz=EMA_IST)).astimezone(EMA_IST)
+    symbol = str(position.get("symbol") or position.get("underlying") or "").upper()
+    cutoff_minutes = 23 * 60 + 30 if symbol.startswith("MCX:") else 15 * 60 + 15
+    opened_at = position.get("opened_at")
+    if opened_at:
+        try:
+            opened = datetime.fromisoformat(str(opened_at)).astimezone(EMA_IST)
+            if opened.date() < moment.date():
+                return True
+        except (TypeError, ValueError):
+            pass
+    return moment.hour * 60 + moment.minute >= cutoff_minutes
+
 def run_server():
     port = int(os.getenv("HEATMAP_PORT", "8080"))
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
@@ -793,9 +878,14 @@ def run_server():
     ema_master_dir = ROOT / ".private" / "ema-band-masters"
     live_pnl_snapshot_path = ROOT / ".private" / "live-pnl.json"
     ema_chart_cache = {"key": None, "snapshot": None, "refreshed_at": None}
+    from sector_heatmap.parser_submission import ParserSubmissionGuard
+    parser_submissions = ParserSubmissionGuard(ROOT / ".private" / "parser-submissions.sqlite3")
     parser_order_previews = {}
     parser_trailing_positions = {}
     parser_trailing_lock = threading.Lock()
+
+    parser_protection_enabled = lambda: (parser_live_submission_enabled and os.getenv("SECTOR_PULSE_ENABLE_PARSER_PROTECTION") == "1")
+    parser_lifecycle = ParserLifecycle(ROOT / ".private" / "parser-lifecycle.sqlite3", ParserProtectionBroker(), parser_protection_enabled)
 
     def parser_target_trail(entry, targets, ltp, peak_price=None):
         """Long-option T1/T2/T3 ladder followed by an open-ended T2-T3 interval trail."""
@@ -1031,64 +1121,26 @@ def run_server():
         return {"status": "REVIEW_ONLY", "parsed": parsed, "mapping": mapping, "trailing_plan": stages,
                 "message": "This is a parsed review ticket only. It creates no FYERS order, stop order or trailing order."}
 
-    def trade_recommendation_ai_analysis(payload):
-        """Evidence-based AI-style check of the parsed contract, with no sizing gates.
+    def whatsapp_reconcile():
+        client = ema_readonly_client()
+        positions, orders = client.positions(), client.orderbook()
+        if positions.get("s") != "ok" or orders.get("s") != "ok":
+            raise RuntimeError("FYERS positions/orders unavailable.")
+        if not isinstance(positions.get("netPositions"), list) or not isinstance(orders.get("orderBook"), list):
+            raise RuntimeError("FYERS reconciliation payload incomplete.")
+        occupied = {row["symbol"] for row in positions["netPositions"] if float(row.get("netQty", 0)) != 0}
+        occupied.update(row["symbol"] for row in orders["orderBook"]
+                        if float(row.get("filledQty", 0)) > 0 or row.get("status") not in {1, 5})
+        return {"verified": True, "occupied_symbols": sorted(occupied)}
 
-        The result deliberately assesses the exact option's completed-candle
-        trend and the supplied price plan.  It does not infer capital, impose
-        reward-to-risk, or promise that a target will be reached.
-        """
-        preview = trade_recommendation_preview(payload)
-        parsed, mapping = preview["parsed"], preview["mapping"]
-        contract = mapping.get("contract") if mapping.get("status") == "EXACT" else None
-        if not contract:
-            raise ValueError("AI analysis needs one exact active FYERS contract.")
-        if parsed.get("action") not in {"BUY", "SELL"} or parsed.get("entry") is None or parsed.get("stop_loss") is None:
-            raise ValueError("AI analysis needs an explicit BUY/SELL, entry and stop loss.")
-        token = load_config().get("FYERS_ACCESS_TOKEN", "")
-        if ":" not in token:
-            raise RuntimeError("A current FYERS connection is required for AI analysis.")
-        app_id, access_token = token.split(":", 1)
-        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        candles = ema_band_completed_candles(client, contract["symbol"], "5 minutes")
-        if len(candles) < 30:
-            raise RuntimeError("FYERS returned insufficient completed option candles for the AI analysis.")
-        regime = ema_band_slope_regime(candles, ema_length=21, lookback=8, minimum_atr_per_bar=0.03)
-        last = candles[-1]
-        ltp = float(last["close"])
-        entry, stop = float(parsed["entry"]), float(parsed["stop_loss"])
-        first_target = float(parsed["targets"][0]) if parsed.get("targets") else None
-        action = parsed["action"]
-        trend_favorable = regime["state"] == ("RISING" if action == "BUY" else "FALLING") and regime["pass"]
-        entry_gap_pct = abs(ltp - entry) / entry * 100 if entry else None
-        entry_instruction = parsed.get("entry_instruction", "LIMIT")
-        if entry_instruction == "STOP_LIMIT":
-            waiting_for_trigger = (action == "BUY" and ltp < entry) or (action == "SELL" and ltp > entry)
-            entry_state = "WAITING_FOR_TRIGGER" if waiting_for_trigger else "TRIGGER_REACHED"
-            entry_favorable = entry_gap_pct is not None and entry_gap_pct <= 3.0
-        else:
-            limit_eligible = (action == "BUY" and ltp <= entry) or (action == "SELL" and ltp >= entry)
-            entry_state = "LIMIT_ELIGIBLE" if limit_eligible else "WAITING_AT_LIMIT"
-            entry_favorable = bool(limit_eligible)
-        target_direction_valid = first_target is not None and ((action == "BUY" and first_target > entry) or (action == "SELL" and first_target < entry))
-        atr = float(regime.get("atr") or 0)
-        target_distance_atr = abs(first_target - ltp) / atr if first_target is not None and atr > 0 else None
-        target_plausible = bool(target_direction_valid and target_distance_atr is not None and target_distance_atr <= 4.0)
-        favourable = trend_favorable and entry_favorable and target_plausible
-        verdict = "WAIT_FOR_TRIGGER" if entry_instruction == "STOP_LIMIT" and entry_state == "WAITING_FOR_TRIGGER" and trend_favorable and target_plausible else "FAVOURABLE" if favourable else "MIXED" if trend_favorable and target_direction_valid else "NOT_FAVOURABLE"
-        reasons = [
-            "Completed five-minute option trend is aligned with the recommendation." if trend_favorable else f"Completed five-minute option trend is {regime['state'].lower()}, which is not aligned with {action}.",
-            (f"Stop-limit trigger has not fired; current completed option price is {entry_gap_pct:.2f}% from the trigger." if entry_instruction == "STOP_LIMIT" and entry_state == "WAITING_FOR_TRIGGER" else f"Current completed option price is {entry_gap_pct:.2f}% from the stated entry.") if entry_gap_pct is not None else "Current entry distance is unavailable.",
-            f"First target is {target_distance_atr:.2f} recent ATR from the latest completed option close." if target_distance_atr is not None else "No directionally valid first target was supplied.",
-        ]
-        return {"status": "READY", "verdict": verdict, "contract": contract, "parsed": parsed,
-                "evidence": {"timeframe": "5 minutes", "completed_candles": len(candles), "last_completed_close": ltp,
-                             "trend": regime, "entry_instruction": entry_instruction, "entry_state": entry_state, "entry_gap_pct": round(entry_gap_pct, 2) if entry_gap_pct is not None else None,
-                             "first_target": first_target, "target_distance_atr": round(target_distance_atr, 2) if target_distance_atr is not None else None},
-                "checks": {"trend_aligned": trend_favorable, "entry_near_stated_price": entry_favorable,
-                           "first_target_direction_valid": target_direction_valid, "first_target_within_four_atr": target_plausible},
-                "reasons": reasons,
-                "message": "AI analysis is a completed-candle evidence check, not a target guarantee. It applies no capital, lot-sizing or reward-to-risk gate."}
+    whatsapp_polling = WhatsAppPolling(ROOT / ".private" / "whatsapp-review.sqlite3",
+                                      trade_recommendation_preview, whatsapp_reconcile,
+                                      source=NativeWhatsAppSource(ROOT / ".private" / "whatsapp-reader"))
+
+    def trade_recommendation_ai_analysis(payload):
+        # Separate read-only request; never called by an order route.
+        return analyze_trade_advisory(trade_recommendation_preview, payload,
+                                      lambda: load_config().get("FYERS_ACCESS_TOKEN", ""), ema_master_dir)
 
     def prepare_trade_recommendation_order(payload):
         """Build a confirmation-gated FYERS limit or stop-limit entry from an exact parser match.
@@ -1108,7 +1160,7 @@ def run_server():
             lots = int(payload.get("lots", 1))
         except (TypeError, ValueError) as error:
             raise ValueError("Lots must be a whole number.") from error
-        if lots < 1:
+        if lots < 1 or isinstance(payload.get("lots"), bool) or float(payload.get("lots", 1)) != lots:
             raise ValueError("At least one lot is required.")
         try:
             entry = float(parsed["entry"])
@@ -1146,6 +1198,8 @@ def run_server():
             return round(round(float(value) / tick_size) * tick_size, 6)
         limit_price = tick_round(payload.get("limit_price", entry))
         trigger_price = tick_round(payload.get("trigger_price", entry))
+        if not math.isfinite(limit_price) or limit_price <= 0 or not math.isfinite(trigger_price) or trigger_price <= 0:
+            raise ValueError("Entry prices must be finite and positive.")
         side = 1 if parsed["action"] == "BUY" else -1
         if entry_mode == "STOP_LIMIT":
             # FYERS SL-L requires Buy trigger < limit and Sell trigger > limit.
@@ -1161,6 +1215,7 @@ def run_server():
             "productType": "MARGIN", "limitPrice": limit_price, "stopPrice": trigger_price if entry_mode == "STOP_LIMIT" else 0,
             "validity": "DAY", "disclosedQty": 0, "offlineOrder": False,
         }
+        protection = protection_plan(parsed, contract, order, payload.get("protection_target")) if payload.get("protect_after_fill") is True else None
         target_trailing = None
         if parsed["action"] == "BUY" and len(parsed.get("targets") or []) >= 3:
             try:
@@ -1172,15 +1227,24 @@ def run_server():
                   "contract": contract, "parsed": parsed, "trailing_plan": preview["trailing_plan"], "target_trailing": target_trailing,
                   "order": order, "fresh_quote": {"ltp": ltp, "provider_timestamp": quote_values.get("tt")},
                   "available_funds": funds, "live_submission_enabled": parser_live_submission_enabled,
-                  "entry_mode": entry_mode,
-                  "message": f"Review the exact FYERS {'STOP-LIMIT' if entry_mode == 'STOP_LIMIT' else 'LIMIT'} order and confirm it before submission. The T1–T3 target trail is attached to this reviewed plan and activates only after FYERS confirms the fill."}
-        parser_order_previews[preview_id] = {"ticket": ticket, "payload": {"text": payload.get("text"), "lots": lots, "entry_mode": entry_mode, "trigger_price": trigger_price, "limit_price": limit_price}}
+                  "entry_mode": entry_mode, "protection": protection, "protection_worker_enabled": parser_protection_enabled(), "lifecycle_version": 1,
+                  "message": f"Review the exact FYERS {'STOP-LIMIT' if entry_mode == 'STOP_LIMIT' else 'LIMIT'} order and confirm it before submission. Stop/target fields alone create no protection. Review explicit post-fill protection consent and worker availability in this ticket."}
+        parser_order_previews[preview_id] = {"ticket": ticket, "payload": {"text": payload.get("text"), "lots": lots, "entry_mode": entry_mode, "trigger_price": trigger_price, "limit_price": limit_price, "protect_after_fill": payload.get("protect_after_fill") is True, "protection_target": payload.get("protection_target")}}
         return ticket
 
     def submit_trade_recommendation_direct(payload):
         """Validate and submit one parser order in a single user-click flow."""
-        ticket = prepare_trade_recommendation_order(payload)
-        return submit_trade_recommendation_order({"preview_id": ticket["preview_id"], "confirmation": ticket["confirmation_phrase"]})
+        def submit_once():
+            if not payload.get("symbol"):
+                raise ValueError("Parse an exact contract before submitting.")
+            ticket = prepare_trade_recommendation_order(payload)
+            if ticket["contract"]["symbol"] != payload["symbol"]:
+                raise ValueError("The mapped contract changed. Parse and review the current contract.")
+            quote = ticket["fresh_quote"]["ltp"]
+            if quote is None or not math.isfinite(quote) or quote <= 0:
+                raise ValueError("A valid fresh FYERS quote is required before submission.")
+            return submit_trade_recommendation_order({"preview_id": ticket["preview_id"], "confirmation": ticket["confirmation_phrase"]})
+        return parser_submissions.submit(str(payload.get("submission_id") or ""), payload, submit_once)
 
     def submit_trade_recommendation_order(payload):
         preview_id = str(payload.get("preview_id") or "")
@@ -1203,21 +1267,41 @@ def run_server():
         new_order = refreshed["order"]
         if old_order != new_order or ticket["contract"]["symbol"] != refreshed["contract"]["symbol"]:
             raise PreviewChanged(refreshed)
+        if ticket.get("protection") != refreshed.get("protection"):
+            raise PreviewChanged(refreshed)
+        if ticket.get("protection"):
+            result = parser_lifecycle.submit_entry(ticket)
+            parser_order_previews.pop(preview_id, None)
+            return {"status": result["status"], "broker": "FYERS", "lifecycle_id": result["id"], "message": result["message"]}
         token = load_config().get("FYERS_ACCESS_TOKEN", "")
         app_id, access_token = token.split(":", 1)
         response = fyersModel.FyersModel(client_id=app_id, token=access_token).place_order(old_order)
+        if not isinstance(response, dict) or response.get("s") != "ok" or not response.get("id"):
+            parser_order_previews.pop(preview_id, None)
+            raise ValueError("FYERS did not confirm entry acceptance. Check the broker orderbook before retrying; no protection was created.")
         parser_order_previews.pop(preview_id, None)
         return {"status": "SUBMITTED", "broker": "FYERS", "response": response,
                 "message": "FYERS received the parser order. Reconcile its fill status in the broker before relying on any target or trailing plan."}
 
-    def search_ema_option_underlyings(query):
+    def parser_protection_loop():
+        while parser_protection_enabled():
+            for entry in parser_lifecycle.rows():
+                parser_lifecycle.reconcile(entry["id"])
+            threading.Event().wait(5)
+
+    if parser_protection_enabled():
+        threading.Thread(target=parser_protection_loop, daemon=True, name="parser-protection").start()
+
+    def search_ema_option_underlyings(query, market=""):
         """Offer only master-backed NSE/BSE cash/index underlyings with listed options."""
         state = ema_master_status()
         if not state["usable"]:
             raise RuntimeError("FYERS master cache is missing or older than 72 hours. Underlying selection is fail-closed until a refresh succeeds.")
         needle = str(query or "").strip().upper()
-        if len(needle) < 2:
+        if len(needle) < 2 and not market:
             return {"matches": [], "status": state}
+        if market not in {"", "ALL", "NSE_INDEX", "BSE_INDEX", "NSE_STOCK", "BSE_STOCK", "NSE_EQUITY", "BSE_EQUITY", "MCX"}:
+            raise ValueError("Unknown instrument market category")
         cash_underlyings = {}
         for cash_segment in ("NSE_CM", "BSE_CM"):
             exchange = cash_segment.split("_", 1)[0]
@@ -1227,6 +1311,17 @@ def run_server():
                 if not ema_cash_or_index_row_matches_exchange(row, exchange):
                     continue
                 cash_underlyings[(exchange, str(row[13]).strip().upper())] = {"symbol": row[9], "description": row[1]}
+        if market in {"NSE_EQUITY", "BSE_EQUITY"}:
+            exchange = market.split("_", 1)[0]
+            matches = [dict(underlying=underlying, **cash, category=market,
+                            market_kind="CASH_EQUITY", execution_route="CASH_EQUITY",
+                            lot_size=1, quantity_multiplier=1)
+                       for (venue, underlying), cash in cash_underlyings.items()
+                       if venue == exchange and not cash["symbol"].endswith("-INDEX")
+                       and needle in f"{underlying} {cash['symbol']} {cash['description']}".upper()]
+            matches.sort(key=lambda item: ema_master_search_rank(item, needle))
+            return {"matches": matches[:1000], "total": len(matches), "status": state,
+                    "market": market, "message": "Cash equities · quantity in shares · no option lot multiplier"}
         matches = {}
         for option_segment in ("NSE_FO", "BSE_FO"):
             exchange = option_segment.split("_", 1)[0]
@@ -1270,7 +1365,13 @@ def run_server():
             if item["underlying"].startswith(needle) or symbol.endswith(needle):
                 return (1, item["underlying"], symbol)
             return (2, item["underlying"], symbol)
-        return {"matches": sorted(matches.values(), key=rank)[:20], "status": state}
+        def category(item):
+            if item["option_segment"] == "MCX_COM": return "MCX"
+            exchange=item["symbol"].split(":",1)[0]
+            return exchange+("_INDEX" if item["symbol"].endswith("-INDEX") else "_STOCK")
+        selected=[{**item,"category":category(item)} for item in matches.values() if market in {"", "ALL", category(item)}]
+        return {"matches": sorted(selected, key=rank)[:1000 if market else 20], "total":len(selected), "status": state, "market":market,
+                "message":"Listed option underlyings from the current broker master" if selected else "No listed option underlyings match this category/search in the current broker master."}
 
     ema_history_cache = {}
     ema_history_lock = threading.RLock()
@@ -1278,6 +1379,29 @@ def run_server():
     ema_daily_reference_cache = {}
     rsi_table = RsiTable()
     delta_india = DeltaIndia(ROOT / ".private" / "delta-india-paper.json",credentials=load_config)
+    from .delta_backtest_server import ensure_research_worker
+    ensure_research_worker()  # Public-data research has its own process; broker runners are untouched.
+    from .telegram_polling import TelegramPolling
+    from .telegram_parser import TelegramParser
+    telegram_polling = TelegramPolling(ROOT / '.private' / 'telegram-review.json')
+    telegram_parser = TelegramParser(parse_trade_recommendation, trade_recommendation_preview,
+                                    submit_trade_recommendation_direct, delta_india, parser_submissions, telegram_polling)
+    telegram_polling.auto_submit = telegram_parser.auto
+    def telegram_fyers_reconcile(result):
+        token=load_config().get('FYERS_ACCESS_TOKEN','')
+        if ':' not in token:raise ValueError('Fresh FYERS authentication is required for reconciliation.')
+        app_id,access=token.split(':',1);client=fyersModel.FyersModel(client_id=app_id,token=access)
+        profile=client.get_profile();book=client.orderbook();trades=client.tradebook()
+        if profile.get('s')!='ok' or book.get('s')!='ok' or trades.get('s')!='ok':raise ValueError('Authenticated FYERS order/trade snapshots are unavailable; no retry sent.')
+        ident=str((result.get('response') or {}).get('id') or '')
+        matches=[r for r in book.get('orderBook',[]) if str(r.get('id'))==ident]
+        if not ident or len(matches)!=1:raise ValueError('Exact FYERS order identity could not be reconciled; check the broker.')
+        return dict(status='BROKER_ORDER_SNAPSHOT',response=dict(id=ident),order=matches[0],fills=[r for r in trades.get('tradeBook',[]) if str(r.get('orderNumber'))==ident],observed_at=time.time(),message='Broker order and attributed trade snapshot; acceptance is not a fill.')
+    telegram_parser.fyers_reconcile = telegram_fyers_reconcile
+
+
+    delta_india.start_history()
+    delta_india.start_monitoring_supervisor()
     ema_chart_tick_cache = {}
     ema_chart_stream_bars = {}
     ema_chart_stream_lock = threading.Lock()
@@ -1695,6 +1819,8 @@ def run_server():
                                  "last_signal_key": None, "last_watch_key": None, "run_started_at": None, "position": None, "chart": None})
             return snapshot
 
+    from .paper_wallet import capital as paper_initial, wallet as paper_wallet, reserve as paper_reserve, release as paper_release
+
     def start_ema_runner(payload):
         mode = str(payload.get("mode") or "PAPER").upper()
         config = {
@@ -1750,10 +1876,11 @@ def run_server():
             # reaches a broker-order function.
             config.update({"lots": int(payload.get("lots") or 1), "stop_loss_pct": None,
                            "target_profit_pct": None, "profit_protection_pct": float(payload.get("profit_protection_pct") or 20)})
+        config["paper_capital_inr"]=paper_initial(payload.get("paper_capital_inr",100000)) if mode=="PAPER" else 100000
         with ema_runner_lock:
             if ema_runner["running"]:
                 raise RuntimeError("The EMA Band runner is already monitoring a selected underlying.")
-            ema_runner.update({"running": True, "status": "MONITORING", "config": config, "last_event": None, "last_signal_key": None, "last_watch_key": None, "run_started_at": datetime.now().astimezone().isoformat(), "position": None, "chart": None})
+            ema_runner.update({"running": True, "status": "MONITORING", "config": config, "last_event": None, "last_signal_key": None, "last_watch_key": None, "run_started_at": datetime.now().astimezone().isoformat(), "position": None, "chart": None, "paper_capital":paper_wallet(config["paper_capital_inr"]) if mode=="PAPER" else None})
 
         def live_client():
             token = load_config().get("FYERS_ACCESS_TOKEN", "")
@@ -1807,6 +1934,8 @@ def run_server():
             if not candidates:
                 return None
             row, contract_row, quantity, entry = candidates[0]
+            if str(row['symbol']) in renko_adoptions.owned_symbols():
+                raise RuntimeError('This position is already managed by an adopted Renko strategy.')
             lot_size, tick_size = int(float(contract_row[3])), float(contract_row[4])
             return {"symbol": str(row["symbol"]), "description": str(contract_row[1]), "quantity": quantity, "lots": max(1, quantity // lot_size), "entry_price": entry, "stop_price": None, "target_price": None, "profit_protection_pct": config["profit_protection_pct"], "profit_peak_price": entry, "profit_protection_stop": None, "direction": "BULLISH" if str(contract_row[16]).upper() == "CE" else "BEARISH", "adopted_manual_position": True, "opened_at": datetime.now().astimezone().isoformat(), "lot_size": lot_size, "tick_size": tick_size}
 
@@ -1966,6 +2095,7 @@ def run_server():
                             realized_pnl = round((ltp - position["entry_price"]) * position["quantity"], 2)
                             event = {"at": datetime.now().astimezone().isoformat(), "mode": "PAPER", "status": "PAPER_EXIT_RECORDED", "position": position, "exit_ltp": ltp, "exit_reason": reason, "realized_pnl_rupees": realized_pnl, "indicator_exit": indicator_exit, "resistance_exit": resistance_exit}
                             with ema_runner_lock:
+                                ema_runner["paper_capital"]=paper_release(ema_runner["paper_capital"],position["quantity"]*ltp,realized_pnl)
                                 ema_runner.update({"status": event["status"], "last_event": event, "position": None})
                                 if ema_runner.get("chart"):
                                     ema_runner["chart"].update({"closed": True, "exit_price": ltp, "exit_reason": reason, "realized_pnl_rupees": realized_pnl, "closed_at": event["at"]})
@@ -1990,6 +2120,9 @@ def run_server():
                             ema_runner["last_signal_key"] = signal_key
                         if config["mode"] == "PAPER":
                             ticket = ema_live_ticket_preview(resolved["contract"], resolved.get("option_quote") or {}, config["lots"], config["stop_loss_pct"], config["target_profit_pct"], config["profit_protection_pct"])
+                            if not duplicate:
+                                with ema_runner_lock:
+                                    ema_runner["paper_capital"]=paper_reserve(ema_runner["paper_capital"],ticket["quantity"]*ticket["limit_price"])
                             event["ticket"] = ticket
                             event["status"] = "PAPER_ENTRY_RECORDED" if not duplicate else "PAPER_ENTRY_ALREADY_RECORDED"
                             with ema_runner_lock:
@@ -2120,6 +2253,24 @@ def run_server():
     kama_runner_lock = threading.Lock()
     kama_runner_paper_log = ROOT / ".private" / "kama-runner-paper.jsonl"
     kama_runner_live_log = ROOT / ".private" / "kama-runner-live.jsonl"
+    kama_chart_snapshot_path = ROOT / ".private" / "kama-chart.json"
+
+    def read_kama_chart_snapshot():
+        try:
+            snapshot = json.loads(kama_chart_snapshot_path.read_text(encoding="utf-8"))
+            return snapshot if isinstance(snapshot, dict) and isinstance(snapshot.get("candles"), list) else None
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+
+    def persist_kama_chart_snapshot(snapshot):
+        if not snapshot:
+            return
+        kama_chart_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = kama_chart_snapshot_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(snapshot, separators=(",", ":")), encoding="utf-8")
+        temporary.replace(kama_chart_snapshot_path)
+
+    kama_runner["chart"] = read_kama_chart_snapshot()
 
     def kama_live_capability():
         """Report KAMA's independent, explicit live-execution gates."""
@@ -2144,7 +2295,7 @@ def run_server():
             if not result["running"]:
                 # A stopped context is not an open trade.  Events remain in the
                 # dedicated journal and are exposed as history only.
-                result.update({"status": "STOPPED", "config": None, "position": None, "chart": None,
+                result.update({"status": "STOPPED", "config": None, "position": None,
                                "last_event": None, "run_started_at": None})
             return result
 
@@ -2169,6 +2320,49 @@ def run_server():
         journal.parent.mkdir(parents=True, exist_ok=True)
         with journal.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+
+    def kama_restore_paper_position():
+        """Restore one journal-backed paper position across a service restart.
+
+        The KAMA runner owns a single position.  If an older build left more
+        than one journal row open, close every superseded row at its last
+        recorded paper mark before restoring the newest one.
+        """
+        wallet_events=kama_execution_log(limit=5000)
+        report = kama_trade_report(wallet_events)
+        opened = sorted((trade for trade in report.get("trades") or []
+                         if trade.get("mode") == "PAPER" and trade.get("status") == "OPEN"),
+                        key=lambda trade: trade.get("opened_at") or "")
+
+        def position_from(trade):
+            signal_side = -1 if trade.get("signal") == "ENTER_SHORT" else 1
+            symbol = str(trade.get("symbol") or "")
+            option_type = "CE" if symbol.endswith("CE") else "PE" if symbol.endswith("PE") else None
+            side = 1 if option_type else signal_side
+            return {"trade_id": trade.get("trade_id"), "symbol": symbol, "side": side,
+                    "signal_side": signal_side, "quantity": trade.get("quantity"),
+                    "entry_price": trade.get("entry_price"), "last_price": trade.get("last_price"),
+                    "unrealized_pnl_rupees": trade.get("unrealized_pnl_rupees"),
+                    "instrument_type": "OPTION" if option_type else "UNDERLYING", "option_type": option_type,
+                    "opened_at": trade.get("opened_at"), "mode": "PAPER",
+                    "paper_capital":next((row["paper_capital"] for row in wallet_events if row.get("trade_id")==trade.get("trade_id") and row.get("paper_capital")),None)}
+
+        for stale in opened[:-1]:
+            position = position_from(stale)
+            exit_price = stale.get("last_price")
+            realized = None
+            try:
+                realized = (float(exit_price) - float(position["entry_price"])) * int(position["side"]) * int(position["quantity"])
+            except (TypeError, ValueError):
+                pass
+            kama_append_event({"at": datetime.now().astimezone().isoformat(), "mode": "PAPER",
+                               "lifecycle": "PAPER_EXIT", "trade_id": position.get("trade_id"),
+                               "position": position, "entry_price": position.get("entry_price"),
+                               "exit_price": exit_price,
+                               "realized_pnl_rupees": round(realized, 2) if realized is not None else None,
+                               "exit_reason": "RUNNER_RESTART_RECONCILIATION",
+                               "reconciliation": "SUPERSEDED_OPEN_PAPER_TRADE_CLOSED_AT_LAST_RECORDED_MARK"}, "PAPER")
+        return position_from(opened[-1]) if opened else None
 
     def search_kama_underlyings(query, execution_mode="EQUITY"):
         """Search master-backed equity/index underlyings for KAMA execution."""
@@ -2251,6 +2445,50 @@ def run_server():
         if not isinstance(profile, dict) or profile.get("s") != "ok":
             raise RuntimeError("KAMA FYERS session validation failed; the runner remains fail-closed.")
         return client
+
+    def kama_read_only_chart(query):
+        """Build and persist a completed-candle chart without starting a runner."""
+        execution_mode = str((query.get("execution_mode") or ["EQUITY"])[0]).strip().upper()
+        symbol = str((query.get("symbol") or [""])[0]).strip().upper()
+        if not symbol:
+            raise ValueError("Choose a broker-master underlying to load its KAMA chart.")
+        eligible = kama_eligible_underlying(symbol, execution_mode)
+        if not eligible:
+            raise ValueError("The selected underlying is not eligible for this KAMA execution route.")
+        try:
+            settings = {
+                "kama_length": int((query.get("kama_length") or ["10"])[0]),
+                "fast_length": int((query.get("fast_length") or ["2"])[0]),
+                "slow_length": int((query.get("slow_length") or ["30"])[0]),
+                "minimum_efficiency": float((query.get("minimum_efficiency") or ["0.35"])[0]),
+                "slope_lookback": int((query.get("slope_lookback") or ["8"])[0]),
+                "minimum_slope_atr": float((query.get("minimum_slope_atr") or ["0.10"])[0]),
+                "breakout_bars": int((query.get("breakout_bars") or ["5"])[0]),
+                "cooldown_bars": int((query.get("cooldown_bars") or ["2"])[0]),
+                "allow_reclaims": str((query.get("allow_reclaims") or ["true"])[0]).lower() in {"1", "true", "yes", "on"},
+            }
+        except (TypeError, ValueError) as error:
+            raise ValueError("KAMA chart settings must be valid numeric values.") from error
+        timeframe = str((query.get("timeframe") or ["5 minutes"])[0])
+        mcx = symbol.startswith("MCX:")
+        sessions = {"entry_session": "0915-2330" if mcx else "0915-1510",
+                    "squareoff_session": "2330-2355" if mcx else "1515-1530"}
+        client = kama_authenticated_client()
+        candles = ema_band_completed_candles(client, symbol, timeframe)
+        signal = kama_v6_signal(candles, position=0, **settings, **sessions)
+        line = kama_series(candles, settings["kama_length"], settings["fast_length"], settings["slow_length"])
+        snapshot = {
+            "symbol": symbol, "description": eligible.get("description"), "timeframe": timeframe,
+            "candles": [{**candle, "kama": line[index]} for index, candle in enumerate(candles)][-80:],
+            "signal": signal, "position": None, "mode": "VIEW", "execution_mode": execution_mode,
+            "squareoff_at": "23:30 IST" if mcx else "15:15 IST",
+            "updated_at": datetime.now().astimezone().isoformat(),
+        }
+        persist_kama_chart_snapshot(snapshot)
+        with kama_runner_lock:
+            if not kama_runner["running"]:
+                kama_runner["chart"] = snapshot
+        return snapshot
 
     def kama_fresh_preflight(client, symbol, expected_position=None, require_two_sided=True):
         """Read-only session, two-sided quote, and exact broker reconciliation."""
@@ -2423,6 +2661,7 @@ def run_server():
                       "timeframe": str(payload.get("timeframe") or "5 minutes"), "mode": mode,
                       "kama_length": int(payload.get("kama_length") or 10), "fast_length": int(payload.get("fast_length") or 2),
                       "slow_length": int(payload.get("slow_length") or 30), "minimum_efficiency": float(payload.get("minimum_efficiency") or .35),
+                      "slope_lookback": int(payload.get("slope_lookback") or 8), "minimum_slope_atr": float(payload.get("minimum_slope_atr") or .10),
                       "breakout_bars": int(payload.get("breakout_bars") or 5), "cooldown_bars": int(payload.get("cooldown_bars") or 2),
                       "allow_reclaims": bool(payload.get("allow_reclaims", True)),
                       "entry_session": "0915-2330" if mcx else "0915-1510",
@@ -2432,7 +2671,7 @@ def run_server():
         if config["size"] < 1:
             raise ValueError("KAMA position size or option lots must be a positive whole number.")
         # Validate settings before a monitor can start.
-        kama_v6_signal([], **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "breakout_bars", "cooldown_bars", "allow_reclaims")})
+        kama_v6_signal([], **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "slope_lookback", "minimum_slope_atr", "breakout_bars", "cooldown_bars", "allow_reclaims")})
         if mode == "LIVE":
             try:
                 config.update({"invalidation": float(payload.get("invalidation")), "idea_risk_limit": float(payload.get("idea_risk_limit", 2000))})
@@ -2442,11 +2681,15 @@ def run_server():
                 raise ValueError("KAMA LIVE requires a positive whole quantity, invalidation, and per-idea risk limit.")
             if not kama_live_submission_enabled():
                 raise PermissionError("KAMA LIVE requires both operator-set environment gates before the runner can start.")
+        config["paper_capital_inr"]=paper_initial(payload.get("paper_capital_inr",100000)) if mode=="PAPER" else 100000
+        restored_position = kama_restore_paper_position() if mode == "PAPER" else None
         with kama_runner_lock:
             if kama_runner["running"]:
                 raise RuntimeError("The KAMA runner is already active.")
-            kama_runner.update({"running": True, "mode": mode, "status": "PAPER_MONITORING" if mode == "PAPER" else "LIVE_PREFLIGHT",
-                                "config": config, "position": None, "chart": None, "last_event": None,
+            if restored_position and restored_position.get("paper_capital") and config["paper_capital_inr"]!=restored_position["paper_capital"]["initial_inr"]:raise ValueError("Resume the held Paper position with its original virtual capital.")
+            kama_runner["paper_capital"]=(restored_position.get("paper_capital") if restored_position else None) or paper_wallet(config["paper_capital_inr"],reserved=restored_position["quantity"]*restored_position["entry_price"] if restored_position else 0) if mode=="PAPER" else None
+            kama_runner.update({"running": True, "mode": mode, "status": "PAPER_POSITION_OPEN" if restored_position else "PAPER_MONITORING" if mode == "PAPER" else "LIVE_PREFLIGHT",
+                                "config": config, "position": restored_position, "last_event": None,
                                 "run_started_at": datetime.now().astimezone().isoformat(), "last_bar": None,
                                 "last_long_exit_bar": None, "last_short_exit_bar": None, "events": [],
                                 "policy": {**kama_policy(config, mode), "fresh_preflight": "PENDING", "reconciliation": "NOT_APPLICABLE" if mode == "PAPER" else "PENDING"}})
@@ -2463,22 +2706,47 @@ def run_server():
                     with kama_runner_lock:
                         long_exit, short_exit = kama_runner["last_long_exit_bar"], kama_runner["last_short_exit_bar"]
                     signal = kama_v6_signal(candles, position=(current or {}).get("signal_side", (current or {}).get("side", 0)), last_long_exit_bar=long_exit,
-                                            last_short_exit_bar=short_exit, **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "breakout_bars", "cooldown_bars", "allow_reclaims", "entry_session", "squareoff_session")})
+                                            last_short_exit_bar=short_exit, **{key: config[key] for key in ("kama_length", "fast_length", "slow_length", "minimum_efficiency", "slope_lookback", "minimum_slope_atr", "breakout_bars", "cooldown_bars", "allow_reclaims", "entry_session", "squareoff_session")})
+                    scheduled_squareoff = kama_scheduled_squareoff_due(current)
+                    if scheduled_squareoff:
+                        cutoff = "23:30 IST" if symbol.startswith("MCX:") else "15:15 IST"
+                        signal = {**signal, "action": "SQUARE_OFF",
+                                  "message": f"KAMA scheduled exchange square-off at {cutoff}."}
                     bar = candles[-1]["timestamp"] if candles else None
                     event = {"at": datetime.now().astimezone().isoformat(), "mode": mode, "bar": bar, "signal": signal,
-                             "preflight": preflight, "lifecycle": "WATCH", "instrument": symbol}
+                             "preflight": preflight, "lifecycle": "WATCH", "instrument": symbol,
+                             "scheduled_squareoff_at": "23:30 IST" if symbol.startswith("MCX:") else "15:15 IST"}
+                    paper_mark = None
+                    if mode == "PAPER" and current:
+                        try:
+                            mark_quote = kama_fresh_preflight(client, current["symbol"])
+                            mark_price = mark_quote["bid"] if current["side"] > 0 else mark_quote["ask"]
+                            unrealized = (mark_price - current["entry_price"]) * current["side"] * current["quantity"]
+                            paper_mark = {"status": "READY", "price": mark_price,
+                                          "unrealized_pnl_rupees": round(unrealized, 2), "quote": mark_quote["quote"]}
+                        except Exception as mark_error:
+                            paper_mark = {"status": "UNAVAILABLE", "error": str(mark_error)}
+                        event["paper_mark"] = paper_mark
                     with kama_runner_lock:
                         is_new_bar = bar is not None and bar != kama_runner["last_bar"]
                         position = kama_runner["position"]
+                        if position and paper_mark and paper_mark.get("status") == "READY":
+                            position.update({"last_price": paper_mark["price"],
+                                             "unrealized_pnl_rupees": paper_mark["unrealized_pnl_rupees"]})
                         if is_new_bar and position is None and signal["action"] in {"ENTER_LONG", "ENTER_SHORT"}:
                             if mode == "PAPER":
                                 selected = kama_resolve_entry_instrument(client, config, signal, preflight)
-                                kama_runner["position"] = {"symbol": selected["symbol"], "side": selected["side"],
+                                entry_price = selected["quote"]["ask"] if selected["side"] > 0 else selected["quote"]["bid"]
+                                kama_runner["paper_capital"]=paper_reserve(kama_runner["paper_capital"],selected["quantity"]*entry_price)
+                                kama_runner["position"] = {"trade_id": event["at"], "symbol": selected["symbol"], "side": selected["side"],
                                                            "signal_side": selected["signal_side"], "quantity": selected["quantity"],
-                                                           "entry_price": selected["quote"]["ask"] if selected["side"] > 0 else selected["quote"]["bid"],
+                                                           "entry_price": entry_price, "last_price": entry_price,
+                                                           "unrealized_pnl_rupees": 0.0,
                                                            "instrument_type": selected["instrument_type"], "option_type": selected.get("option_type"),
                                                            "opened_at": event["at"], "mode": mode}
                                 event["selected_instrument"] = {key: value for key, value in selected.items() if key != "quote"}
+                                event.update({"trade_id": event["at"], "entry_price": entry_price,
+                                              "position": dict(kama_runner["position"])})
                                 event["lifecycle"] = "PAPER_ENTRY"
                             else:
                                 ticket = kama_submit_live_entry(client, config, signal, preflight)
@@ -2488,25 +2756,42 @@ def run_server():
                                                            "entry_price": ticket["limit_price"], "entry_order_id": ticket["entry_order_id"],
                                                            "opened_at": event["at"], "mode": mode}
                                 event.update({"lifecycle": "LIVE_ENTRY_SUBMITTED", "ticket": ticket})
-                        elif is_new_bar and position and signal["action"] in {"EXIT_LONG", "EXIT_SHORT", "SQUARE_OFF"}:
+                        elif position and signal["action"] in {"EXIT_LONG", "EXIT_SHORT", "SQUARE_OFF"} and (is_new_bar or scheduled_squareoff):
                             if position.get("signal_side", position["side"]) > 0: kama_runner["last_long_exit_bar"] = len(candles) - 1
                             else: kama_runner["last_short_exit_bar"] = len(candles) - 1
                             if mode == "PAPER":
+                                closed_position = dict(position)
+                                exit_price = paper_mark.get("price") if paper_mark and paper_mark.get("status") == "READY" else None
+                                realized = ((exit_price - position["entry_price"]) * position["side"] * position["quantity"]
+                                            if exit_price is not None else None)
+                                if realized is None:raise ValueError("Fresh executable mark required before a Paper exit; position remains open.")
+                                kama_runner["paper_capital"]=paper_release(kama_runner["paper_capital"],position["quantity"]*exit_price,realized)
                                 kama_runner["position"] = None
-                                event["lifecycle"] = "PAPER_EXIT"
+                                event.update({"lifecycle": "PAPER_EXIT", "trade_id": position.get("trade_id"),
+                                              "position": closed_position, "entry_price": position.get("entry_price"),
+                                              "exit_price": exit_price, "realized_pnl_rupees": round(realized, 2) if realized is not None else None,
+                                              "exit_reason": signal["action"]})
                             else:
                                 exit_quote = kama_fresh_preflight(client, position["symbol"], position)
                                 exit_result = kama_submit_live_exit(client, position, signal["action"], exit_quote)
                                 kama_runner["position"] = None
                                 event.update({"lifecycle": "LIVE_EXIT_SUBMITTED", **exit_result})
                         kama_runner["last_bar"] = bar
-                        kama_runner["chart"] = {"symbol": symbol, "timeframe": config["timeframe"], "candles": candles[-80:], "signal": signal,
-                                                "position": kama_runner["position"], "mode": mode}
+                        kama_line = kama_series(candles, config["kama_length"], config["fast_length"], config["slow_length"])
+                        chart_candles = [{**candle, "kama": kama_line[index]} for index, candle in enumerate(candles)][-80:]
+                        if event["lifecycle"] == "WATCH" and position:
+                            event["position"] = dict(position)
+                        kama_runner["chart"] = {"symbol": symbol, "timeframe": config["timeframe"], "candles": chart_candles, "signal": signal,
+                                                "position": kama_runner["position"], "mode": mode,
+                                                "squareoff_at": "23:30 IST" if symbol.startswith("MCX:") else "15:15 IST"}
                         kama_runner["policy"] = {**kama_policy(config, mode), "fresh_preflight": "PASSED", "reconciliation": preflight.get("reconciliation", "NOT_APPLICABLE"),
-                                                 "risk_policy": "ENFORCED_FOR_LIVE" if mode == "LIVE" else "NOT_APPLICABLE"}
+                                                 "risk_policy": "ENFORCED_FOR_LIVE" if mode == "LIVE" else "VIRTUAL_CAPITAL_ENFORCED"}
                         kama_runner["status"] = ("PAPER_POSITION_OPEN" if kama_runner["position"] else "PAPER_MONITORING") if mode == "PAPER" else ("LIVE_POSITION_PENDING_CONFIRMATION" if kama_runner["position"] else "LIVE_WATCHING_NO_POSITION")
+                        if mode=="PAPER":event["paper_capital"]=dict(kama_runner["paper_capital"])
                         kama_runner["last_event"] = event
                         kama_runner["events"] = ([event] + kama_runner["events"])[:100]
+                        chart_snapshot = kama_runner["chart"]
+                    persist_kama_chart_snapshot(chart_snapshot)
                     kama_append_event(event, mode)
                 except Exception as error:
                     event = {"at": datetime.now().astimezone().isoformat(), "mode": mode, "lifecycle": "BLOCKED", "error": str(error)}
@@ -2524,7 +2809,7 @@ def run_server():
 
     def stop_kama_runner():
         with kama_runner_lock:
-            kama_runner.update({"running": False, "status": "STOPPED", "config": None, "position": None, "chart": None,
+            kama_runner.update({"running": False, "status": "STOPPED", "config": None, "position": None,
                                 "last_event": None, "run_started_at": None, "thread": None})
         return kama_runner_snapshot()
 
@@ -3089,6 +3374,143 @@ def run_server():
         }
 
     ema_crossover = EmaCrossoverRunner(EmaCrossoverBroker(ema_master_dir, ema_band_candles, select_ema_atm_option), ROOT / ".private" / "ema-crossover-state.json")
+    renko_broker = RenkoSupertrendBroker(ema_master_dir, ema_band_candles, select_ema_atm_option)
+    renko_chart_broker = RenkoSupertrendBroker(ema_master_dir, ema_band_candles, select_ema_atm_option)
+    renko_chart_history = RenkoChartHistory(ROOT / ".private" / "renko-chart-history")
+    from strategies.renko_supertrend.stream import OrderNotifications, browser_frame
+    renko_stream_wake = threading.Event()
+    renko_display_context = {}
+    renko_display_lock = threading.Lock()
+    for adapter in (renko_broker, renko_chart_broker):
+        previous = adapter.on_tick
+        def stream_tick(raw, previous=previous):
+            if previous: previous(raw)
+            renko_stream_wake.set()
+        adapter.on_tick = stream_tick
+    renko_supertrend = RenkoSupertrendRunner(renko_broker, ROOT / ".private" / "renko-supertrend-state.json")
+    renko_order_stream = OrderNotifications(renko_supertrend, renko_stream_wake, ROOT / '.private')
+    from strategies.renko_supertrend.adoption import Manager as RenkoAdoptionManager
+    def renko_adoption_account():
+        profile=ema_readonly_client().get_profile()
+        account=(profile.get('data') or {}).get('fy_id') if isinstance(profile,dict) and profile.get('s')=='ok' else None
+        if not account:raise ValueError('FYERS account identity unavailable; refresh authentication.')
+        return hashlib.sha256(str(account).encode()).hexdigest()
+    def renko_other_owners():
+        symbols=set()
+        for state in (ema_crossover.state,renko_supertrend.state,ema_runner,kama_runner):
+            if (state.get('config') or {}).get('mode',state.get('mode'))!='LIVE':continue
+            for p in (state.get('position'),(state.get('pending') or {}).get('position')):
+                if p and p.get('symbol'):symbols.add(p['symbol'])
+        for row in parser_lifecycle.rows():
+            if row.get('status') not in ('CLOSED','REJECTED') and (row.get('order') or {}).get('symbol'):
+                symbols.add(row['order']['symbol'])
+        gtt=ema_readonly_client().gtt_orderbook()
+        if not isinstance(gtt,dict) or gtt.get('s')!='ok' or not isinstance(gtt.get('orderBook'),list):
+            raise ValueError('FYERS protective-order ownership could not be verified.')
+        symbols.update(row['symbol'] for row in gtt['orderBook'] if row.get('symbol') and int(row.get('ord_status',0)) not in {1,2,5,7})
+        return symbols
+    renko_adoptions=RenkoAdoptionManager(ROOT/'.private'/'renko-adoptions',
+        lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),
+        RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,renko_other_owners)
+    renko_adoptions.guard(renko_supertrend)
+    from strategies.renko_supertrend.delta_service import Service as DeltaRenkoService
+    delta_renko = DeltaRenkoService(delta_india, ROOT)
+    renko_default_bundle=(renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake)
+    delta_default_service=delta_renko
+    renko_instances_lock=threading.RLock()
+    renko_instances={}
+    renko_manifest=ROOT/'.private'/'renko-instances.json'
+    def renko_instance_owners(broker,exclude=None):
+        result=set()
+        if broker=='FYERS':
+            result.update(renko_other_owners())
+            result.update(renko_default_bundle[3].owned_symbols())
+        else:
+            for state in (delta_default_service.runner.state,delta_india.runner):
+                if (state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (state.get('position'),(state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+            result.update(delta_default_service.adoptions.owned_symbols())
+        with renko_instances_lock:
+            for key,item in renko_instances.items():
+                if key==exclude or item['broker']!=broker:continue
+                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+                if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+                result.update(manager.owned_symbols())
+        return result
+    def renko_additional_owners(broker):
+        result=set()
+        with renko_instances_lock:
+            for item in renko_instances.values():
+                if item['broker']!=broker:continue
+                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+                if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+                result.update(manager.owned_symbols())
+        return result
+    renko_default_bundle[3].owners=lambda:set(renko_other_owners())|renko_additional_owners('FYERS')
+    delta_default_service.external_owners=lambda:renko_additional_owners('DELTA_INDIA')
+    def renko_make_instance(broker,instrument,persist=True):
+        if broker not in ('FYERS','DELTA_INDIA'):raise ValueError('Choose FYERS or Delta India.')
+        key=hashlib.sha256((broker+':'+instrument).encode()).hexdigest()[:20]
+        with renko_instances_lock:
+            if key in renko_instances:return key
+            folder=ROOT/'.private'/'renko-instances'/key
+            if broker=='DELTA_INDIA':
+                if persist:delta_default_service.broker.underlying(instrument)
+                component=DeltaRenkoService(delta_india,ROOT,key,instrument)
+                component.external_owners=lambda:renko_instance_owners(broker,key)
+                component.adoptions.intent_lock=delta_default_service.adoptions.intent_lock
+                runner=component.runner
+            else:
+                adapter=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                if persist:adapter.underlying(instrument)
+                chart_adapter=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                wake=threading.Event();context={};context_lock=threading.Lock()
+                adapter.on_tick=lambda raw:wake.set();chart_adapter.on_tick=lambda raw:wake.set()
+                runner=RenkoSupertrendRunner(adapter,folder/'state.json')
+                order_stream=OrderNotifications(runner,wake,ROOT/'.private')
+                manager=RenkoAdoptionManager(folder/'adoptions',lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,lambda:renko_instance_owners(broker,key))
+                manager.intent_lock=renko_default_bundle[3].intent_lock;manager.guard(runner)
+                component=(runner,adapter,chart_adapter,manager,RenkoChartHistory(folder/'chart-history'),order_stream,context,context_lock,wake)
+            renko_instances[key]={'broker':broker,'instrument':instrument,'component':component}
+            if persist:
+                runner.save_preferences({'settings':{'symbol':instrument,'timeframe':'5 minutes','mode':'PAPER'}})
+                temporary=renko_manifest.with_suffix('.tmp');temporary.parent.mkdir(parents=True,exist_ok=True)
+                temporary.write_text(json.dumps([{'broker':v['broker'],'instrument':v['instrument']} for v in renko_instances.values()]));temporary.chmod(0o600);temporary.replace(renko_manifest)
+            return key
+    # Restoring an instance is inert: durable runners load stopped and retain claims.
+    if renko_manifest.exists():
+        for saved in json.loads(renko_manifest.read_text()):renko_make_instance(saved['broker'],saved['instrument'],False)
+    def renko_select(path,request_path):
+        query=parse_qs(urlparse(request_path).query);key=(query.get('instance') or ['default'])[0]
+        if key=='default':return renko_default_bundle,delta_default_service,None
+        with renko_instances_lock:item=renko_instances.get(key)
+        if not item:raise ValueError('Unknown Renko instance; refresh the instance list.')
+        if path.startswith('/api/renko-delta/'):
+            if item['broker']!='DELTA_INDIA':raise ValueError('Broker/instance mismatch.')
+            return renko_default_bundle,item['component'],item['instrument']
+        if item['broker']!='FYERS':raise ValueError('Broker/instance mismatch.')
+        return item['component'],delta_default_service,item['instrument']
+    from strategies.renko_supertrend.batch import Batch as RenkoBatch
+    def renko_lookup_instance(broker,key):
+        item=renko_instances[key]
+        if item['broker']!=broker:raise ValueError('Broker/instance mismatch.')
+        return item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+    renko_batch=RenkoBatch(ROOT/'.private'/'renko-batches',renko_make_instance,renko_lookup_instance)
+    def renko_instance_rows():
+        rows=[{'id':'FYERS:default','instance_key':'default','broker':'FYERS',**renko_default_bundle[0].snapshot()},{'id':'DELTA_INDIA:default','instance_key':'default','broker':'DELTA_INDIA',**delta_default_service.runner.snapshot()}]
+        with renko_instances_lock:
+            for key,item in renko_instances.items():
+                runner=item['component'].runner if item['broker']=='DELTA_INDIA' else item['component'][0]
+                rows.append({'id':key,'instance_key':key,'broker':item['broker'],'instrument':item['instrument'],**runner.snapshot()})
+        return rows
+
 
     class Handler(SimpleHTTPRequestHandler):
         def send_head(self):
@@ -3120,6 +3542,20 @@ def run_server():
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            try:
+                bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
+                renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if bound_instrument and path.endswith(('/chart','/stream')) and (parse_qs(urlparse(self.path).query).get('symbol') or [''])[0]!=bound_instrument:raise ValueError('Chart instrument differs from selected instance.')
+            except Exception as error:self.send_json(409,{'error':str(error)});return
+            if path=="/api/paper-capital/status":
+                self.send_json(200,dict(revision="paper-capital-inr-v1",default_capital_inr=100000,scope="Renko, RSI, EMA Band, KAMA, Delta Paper and isolated straddles"));return
+            if delta_renko.get(self,path): return
+            if path == '/api/renko-instances':
+                self.send_json(200,{'instances':renko_instance_rows()});return
+            if path == "/api/trade-recommendation/lifecycle":
+                self.send_json(200, {"enabled": parser_protection_enabled(), "entries": parser_lifecycle.rows()}); return
+            if path == "/api/whatsapp/status":
+                self.send_json(200, whatsapp_polling.status()); return
             if path == "/api/auth/status":
                 self.send_json(200, fyers_auth_status()); return
             if path == "/api/ema-band/master-status":
@@ -3135,7 +3571,8 @@ def run_server():
             if path == "/api/ema-band/underlying-search":
                 try:
                     query = (parse_qs(urlparse(self.path).query).get("q") or [""])[0]
-                    self.send_json(200, search_ema_option_underlyings(query))
+                    market = (parse_qs(urlparse(self.path).query).get("market") or [""])[0]
+                    self.send_json(200, search_ema_option_underlyings(query, market))
                 except Exception as error:
                     self.send_json(409, {"error": str(error), "status": ema_master_status()})
                 return
@@ -3153,13 +3590,23 @@ def run_server():
                 except Exception as error:
                     self.send_json(409, {"error": str(error)})
                 return
+            if path == '/api/telegram/status':
+                self.send_json(200, telegram_polling.status()); return
             if path.startswith("/api/delta-india/"):
                 try:
                     query=parse_qs(urlparse(self.path).query)
                     symbol=str((query.get('symbol') or [''])[0])
                     if path=="/api/delta-india/status":result=delta_india.status()
                     elif path=="/api/delta-india/instruments":result=delta_india.catalog()
+                    elif path=="/api/delta-india/chart-option":result=delta_india.chart_option(symbol,str((query.get('direction') or [''])[0]))
                     elif path=="/api/delta-india/quote":result=delta_india.ticker(symbol)
+                    elif path=="/api/delta-india/journal.xlsx":
+                        from .delta_journal_export import export_xlsx
+                        current=delta_india.status()
+                        body=export_xlsx(dict(state=dict(paper=current.get('paper'),orders=current.get('orders')),conversion=current.get('inr_conversion')),delta_india.path.parent.parent)
+                        self.send_response(200);self.send_header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');self.send_header('Content-Disposition','attachment; filename="DeltaIndia-Trading-Journal.xlsx"');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
+                    elif path=="/api/delta-india/history-list":result={"contracts":[{"symbol":p["symbol"],"resolution":r} for p,r in delta_india.history.watches()]}
+                    elif path=="/api/delta-india/history":result=delta_india.saved_history(symbol,str((query.get("resolution") or ["5m"])[0]))
                     elif path=="/api/delta-india/chart":result=delta_india.chart(symbol,str((query.get('resolution') or ['5m'])[0]),int((query.get('rsi_length') or ['14'])[0]),int((query.get('ma_length') or ['14'])[0]),str((query.get('ma_type') or ['SMA'])[0]))
                     else:raise ValueError('Unknown Delta India read-only route.')
                     self.send_json(200,result)
@@ -3178,6 +3625,134 @@ def run_server():
                 return
             if path == "/api/ema-crossover/runner":
                 self.send_json(200, ema_crossover.snapshot())
+                return
+            if path == '/api/renko-supertrend/settings':
+                try:self.send_json(200,renko_supertrend.read_preferences())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/broker-positions':
+                try:self.send_json(200,renko_adoptions.inventory())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == "/api/renko-supertrend/runner":
+                self.send_json(200, renko_supertrend.snapshot())
+                return
+            if path == "/api/renko-supertrend/journal":
+                self.send_json(200, {'schema_version':1,'exported_at':time.time(),'scope':'Actual Paper/Live owned option lifecycle; historical chart simulations excluded.','trades':renko_supertrend.snapshot().get('trade_history',[])})
+                return
+            if path == '/api/renko-supertrend/journal.xlsx':
+                try:
+                    from strategies.renko_supertrend.journal_export import export_xlsx
+                    body = export_xlsx({'exported_at':time.time(),'trades':renko_supertrend.snapshot().get('trade_history',[])}, ROOT)
+                    self.send_response(200)
+                    self.send_header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                    self.send_header('Content-Disposition','attachment; filename="renko-trading-journal.xlsx"')
+                    self.send_header('Content-Length',str(len(body)))
+                    self.send_header('Cache-Control','no-store')
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError,ConnectionResetError):pass
+                except Exception:self.send_json(409,{'error':'Excel export unavailable; saved journal remains intact.'})
+                return
+            if path == '/api/renko-supertrend/stream':
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    config = {'underlying':str((query.get('symbol') or [''])[0]).upper(),
+                              'timeframe':str((query.get('timeframe') or ['5 minutes'])[0])}
+                    raw = {key:query[key][0] for key in renko_supertrend_settings({}) if key in query}
+                    raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower()=='true'
+                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                        raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
+                    display_settings = renko_supertrend_settings(raw)
+                    context_key = json.dumps([config,display_settings],sort_keys=True)
+                    renko_chart_broker.session_policy(config)  # Authoritative instrument validation.
+                    from strategies.ema_crossover.runner import TIMEFRAMES
+                    seconds = TIMEFRAMES[config['timeframe']]
+                    renko_chart_broker.observe(config,[])
+                    renko_chart_broker.start()  # Read-only subscription, never arms the runner.
+                    renko_order_stream.start()
+                except Exception:
+                    self.send_json(409,{'error':'Live stream could not connect for this instrument.'})
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type','text/event-stream')
+                self.send_header('Cache-Control','no-cache, no-store')
+                self.send_header('X-Accel-Buffering','no')
+                self.end_headers()
+                try:
+                    while True:
+                        frame = browser_frame(renko_supertrend,renko_chart_broker,config,renko_order_stream)
+                        frame['bar_seconds'] = seconds
+                        with renko_adoptions.lock:
+                            frame['adopted_managers']=[dict(id=k,**r.snapshot()) for k,r in renko_adoptions.runners.items()]
+                        with renko_display_lock:
+                            context = renko_display_context.get(context_key)
+                        if context and frame['forming']:
+                            try:
+                                frame['display_analysis'] = renko_provisional(context['confirmed'],frame['forming'],context['config'],context['tick'],time.time())
+                            except ValueError:pass
+                        self.wfile.write(('event: state\ndata: '+json.dumps(frame,allow_nan=False)+'\n\n').encode())
+                        self.wfile.flush()
+                        renko_stream_wake.wait(1)
+                        renko_stream_wake.clear()
+                        time.sleep(.15)  # Coalesce tick bursts without accumulating stale frames.
+                except (BrokenPipeError,ConnectionResetError,TimeoutError):pass
+                finally:self.close_connection=True
+                return
+            if path == "/api/renko-supertrend/chart":
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    symbol = str((query.get('symbol') or [''])[0]).upper()
+                    timeframe = str((query.get('timeframe') or ['5 minutes'])[0])
+                    raw = {key: query[key][0] for key in renko_supertrend_settings({}) if key in query}
+                    raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower() == 'true'
+                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                        raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
+                    config = renko_supertrend_settings(raw)
+                    policy = renko_broker.session_policy({'underlying':symbol})
+                    try:option_route=renko_broker.route_availability({'underlying':symbol})
+                    except ValueError as error:option_route={'available':False,'message':str(error)}
+                    config.update(policy)
+                    holding=str((query.get('commodity_holding') or ['INTRADAY'])[0])
+                    if holding not in ('INTRADAY','CARRY_FORWARD'):raise ValueError('Unknown MCX holding policy.')
+                    if symbol.startswith('MCX:') and holding == 'CARRY_FORWARD':
+                        config.update(commodity_holding=holding,session_deadline=None)
+                    tick = renko_broker.host_tick_size(symbol)
+                    analyzed,rows,forming_rows,history = renko_chart_history.load(ema_readonly_client(),symbol,timeframe,
+                        str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),
+                        {**config,'underlying':symbol,'timeframe':timeframe},tick)
+                    history_error=history['history_error']
+                    data_quality=history['data_quality']
+                    analysis_available=data_quality['analysis_available']
+                    candles=rows+forming_rows
+                    renko_chart_broker.observe({**config,'underlying':symbol,'timeframe':timeframe},candles)
+                    with renko_display_lock:
+                        context_key=json.dumps([{'underlying':symbol,'timeframe':timeframe},renko_supertrend_settings(raw)],sort_keys=True)
+                        if not analysis_available:renko_display_context.pop(context_key,None)
+                        else:renko_display_context[context_key]={'confirmed':{'last':analyzed['last'],'state':analyzed['state']},'config':{**config,'underlying':symbol,'timeframe':timeframe},'tick':tick}
+                        if len(renko_display_context)>20:renko_display_context.pop(next(iter(renko_display_context)))
+                    intrabar_enabled = str((query.get('intrabar_entries') or ['false'])[0]).lower() == 'true'
+                    candidate = None
+                    candidate_error = None
+                    if intrabar_enabled and analysis_available:
+                        try:
+                            chart_config = {**config,'underlying':symbol,'timeframe':timeframe}
+                            renko_chart_broker.observe(chart_config,candles)
+                            renko_chart_broker.start()  # Read-only chart websocket; does not start a trading runner.
+                            forming = renko_chart_broker.forming(chart_config,candles,time.time())
+                            candidate = renko_provisional(analyzed,forming,chart_config,tick,time.time())
+                            candles = [c for c in candles if not c.get('is_forming')] + [forming]
+                        except (ValueError,RuntimeError) as error:
+                            candidate_error = str(error)
+                    self.send_json(200, {'symbol': symbol, 'timeframe': timeframe, 'settings': config,
+                        'tick_size': tick, 'rows': [r for r in rows if r['timestamp'] >= float((query.get('since') or ['0'])[0])] if (query.get('revision') or [''])[0] == history['analysis_revision'] else rows, 'incremental': (query.get('revision') or [''])[0] == history['analysis_revision'], 'history':history, 'latest': rows[-1] if rows and analysis_available else None, 'data_quality':data_quality,
+                        'initialization_anchor': analyzed['anchor'],
+                        'host_bar_count': analyzed['state']['count'], 'forming': [c for c in candles if c.get('is_forming')],
+                        'source': 'Pinaki Renko ST Auto Research · supplied Pine v6',
+                        'history_error': history_error, 'intrabar_entries':intrabar_enabled,'provisional_candidate':candidate,'provisional_error':candidate_error,'session_policy':policy,'option_route':option_route,'squareoff_time':('None · overnight carry; exact option expiry protection applies' if config.get('commodity_holding')=='CARRY_FORWARD' else policy['session_deadline']+' Asia/Kolkata'),
+                        'parity': 'Formula port; initialization depends on identical host history. Protected-original parity unverified.'})
+                except Exception as error:
+                    self.send_json(409, {'error': str(error)})
                 return
             if path == "/api/ema-band/runner":
                 self.send_json(200, ema_runner_snapshot())
@@ -3248,19 +3823,13 @@ def run_server():
                     state["renewing"] = False
                     self.send_error(400, "Fyers returned an invalid OAuth state"); return
                 try:
-                    exchange_auth_code(code)
+                    from .auth_refresh import refresh_fyers_session
+                    refresh_fyers_session(code, exchange_auth_code, load_config, replace_feed, state)
                 except Exception as error:
                     state["renewing"] = False
                     self.send_error(502, str(error)); return
                 state.pop("oauth_state", None)
-                self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers(); self.wfile.write(b'<meta http-equiv="refresh" content="2;url=/"><h2>Fyers authorization received.</h2><p>The dashboard is reconnecting.</p>')
-                def restart_server():
-                    import sys, time
-                    time.sleep(0.25)
-                    print("Token renewed; restarting the live heat-map feed.")
-                    os.execv(sys.executable, [sys.executable, str(ROOT / "heatmap_server.py")])
-                from threading import Thread
-                Thread(target=restart_server, daemon=True, name="fyers-server-restart").start()
+                self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers(); self.wfile.write(b'<meta http-equiv="refresh" content="2;url=/"><h2>Fyers authorization received.</h2><p>FYERS feed refreshed without restarting other broker monitoring.</p>')
                 return
             if path == "/api/realized-pnl":
                 try:
@@ -3308,6 +3877,12 @@ def run_server():
                 except Exception as error:
                     self.send_json(409, {"error": str(error), "status": ema_master_status()})
                 return
+            if path == "/api/kama/chart":
+                try:
+                    self.send_json(200, kama_read_only_chart(parse_qs(urlparse(self.path).query)))
+                except Exception as error:
+                    self.send_json(409, {"error": str(error)})
+                return
             if path == "/api/kama/runner":
                 self.send_json(200, kama_runner_snapshot())
                 return
@@ -3316,7 +3891,11 @@ def run_server():
                     limit = int((parse_qs(urlparse(self.path).query).get("limit") or ["200"])[0])
                 except ValueError:
                     limit = 200
-                self.send_json(200, {"entries": kama_execution_log(max(1, min(limit, 1000)))})
+                entries = kama_execution_log(max(1, min(limit, 1000)))
+                # Build the compact trade ledger from the full journal so a
+                # high-volume WATCH stream cannot push an older entry off-screen.
+                report = kama_trade_report(kama_execution_log(100_000))
+                self.send_json(200, {"entries": entries, **report})
                 return
             if path == "/api/automation/profile":
                 self.send_json(200, automation_policy.current())
@@ -3361,6 +3940,30 @@ def run_server():
             path = self.path.split("?", 1)[0]
             try:
                 payload = self.read_json()
+                bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
+                renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if bound_instrument and path.endswith(('/preview','/start','/adopt')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
+                if path=='/api/renko-instances/start-selected':
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
+                    origin=self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise PermissionError('Cross-origin mutation forbidden.')
+                    self.send_json(200,renko_batch.start(payload));return
+                if path=='/api/renko-instances/create':
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
+                    origin=self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise PermissionError('Cross-origin mutation forbidden.')
+                    key=renko_make_instance(payload.get('broker'),str(payload.get('underlying','')).strip().upper())
+                    self.send_json(200,{'instance_key':key,'running':renko_lookup_instance(payload.get('broker'),key).state['running'],'message':'Instance created/reused; no runner started.'});return
+                if delta_renko.post(self,path,payload): return
+                if path.startswith("/api/whatsapp/"):
+                    actions = {"config": lambda: whatsapp_polling.configure(payload),
+                               "start": whatsapp_polling.start, "stop": whatsapp_polling.stop,
+                               "review": lambda: whatsapp_polling.review(str(payload.get("id", ""))),
+                               "dismiss": lambda: whatsapp_polling.dismiss(str(payload.get("id", "")))}
+                    action = actions.get(path.rsplit("/", 1)[-1])
+                    if action is None:
+                        raise ValueError("Unknown WhatsApp action.")
+                    self.send_json(200, action()); return
                 if path == "/api/ema-band/master-refresh":
                     self.send_json(200, refresh_ema_masters())
                     return
@@ -3368,7 +3971,7 @@ def run_server():
                     if (self.headers.get("Host") or "").split(":")[0] not in ("127.0.0.1","localhost"):raise PermissionError('Delta account/execution actions require the local dashboard.')
                     origin=self.headers.get("Origin")
                     if origin and urlparse(origin).netloc!=self.headers.get("Host"):raise PermissionError('Cross-origin broker actions are forbidden.')
-                    actions={"/api/delta-india/verify-auth":lambda _:delta_india.verify_auth(),"/api/delta-india/paper-preview":delta_india.preview,"/api/delta-india/paper-record":delta_india.record_paper,"/api/delta-india/paper-close":delta_india.close_paper,"/api/delta-india/connect":delta_india.configure,"/api/delta-india/account":delta_india.account,"/api/delta-india/submit":delta_india.submit,"/api/delta-india/reconcile":delta_india.reconcile,"/api/delta-india/cancel":delta_india.cancel,"/api/delta-india/fills":delta_india.fills,"/api/delta-india/runner-start":delta_india.start_runner,"/api/delta-india/runner-stop":delta_india.stop_runner,"/api/delta-india/runner-close":delta_india.close_runner}
+                    actions={"/api/delta-india/verify-auth":lambda _:delta_india.verify_auth(),"/api/delta-india/paper-preview":delta_india.preview,"/api/delta-india/paper-record":delta_india.record_paper,"/api/delta-india/paper-close":delta_india.close_paper,"/api/delta-india/connect":delta_india.configure,"/api/delta-india/account":delta_india.account,"/api/delta-india/submit":delta_india.submit,"/api/delta-india/reconcile":delta_india.reconcile,"/api/delta-india/cancel":delta_india.cancel,"/api/delta-india/fills":delta_india.fills,"/api/delta-india/runner-start":delta_india.start_runner,"/api/delta-india/runner-resume-paper":delta_india.resume_paper_runner,"/api/delta-india/monitoring-restore-paper":lambda p:delta_india.restore_exit_monitor(dict(mode="PAPER",lifecycle_id=p.get("lifecycle_id"))),"/api/delta-india/runner-stop":delta_india.stop_runner,"/api/delta-india/runner-close":delta_india.close_runner}
                     if path not in actions:raise ValueError('Unknown Delta India action.')
                     self.send_json(200,actions[path](payload));return
                 if path.startswith("/api/ema-crossover/"):
@@ -3382,6 +3985,22 @@ def run_server():
                         raise ValueError("Unknown crossover action.")
                     self.send_json(200, actions[path](payload))
                     return
+                if path.startswith('/api/renko-supertrend/'):
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('127.0.0.1', 'localhost'):
+                        raise PermissionError('Runner actions require the local dashboard.')
+                    origin = self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc != self.headers.get('Host'):
+                        raise PermissionError('Cross-origin runner mutations are forbidden.')
+                    actions = {'/api/renko-supertrend/adopt': renko_adoptions.apply,
+                               '/api/renko-supertrend/adoption-control': renko_adoptions.control,
+                               '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
+                               '/api/renko-supertrend/preview': renko_supertrend.preview,
+                               '/api/renko-supertrend/start': renko_supertrend.activate,
+                               '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop()}
+                    if path not in actions:
+                        raise ValueError('Unknown Renko strategy action.')
+                    self.send_json(200, actions[path](payload))
+                    return
                 if path == "/api/ema-band/runner/start":
                     self.send_json(200, start_ema_runner(payload))
                     return
@@ -3392,8 +4011,25 @@ def run_server():
                     self.send_json(200, start_kama_runner(payload)); return
                 if path == "/api/kama/runner/stop":
                     self.send_json(200, stop_kama_runner()); return
+                if path.startswith('/api/telegram/'):
+                    actions={'config':telegram_polling.configure,'verify':lambda p:telegram_polling.verify(),
+                             'start':telegram_polling.start,'stop':lambda p:telegram_polling.stop(),
+                             'parse':telegram_parser.parse,'submit':telegram_parser.submit,'reconcile':telegram_parser.reconcile}
+                    action=actions.get(path.rsplit('/',1)[-1])
+                    if not action:raise ValueError('Unknown Telegram action.')
+                    self.send_json(200,action(payload));return
                 if path == "/api/trade-recommendation/parse":
                     self.send_json(200, trade_recommendation_preview(payload))
+                    return
+                if path == "/api/trade-recommendation/quote":
+                    preview = trade_recommendation_preview(payload)
+                    mapping = preview["mapping"]
+                    contract = mapping.get("contract") if mapping.get("status") == "EXACT" else None
+                    if not contract or contract["symbol"] != payload.get("symbol"):
+                        self.send_json(200, {"status": "UNAVAILABLE", "symbol": payload.get("symbol"), "ltp": None,
+                                             "message": "FYERS LTP unavailable: parse an exact matching contract again."})
+                    else:
+                        self.send_json(200, fetch_parser_quote(contract["symbol"], load_config().get("FYERS_ACCESS_TOKEN", "")))
                     return
                 if path == "/api/trade-recommendation/ai-analysis":
                     self.send_json(200, trade_recommendation_ai_analysis(payload))
@@ -3482,6 +4118,7 @@ def run_server():
                         lots=payload.get("lots", 1),
                         entry_start=payload.get("entry_start", "09:15"),
                         entry_end=payload.get("entry_end", "11:30"),
+                        paper_capital_inr=payload.get("paper_capital_inr",100000),
                         confirmation=payload.get("confirmation", ""),
                     ))
                     return
@@ -3497,6 +4134,7 @@ def run_server():
                         exit_mode=payload.get("exit_mode", "supertrend"),
                         entry_start=payload.get("entry_start", "09:15"),
                         entry_end=payload.get("entry_end", "11:30"),
+                        paper_capital_inr=payload.get("paper_capital_inr",100000),
                         confirmation=payload.get("confirmation", ""),
                     ))
                     return
@@ -3528,6 +4166,9 @@ def run_server():
     except KeyboardInterrupt:
         print("\nSector heat map stopped cleanly. Restart with ./setup_and_run.sh when ready.")
     finally:
+        delta_india.monitoring_stop.set()
+        delta_india.stop_event.set()  # Shutdown is not an intentional persisted monitoring stop.
+        telegram_polling.stop()
         active_analysis = state.get("sector_analysis")
         if active_analysis:
             active_analysis.running = False

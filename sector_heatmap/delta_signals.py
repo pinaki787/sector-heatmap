@@ -1,5 +1,23 @@
 """Delta completed-bar entries; exits continue to use cross_direction only."""
 from strategies.ema_crossover.signals import rsi_sma_series
+import math
+
+def momentum_settings(payload):
+    enabled=payload.get("momentum_enabled",False)
+    if not isinstance(enabled,bool):raise ValueError("Momentum filter must be enabled or disabled.")
+    return dict(momentum_enabled=enabled,momentum_lookback=1)
+
+def momentum_evidence(row,prior):
+    values=[row.get("close"),row.get("rsi_ma"),prior.get("rsi_ma"),prior.get("high"),prior.get("low")]
+    if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in values):return None
+    slope=row["rsi_ma"]-prior["rsi_ma"]
+    return dict(lookback=1,previous_high=prior["high"],previous_low=prior["low"],rsi_ma_slope=slope,bullish=row["close"]>prior["high"] and slope>0,bearish=row["close"]<prior["low"] and slope<0,basis="Completed close beyond previous candle; RSI moving average slope over one candle")
+
+def momentum_allows(cfg,row,direction):
+    if not cfg.get("momentum_enabled"):return True
+    evidence=row.get("momentum") or {}
+    return evidence.get("bullish" if direction=="BULLISH" else "bearish" if direction=="BEARISH" else "invalid") is True
+
 
 
 def delta_rsi_series(candles, rsi_length=14, ma_length=14, ma_type='SMA'):
@@ -10,6 +28,7 @@ def delta_rsi_series(candles, rsi_length=14, ma_length=14, ma_type='SMA'):
         row['entry_direction'] = row['cross_direction']
         row['entry_reason'] = 'CROSSOVER' if row['cross_direction'] else None
         row['touch_evidence'] = None
+        row['momentum'] = momentum_evidence(row,rows[i-1]) if i else None
         if not i:
             continue
         prior = rows[i - 1]

@@ -59,13 +59,25 @@ def _read_token_cache():
     return values
 
 def load_config():
-    values = _read_token_cache()
+    # The token cache is deliberately applied after static configuration.  An
+    # access token is short-lived and is renewed through OAuth, whereas a
+    # launcher can keep an old FYERS_ACCESS_TOKEN in its inherited environment
+    # indefinitely.  Letting that old environment value win would make every
+    # successful browser reauthentication appear expired after the restart.
+    cached_token_values = _read_token_cache()
+    values = {}
     for path in reversed(_user_config_files()):
         values.update(_normalize_aliases(_read_env_file(path)))
     values.update(_normalize_aliases(_read_env_file(ENV_FILE)))
     environment = {key: value for key, value in os.environ.items() if key.startswith("FYERS_")}
     values.update(_normalize_aliases(environment))
+    if not values.get("FYERS_APP_ID") and cached_token_values.get("FYERS_APP_ID"):
+        values["FYERS_APP_ID"] = cached_token_values["FYERS_APP_ID"]
     values.setdefault("FYERS_REDIRECT_URI", f"http://127.0.0.1:{os.getenv('HEATMAP_PORT', '8080')}/callback")
+    cached_access_token = cached_token_values.get("FYERS_ACCESS_TOKEN")
+    cached_app_id = cached_token_values.get("FYERS_APP_ID")
+    if cached_access_token and (not values.get("FYERS_APP_ID") or cached_app_id == values.get("FYERS_APP_ID")):
+        values["FYERS_ACCESS_TOKEN"] = cached_access_token
     cached_token = values.get("FYERS_ACCESS_TOKEN", "")
     if ":" in cached_token and values.get("FYERS_APP_ID") and cached_token.split(":", 1)[0] != values["FYERS_APP_ID"]:
         values.pop("FYERS_ACCESS_TOKEN")
@@ -104,6 +116,10 @@ def save_access_token(token):
         cached = {}
     cached.update({"app_id": app_id, "access_token": access_token, "created_at": int(time.time())})
     _atomic_private_write(TOKEN_FILE, json.dumps(cached, indent=2) + "\n")
+    # Keep the current process and its exec-based dashboard restart on the
+    # newly issued token too; otherwise an inherited stale environment value
+    # can immediately replace the cache we just wrote.
+    os.environ["FYERS_ACCESS_TOKEN"] = token
     if ENV_FILE.exists():
         ordered = ("FYERS_APP_ID", "FYERS_SECRET_KEY", "FYERS_REDIRECT_URI", "FYERS_ACCESS_TOKEN")
         lines = [f"{key}={values[key]}" for key in ordered if values.get(key)]

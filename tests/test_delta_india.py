@@ -24,6 +24,9 @@ class Tests(unittest.TestCase):
  def setUp(self):
   thread_patch=patch('threading.Thread');thread_patch.start();self.addCleanup(thread_patch.stop)
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.req=Requests();self.b=DeltaIndia(Path(self.tmp.name)/'paper.json',requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)))
  def paper_preview(self,payload):
   side=payload.get('side','LONG');self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-310,'cross_direction':'BULLISH' if side=='LONG' else 'BEARISH','rsi_ma':50}}
   return self.b.preview(dict(resolution='5m',rsi_length=14,ma_length=14,ma_type='SMA',signal_close=self.req.now-10)|payload)
@@ -52,7 +55,10 @@ class Tests(unittest.TestCase):
   self.req.bid=110;self.req.ask=111;s=self.b.close_paper({'mode':'PAPER'});self.assertAlmostEqual(s['paper']['trades'][0]['realized_pnl'],.027)
   self.assertIsNone(s['paper']['position']);self.assertEqual(s['paper']['trades'][0]['mode'],'PAPER')
   with self.assertRaises(ValueError):self.b.close_paper({'mode':'PAPER'})
-  restarted=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now);self.assertFalse(restarted.status()['running']);self.assertEqual(len(restarted.paper['trades']),1)
+  restarted=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)));self.assertFalse(restarted.status()['running']);self.assertEqual(len(restarted.paper['trades']),1)
  def test_whole_contracts_expired_preview_inverse_options_writing(self):
   for n in (0,1.5,True):
    with self.assertRaises(ValueError):self.paper_preview(dict(mode='PAPER',symbol='BTCUSD',contracts=n))
@@ -95,6 +101,9 @@ class LiveTests(unittest.TestCase):
  def setUp(self):
   thread_patch=patch('threading.Thread');thread_patch.start();self.addCleanup(thread_patch.stop)
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.req=LiveRequests();self.creds=lambda:{'DELTA_INDIA_API_KEY':'fake-live-key','DELTA_INDIA_API_SECRET':'fake-live-secret'};self.b=DeltaIndia(Path(self.tmp.name)/'paper.json',credentials=self.creds,requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)))
   self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-310,'cross_direction':'BULLISH','rsi_ma':50}}
   self.payload=dict(resolution='5m',rsi_length=14,ma_length=14,ma_type='SMA',signal_close=99990,mode='LIVE',request_id='request-12345678',symbol='BTCUSD',side='buy',contracts=3,limit_price='101',time_in_force='ioc')
  def test_market_body_fill_reconciliation_and_idempotency(self):
@@ -126,7 +135,10 @@ class LiveTests(unittest.TestCase):
  def test_rejection_and_unknown_never_resubmit_across_restart(self):
   self.req.reject=True;o=self.b.submit(self.payload);self.assertEqual(o['status'],'REJECTED');self.b.submit(self.payload);self.assertEqual(self.req.posts,1)
   self.req.reject=False;self.req.unknown=True;self.req.now+=300;p={**self.payload,'request_id':'unknown-request','signal_close':self.req.now-10};o=self.b.submit(p);self.assertEqual(o['status'],'UNKNOWN')
-  b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now);o=b.submit(p);self.assertEqual(o['status'],'closed');self.assertEqual(self.req.posts,2);self.assertFalse(b.status()['running'])
+  b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)));o=b.submit(p);self.assertEqual(o['status'],'closed');self.assertEqual(self.req.posts,2);self.assertFalse(b.status()['running'])
  def test_partial_fill_pending_cancel_and_duplicate_guard(self):
   self.req.unfilled=2;self.req.state='open';o=self.b.submit(self.payload);self.assertEqual(o['filled_contracts'],1)
   with self.assertRaises(ValueError):self.b.submit({**self.payload,'request_id':'new-request-123'})
@@ -142,6 +154,9 @@ class LiveTests(unittest.TestCase):
   self.b.configure({'api_key':'local-fake-key','api_secret':'local-fake-secret'})
   before=self.b.key_path.read_bytes();self.b.configure({'api_key':'','api_secret':''});self.assertEqual(self.b.key_path.read_bytes(),before)
   b=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)))
   self.assertEqual(b.status()['credentials'],'CONFIGURED');self.assertNotIn('local-fake',json.dumps(b.status()));self.assertEqual(b.key_path.stat().st_mode&0o777,0o600)
  def test_read_funds_position_and_credentials_file_masked(self):
   account=self.b.account();self.assertEqual(account['funds'][0]['asset_symbol'],'USD');self.assertNotIn('user_id',json.dumps(account))
@@ -171,7 +186,10 @@ class LiveTests(unittest.TestCase):
   self.assertEqual(self.req.posts,0)
  def test_restart_preserves_owned_position_and_never_starts(self):
   self.arm('LIVE');self.cross('BULLISH');self.b.runner_tick();self.b.stop_runner()
-  b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now);self.assertFalse(b.status()['running']);self.assertEqual(b.live['runner_position']['contracts'],3);b.close_runner({'mode':'LIVE'});self.assertEqual(self.req.position,0)
+  b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now)
+  from sector_heatmap.delta_currency import SOURCE
+  policy_fetch=patch('sector_heatmap.delta_currency.requests.get',return_value=__import__('types').SimpleNamespace(url=SOURCE,text='USD-INR rate on the platform is fixed at 85, i.e. 1 USD = 85 INR',raise_for_status=lambda:None));policy_fetch.start();self.addCleanup(policy_fetch.stop)
+  self.b.path.with_name('delta-inr-policy.json').write_text(__import__('json').dumps(dict(source=SOURCE,rate=85,native_currency='USD',equivalent_currency='INR',verified_at=self.req.now)));self.assertFalse(b.status()['running']);self.assertEqual(b.live['runner_position']['contracts'],3);b.close_runner({'mode':'LIVE'});self.assertEqual(self.req.position,0)
 
  def test_verified_connection_reports_freshness_and_rechecks_before_mutation(self):
   self.b.verify_auth();self.req.now+=61;s=self.b.status();self.assertEqual(s['authentication'],'VERIFIED_READ_ONLY');self.assertFalse(s['authentication_fresh']);self.assertTrue(s['live_available'])

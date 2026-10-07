@@ -18,3 +18,31 @@ backtesting/sensex_dhan_real_options/*_trades.csv
 
 # Superseded local launcher; setup_and_run.sh is the supported entry point.
 run_kama_live_heatmap.sh
+
+# Local OpenAI credential; never commit.
+.env.local
+
+# Private release payloads and generated local evidence.
+output/
+tmp/
+release-private/
+backtesting/delta_indicator_grid/*.json
+backtesting/delta_indicator_grid/*.html
+backtesting/ema_crossover_10_30/*.csv
+backtesting/ema_crossover_10_30/*.json
+backtesting/ema_crossover_10_30/*.txt
+backtesting/ema_crossover_10_30/*.png
+backtesting/ema_crossover_10_30/*.html
+backtesting/ema_crossover_10_30/confluence/*.csv
+backtesting/ema_crossover_10_30/confluence/*.json
+backtesting/ema_crossover_10_30/confluence/*.png
+backtesting/ema_crossover_10_30/confluence/*.html
+backtesting/ema_daily_confluence/*.csv
+backtesting/ema_daily_confluence/*.json
+backtesting/ema_daily_confluence/*.png
+backtesting/ema_daily_confluence/*.html
+docs/renko-churn-evidence/*.json
+backtesting/trailing_exit_research/*.json
+backtesting/trailing_exit_research/*.csv
+backtesting/trailing_exit_research/*.html
+backtesting/delta_indicator_grid/cache/

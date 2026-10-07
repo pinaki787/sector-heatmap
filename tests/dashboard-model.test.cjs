@@ -77,7 +77,7 @@ test('risk policy preview validates limits and calculates immediate capacity', (
   assert.equal(preview.valid, true)
   assert.equal(preview.availableNewIdeaRisk, 2000)
   assert.equal(preview.perPositionCapitalCap, 20000)
-  const invalid = riskPolicyPreview({ planningCapital: 0, dailyLossLimit: 5000, ideaRiskLimit: 4500, riskReserve: 1000, maxPositions: 0, minimumRewardToRisk: 0.5, stopBasis: '', orderType: '' })
+  const invalid = riskPolicyPreview({ enforceRiskControls: true, planningCapital: 0, dailyLossLimit: 5000, ideaRiskLimit: 4500, riskReserve: 1000, maxPositions: 0, minimumRewardToRisk: 0.5, stopBasis: '', orderType: '' })
   assert.equal(invalid.valid, false)
   assert.ok(invalid.errors.length >= 5)
 })

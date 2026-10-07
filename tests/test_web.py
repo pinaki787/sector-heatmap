@@ -5,7 +5,7 @@ import unittest
 from sector_heatmap.web import (
     candidate_has_open_position, chartink_candidate_sectors, closed_position_records, ema_master_row_matches_segment, open_position_underlyings,
     ema_band_entry_checklist, ema_cash_or_index_row_matches_exchange, ema_master_search_rank, ema_open_buy_reconciliation, enrich_chartink_candidates, fetch_chartink_source,
-    ema_band_strategy_signal, ema_live_ticket_preview, ema_profit_protection, estimate_fyers_trade_charges, fetch_realized_pnl_report, instrument_route, join_unique_reasons, select_ema_atm_option,
+    ema_band_strategy_signal, ema_live_ticket_preview, ema_profit_protection, estimate_fyers_trade_charges, fetch_realized_pnl_report, instrument_route, join_unique_reasons, kama_trade_report, select_ema_atm_option,
 )
 
 
@@ -22,6 +22,20 @@ class FakeResponse:
 
 
 class EmaProfitProtectionTests(unittest.TestCase):
+    def test_kama_trade_report_pairs_paper_entry_marks_and_exit_pnl(self):
+        records = [
+            {"source": "PAPER", "at": "2026-09-15T10:15:00+05:30", "lifecycle": "PAPER_ENTRY",
+             "signal": {"action": "ENTER_SHORT"}, "position": {"trade_id": "T1", "symbol": "NSE:NIFTY-PE", "quantity": 130, "entry_price": 100}},
+            {"source": "PAPER", "at": "2026-09-15T10:20:00+05:30", "lifecycle": "WATCH",
+             "position": {"trade_id": "T1", "symbol": "NSE:NIFTY-PE"}, "paper_mark": {"status": "READY", "price": 105, "unrealized_pnl_rupees": 650}},
+            {"source": "PAPER", "at": "2026-09-15T15:20:00+05:30", "lifecycle": "PAPER_EXIT",
+             "signal": {"action": "SQUARE_OFF"}, "position": {"trade_id": "T1"}, "exit_price": 110, "realized_pnl_rupees": 1300},
+        ]
+        report = kama_trade_report(records)
+        self.assertEqual(report["summary"]["closed_trades"], 1)
+        self.assertEqual(report["summary"]["realized_pnl_rupees"], 1300.0)
+        self.assertEqual(report["trades"][0]["exit_price"], 110)
+
     def test_intraday_charge_estimate_uses_fills_and_unique_orders(self):
         estimate = estimate_fyers_trade_charges([
             {"symbol": "NSE:NIFTY2691523500PE", "tradeValue": 10000, "side": 1, "orderNumber": "ONE"},
@@ -110,7 +124,8 @@ class RealizedPnlReportTests(unittest.TestCase):
 
     def test_dashboard_asset_version_identifies_route_split(self):
         index = (Path(__file__).resolve().parents[1] / "index.html").read_text(encoding="utf-8")
-        self.assertIn("ema-position-registry-oi-v1", index)
+        self.assertRegex(index, r"/ema-crossover-live\.js\?v=[^\"]+")
+        self.assertIn("/ema-crossover-live.js?v=", index)
 
     def test_ema_band_stock_option_search_excludes_futures_in_the_same_fo_master(self):
         future = ["token", "NIFTY 30 Sep 26 FUT", "11", "65", "0.05", "", "", "", "", "NSE:NIFTY26SEPFUT", "10", "11", "", "NIFTY", "", "-1", "XX"]

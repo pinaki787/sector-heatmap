@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GATES = (
+    "SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS",
     "SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS",
     "SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS",
 )

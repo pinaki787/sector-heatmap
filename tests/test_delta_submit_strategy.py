@@ -4,7 +4,8 @@ from sector_heatmap.delta_india import DeltaIndia
 from tests import test_delta_india as fixture
 
 class SubmitStrategyTests(unittest.TestCase):
- setUp=fixture.LiveTests.setUp
+ def setUp(self):
+  fixture.LiveTests.setUp(self);self.req.now=99910
  def ticket(self,mode='LIVE',side='buy',ma='SMA'):
   return dict(self.payload,mode=mode,side=('LONG' if side=='buy' else 'SHORT') if mode=='PAPER' else side,ma_type=ma,order_type='market_order',time_in_force='ioc',reduce_only=False)
  def analysis(self,cross='BULLISH',stamp=None):
@@ -17,6 +18,14 @@ class SubmitStrategyTests(unittest.TestCase):
   if t['mode']=='PAPER':
    p=self.b.preview(t);return self.b.record_paper({'mode':'PAPER','preview_id':p['id']})
   return self.b.submit(t)
+ def test_paper_entry_timeframe_survives_exit_and_reload(self):
+  for resolution in ('1m','5m','1h'):
+   self.setUp();self.analysis('BULLISH')
+   self.entry(self.ticket('PAPER')|dict(resolution=resolution))
+   self.assertEqual(self.b.paper['position']['entry_timeframe'],resolution)
+   self.b.close_paper(dict(mode='PAPER'))
+   restarted=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now)
+   self.assertEqual(restarted.paper['trades'][0]['entry_timeframe'],resolution)
  def test_paper_live_sma_ema_long_short_snapshot_opposite_exit_no_reentry(self):
   for mode in ('PAPER','LIVE'):
    for side in ('buy','sell'):
@@ -37,31 +46,23 @@ class SubmitStrategyTests(unittest.TestCase):
     self.b.chart=lambda *a,**k: {'last_completed':dict(timestamp=self.req.now-310,cross_direction=None,entry_direction=opposite,entry_reason='CANDLE_EXTREME_EMA_TOUCH',rsi_ma=50)}
     posts=self.req.posts;self.b.runner_tick();self.assertTrue(self.b.runner['running']);self.assertEqual(self.req.posts,posts)
     self.req.now+=300;self.analysis(opposite);self.b.runner_tick();self.assertFalse(self.b.runner['running'])
- def test_missing_wrong_stale_changed_and_settings_bypass_rejected_without_orders(self):
+ def test_manual_entry_without_missing_wrong_or_stale_signal_keeps_exit_monitor(self):
   for mode in ('LIVE','PAPER'):
    for cross,stamp in [(None,None),('BEARISH',None),('BULLISH',99000)]:
-    self.setUp();self.analysis(cross,stamp)
-    with self.assertRaisesRegex(ValueError,'condition not met'):self.entry(self.ticket(mode))
-    self.assertEqual(self.req.posts,0);self.assertFalse(self.b.paper['trades']);self.assertFalse(self.b.runner['running'])
-   for change in [dict(ma_type='INVALID'),dict(rsi_length=True),dict(ma_length=0),dict(resolution='invalid'),dict(signal_close=99000)]:
+    self.setUp();self.analysis(cross,stamp);self.entry(self.ticket(mode));self.assertTrue(self.b.runner['running']);self.assertTrue(self.b.runner['config']['one_shot'])
+    position=self.b.live['runner_position'] if mode=='LIVE' else self.b.paper['position'];self.assertEqual(position['entry_reason'],'MANUAL_DISCRETIONARY')
+   for change in [dict(ma_type='INVALID'),dict(rsi_length=True),dict(ma_length=0),dict(resolution='invalid')]:
     self.setUp();self.analysis()
     with self.assertRaises(ValueError):self.entry(self.ticket(mode)|change|dict(runner=True,_runner_origin=True))
     self.assertEqual(self.req.posts,0)
- def test_revalidate_paper_after_preview_and_live_after_preflight(self):
-  self.analysis();p=self.b.preview(self.ticket('PAPER'));self.analysis('BEARISH')
-  with self.assertRaisesRegex(ValueError,'condition not met'):self.b.record_paper({'mode':'PAPER','preview_id':p['id']})
-  self.assertFalse(self.b.paper['trades']);self.assertFalse(self.b.runner['running'])
-  self.setUp();count=[0]
-  def chart(*a):
-   count[0]+=1;return {'last_completed':dict(timestamp=99690,cross_direction='BULLISH' if count[0]==1 else 'BEARISH',rsi_ma=50)}
-  self.b.chart=chart
-  with self.assertRaisesRegex(ValueError,'condition not met'):self.b.submit(self.ticket())
-  self.assertEqual(self.req.posts,0)
+ def test_paper_fill_does_not_revalidate_entry_signal(self):
+  self.analysis(None);p=self.b.preview(self.ticket('PAPER'));self.analysis('BEARISH');self.b.record_paper({'mode':'PAPER','preview_id':p['id']})
+  self.assertEqual(len(self.b.paper['trades']),1);self.assertTrue(self.b.runner['running'])
  def test_duplicate_consumed_signal_settings_change_and_stop_restart(self):
   self.analysis();t=self.ticket();self.b.submit(t);self.b.submit(t);self.assertEqual(self.req.posts,1);self.b.stop_runner()
   b=DeltaIndia(self.b.path,credentials=self.creds,requester=self.req,clock=lambda:self.req.now);self.assertFalse(b.runner['running']);self.assertIn('restart',b.runner['message']);self.assertEqual(b.live['runner_position']['contracts'],3)
   self.analysis()
-  with self.assertRaisesRegex(ValueError,'already used'):self.b.submit(t|dict(request_id='changed-ma-request',ma_type='EMA'))
+  with self.assertRaisesRegex(ValueError,'flat exact'):self.b.submit(t|dict(request_id='changed-ma-request',ma_type='EMA'))
   b.close_runner({'mode':'LIVE'});self.assertEqual(self.req.position,0);self.assertEqual(self.req.posts,2)
  def test_partial_entry_exit_latches_residual_and_never_duplicates_pending(self):
   self.analysis();self.req.unfilled=2;self.req.state='cancelled';self.b.submit(self.ticket());self.assertEqual(self.b.live['runner_position']['contracts'],1)

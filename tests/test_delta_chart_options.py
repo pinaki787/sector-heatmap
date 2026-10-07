@@ -42,19 +42,12 @@ class ChartOptions(unittest.TestCase):
   t=dict(mode='LIVE',request_id='chart-put-market-test',chart_symbol='BTCUSD',chart_direction='SELL',symbol='P-100-100100',side='buy',contracts=2,order_type='market_order',time_in_force='ioc',reduce_only=False,chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='EMA',chart_signal_close=99990)
   r=self.b.submit(t);self.assertEqual(r['status'],'closed');self.assertEqual(r['request']['side'],'buy');self.assertEqual(r['symbol'],'P-100-100100');self.assertNotIn('limit_price',r['request']);self.b.submit(t);self.assertEqual(self.b.requester.posts,1)
 
- def test_chart_gate_blocks_absent_stale_display_changed_and_used_signals(self):
-  t=dict(chart_symbol='BTCUSD',chart_direction='SELL',symbol='P-100-100100',side='buy',chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='SMA',chart_signal_close=99990)
-  for last in [None,dict(timestamp=99690,cross_direction=None),dict(timestamp=99600,cross_direction='BEARISH'),dict(timestamp=99690,cross_direction='BULLISH')]:
-   with patch.object(self.b,'chart',return_value={'last_completed':last}):
-    with self.assertRaisesRegex(ValueError,'condition not met'):self.b._chart_intent(dict(t))
-  with self.assertRaisesRegex(ValueError,'signal changed'):self.b._chart_intent(t|dict(chart_signal_close=99600))
-  valid=dict(t);self.b._chart_intent(valid);self.b.live['orders']['used']={'chart_signal':valid['chart_signal']}
-  with self.assertRaisesRegex(ValueError,'already used'):self.b._chart_intent(dict(t))
-
- def test_submit_without_qualifying_signal_never_posts_and_call_uses_bullish(self):
+ def test_chart_manual_intent_ignores_absent_wrong_stale_and_used_signal(self):
+  t=dict(chart_symbol='BTCUSD',chart_direction='SELL',symbol='P-100-100100',side='buy',chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='SMA',chart_signal_close=99000)
+  with patch.object(self.b,'chart',side_effect=AssertionError('Manual entry must not fetch RSI signal')):
+   self.b._chart_intent(t)
+  self.assertEqual(t['entry_reason'],'MANUAL_DISCRETIONARY');self.assertNotIn('chart_signal',t);self.assertEqual(t['signal_direction'],'BEARISH')
+ def test_call_without_qualifying_signal_posts_once_and_manages_exit(self):
   self.b.credentials=lambda:dict(DELTA_INDIA_API_KEY='fake-key',DELTA_INDIA_API_SECRET='fake-secret',DELTA_INDIA_ENABLE_LIVE_ORDERS='1');self.b.requester=fixture.LiveRequests()
-  t=dict(mode='LIVE',request_id='chart-call-gate-test',chart_symbol='BTCUSD',chart_direction='BUY',symbol='C-100-100100',side='buy',contracts=1,order_type='market_order',time_in_force='ioc',reduce_only=False,chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='SMA',chart_signal_close=99990)
-  with self.assertRaisesRegex(ValueError,'condition not met'):self.b.submit(t)
-  self.assertEqual(self.b.requester.posts,0);self.assertFalse(self.b.live['orders'])
-  with patch.object(self.b,'chart',return_value={'last_completed':dict(timestamp=99690,cross_direction='BULLISH')}):
-   r=self.b.submit(t);self.assertEqual(r['status'],'closed');self.assertEqual(r['request']['side'],'buy');self.assertEqual(r['symbol'],'C-100-100100')
+  t=dict(mode='LIVE',request_id='chart-call-manual-test',chart_symbol='BTCUSD',chart_direction='BUY',symbol='C-100-100100',side='buy',contracts=1,order_type='market_order',time_in_force='ioc',reduce_only=False,chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='SMA',chart_signal_close=99000)
+  r=self.b.submit(t);self.b.submit(t);self.assertEqual(self.b.requester.posts,1);self.assertEqual(r['symbol'],'C-100-100100');self.assertEqual(r['entry_reason'],'MANUAL_DISCRETIONARY');self.assertTrue(self.b.runner['running']);self.assertTrue(self.b.runner['config']['one_shot'])

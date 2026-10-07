@@ -148,6 +148,7 @@ class SensexStraddleService:
                 },
                 "position": position,
                 "premium_chart": self._read_json(self.chart_path) if position else None,
+                "paper_capital":self._read_json(self.runtime_dir/"paper-capital.json") if self.active_mode=="PAPER" else None,
                 "recent_trades": self._recent_trades(),
                 "output": list(self.output)[-20:],
                 "updated_at": datetime.now().astimezone().isoformat(),
@@ -161,7 +162,7 @@ class SensexStraddleService:
             with self.lock:
                 self.output.append(line.rstrip())
 
-    def start(self, mode="live", exit_mode="supertrend", lots=1, entry_start="09:15", entry_end="11:30", confirmation=""):
+    def start(self, mode="live", exit_mode="supertrend", lots=1, entry_start="09:15", entry_end="11:30", confirmation="", paper_capital_inr=100000):
         mode = str(mode or "").strip().lower()
         exit_mode = str(exit_mode or "").strip().lower()
         try:
@@ -206,8 +207,12 @@ class SensexStraddleService:
                 env["FYERS_APP_ID"] = app_id
                 env["FYERS_ACCESS_TOKEN"] = access_token
             self.output.clear()
+            script=self.script_path
+            if mode=="paper":
+                from .straddle_paper import prepare
+                script=prepare(self.script_path,self.runtime_dir,paper_capital_inr,requested_lots)
             command = [
-                str(self._interpreter()), "-u", str(self.script_path),
+                str(self._interpreter()), "-u", str(script),
                 exit_flags[exit_mode], "--lots", str(requested_lots),
                 "--entry-start", parsed_entry_start, "--entry-end", parsed_entry_end,
             ]

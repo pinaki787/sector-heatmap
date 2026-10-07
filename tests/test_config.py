@@ -41,6 +41,16 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(values["FYERS_APP_ID"], "NEW-100")
             self.assertNotIn("FYERS_ACCESS_TOKEN", values)
 
+    def test_newer_private_cache_overrides_stale_environment_token(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            token_file = root / "token.json"
+            token_file.write_text(json.dumps({"app_id": "APP-100", "access_token": "fresh-token"}), encoding="utf-8")
+            environment = {"FYERS_APP_ID": "APP-100", "FYERS_ACCESS_TOKEN": "APP-100:stale-token"}
+            with patch.object(config, "TOKEN_FILE", token_file), patch.object(config, "ENV_FILE", root / ".fyers.env"), patch.object(config, "_user_config_files", return_value=[]), patch.dict(os.environ, environment, clear=True):
+                values = config.load_config()
+            self.assertEqual(values["FYERS_ACCESS_TOKEN"], "APP-100:fresh-token")
+
     def test_save_access_token_updates_private_shared_cache(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -48,6 +58,7 @@ class ConfigTests(unittest.TestCase):
             token_file.write_text(json.dumps({"refresh_token": "keep-me"}), encoding="utf-8")
             with patch.object(config, "TOKEN_FILE", token_file), patch.object(config, "ENV_FILE", root / ".fyers.env"), patch.object(config, "_user_config_files", return_value=[]), patch.dict(os.environ, {}, clear=True):
                 config.save_access_token("APP-100:new-token")
+                self.assertEqual(os.environ["FYERS_ACCESS_TOKEN"], "APP-100:new-token")
             cached = json.loads(token_file.read_text(encoding="utf-8"))
             self.assertEqual(cached["app_id"], "APP-100")
             self.assertEqual(cached["access_token"], "new-token")

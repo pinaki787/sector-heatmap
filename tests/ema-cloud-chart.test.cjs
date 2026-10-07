@@ -53,3 +53,16 @@ test('crowded Fib, period and zone captions stay separate while level anchors re
 test('Bollinger uses close SMA and population deviation with warmup and no future leakage',()=>{
  const {bollingerRows}=require('../ema-cloud-chart.js'),bars=[1,2,3,4].map((close,timestamp)=>({timestamp,close}));const r=bollingerRows(bars,3,2);assert.deepEqual(r[1],{time:1});assert.equal(r[2].middle,2);assert.equal(r[2].upper,2+2*Math.sqrt(2/3));assert.equal(r[2].lower,2-2*Math.sqrt(2/3));assert.deepEqual(bollingerRows(bars.slice(0,3),3,2),r.slice(0,3));assert.throws(()=>bollingerRows(bars,1,2));assert.throws(()=>bollingerRows(bars,20,0));
 });
+
+test('ADX graph uses Wilder warmup and excludes forming candle values',()=>{const {adxRows}=require('../ema-cloud-chart.js');const rows=Array.from({length:50},(_,i)=>({timestamp:i*300,high:102+i,low:99+i,close:101+i}));const values=adxRows(rows);assert.equal(values[26].value,undefined);assert.equal(values[27].value,100);assert.equal(values[49].value,100);rows[49].is_forming=true;assert.equal(adxRows(rows)[49].value,undefined);assert.equal(adxRows(rows.map(r=>({...r,high:100,low:100,close:100,is_forming:false})))[49].value,0);});
+test('Renko emits full close-based bricks, uses two-brick reversals and excludes forming prices',()=>{
+ const {renkoRows}=require('../ema-cloud-chart.js');
+ const rows=[100,103,102,101,104].map((close,i)=>({timestamp:i*60,close}));
+ const bricks=renkoRows(rows,1);
+ assert.deepEqual(bricks.map(b=>[b.open,b.close]),[[100,101],[101,102],[102,103],[102,101],[102,103],[103,104]]);
+ assert.ok(bricks.every((b,i)=>!i||b.time>bricks[i-1].time));
+ assert.deepEqual(renkoRows([...rows,{timestamp:300,close:120,is_forming:true}],1),bricks);
+ assert.deepEqual(renkoRows(rows.slice(0,3),1),bricks.slice(0,3));
+ assert.throws(()=>renkoRows(rows,0),/greater than zero/);
+ assert.throws(()=>renkoRows([{timestamp:0,close:100},{timestamp:60,close:10000}],1),/increase brick size/);
+});

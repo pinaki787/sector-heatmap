@@ -29,7 +29,9 @@ def configuration(payload):
         if isinstance(raw, bool) or str(raw) != str(int(raw)):
             raise ValueError(f'{key} must be a whole number.')
         return int(raw)
-    c = dict(underlying=str(payload.get('underlying', '')).strip().upper(),
+    from sector_heatmap.paper_wallet import capital
+    paper_capital=capital(payload.get('paper_capital_inr',100000)) if payload.get('mode','PAPER')=='PAPER' else 100000
+    c = dict(paper_capital_inr=paper_capital,underlying=str(payload.get('underlying', '')).strip().upper(),
              timeframe=payload.get('timeframe', '5 minutes'), rsi_length=whole('rsi_length',14), ma_length=whole('ma_length',payload.get('sma_length',14)), ma_type=str(payload.get('ma_type','SMA')).upper(), max_trades=whole('max_trades', 2), lots=whole('lots'), mode=str(payload.get('mode', 'PAPER')).upper(),
              max_premium=None if payload.get('max_premium') in (None, '') else float(payload['max_premium']), daily_budget=None if payload.get('daily_budget') in (None, '') else float(payload['daily_budget']),
              label='RSI based '+str(payload.get('ma_type','SMA')).upper(), strategy='RSI_BASED_EMA_V1')
@@ -79,6 +81,30 @@ def spot_exit(candle, direction, config):
 
 
 class Runner:
+    strategy_id = 'RSI_BASED_EMA_V1'
+    runtime_revision = 'rsi-crossover-partial-trailing-v5'
+    signal_policy = 'COMPLETED_RSI_CROSSOVER_ONLY'
+    activation_name = 'RSI BASED EMA'
+    entry_reason = 'RSI_CLOSE_ENTRY'
+    exit_reason = 'RSI_CLOSE_EXIT'
+    configure = staticmethod(configuration)
+
+    def signal_key(self, sig):
+        c = self.state['config']
+        return f"RSI:{c['underlying']}:{c['timeframe']}:{c['rsi_length']}:{c['ma_type']}:{c['ma_length']}:{sig['timestamp']}"
+
+    def session_bounds(self,c):
+        return 9*60+15,23*60+30 if c['underlying'].startswith('MCX:') else 15*60+30
+
+    def exit_reason_for(self, sig, position):
+        return self.exit_reason if self.exit_signal(sig,position['direction']) else None
+
+    def exit_is_later(self, sig, position):
+        return sig['timestamp'] > position['entry_signal_timestamp']
+
+    def exit_signal(self, sig, direction):
+        return rsi_exit_on_close(sig, direction)
+
     def __init__(self, adapter, state_path, clock=time.time):
         self.adapter, self.path, self.clock = adapter, Path(state_path), clock
         self.lock, self.wake, self.thread, self.file_lock = threading.RLock(), threading.Event(), None, None
@@ -120,8 +146,8 @@ class Runner:
             if self.state['position']:
                 try:
                     pos = self.state['position']
-                    bid = self.adapter.quote(pos['symbol'])['bid']
-                    pnl.update(unrealized=amount(pos, pos['quantity'], bid-pos['entry_price']), available=True, updated_at=self.clock())
+                    bid = self.adapter.quote(pos['symbol'])['ask' if pos.get('entry_side',1)==-1 else 'bid']
+                    pnl.update(unrealized=amount(pos, pos['quantity'], (bid-pos['entry_price'])*pos.get('entry_side',1)), available=True, updated_at=self.clock())
                 except Exception:
                     pass
             else:
@@ -131,24 +157,28 @@ class Runner:
                 try:return json.loads((evidence/name).read_text())
                 except (OSError,ValueError):return default
             history=verified_legacy_rows(self.state.get('order_history',[]),self.state.get('events',[]),self.state.get('position'),self.state.get('config') or {},audit('position-history-valuation-evidence.json',{}),audit('position-history-ownership-evidence.json',[]))
-            return {**deepcopy(self.state), 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': 'rsi-crossover-partial-trailing-v5', 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': 'RSI_BASED_EMA_V1', 'scan_interval_seconds': 1, 'signal_policy':'COMPLETED_RSI_CROSSOVER_ONLY', 'live_available': self.adapter.live_enabled()}
+            funds=None
+            if (self.state.get('config') or {}).get('mode')=='PAPER':
+                try:funds=self.paper_funds()
+                except (ValueError,AttributeError,KeyError) as error:funds=dict(available=False,error=str(error))
+            return {**deepcopy(self.state), 'paper_capital':funds, 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': self.runtime_revision, 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': self.strategy_id, 'scan_interval_seconds': 1, 'signal_policy':self.signal_policy, 'live_available': self.adapter.live_enabled()}
 
     def preview(self, payload):
-        config = configuration(payload)
+        config = self.configure(payload)
         with self.lock:
             if self.state['status'] == 'STATE_CORRUPT':
                 raise ValueError(self.state['error'])
             if self.state['running']:
                 raise ValueError('Runner is already active. Stop new entries first and wait until flat.')
-            if (self.state['position'] or self.state['pending']) and config != self.state['config']:
+            if (self.state['position'] or self.state['pending']) and config != ({**self.state['config'],'paper_capital_inr':self.state['config'].get('paper_capital_inr',100000)} if config['mode']=='PAPER' else self.state['config']):
                 raise ValueError('Recovery requires the original configuration; pending orders and positions are preserved.')
             if config['mode'] == 'LIVE' and not self.adapter.live_enabled():
                 raise ValueError('The existing FYERS live runtime gate is disabled.')
             context = self.adapter.validate_config(config)
-            if (self.state['position'] or self.state['pending']) and context.get('account_identity') != self.state.get('account_identity'):
+            if (self.state['position'] or self.state['pending']) and config['mode']=='LIVE' and context.get('account_identity') != self.state.get('account_identity'):
                 raise ValueError('Saved exposure belongs to a different FYERS account.')
             digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:10].upper()
-            phrase = f"START {config['mode']} RSI BASED EMA {digest}"
+            phrase = f"START {config['mode']} {self.activation_name} {digest}"
             self.preview_value = dict(id=secrets.token_hex(16), config=config, confirmation=phrase,
                                       expires_at=self.clock()+120, context=context, trailing_allocation=trailing_allocation(config['lots']) if config.get('trailing_enabled') else None)
             return deepcopy(self.preview_value)
@@ -164,7 +194,7 @@ class Runner:
             if config['mode'] == 'LIVE' and not self.adapter.live_enabled():
                 raise ValueError('FYERS live runtime gate is disabled.')
             context = self.adapter.validate_config(config)
-            if context.get('account_identity') != p['context'].get('account_identity'):
+            if config['mode']=='LIVE' and context.get('account_identity') != p['context'].get('account_identity'):
                 raise ValueError('FYERS account changed since preview; review again.')
             self.path.parent.mkdir(parents=True, exist_ok=True)
             handle = open(self.path.with_suffix('.lock'), 'a')
@@ -188,7 +218,7 @@ class Runner:
                     self.state['realized_pnl'] = 0
                     self.state['squareoff_requested'] = False
                 self.state.update(config=config, account_identity=context.get('account_identity'), running=True, accepting_entries=True, started_at=self.clock(),eligible_since=self.clock(),last_processed_bar=None,stream_was_connected=None,stream_generation=None)
-                self.event('WATCHING', config['label']+' armed. Waiting for a new completed RSI crossover after arming; old crosses and forming candles are ignored.')
+                self.event('WATCHING', config['label']+' armed. Waiting for a new completed signal after arming; old signals and forming candles are ignored.')
                 if background:
                     self.wake.clear()
                     self.thread = threading.Thread(target=self.loop, name='ema-crossover-runner', daemon=True)
@@ -260,7 +290,7 @@ class Runner:
     def record_order(self, pending, status, filled=0, price=None):
         order = pending['order']
         row = dict(tag=pending['tag'], order_id=pending.get('id'), symbol=order['symbol'],
-                   side='BUY' if order['side'] == 1 else 'SELL', requested=order['qty'],
+                   side='BUY' if order['side'] == 1 else 'SELL', is_entry=self.is_entry_order(order, pending['position']), entry_side=pending['position'].get('entry_side',1), execution_route=pending['position'].get('execution_route','OPTIONS'), requested=order['qty'],
                    filled=filled, remaining=order['qty']-filled, average_price=price,
                    status=status, submitted_at=pending['submitted_at'], updated_at=self.clock(),
                    lifecycle_id=pending['position'].get('lifecycle_id'), strategy=pending['position'].get('strategy'), lot_size=pending['position'].get('lot_size'), quantity_multiplier=pending['position'].get('quantity_multiplier'), filled_at=self.clock() if filled else None, mode=self.state['config']['mode'], requested_type='MARKET', product=order['productType'], reason=pending['reason'])
@@ -270,19 +300,41 @@ class Runner:
         else: rows[index]=row
         self.state['order_history']=rows
 
+    @staticmethod
+    def is_entry_order(order, position):
+        return order['side'] == position.get('entry_side', 1)
+
+    def paper_rate(self):
+        if (self.state.get('config') or {}).get('broker') != 'DELTA_INDIA':return 1
+        policy=self.adapter.delta._inr_conversion()
+        if not policy:raise ValueError('Verified INR settlement conversion required for virtual Paper capital.')
+        return policy['rate']
+
+    def paper_funds(self):
+        from .paper_capital import balance
+        return balance(self.state,self.paper_rate())
+
+    def entry_preflight(self,order,contract,quote):
+        if self.state['config']['mode'] == 'PAPER':
+            from .paper_capital import preflight
+            return preflight(self.state,order,contract,quote,self.paper_rate())
+        return self.adapter.preflight(order,self.state['config'])
+
     def submit(self, order, position, reason):
         self.adapter.validate_order(order)
-        if order['side'] == 1:
+        if self.is_entry_order(order, position):
             c = self.state['config']
             last = self.state['last_signal']
             if not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
                 raise ValueError('Entry authorization or signal expired during preflight.')
         execution_quote = self.adapter.quote(order['symbol'])  # Recheck socket freshness immediately before persisting intent.
+        if self.state['config']['mode']=='PAPER' and self.is_entry_order(order,position):
+            self.entry_preflight(order,position,execution_quote)
         tag = 'EC' + secrets.token_hex(10)
-        if order['side']==1:
+        if self.is_entry_order(order, position):
             position={**position,'lifecycle_id':tag,'strategy':self.state['config']['label'],'trailing_config':{k:self.state['config'].get(k) for k in ('trailing_enabled','trailing_mode','trailing_step')}}
         order = {**order, 'orderTag': tag}
-        if order['side'] == 1:
+        if self.is_entry_order(order, position):
             if self.state.get('trades_used', 0) >= self.state['config']['max_trades']:
                 raise ValueError('Maximum entry trades reached.')
             self.state['trades_used'] = self.state.get('trades_used', 0) + 1
@@ -321,13 +373,13 @@ class Runner:
         pending = self.state['pending']
         if filled < 0 or filled > pending['order']['qty'] or (filled and (not math.isfinite(price) or price <= 0)):
             raise ValueError('Invalid confirmed fill quantity/price.')
-        if pending['order']['side'] == 1 and filled:
+        if self.is_entry_order(pending['order'], pending['position']) and filled:
             self.state['position'] = {**pending['position'], 'quantity': filled, 'entry_price': price,
                                       'opened_at': self.clock(), 'entry_order_id': pending['id']}
             self.state['position']['trailing']=trailing_initial(price,pending['position'].get('tick_size'),pending['position'].get('trailing_config',{}),filled,pending['position'].get('lot_size'))
-        elif pending['order']['side'] == -1 and filled:
+        elif not self.is_entry_order(pending['order'], pending['position']) and filled:
             p = self.state['position']
-            pnl = amount(p, filled, price-p['entry_price'])
+            pnl = amount(p, filled, (price-p['entry_price'])*p.get('entry_side', 1))
             p['quantity'] -= filled
             if pending['reason'] in ('STEP_TARGET_1','STEP_TARGET_2') and p.get('trailing'):
                 stage=pending['reason'][-1]
@@ -360,13 +412,14 @@ class Runner:
         if status in TERMINAL:
             if status == 2 and filled != p['order']['qty']:
                 raise ValueError('Filled status has inconsistent quantity.')
-            expected = filled if p['order']['side'] == 1 else self.state['position']['quantity'] - filled
+            entry_side = p['position'].get('entry_side', 1)
+            expected = (filled if self.is_entry_order(p['order'], p['position']) else self.state['position']['quantity'] - filled)*entry_side
             self.adapter.reconcile_position(p['order']['symbol'], expected)
             price = float(row.get('tradedPrice') or 0)
             self.complete_pending(filled, price)
             return
         # Cancel stale orders, paused entry orders, or entry orders at square-off. Await terminal status.
-        cancel = self.clock()-p['submitted_at'] > 30 or (p['order']['side'] == 1 and (not self.state['accepting_entries']))
+        cancel = self.clock()-p['submitted_at'] > 30 or (self.is_entry_order(p['order'], p['position']) and (not self.state['accepting_entries']))
         if cancel and not p['cancel_requested']:
             self.adapter.validate_order(p['order'])
             p['cancel_requested'] = True
@@ -405,7 +458,7 @@ class Runner:
                     p.update(exit_requested=True, exit_reason='MANUAL_SQUARE_OFF')
                     self.save()
                 if c['mode'] == 'LIVE':
-                    self.adapter.reconcile_position(p['symbol'], p['quantity'])
+                    self.adapter.reconcile_position(p['symbol'], p['quantity']*p.get('entry_side', 1))
                 if not p.get('exit_requested') and p.get('trailing'):
                     try:
                         trail,hit=trailing_advance(p['trailing'],self.adapter.quote(p['symbol']),self.clock())
@@ -424,8 +477,8 @@ class Runner:
                     sig = self.signal()
                     fresh = self.fresh_cross(sig)
                     # Never exit on the same completed bar that authorized entry.
-                    later = sig['timestamp'] > p['entry_signal_timestamp']
-                    reason = 'RSI_CLOSE_EXIT' if rsi_exit_on_close(sig,p['direction']) else None
+                    later = self.exit_is_later(sig,p)
+                    reason = self.exit_reason_for(sig,p)
                     if fresh and later and reason:
                         p['exit_requested'] = True
                         p['exit_reason'] = reason
@@ -438,17 +491,17 @@ class Runner:
                     stage,qty=target
                     quote=self.adapter.quote(p['symbol'])
                     trailing_advance(p['trailing'],quote,self.clock())
-                    order=self.adapter.order(p['symbol'],qty,-1,quote)
+                    order=self.adapter.order(p['symbol'],qty,-p.get('entry_side', 1),quote)
                     self.submit(order,p,'STEP_TARGET_'+str(stage))
                     return
                 if p.get('exit_requested'):
                     quote = self.adapter.quote(p['symbol'])
                     if p.get('exit_reason')=='STEP_TRAILING_EXIT':trailing_advance(p['trailing'],quote,self.clock())
-                    order = self.adapter.order(p['symbol'], p['quantity'], -1, quote)
-                    self.submit(order, p, p.get('exit_reason', 'RSI_CLOSE_EXIT'))
+                    order = self.adapter.order(p['symbol'], p['quantity'], -p.get('entry_side', 1), quote)
+                    self.submit(order, p, p.get('exit_reason', self.exit_reason))
                 else:
                     self.state['status'] = 'POSITION_OPEN'
-                    self.state['message'] = 'Holding until a fresh opposite completed RSI crossover. Equality and continued relationships hold.'
+                    self.state['message'] = 'Holding until a fresh opposite completed signal. Unchanged direction holds.'
                     self.save()
                 return
             if not self.state['accepting_entries']:
@@ -460,8 +513,8 @@ class Runner:
                 self.stop()
                 return
             now = datetime.fromtimestamp(self.clock(), IST)
-            end = 23*60+30 if c['underlying'].startswith('MCX:') else 15*60+30
-            if now.weekday() >= 5 or not 9*60+15 <= now.hour*60+now.minute < end:
+            opening,end = self.session_bounds(c)
+            if (now.weekday() >= 5 and not c.get('seven_day_session',False)) or not opening <= now.hour*60+now.minute < end:
                 self.state['status'] = 'OUTSIDE_SESSION'
                 return
             sig = self.signal()
@@ -472,7 +525,7 @@ class Runner:
                 self.state['status'] = 'WATCHING_NO_ENTRY'
                 self.save()
                 return
-            key = f"RSI:{c['underlying']}:{c['timeframe']}:{c['rsi_length']}:{c['ma_type']}:{c['ma_length']}:{sig['timestamp']}"
+            key = self.signal_key(sig)
             if key in self.state['seen']:
                 return
             validate_spot_levels(sig['close'], sig['cross_direction'], c)
@@ -480,16 +533,17 @@ class Runner:
             tick=contract.get('verified_tick_size',contract.get('tick_size'))
             if c.get('trailing_enabled'):trailing_initial(1,tick,c)
             quote = self.adapter.quote(contract['symbol'])
-            qty = c['lots']*contract['lot_size']
-            order = self.adapter.order(contract['symbol'], qty, 1, quote)
+            qty = c['quantity'] if c.get('execution_route') == 'CASH_EQUITY' else c['lots']*contract['lot_size']
+            entry_side = contract.get('entry_side', 1)
+            order = self.adapter.order(contract['symbol'], qty, entry_side, quote)
             premium = amount(contract, qty, quote['ask'])
             day = now.date().isoformat()
             if (c['max_premium'] is not None and premium > c['max_premium']) or (c['daily_budget'] is not None and premium+self.state['losses'].get(day,0) > c['daily_budget']):
                 raise ValueError('Full option premium exceeds per-entry cap or remaining daily loss budget.')
-            self.adapter.preflight(order, c)
+            self.entry_preflight(order,contract,quote)
             self.state['seen'] = (self.state['seen']+[key])[-5000:]
             self.save()
-            position = dict(symbol=contract['symbol'], direction=sig['cross_direction'], lot_size=contract['lot_size'], quantity=qty,
+            position = dict(symbol=contract['symbol'], direction=sig['cross_direction'], entry_side=entry_side, execution_route=c.get('execution_route','OPTIONS'), lot_size=contract['lot_size'], quantity=qty,
                             quantity_multiplier=multiplier(contract),tick_size=tick,
                             entry_price=None, opened_at=None, entry_signal_timestamp=sig['timestamp'])
-            self.submit(order, position, 'RSI_CLOSE_ENTRY')
+            self.submit(order, position, self.entry_reason)

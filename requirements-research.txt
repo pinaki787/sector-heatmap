@@ -1,0 +1,10 @@
+# Optional offline research only; does not activate strategies.
+-r requirements.lock
+numpy>=1.26,<3
+pandas>=2.2,<3
+vectorbt>=0.26,<1
+openalgo>=1,<2
+tqdm>=4.66,<5
+plotly>=5,<7
+matplotlib>=3.8,<4
+python-dotenv>=1,<2

@@ -135,6 +135,10 @@ trust store is reported as an error. Certificate verification is never disabled.
 
 When Fyers reports an expired or invalid token, the dashboard detects the authentication error and invokes the same renewal module automatically. Fyers still requires browser login/2FA; once finished, the dashboard replaces itself and reconnects using the fresh token.
 
+## User functional guide
+
+Open the [Renko Support and Strategy user guide](docs/user-functional-guide.md) or its [browser version](docs/user-functional-guide.html) for existing FYERS position management and candlestick volume controls.
+
 ## Modules
 
 - `sector_heatmap/config.py` — local configuration and token persistence
@@ -253,3 +257,75 @@ labelled `OFFICIAL_PARTIAL` with both published constituent count and covered
 weight. Missing live ticks stay unavailable rather than being estimated. See
 [the source and refresh guide](docs/official-weight-attribution.md) for the exact
 coverage boundary and monthly update procedure.
+
+### Trade Parser: OpenAI advisory feedback
+
+Submitting a parser ticket dispatches the existing FYERS request first. A separate
+background request gathers completed FYERS evidence and requests OpenAI analysis.
+There is no AI checkbox, no analysis on Parse, and no AI verdict, error, timeout or
+connection check in the broker submission path. Existing broker validations still
+apply. Green **PASS** and red **FAIL** are advisory assessments of the intraday and
+1–5-trading-day swing plans; **UNAVAILABLE** and **SKIPPED** are neutral, not failures
+of the trade. Plans and stops in the feedback never modify broker orders.
+
+The server reads `OPENAI_API_KEY` and optional `OPENAI_MODEL` from the environment
+or ignored `.env.local`; the default model is `gpt-4.1-mini`. Never put the key in
+browser code. The OpenAI request uses `store: false` and contains only the extracted
+price plan, contract and market evidence, not broker credentials, funds, positions,
+account identity or the original pasted message. OpenAI API usage may incur charges.
+The new static-file handler denies hidden files, including `.env.local`.
+
+Analysis includes completed 5-minute, hourly and daily candles (today's daily bar is
+excluded), structure, conditional levels, stops, reward/risk, volume, a session VWAP
+proxy when complete opening data exists, and sector comparison where official
+constituent mapping is unambiguous. Conflicting candles are rejected. Missing or
+stale essential instrument/underlying candles suppress that horizon's verdict.
+Volume-at-price data is unavailable and is not represented as a volume profile.
+Some newly listed options lack sufficient daily history for a swing assessment.
+
+After Python changes, a controlled server restart is required; refreshing the page
+alone updates only JavaScript. Preserve the launch environment and reconcile active
+runners before restarting. No live order is needed to test the AI integration:
+
+- `python3 -m unittest discover -s tests -p test_trade_advisory.py`
+- `node --test tests/trade_parser_advisory.test.cjs`
+- `.venv/bin/python scripts/preview_trade_advisory.py` serves a GET-only UI fixture on port 8097.
+- `.venv/bin/python scripts/check_trade_advisory.py` explicitly performs read-only
+  FYERS parsing/history and an OpenAI request against a sample DMART plan; it never submits an order.
+
+API format: [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+## Release portability (7 October 2026)
+
+All four launchers read explicit FYERS, KAMA and trade-parser live switches from
+`.env` or the caller environment, validate 0/1, and default to 0. Private credential
+imports do not authorize starting strategies. Inspect copied `.env` switches before
+launching on another host. Setup-only builds never start the dashboard.
+
+`HEATMAP_SETUP_ONLY=1 sh setup_and_run.sh` installs the pinned Python runtime,
+builds the UI and runs `scripts/check_setup.py`. Windows uses the equivalent
+`set HEATMAP_SETUP_ONLY=1` followed by `setup_and_run.bat`. macOS setup builds the
+read-only Swift WhatsApp helper when `swiftc` is available. Grant Accessibility and
+Screen Recording permissions manually. Native WhatsApp polling is unavailable on
+Windows/Linux; manual parsing and Telegram polling do not require that helper.
+
+Journal XLSX exports now use the project-installed Python runtime and openpyxl,
+with recorded trades/orders and a lossless chunked raw snapshot; no Codex runtime
+is required. Exports are static evidence, not proof of order fills or profitability.
+Nested JSON remains evidence rather than computed performance. Timezone data is
+installed for Windows; cross-process ownership locks use the OS on each platform.
+
+Offline research sources remain research-only. Install their separate optional
+requirements with `HEATMAP_INSTALL_RESEARCH=1` during setup or
+`.venv/bin/python -m pip install -r requirements-research.txt`. Research dependencies
+are bounded but not fully pinned; they are not part of the production runtime lock.
+Generated candles, results, journals and deployment snapshots are excluded from
+source releases. Research code may require separately obtained market data.
+
+A private credential overlay is for local transfer only. It must never be added to
+Git or uploaded with a source archive. Keep directories private (0700), files and
+archives 0600. Import only the selected configuration/key files; never import active
+runner state, ownership locks or polling databases. FYERS access tokens expire and
+may require browser login/2FA on the destination. Broker IP policies and native OS
+permissions must be configured on that host. No launcher starts a saved strategy
+as part of installation validation.

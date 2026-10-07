@@ -16,6 +16,31 @@ STOPLOSS_POINTS = 15.0
 TARGET_POINTS = 30.0
 import datetime as dt
 EOD_SQUARE_OFF_TIME = dt.time(15, 20)
+
+import json
+DRY_RUN=True
+QUANTITY=20
+
+def place_order(symbol,quantity,side):
+    return {}
+
+def enter_position():
+    premium_entry=100
+    ce_symbol='CE'
+    pe_symbol='PE'
+    ce_order = place_order(ce_symbol, QUANTITY, side=1)
+    state={'premium_entry':premium_entry}
+    save_state(state)
+    return state
+
+def exit_position(state,reason):
+    premium_exit=110
+    pnl_rupees=(premium_exit-state['premium_entry'])*QUANTITY
+    clear_state()
+
+if __name__ == "__main__":
+    pass
+
 """
 
 

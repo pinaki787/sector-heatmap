@@ -15,6 +15,36 @@ class AtmOptionRunner(unittest.TestCase):
   self.b.chart=lambda *a,**k:dict(last_completed=dict(timestamp=self.req.now-310,rsi_ma=50,cross_direction=cross,entry_direction=touch or cross,entry_reason='CANDLE_EXTREME_EMA_TOUCH' if touch else 'CROSSOVER'))
  def config(self,mode='PAPER'):
   return dict(mode=mode,symbol='BTCUSD',resolution='5m',rsi_length=14,ma_length=14,ma_type='EMA',contracts=10,direction='BOTH',strategy_mode='ATM_OPTIONS')
+ def test_one_minute_runner_enters_and_exits_on_new_completed_underlying_candles(self):
+  self.req.now=int(self.req.now//60)*60+10
+  calls=[]
+  cross=[None]
+  def chart(symbol,resolution,*args):
+   calls.append((symbol,resolution))
+   return dict(last_completed=dict(timestamp=int(self.req.now//60)*60-60,rsi_ma=50,cross_direction=cross[0],entry_direction=cross[0],entry_reason='CROSSOVER'))
+  self.b.chart=chart
+  self.b.start_runner(self.config()|dict(resolution='1m'))
+  self.assertEqual(self.b.runner['config']['resolution'],'1m')
+  self.req.now+=60;cross[0]='BULLISH';self.b.runner_tick()
+  self.assertTrue(self.b.paper['position']['symbol'].startswith('C-'))
+  self.assertEqual(self.b.paper['position']['entry_timeframe'],'1m')
+  entries=len(self.b.paper['trades'])
+  self.b.runner_tick();self.assertEqual(len(self.b.paper['trades']),entries)
+  self.req.now+=60;cross[0]='BEARISH';self.b.runner_tick()
+  self.assertIsNone(self.b.paper['position'])
+  self.assertEqual(len(self.b.paper['trades']),1)
+  self.assertEqual(self.b.paper['trades'][0]['entry_timeframe'],'1m')
+  self.assertTrue(any(symbol=='BTCUSD' for symbol,resolution in calls))
+  self.assertTrue(all(resolution=='1m' for symbol,resolution in calls))
+ def test_explicit_futures_long_short_and_opposite_exit(self):
+  for direction,side,opposite in [('BULLISH','LONG','BEARISH'),('BEARISH','SHORT','BULLISH')]:
+   self.setUp();cfg=self.config();cfg['strategy_mode']='FUTURES';self.b.start_runner(cfg);self.req.now+=300;self.signal(direction);self.b.runner_tick()
+   p=self.b.paper['position'];self.assertEqual(p['symbol'],'BTCUSD');self.assertEqual(p['side'],side);self.assertEqual(self.b.runner['config']['strategy_mode'],'FUTURES')
+   self.req.now+=300;self.signal(opposite);self.b.runner_tick();self.assertIsNone(self.b.paper['position']);self.assertEqual(len(self.b.paper['trades']),1)
+ def test_futures_mode_rejects_option_before_activation(self):
+  cfg=self.config();cfg.update(strategy_mode='FUTURES',symbol=next(r['symbol'] for r in self.rows if r['contract_type']=='call_options'))
+  with self.assertRaisesRegex(ValueError,'perpetual futures'):self.b.start_runner(cfg)
+  self.assertFalse(self.b.runner['running']);self.assertEqual(self.b.paper['trades'],[])
  def test_bullish_call_and_bearish_put_are_both_long_with_underlying_opposite_exits(self):
   for direction,prefix,opposite in [('BULLISH','C','BEARISH'),('BEARISH','P','BULLISH')]:
    self.setUp();self.b.start_runner(self.config());self.req.now+=300;self.signal(direction);self.b.runner_tick();p=self.b.paper['position']
@@ -50,6 +80,7 @@ class AtmOptionRunner(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,'expired'):self.b.runner_tick()
   self.assertFalse(self.b.paper['trades'])
  def test_put_submit_monitor_uses_underlying_rsi_and_closes_only_on_bullish_cross(self):
+  self.req.now=99910
   payload=dict(mode='PAPER',symbol='P-100-100100',side='LONG',contracts=10,chart_symbol='BTCUSD',chart_direction='SELL',chart_resolution='5m',chart_rsi_length=14,chart_ma_length=14,chart_ma_type='EMA',chart_signal_close=self.req.now-10)
   self.signal('BEARISH');preview=self.b.preview(payload);self.b.record_paper(dict(mode='PAPER',preview_id=preview['id']));self.assertTrue(self.b.runner['config']['one_shot']);self.assertEqual(self.b.runner['config']['symbol'],'BTCUSD')
   self.req.now+=300;self.signal('BEARISH');self.b.runner_tick();self.assertIsNotNone(self.b.paper['position'])

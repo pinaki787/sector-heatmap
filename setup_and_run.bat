@@ -46,6 +46,14 @@ if errorlevel 1 (
 )
 popd
 
+echo WhatsApp native polling requires macOS; manual parser and Telegram remain available.
+".venv\Scripts\python.exe" scripts\check_setup.py
+if errorlevel 1 goto setup_failed
+if "%HEATMAP_INSTALL_RESEARCH%"=="1" (
+  ".venv\Scripts\python.exe" -m pip install --requirement requirements-research.txt
+  if errorlevel 1 goto setup_failed
+)
+
 if "%HEATMAP_SETUP_ONLY%"=="1" (
   echo Environment setup and UI build completed.
   exit /b 0
@@ -60,6 +68,9 @@ exit /b %errorlevel%
 :load_runtime_switches
 if not defined SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS if exist ".env" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=" ".env"') do set "SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=%%B"
 if not defined SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS if exist ".env" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=" ".env"') do set "SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=%%B"
+if not defined SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS if exist ".env" for /f "tokens=1,* delims==" %%A in ('findstr /B /C:"SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS=" ".env"') do set "SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS=%%B"
+if not defined SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS set "SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS=0"
+if not "%SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS%"=="0" if not "%SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS%"=="1" goto runtime_switch_invalid
 if not defined SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS set "SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=0"
 if not defined SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS set "SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS=0"
 if not "%SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS%"=="0" if not "%SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS%"=="1" goto runtime_switch_invalid

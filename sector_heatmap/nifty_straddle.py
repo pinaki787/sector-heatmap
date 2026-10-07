@@ -35,15 +35,15 @@ class NiftyStraddleService(SensexStraddleService):
 
     @property
     def state_path(self):
-        return self.script_path.parent / "live_position_state.json"
+        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_position_state.json"
 
     @property
     def trades_path(self):
-        return self.script_path.parent / "live_trade_log.csv"
+        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_trade_log.csv"
 
     @property
     def chart_path(self):
-        return self.script_path.parent / "live_premium_chart.json"
+        return (self.runtime_dir if self.active_mode=="PAPER" else self.script_path.parent) / "live_premium_chart.json"
 
     def snapshot(self):
         with self.lock:
@@ -87,12 +87,13 @@ class NiftyStraddleService(SensexStraddleService):
                 },
                 "position": position,
                 "premium_chart": self._read_json(self.chart_path) if position else None,
+                "paper_capital":self._read_json(self.runtime_dir/"paper-capital.json") if self.active_mode=="PAPER" else None,
                 "recent_trades": self._recent_trades(),
                 "output": list(self.output)[-20:],
                 "updated_at": datetime.now().astimezone().isoformat(),
             }
 
-    def start(self, mode="live", lots=1, stoploss=15, target=30, exit_mode="supertrend", entry_start="09:15", entry_end="11:30", confirmation=""):
+    def start(self, mode="live", lots=1, stoploss=15, target=30, exit_mode="supertrend", entry_start="09:15", entry_end="11:30", confirmation="", paper_capital_inr=100000):
         mode = str(mode or "").strip().lower()
         try:
             requested_lots = int(lots)
@@ -135,8 +136,12 @@ class NiftyStraddleService(SensexStraddleService):
                 app_id, access_token = token.split(":", 1)
                 env["FYERS_APP_ID"] = app_id
                 env["FYERS_ACCESS_TOKEN"] = access_token
+            script=self.script_path
+            if mode=="paper":
+                from .straddle_paper import prepare
+                script=prepare(self.script_path,self.runtime_dir,paper_capital_inr,requested_lots)
             command = [
-                str(self._interpreter()), "-u", str(self.script_path),
+                str(self._interpreter()), "-u", str(script),
                 "--lots", str(requested_lots), "--stoploss", str(requested_stoploss),
                 "--target", str(requested_target),
                 "--entry-start", parsed_entry_start, "--entry-end", parsed_entry_end,
