@@ -15,8 +15,8 @@ with output.open('wb') as raw, gzip.GzipFile(filename='',mode='wb',fileobj=raw,m
     with tarfile.open(fileobj=io.BytesIO(source)) as tracked:
         for item in tracked:
             if any(part in {'.private','.env','.fyers.env','.venv','output','outputs','tmp','node_modules'} for part in Path(item.name).parts):raise SystemExit('Private/generated path tracked: '+item.name)
-            original=item.name;item.name='sector-pulse/'+original;item.uid=item.gid=0;item.uname=item.gname='';item.mtime=epoch
-            release.addfile(item,tracked.extractfile(original) if item.isfile() else None)
+            original=item.name;content=tracked.extractfile(item) if item.isfile() else None;item.name='sector-pulse/'+original;item.uid=item.gid=0;item.uname=item.gname='';item.mtime=epoch
+            release.addfile(item,content)
     for file in sorted(dist.rglob('*')):
         if file.is_file():
             item=release.gettarinfo(str(file),arcname='sector-pulse/client/dist/'+str(file.relative_to(dist)));item.uid=item.gid=0;item.uname=item.gname='';item.mtime=epoch
