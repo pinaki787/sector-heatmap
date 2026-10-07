@@ -20,6 +20,16 @@ class IndependentDataSocket(data_ws.FyersDataSocket):
     def __new__(cls, *args, **kwargs):
         return object.__new__(cls)
 
+    def reset_feed_state(self):
+        # Topic IDs belong to one transport connection. The FYERS SDK retains
+        # these maps on reconnect and checks scrips before indices, so a reused
+        # topic ID can decode index fields as stock fields (including time).
+        self.scrips_sym = {}
+        self.index_sym = {}
+        self.dp_sym = {}
+        self.resp = {}
+        self.literesp = {}
+
 
 class FyersBroker:
     def __init__(self, master_dir, fetch_candles, select_atm, on_tick=None):
@@ -106,15 +116,23 @@ class FyersBroker:
             raise ValueError('FYERS profile did not provide a broker account identity.')
         self.account_identity = hashlib.sha256(str(account).encode()).hexdigest()
         # Preview is read-only, including outside market hours.
-        self.orders()
-        self.positions()
+        if c.get('mode')=='LIVE':
+            self.orders()
+            self.positions()
         return dict(broker='FYERS', account_identity=self.account_identity, underlying=c['underlying'], description=row[1], execution='Nearest-expiry ATM CE for bullish / PE for bearish',
                     order_type='MARKET (FYERS MPP)', product='MARGIN', exits='Call exits on completed RSI below its selected moving average; put exits on completed RSI above its selected moving average',
                     risk='Optional limits apply only when set: premium cap bounds paid premium; daily budget excludes fees. Blank limits mean no strategy-level money cap. RSI/MA exits require completed candles and the running server. No intrabar premium stop or timed square-off; positions may carry between sessions. MARKET requests are subject to FYERS MPP conversion; fills are not guaranteed. Optional premium limits check the current quote and are not guaranteed fill-price caps.')
 
     def stream_status(self):
         with self.lock:
-            return dict(connected=self.connected, generation=getattr(self,"connection_epoch",0), error=self.stream_error, subscribed=sorted(self.symbols))
+            now=time.time()
+            freshness={}
+            for symbol,(raw,received) in self.ticks.items():
+                stamp=raw.get('exch_feed_time',raw.get('last_traded_time'))
+                try:exchange=float(stamp);age=now-exchange if math.isfinite(exchange) else None
+                except (TypeError,ValueError):exchange=age=None
+                freshness[symbol]=dict(type=raw.get('type'),received_age_seconds=now-received,exchange_at=exchange,exchange_age_seconds=age)
+            return dict(connected=self.connected, generation=getattr(self,"connection_epoch",0), error=self.stream_error, subscribed=sorted(self.symbols),freshness=freshness,revision='fyers-topic-recovery-v1')
 
     def subscribe_all(self):
         # SDK mutates channel state on every subscribe; retain the complete set for reconnects.
@@ -156,6 +174,8 @@ class FyersBroker:
         def on_connect():
             if generation != self.stream_generation:
                 return
+            # Authentication callback runs before our subscriptions/snapshots.
+            self.socket.reset_feed_state()
             with self.lock:
                 self.connected=True
                 self.connection_epoch = getattr(self,"connection_epoch",0)+1
@@ -202,7 +222,10 @@ class FyersBroker:
             item=self.ticks.get(symbol)
             error=self.stream_error
             retry=now-self.last_subscribe.get(symbol,0)>=30
-        if connected and (new or ((not item or now-item[1]>15) and retry)):
+        stamp=item[0].get('exch_feed_time',item[0].get('last_traded_time')) if item else None
+        try:exchange_fresh=stamp is not None and math.isfinite(float(stamp)) and abs(now-float(stamp))<=60
+        except (TypeError,ValueError):exchange_fresh=False
+        if connected and (new or ((not item or now-item[1]>15 or not exchange_fresh) and retry)):
             self.subscribe_all()
         if not connected:
             raise ValueError(f'FYERS stream disconnected for {symbol}. {error or "Waiting for connection."}')
@@ -212,7 +235,7 @@ class FyersBroker:
             raise ValueError(f'FYERS stream receive age exceeds 15 seconds for {symbol}. {error or "Awaiting fresh tick."}')
         raw=item[0]
         stamp=raw.get('exch_feed_time',raw.get('last_traded_time'))
-        if stamp is None or not math.isfinite(float(stamp)) or abs(now-float(stamp))>60:
+        if not exchange_fresh:
             raise ValueError(f'FYERS tick has a missing/stale exchange timestamp: {symbol}.')
         return raw
 

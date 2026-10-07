@@ -15,6 +15,10 @@ RESOLUTIONS={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,
 SUPPORTED={'perpetual_futures','futures','call_options','put_options'}
 
 class DeltaIndia:
+    def _inr_conversion(self):
+        from .delta_currency import policy
+        return policy(self.path.with_name('delta-inr-policy.json'),self.clock())
+
     def __init__(self,state_path,credentials=lambda:{},requester=None,clock=time.time):
         self.path=Path(state_path);self.credentials=credentials;self.requester=requester or requests;self.clock=clock
         self.lock=threading.RLock();self.cache={};self.previews={};self.auth_state='NOT_CHECKED';self.paper={'schema':1,'position':None,'trades':[]}

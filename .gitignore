@@ -18,3 +18,6 @@ backtesting/sensex_dhan_real_options/*_trades.csv
 
 # Superseded local launcher; setup_and_run.sh is the supported entry point.
 run_kama_live_heatmap.sh
+
+.setup-cache/
+RELEASE_COMMIT

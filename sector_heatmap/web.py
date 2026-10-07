@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import csv
+import hashlib
 import io
 import json
 import os
@@ -19,6 +20,10 @@ from .market_data import FyersLiveFeed, is_token_error, tick_timestamp_iso
 from .market_calendar import market_session
 from .rsi_table import RsiTable
 from .delta_india import DeltaIndia
+from strategies.renko_supertrend.runner import provisional as renko_provisional
+from strategies.renko_supertrend.runner import Runner as RenkoSupertrendRunner, Broker as RenkoSupertrendBroker, analysis as renko_supertrend_analysis
+from strategies.renko_supertrend.signals import settings as renko_supertrend_settings
+from strategies.renko_supertrend.chart_history import ChartHistory as RenkoChartHistory
 from strategies.ema_crossover.runner import Runner as EmaCrossoverRunner
 from strategies.ema_crossover.broker import FyersBroker as EmaCrossoverBroker
 from .official_weights import OFFICIAL_WEIGHT_SET
@@ -3090,6 +3095,141 @@ def run_server():
 
     ema_crossover = EmaCrossoverRunner(EmaCrossoverBroker(ema_master_dir, ema_band_candles, select_ema_atm_option), ROOT / ".private" / "ema-crossover-state.json")
 
+    renko_broker = RenkoSupertrendBroker(ema_master_dir, ema_band_candles, select_ema_atm_option)
+    renko_chart_broker = RenkoSupertrendBroker(ema_master_dir, ema_band_candles, select_ema_atm_option)
+    renko_chart_history = RenkoChartHistory(ROOT / ".private" / "renko-chart-history")
+    from strategies.renko_supertrend.stream import OrderNotifications, browser_frame
+    renko_stream_wake = threading.Event()
+    renko_display_context = {}
+    renko_display_lock = threading.Lock()
+    for adapter in (renko_broker, renko_chart_broker):
+        previous = adapter.on_tick
+        def stream_tick(raw, previous=previous):
+            if previous: previous(raw)
+            renko_stream_wake.set()
+        adapter.on_tick = stream_tick
+    renko_supertrend = RenkoSupertrendRunner(renko_broker, ROOT / ".private" / "renko-supertrend-state.json")
+    renko_order_stream = OrderNotifications(renko_supertrend, renko_stream_wake, ROOT / '.private')
+    from strategies.renko_supertrend.adoption import Manager as RenkoAdoptionManager
+    def renko_adoption_account():
+        profile=ema_readonly_client().get_profile()
+        account=(profile.get('data') or {}).get('fy_id') if isinstance(profile,dict) and profile.get('s')=='ok' else None
+        if not account:raise ValueError('FYERS account identity unavailable; refresh authentication.')
+        return hashlib.sha256(str(account).encode()).hexdigest()
+    def renko_other_owners():
+        symbols=set()
+        for state in (ema_crossover.state,renko_supertrend.state,ema_runner,kama_runner):
+            if (state.get('config') or {}).get('mode',state.get('mode'))!='LIVE':continue
+            for p in (state.get('position'),(state.get('pending') or {}).get('position')):
+                if p and p.get('symbol'):symbols.add(p['symbol'])
+        gtt=ema_readonly_client().gtt_orderbook()
+        if not isinstance(gtt,dict) or gtt.get('s')!='ok' or not isinstance(gtt.get('orderBook'),list):
+            raise ValueError('FYERS protective-order ownership could not be verified.')
+        symbols.update(row['symbol'] for row in gtt['orderBook'] if row.get('symbol') and int(row.get('ord_status',0)) not in {1,2,5,7})
+        return symbols
+    renko_adoptions=RenkoAdoptionManager(ROOT/'.private'/'renko-adoptions',
+        lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),
+        RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,renko_other_owners)
+    renko_adoptions.guard(renko_supertrend)
+    from strategies.renko_supertrend.delta_service import Service as DeltaRenkoService
+    delta_renko = DeltaRenkoService(delta_india, ROOT)
+    renko_default_bundle=(renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake)
+    delta_default_service=delta_renko
+    renko_instances_lock=threading.RLock()
+    renko_instances={}
+    renko_manifest=ROOT/'.private'/'renko-instances.json'
+    def renko_instance_owners(broker,exclude=None):
+        result=set()
+        if broker=='FYERS':
+            result.update(renko_other_owners())
+            result.update(renko_default_bundle[3].owned_symbols())
+        else:
+            for state in (delta_default_service.runner.state,delta_india.runner):
+                if (state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (state.get('position'),(state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+            result.update(delta_default_service.adoptions.owned_symbols())
+        with renko_instances_lock:
+            for key,item in renko_instances.items():
+                if key==exclude or item['broker']!=broker:continue
+                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+                if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+                result.update(manager.owned_symbols())
+        return result
+    def renko_additional_owners(broker):
+        result=set()
+        with renko_instances_lock:
+            for item in renko_instances.values():
+                if item['broker']!=broker:continue
+                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+                if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                        if pos:result.add(pos['symbol'])
+                result.update(manager.owned_symbols())
+        return result
+    renko_default_bundle[3].owners=lambda:set(renko_other_owners())|renko_additional_owners('FYERS')
+    delta_default_service.external_owners=lambda:renko_additional_owners('DELTA_INDIA')
+    def renko_make_instance(broker,instrument,persist=True):
+        if broker not in ('FYERS','DELTA_INDIA'):raise ValueError('Choose FYERS or Delta India.')
+        key=hashlib.sha256((broker+':'+instrument).encode()).hexdigest()[:20]
+        with renko_instances_lock:
+            if key in renko_instances:return key
+            folder=ROOT/'.private'/'renko-instances'/key
+            if broker=='DELTA_INDIA':
+                if persist:delta_default_service.broker.underlying(instrument)
+                component=DeltaRenkoService(delta_india,ROOT,key,instrument)
+                component.external_owners=lambda:renko_instance_owners(broker,key)
+                component.adoptions.intent_lock=delta_default_service.adoptions.intent_lock
+                runner=component.runner
+            else:
+                adapter=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                if persist:adapter.underlying(instrument)
+                chart_adapter=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                wake=threading.Event();context={};context_lock=threading.Lock()
+                adapter.on_tick=lambda raw:wake.set();chart_adapter.on_tick=lambda raw:wake.set()
+                runner=RenkoSupertrendRunner(adapter,folder/'state.json')
+                order_stream=OrderNotifications(runner,wake,ROOT/'.private')
+                manager=RenkoAdoptionManager(folder/'adoptions',lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,lambda:renko_instance_owners(broker,key))
+                manager.intent_lock=renko_default_bundle[3].intent_lock;manager.guard(runner)
+                component=(runner,adapter,chart_adapter,manager,RenkoChartHistory(folder/'chart-history'),order_stream,context,context_lock,wake)
+            renko_instances[key]={'broker':broker,'instrument':instrument,'component':component}
+            if persist:
+                runner.save_preferences({'settings':{'symbol':instrument,'timeframe':'5 minutes','mode':'PAPER'}})
+                temporary=renko_manifest.with_suffix('.tmp');temporary.parent.mkdir(parents=True,exist_ok=True)
+                temporary.write_text(json.dumps([{'broker':v['broker'],'instrument':v['instrument']} for v in renko_instances.values()]));temporary.chmod(0o600);temporary.replace(renko_manifest)
+            return key
+    # Restoring an instance is inert: durable runners load stopped and retain claims.
+    if renko_manifest.exists():
+        for saved in json.loads(renko_manifest.read_text()):renko_make_instance(saved['broker'],saved['instrument'],False)
+    def renko_select(path,request_path):
+        query=parse_qs(urlparse(request_path).query);key=(query.get('instance') or ['default'])[0]
+        if key=='default':return renko_default_bundle,delta_default_service,None
+        with renko_instances_lock:item=renko_instances.get(key)
+        if not item:raise ValueError('Unknown Renko instance; refresh the instance list.')
+        if path.startswith('/api/renko-delta/'):
+            if item['broker']!='DELTA_INDIA':raise ValueError('Broker/instance mismatch.')
+            return renko_default_bundle,item['component'],item['instrument']
+        if item['broker']!='FYERS':raise ValueError('Broker/instance mismatch.')
+        return item['component'],delta_default_service,item['instrument']
+    from strategies.renko_supertrend.batch import Batch as RenkoBatch
+    def renko_lookup_instance(broker,key):
+        item=renko_instances[key]
+        if item['broker']!=broker:raise ValueError('Broker/instance mismatch.')
+        return item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+    renko_batch=RenkoBatch(ROOT/'.private'/'renko-batches',renko_make_instance,renko_lookup_instance)
+    def renko_instance_rows():
+        rows=[{'id':'FYERS:default','instance_key':'default','broker':'FYERS',**renko_default_bundle[0].snapshot()},{'id':'DELTA_INDIA:default','instance_key':'default','broker':'DELTA_INDIA',**delta_default_service.runner.snapshot()}]
+        with renko_instances_lock:
+            for key,item in renko_instances.items():
+                runner=item['component'].runner if item['broker']=='DELTA_INDIA' else item['component'][0]
+                rows.append({'id':key,'instance_key':key,'broker':item['broker'],'instrument':item['instrument'],**runner.snapshot()})
+        return rows
+
+
     class Handler(SimpleHTTPRequestHandler):
         def send_head(self):
             target = Path(self.translate_path(self.path)).resolve()
@@ -3120,6 +3260,16 @@ def run_server():
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            try:
+                bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
+                renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if bound_instrument and path.endswith(('/chart','/stream')) and (parse_qs(urlparse(self.path).query).get('symbol') or [''])[0]!=bound_instrument:raise ValueError('Chart instrument differs from selected instance.')
+            except Exception as error:self.send_json(409,{'error':str(error)});return
+            if path=="/api/paper-capital/status":
+                self.send_json(200,dict(revision="paper-capital-inr-v1",default_capital_inr=100000,scope="Renko, RSI, EMA Band, KAMA, Delta Paper and isolated straddles"));return
+            if delta_renko.get(self,path): return
+            if path == '/api/renko-instances':
+                self.send_json(200,{'instances':renko_instance_rows()});return
             if path == "/api/auth/status":
                 self.send_json(200, fyers_auth_status()); return
             if path == "/api/ema-band/master-status":
@@ -3178,6 +3328,131 @@ def run_server():
                 return
             if path == "/api/ema-crossover/runner":
                 self.send_json(200, ema_crossover.snapshot())
+                return
+            if path == '/api/renko-supertrend/settings':
+                try:self.send_json(200,renko_supertrend.read_preferences())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/broker-positions':
+                try:self.send_json(200,renko_adoptions.inventory())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == "/api/renko-supertrend/runner":
+                self.send_json(200, renko_supertrend.snapshot())
+                return
+            if path == "/api/renko-supertrend/journal":
+                self.send_json(200, {'schema_version':1,'exported_at':time.time(),'scope':'Actual Paper/Live owned option lifecycle; historical chart simulations excluded.','trades':renko_supertrend.snapshot().get('trade_history',[])})
+                return
+            if path == '/api/renko-supertrend/journal.xlsx':
+                try:
+                    from strategies.renko_supertrend.journal_export import export_xlsx
+                    body = export_xlsx({'exported_at':time.time(),'trades':renko_supertrend.snapshot().get('trade_history',[])}, ROOT)
+                    self.send_response(200)
+                    self.send_header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                    self.send_header('Content-Disposition','attachment; filename="renko-trading-journal.xlsx"')
+                    self.send_header('Content-Length',str(len(body)))
+                    self.send_header('Cache-Control','no-store')
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError,ConnectionResetError):pass
+                except Exception:self.send_json(409,{'error':'Excel export unavailable; saved journal remains intact.'})
+                return
+            if path == '/api/renko-supertrend/stream':
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    config = {'underlying':str((query.get('symbol') or [''])[0]).upper(),
+                              'timeframe':str((query.get('timeframe') or ['5 minutes'])[0])}
+                    raw = {key:query[key][0] for key in renko_supertrend_settings({}) if key in query}
+                    raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower()=='true'
+                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                        raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
+                    display_settings = renko_supertrend_settings(raw)
+                    context_key = json.dumps([config,display_settings],sort_keys=True)
+                    renko_chart_broker.session_policy(config)  # Authoritative instrument validation.
+                    from strategies.ema_crossover.runner import TIMEFRAMES
+                    seconds = TIMEFRAMES[config['timeframe']]
+                    renko_chart_broker.observe(config,[])
+                    renko_chart_broker.start()  # Read-only subscription, never arms the runner.
+                    renko_order_stream.start()
+                except Exception:
+                    self.send_json(409,{'error':'Live stream could not connect for this instrument.'})
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type','text/event-stream')
+                self.send_header('Cache-Control','no-cache, no-store')
+                self.send_header('X-Accel-Buffering','no')
+                self.end_headers()
+                try:
+                    while True:
+                        frame = browser_frame(renko_supertrend,renko_chart_broker,config,renko_order_stream)
+                        frame['bar_seconds'] = seconds
+                        with renko_adoptions.lock:
+                            frame['adopted_managers']=[dict(id=k,**r.snapshot()) for k,r in renko_adoptions.runners.items()]
+                        with renko_display_lock:
+                            context = renko_display_context.get(context_key)
+                        if context and frame['forming']:
+                            try:
+                                frame['display_analysis'] = renko_provisional(context['confirmed'],frame['forming'],context['config'],context['tick'],time.time())
+                            except ValueError:pass
+                        self.wfile.write(('event: state\ndata: '+json.dumps(frame,allow_nan=False)+'\n\n').encode())
+                        self.wfile.flush()
+                        renko_stream_wake.wait(1)
+                        renko_stream_wake.clear()
+                        time.sleep(.15)  # Coalesce tick bursts without accumulating stale frames.
+                except (BrokenPipeError,ConnectionResetError,TimeoutError):pass
+                finally:self.close_connection=True
+                return
+            if path == "/api/renko-supertrend/chart":
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    symbol = str((query.get('symbol') or [''])[0]).upper()
+                    timeframe = str((query.get('timeframe') or ['5 minutes'])[0])
+                    raw = {key: query[key][0] for key in renko_supertrend_settings({}) if key in query}
+                    raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower() == 'true'
+                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                        raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
+                    config = renko_supertrend_settings(raw)
+                    policy = renko_broker.session_policy({'underlying':symbol})
+                    try:option_route=renko_broker.route_availability({'underlying':symbol})
+                    except ValueError as error:option_route={'available':False,'message':str(error)}
+                    config.update(policy)
+                    holding=str((query.get('commodity_holding') or ['INTRADAY'])[0])
+                    if holding not in ('INTRADAY','CARRY_FORWARD'):raise ValueError('Unknown MCX holding policy.')
+                    if symbol.startswith('MCX:') and holding == 'CARRY_FORWARD':
+                        config.update(commodity_holding=holding,session_deadline=None)
+                    tick = renko_broker.host_tick_size(symbol)
+                    analyzed,rows,forming_rows,history = renko_chart_history.load(ema_readonly_client(),symbol,timeframe,
+                        str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),
+                        {**config,'underlying':symbol,'timeframe':timeframe},tick)
+                    history_error=history['history_error']
+                    candles=rows+forming_rows
+                    renko_chart_broker.observe({**config,'underlying':symbol,'timeframe':timeframe},candles)
+                    with renko_display_lock:
+                        context_key=json.dumps([{'underlying':symbol,'timeframe':timeframe},renko_supertrend_settings(raw)],sort_keys=True)
+                        renko_display_context[context_key]={'confirmed':{'last':analyzed['last'],'state':analyzed['state']},'config':{**config,'underlying':symbol,'timeframe':timeframe},'tick':tick}
+                        if len(renko_display_context)>20:renko_display_context.pop(next(iter(renko_display_context)))
+                    intrabar_enabled = str((query.get('intrabar_entries') or ['false'])[0]).lower() == 'true'
+                    candidate = None
+                    candidate_error = None
+                    if intrabar_enabled:
+                        try:
+                            chart_config = {**config,'underlying':symbol,'timeframe':timeframe}
+                            renko_chart_broker.observe(chart_config,candles)
+                            renko_chart_broker.start()  # Read-only chart websocket; does not start a trading runner.
+                            forming = renko_chart_broker.forming(chart_config,candles,time.time())
+                            candidate = renko_provisional(analyzed,forming,chart_config,tick,time.time())
+                            candles = [c for c in candles if not c.get('is_forming')] + [forming]
+                        except (ValueError,RuntimeError) as error:
+                            candidate_error = str(error)
+                    self.send_json(200, {'symbol': symbol, 'timeframe': timeframe, 'settings': config,
+                        'tick_size': tick, 'rows': [r for r in rows if r['timestamp'] >= float((query.get('since') or ['0'])[0])] if (query.get('revision') or [''])[0] == history['analysis_revision'] else rows, 'incremental': (query.get('revision') or [''])[0] == history['analysis_revision'], 'history':history, 'latest': rows[-1] if rows else None,
+                        'initialization_anchor': analyzed['anchor'],
+                        'host_bar_count': analyzed['state']['count'], 'forming': [c for c in candles if c.get('is_forming')],
+                        'source': 'Pinaki Renko ST Auto Research · supplied Pine v6',
+                        'history_error': history_error, 'intrabar_entries':intrabar_enabled,'provisional_candidate':candidate,'provisional_error':candidate_error,'session_policy':policy,'option_route':option_route,'squareoff_time':('None · overnight carry; exact option expiry protection applies' if config.get('commodity_holding')=='CARRY_FORWARD' else policy['session_deadline']+' Asia/Kolkata'),
+                        'parity': 'Formula port; initialization depends on identical host history. Protected-original parity unverified.'})
+                except Exception as error:
+                    self.send_json(409, {'error': str(error)})
                 return
             if path == "/api/ema-band/runner":
                 self.send_json(200, ema_runner_snapshot())
@@ -3361,6 +3636,21 @@ def run_server():
             path = self.path.split("?", 1)[0]
             try:
                 payload = self.read_json()
+                bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
+                renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if bound_instrument and path.endswith(('/preview','/start','/adopt')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
+                if path=='/api/renko-instances/start-selected':
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
+                    origin=self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise PermissionError('Cross-origin mutation forbidden.')
+                    self.send_json(200,renko_batch.start(payload));return
+                if path=='/api/renko-instances/create':
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
+                    origin=self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc!=self.headers.get('Host'):raise PermissionError('Cross-origin mutation forbidden.')
+                    key=renko_make_instance(payload.get('broker'),str(payload.get('underlying','')).strip().upper())
+                    self.send_json(200,{'instance_key':key,'running':renko_lookup_instance(payload.get('broker'),key).state['running'],'message':'Instance created/reused; no runner started.'});return
+                if delta_renko.post(self,path,payload): return
                 if path == "/api/ema-band/master-refresh":
                     self.send_json(200, refresh_ema_masters())
                     return
@@ -3371,6 +3661,23 @@ def run_server():
                     actions={"/api/delta-india/verify-auth":lambda _:delta_india.verify_auth(),"/api/delta-india/paper-preview":delta_india.preview,"/api/delta-india/paper-record":delta_india.record_paper,"/api/delta-india/paper-close":delta_india.close_paper,"/api/delta-india/connect":delta_india.configure,"/api/delta-india/account":delta_india.account,"/api/delta-india/submit":delta_india.submit,"/api/delta-india/reconcile":delta_india.reconcile,"/api/delta-india/cancel":delta_india.cancel,"/api/delta-india/fills":delta_india.fills,"/api/delta-india/runner-start":delta_india.start_runner,"/api/delta-india/runner-stop":delta_india.stop_runner,"/api/delta-india/runner-close":delta_india.close_runner}
                     if path not in actions:raise ValueError('Unknown Delta India action.')
                     self.send_json(200,actions[path](payload));return
+                if path.startswith('/api/renko-supertrend/'):
+                    if (self.headers.get('Host') or '').split(':')[0] not in ('127.0.0.1', 'localhost'):
+                        raise PermissionError('Runner actions require the local dashboard.')
+                    origin = self.headers.get('Origin')
+                    if origin and urlparse(origin).netloc != self.headers.get('Host'):
+                        raise PermissionError('Cross-origin runner mutations are forbidden.')
+                    actions = {'/api/renko-supertrend/adopt': renko_adoptions.apply,
+                               '/api/renko-supertrend/adoption-control': renko_adoptions.control,
+                               '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
+                               '/api/renko-supertrend/preview': renko_supertrend.preview,
+                               '/api/renko-supertrend/start': renko_supertrend.activate,
+                               '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop()}
+                    if path not in actions:
+                        raise ValueError('Unknown Renko strategy action.')
+                    self.send_json(200, actions[path](payload))
+                    return
+
                 if path.startswith("/api/ema-crossover/"):
                     origin = self.headers.get("Origin")
                     if origin and urlparse(origin).netloc != self.headers.get("Host"):

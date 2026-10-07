@@ -1,3 +1,7 @@
+# Sector Pulse
+
+For the complete Renko-enabled release, use the [portable installer and deployment guide](docs/installation.md). Run `python3.11 setup.py` after installing Python 3.11/3.12 and Node.js. Release tarballs include the setup script and prebuilt UI.
+
 # NSE Sector Heat Map
 
 For a first-time setup, run the native setup-and-launch entry point from the
