@@ -40,7 +40,7 @@
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
   const initialStraddleMarket = storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
+  const initialView = window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
     : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors'
   let straddleRunnerState = { available: false, running: false }

@@ -222,3 +222,9 @@ Saved configuration choices can be restored or deleted in the setup controls. Re
 ## Analysis Handoff: buy ATM Call or Put
 
 Stock-option handoff now proposes a single bought nearest-strike ATM Call for bullish direction, or Put for bearish direction, on the selected verified expiry. It does not construct a short leg. Contract, whole lot, tick, quote, liquidity and Greeks evidence must pass. The full paid premium is the maximum option loss excluding costs. A selected reward-to-risk target is a premium planning target, not a return forecast. Review quantity, premium and allocation in the execution ticket; exporting the packet sends no order. An unavailable exact contract remains blocked.
+
+## Multiple users and broker accounts
+
+Open the separate **User & broker setup** portal after the operator bootstraps its administrator. Sign in, add your FYERS or Delta India account, save **Connection settings**, then **Launch dashboard**. Add another account to use another broker or another account with the same broker. Each opens in a separate tab and shows its user/account/broker identity in the top bar. Credentials, settings, Paper capital and journals belong to that workspace. The Renko broker selector stays bound to the account; switch accounts through **Users & broker accounts**.
+
+Administrators can add users but do not receive access to their trading workspaces. Password changes revoke login sessions. Sign out stops access and streaming updates; background strategies still require their normal Stop/reconcile workflow. Live capability is off by default and saving a connection places no order. Native WhatsApp polling is unavailable in these isolated workspaces. The existing single-user service is independent and does not acquire portal authentication automatically. Read the [complete setup and update procedure](multi-user-broker-setup.md) before activation.

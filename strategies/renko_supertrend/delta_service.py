@@ -123,7 +123,7 @@ class Service:
         config=self.chart_config(query); self.chart_broker.subscribe(config['underlying'],TIMEFRAMES[config['timeframe']]); self.chart_broker.start()
         handler.send_response(200); handler.send_header('Content-Type','text/event-stream'); handler.send_header('Cache-Control','no-store'); handler.end_headers()
         try:
-            while True:
+            while not hasattr(handler,'workspace_stream_valid') or handler.workspace_stream_valid():
                 forming=None; error=None
                 try: forming=self.chart_broker.forming(config,[],time.time())
                 except ValueError as exc: error=str(exc)

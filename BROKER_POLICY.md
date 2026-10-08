@@ -1,13 +1,24 @@
-# FYERS-only broker policy
+# Sector Pulse broker and workspace boundaries
 
-Sector Heatmap has one broker boundary: FYERS.
+The supported trading brokers are FYERS and Delta India. Indian-market sector
+analysis, Analysis Handoff and FYERS execution retain the FYERS boundary. Delta
+India uses its separate authenticated adapter and India endpoint. There is no
+automatic substitution between these brokers and no other broker execution route.
 
-- FYERS is the only permitted source for broker market data, option chains,
-  account state, order previews, and any user-enabled execution.
-- There is no broker chooser, alternative broker adapter, or fallback data feed.
-- Every final ticket and every future unattended-policy evaluation must refresh
-  FYERS identity, contracts, quotes, funds/margin coverage, positions, and order
-  state before it can proceed.
-- Tests and development must use fakes with live submission gates disabled.
-- Adding another broker requires an explicit change to this policy and its
-  invariant test; it must never happen incidentally through a generic adapter.
+The opt-in user setup portal supports multiple users and multiple broker accounts
+per user. Every account has an isolated dashboard process, source snapshot,
+credential files/token cache, settings, Paper balances, journals and ownership
+locks. Account dashboards verify the signed-in owner for every request and reject
+mutation requests for a broker different from their registered workspace.
+Administrator status permits creating users; it does not grant trading access to
+another user's workspace. Setup starts no strategy and sends no order.
+
+Each final ticket/runner retains its adapter's fresh identity, exact contract,
+quotes, capital/margin, ownership, position and order reconciliation checks.
+Tests use fake credentials with live gates disabled. Adding another broker
+requires an explicit adapter, policy and invariant-test update.
+
+The existing single-user dashboard is unchanged unless launched as an isolated
+workspace. Authentication covers provisioned workspace dashboards, not an
+independently running legacy localhost service. This local feature is not a
+public Internet hosting configuration. See docs/multi-user-broker-setup.md.

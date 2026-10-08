@@ -866,6 +866,8 @@ def kama_scheduled_squareoff_due(position, now=None):
     return moment.hour * 60 + moment.minute >= cutoff_minutes
 
 def run_server():
+    from .workspace_guard import WorkspaceGuard
+    workspace_guard = WorkspaceGuard.from_environment()
     port = int(os.getenv("HEATMAP_PORT", "8080"))
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
     feed = FyersLiveFeed(token) if token else None
@@ -3513,6 +3515,15 @@ def run_server():
 
 
     class Handler(SimpleHTTPRequestHandler):
+        def workspace_stream_valid(self):
+            if not workspace_guard: return True
+            try: workspace_guard.authorize(self.headers); return True
+            except PermissionError: return False
+
+        def do_HEAD(self):
+            if workspace_guard and not workspace_guard.check(self): return
+            super().do_HEAD()
+
         def send_head(self):
             target = Path(self.translate_path(self.path)).resolve()
             try:
@@ -3541,6 +3552,15 @@ def run_server():
                 return
 
         def do_GET(self):
+            if workspace_guard and not workspace_guard.check(self): return
+            if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
+                context = workspace_guard.context(*self.workspace_identity) if workspace_guard else {'workspace': None}
+                body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';').encode()
+                self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
+            if self.path.split('?', 1)[0] == '/api/workspace-context':
+                self.send_json(200, workspace_guard.context(*self.workspace_identity) if workspace_guard else {'workspace': None}); return
+            if workspace_guard and self.path.split('?', 1)[0] == '/workspace-entry':
+                self.send_response(302); self.send_header('Location', '/'); self.end_headers(); return
             path = self.path.split("?", 1)[0]
             try:
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
@@ -3680,7 +3700,7 @@ def run_server():
                 self.send_header('X-Accel-Buffering','no')
                 self.end_headers()
                 try:
-                    while True:
+                    while self.workspace_stream_valid():
                         frame = browser_frame(renko_supertrend,renko_chart_broker,config,renko_order_stream)
                         frame['bar_seconds'] = seconds
                         from strategies.renko_supertrend.stream import browser_managers
@@ -3940,9 +3960,11 @@ def run_server():
             return payload
 
         def do_POST(self):
+            if workspace_guard and not workspace_guard.check(self, mutation=True): return
             path = self.path.split("?", 1)[0]
             try:
                 payload = self.read_json()
+                if workspace_guard: workspace_guard.validate_action(self.workspace_identity[1], path, payload)
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
                 if bound_instrument and path.endswith(('/preview','/start','/adopt','/override-entry')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')

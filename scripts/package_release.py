@@ -37,6 +37,18 @@ def build(ref='HEAD', output=None):
                 if SECRET.search(payload):
                     raise ValueError('Credential pattern in '+str(path))
                 members.append(dict(path=str(path), size=len(payload), sha256=hashlib.sha256(payload).hexdigest()))
+    # Include a verified source inventory so extracted releases can provision
+    # workspaces without Git or a copied developer checkout.
+    inventory=json.dumps(dict(commit=commit,files=members),indent=2).encode()
+    rebuilt=io.BytesIO()
+    with tarfile.open(fileobj=io.BytesIO(data)) as original, tarfile.open(fileobj=rebuilt,mode='w') as packed:
+        for member in original.getmembers():
+            packed.addfile(member,original.extractfile(member) if member.isfile() else None)
+        member=tarfile.TarInfo(name+'/release-source-files.json')
+        member.size=len(inventory);member.mode=0o644
+        packed.addfile(member,io.BytesIO(inventory))
+    members.append(dict(path='release-source-files.json',size=len(inventory),sha256=hashlib.sha256(inventory).hexdigest()))
+    data=rebuilt.getvalue()
     target = folder/(name+'.tar.gz')
     # Compress the validated git archive; no working-tree or private overlay files.
     import gzip

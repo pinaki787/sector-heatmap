@@ -346,3 +346,13 @@ The guides describe source behavior; they do not certify current runtime or prof
 ## October 8 release
 
 Renko adds mandatory completed 1-minute/5-minute Supertrend agreement, optional market structure and five-minute zone exits, explicit manual entry override, and recorded chart/assessment evidence. Analysis Handoff buys one verified ATM Call/Put. Read the [updated user guide](docs/user-functional-guide.md) and [release notes](docs/release-notes-2026-10-08.md). Build a credential-free source deployable with `python3 scripts/package_release.py`; see the [deployment procedure](docs/deployment-guide.md).
+
+## Multiple users and broker accounts
+
+Use the opt-in [user and broker setup portal](docs/multi-user-broker-setup.md) for
+separate logins and multiple FYERS / Delta India account workspaces. Bootstrap an
+administrator with `.venv/bin/python -m sector_heatmap.workspace_portal --bootstrap-admin admin`,
+then run `.venv/bin/python -m sector_heatmap.workspace_portal` and open
+`http://127.0.0.1:8079/`. Each account owns its credentials, dashboard process,
+settings, Paper capital and journals. The existing single-user dashboard remains
+independent; the portal does not migrate or restart it.

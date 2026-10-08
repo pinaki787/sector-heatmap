@@ -2324,6 +2324,75 @@ Local native adapter; invoked only by explicit Start, never at startup.
 - `NativeWhatsAppSource.readiness(self)`
 - `NativeWhatsAppSource.read_latest(self, group)`
 
+## sector_heatmap/workspace_guard.py
+
+[Owning source](../sector_heatmap/workspace_guard.py)
+
+Authenticate every request made to an isolated account dashboard.
+
+### Callables and explicit defaults
+
+- `WorkspaceGuard.__init__(self, store, account_id, port, portal_port)`
+- `WorkspaceGuard.from_environment(cls)`
+- `WorkspaceGuard.authorize(self, headers, mutation=False)`
+- `WorkspaceGuard.validate_action(self, account, path, payload)`
+- `WorkspaceGuard.context(self, user, account)`
+- `WorkspaceGuard.check(self, handler, mutation=False)`
+
+## sector_heatmap/workspace_portal.py
+
+[Owning source](../sector_heatmap/workspace_portal.py)
+
+Authenticated localhost setup portal for separate users and broker accounts.
+
+### Callables and explicit defaults
+
+- `handler_factory(store, runtime, port)`
+- `main()`
+
+### Literal payload and lookup fallbacks
+
+- `Content-Length` → `'0'`
+- `Content-Type` → `''`
+- `account_ref` → `''`
+- `label` → `''`
+- `live_enabled` → `False`
+- `username` → `''`
+
+## sector_heatmap/workspaces.py
+
+[Owning source](../sector_heatmap/workspaces.py)
+
+Local user registry and isolated broker workspaces. Never starts a strategy.
+
+### Callables and explicit defaults
+
+- `password_hash(password, salt)`
+- `private_write(path, content)`
+- `WorkspaceStore.__init__(self, path, clock=time.time)`
+- `WorkspaceStore.db(self)`
+- `WorkspaceStore.create_user(self, username, password, actor=None, bootstrap=False)`
+- `WorkspaceStore.login(self, username, password)`
+- `WorkspaceStore.session(self, token)`
+- `WorkspaceStore.logout(self, token)`
+- `WorkspaceStore.change_password(self, user, current_password, new_password)`
+- `WorkspaceStore.accounts(self, user)`
+- `WorkspaceStore.account(self, user, account_id)`
+- `WorkspaceStore.create_account(self, user, broker, label, account_ref)`
+- `WorkspaceStore.folder(self, account)`
+- `WorkspaceStore.configure(self, user, aid, fields, live_enabled=False)`
+- `cookie_token(headers)`
+- `isolated_environment(account, folder, registry, portal_port)`
+- `WorkspaceRuntime.__init__(self, store, source, portal_port=8079)`
+- `WorkspaceRuntime.running(self, aid)`
+- `WorkspaceRuntime.configure(self, user, aid, fields, live_enabled)`
+- `WorkspaceRuntime.provision(self, account)`
+- `WorkspaceRuntime.start(self, user, aid)`
+
+### Literal payload and lookup fallbacks
+
+- `Cookie` → `''`
+
 ## sensex_ema_band_midpoint_live.py
 
 [Owning source](../sensex_ema_band_midpoint_live.py)
@@ -3622,3 +3691,15 @@ Optional completed-5m opposing-zone exit. Pure OHLC evidence; no execution.
 ### UI field and toggle identifiers
 
 `wa-group`, `wa-interval`, `wa-queue`, `wa-refresh`, `wa-save`, `wa-source`, `wa-start`, `wa-status`, `wa-stop`
+
+## workspace-context.js
+
+[Owning source](../workspace-context.js)
+
+## workspace-portal.js
+
+[Owning source](../workspace-portal.js)
+
+### Named functions
+
+`api`, `bind`, `edit`, `message`, `refresh`
