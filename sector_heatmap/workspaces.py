@@ -304,6 +304,7 @@ class WorkspaceRuntime:
                 import shutil
                 shutil.rmtree(stage)
                 raise
+        (source/'.private').mkdir(parents=True,exist_ok=True,mode=0o700)
         credentials=folder/'credentials.json'
         if credentials.exists():
             values=json.loads(credentials.read_text())

@@ -147,7 +147,7 @@ class WorkspaceTests(unittest.TestCase):
         folder=runtime.provision(self.a);other=runtime.provision(self.b)
         self.assertFalse((folder/'source/.fyers.env').exists())
         self.assertTrue((folder/'source/heatmap_server.py').exists())
-        (folder/'source/.private').mkdir();(folder/'source/.private/state.json').write_text('alice-only')
+        (folder/'source/.private').mkdir(exist_ok=True);(folder/'source/.private/state.json').write_text('alice-only')
         self.assertFalse((other/'source/.private/state.json').exists())
         self.assertTrue((folder/'source-commit.txt').exists())
 

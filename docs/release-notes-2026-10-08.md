@@ -19,3 +19,10 @@ The code baseline passed 293 Renko Python tests, 6 long-option handoff tests and
 ## Build and verify
 
 Run `python3 scripts/package_release.py` after committing the reviewed source. Outputs are under ignored `output/releases/`: source `.tar.gz`, `.sha256` and per-file `.manifest.json`. The builder resolves the exact commit, uses `git archive`, rejects private paths and common credential patterns, and never copies local environment or private state. Verify the SHA256 before extracting; use setup-only and the stopped/exposure-safe update procedure in the deployment guide.
+
+
+## Multi-user / multi-broker addition
+
+The release also includes opt-in private user logins and multiple FYERS / Delta India account workspaces. Each uses a separate source snapshot, dashboard process/port, token cache, settings, Paper capital and journal. Setup/user creation, broker credentials and optional Live capability are managed in the local portal; account dashboards require the signed-in owner and reject wrong-broker actions. See [setup instructions](multi-user-broker-setup.md). The legacy single-user service stays independent and is not automatically migrated or authenticated.
+
+Validation: 425 general Python tests and 293 Renko tests passed; the general suite includes 17 workspace tests. Browser verification used temporary demo account entries, without broker login/orders. The full JavaScript suite passed 132 of 134 tests; the two Renko-settings VM fixture failures were reproduced on the previous committed release (missing apiBase/brokerName fixture variables). Source archive hashes and a credential-free extracted-release worker are verified separately.
