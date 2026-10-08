@@ -1,8 +1,8 @@
 # Sector Pulse User Functional Guide
 
-Audited 7 October 2026. Start with [technical formulas](technical-guide.md), [deployment and private restore](deployment-guide.md), and [complete settings/source catalog](source-reference.md). This guide describes controls and expected behavior, not the current account or a trading recommendation.
+Audited 8 October 2026. Start with [technical formulas](technical-guide.md), [deployment and private restore](deployment-guide.md), and [complete settings/source catalog](source-reference.md). This guide describes controls and expected behavior, not the current account or a trading recommendation.
 
-Updated 7 October 2026 · Renko Support and Strategy
+Updated 8 October 2026 · Renko Support and Strategy
 
 This section explains the deployed Renko chart and management of existing FYERS positions. For other dashboard areas, use the [project documentation](../README.md), [Delta India guide](delta-india.md) and [Trade Parser guide](telegram-trade-parser.md).
 
@@ -36,7 +36,7 @@ The already-filled position becomes the managed position. **No initial BUY is su
 
 The selected existing Renko exit rules become active when management starts. An already adverse EMA or configured underlying price boundary does not require another entry or a new crossing. Trailing starts from fresh observations after adoption; it does not invent an earlier price peak. Execution still requires the relevant fresh price and broker reconciliation; starting monitoring does not guarantee an immediate fill.
 
-- With the EMA exit enabled, a Call exits on an adverse underlying move below the selected EMA; a Put exits above it. Equality alone is not a breach. EMA exit is independent of the entry widening rule and ADX filter.
+- With the EMA exit enabled, a Call exits below the selected EMA; a Put exits above it. Intrabar entries off requires a completed host close; on permits a fresh intrabar breach. Equality alone is not a breach. EMA exit is independent of the entry widening rule and ADX filter.
 - An opposite **confirmed Supertrend reversal** is an additional exit, subject to the selected ADX gate.
 - Configured underlying stop/target levels and optional trailing stops apply when enabled.
 - Session square-off uses the instrument's broker-master segment and verified session policy. Current source uses 15:10 IST for NSE/BSE and the verified regular-session end for MCX, subject to holding/expiry policy. New adoption is unavailable after its cutoff.
@@ -132,7 +132,7 @@ The candlestick/fullscreen chart adds only **Start Runner / Stop Runner**, using
 - ADX: off by default; enabled requires strict threshold exceedance. RSI slope on by default requires rising bullish/falling bearish RSI14, blocks flat/unwarmed data.
 - Retest: optional established trend touch/bounce with selected engulfing/harami/intraday-star geometry. Selecting it does not disable the other gates. At least one pattern is required.
 - Intrabar entries: off by default; provisional cloned engine on verified current candle and fresh tick. A transient candidate can disappear. Missing open/history is a blocker even when tick status is green.
-- EMA exit: runner default on/10; editable1–1000 or disabled. It reacts to fresh provisional underlying EMA breach independently of entry widening. Opposite confirmed ST remains a separate exit.
+- EMA exit: runner default on/10; editable1–1000 or disabled. With Intrabar entries off, it uses a completed host-candle close; with it on, a fresh provisional breach can exit. Entry widening does not govern exits. Opposite confirmed ST remains a separate exit.
 - Underlying stop/target: optional positive absolute underlying prices, not option premium points or percentages; direction/tick validation applies.
 - EMA proximity: optional ATR/points maximum distance from entry EMA10, defaultATR/.5; prevents far-from-EMA entries only when enabled.
 - Sideways: off by default; max3 host buckets. Quick finalized estimated net loss can freeze actual exposure range, blocking new entries until fresh strict breakout. It does not prevent exits.
@@ -144,7 +144,7 @@ The candlestick/fullscreen chart adds only **Start Runner / Stop Runner**, using
 
 A green chart-feed/order-stream LED requires a fresh snapshot, connected/fresh market, tick age0–15seconds and order-stream connection. Snapshot age over5seconds, missing tick time, closed market or errors change the status. Read tick age and candle readiness separately. A green LED does not certify broker fills, current candle-open recovery, future latency or profitability.
 
-Five-minute strong supply/demand shaded bands come from completed broker OHLC, regardless of strategy timeframe. Two bars on either side confirm a strict pivot. Strength requires a close beyond the opposite pivot wick with at least one ATR14 departure within the following two closed bars. Shading starts retrospectively at origin; the region before confirmation was not known then. A later strict close beyond the outside boundary marks broken; a wick/equality alone does not. Latest qualifying band and origin/confirmation/break information remain visible until replaced. They are chart references, not automatic strategy entry/exit gates.
+Five-minute strong supply/demand shaded bands come from completed broker OHLC, regardless of strategy timeframe. Two bars on either side confirm a strict pivot. Strength requires a close beyond the opposite pivot wick with at least one ATR14 departure within the following two closed bars. Shading starts retrospectively at origin; the region before confirmation was not known then. A later strict close beyond the outside boundary marks broken; a wick/equality alone does not. Latest qualifying band and origin/confirmation/break information remain visible until replaced. Shading is a chart reference. The optional five-minute zone target exit described below can use the completed zone evidence.
 
 Choose host/synthetic, volume, RSI pane and its chart-only SMA period, overlays, historical range and fit/latest/fullscreen independently. Synthetic volume is real host volume, not generated volume per brick. Cloud overlays include EMA10/30, Bollinger, RSI ranges, session/Fib/CPR references and drawings; enabling a visual does not alter the armed strategy. Session timezone/start preferences are chart-only. Floating red-bar Fib applies to5m. Earlier/later history may require provider retrieval and replay; gaps/errors remain explicit.
 
@@ -203,3 +203,22 @@ Before update/restart, inspect every active instance and actual broker exposure.
 If data is stale or warming up, inspect missing component/history/master and await verified refresh; never reinterpret unavailable as neutral or zero. Green tick status with missing forming open blocks intrabar entries until recovery. If quote subscription is warming, the limited fresh-signal retry may recover before intent; UNKNOWN submission cannot be retried. A stopped button with owned quantity still requires module-specific reconciliation.
 
 If capital insufficient, choose a deliberately revised quantity/capital after understanding its basis; rejected quantities are not silently changed. If contract not listed or expiry/units cannot be verified, the route is unavailable. If export fails, verify project dependencies and stored evidence. If native WhatsApp unavailable on your OS, use manual/Telegram routes. Broker token renewal, IP/permissions and platform limits are documented in deployment guidance.
+
+
+## October 8 release: entry controls and chart evidence
+
+Every Renko entry now requires the latest completed **1-minute and 5-minute Supertrend** directions to agree with the requested side. This applies across selected host timeframes and to manual overrides. Missing, stale, nonconsecutive or warming-up source candles block entry. The dashed five-minute chart line becomes available after that candle closes; it never uses a forming five-minute value.
+
+**Market structure** is optional and off by default. It requires two confirmed higher highs and higher lows for bullish automatic entries, or lower highs and lower lows for bearish entries, on actual host candles. Each strict pivot needs two completed bars on either side. Mixed, equal or insufficient swings block automatic entry when enabled.
+
+**Five-minute zone target** is optional and off by default. A bullish position targets the latest known unbroken supply band; a bearish position targets demand. Only a whole five-minute candle after the fill can decide the outcome, using a zone known before that candle opened. Touching the zone and closing strictly beyond its outer boundary permits continuation. Other touched closes request an exit. Missing/stale evidence provides no zone exit; ordinary enabled exits continue. This is an underlying-price rule, not a guaranteed premium profit target.
+
+**Manual entry override** requires an already active, flat selected runner with no pending order. Choose Bullish or Bearish explicitly. It bypasses automatic setup qualification, market structure, EMA proximity and the adverse-EMA entry check. It retains completed 1-minute/5-minute agreement, fresh quotes, exact contract/account/ownership, session and quota, capital, hard boundaries, sideways lock and Live capability checks. Normal exit management remains active. A manually entered position can therefore exit quickly. If the response is uncertain, **Check override result** reuses the same request identity; do not create another entry to resolve uncertainty.
+
+EMA exits follow **Intrabar entries** timing: off requires a completed host-candle close; on permits a fresh intrabar adverse breach. Actual exit markers use the recorded fill candle and applied EMA period. Chart assessment preserves recorded runner evaluations across routine history revisions. Feed status distinguishes fresh market ticks from delayed runner snapshots; read both timestamps before interpreting execution state.
+
+Saved configuration choices can be restored or deleted in the setup controls. Restoring prepares the next Start; deleting a saved choice does not close a position. Review draft and active settings separately.
+
+## Analysis Handoff: buy ATM Call or Put
+
+Stock-option handoff now proposes a single bought nearest-strike ATM Call for bullish direction, or Put for bearish direction, on the selected verified expiry. It does not construct a short leg. Contract, whole lot, tick, quote, liquidity and Greeks evidence must pass. The full paid premium is the maximum option loss excluding costs. A selected reward-to-risk target is a premium planning target, not a return forecast. Review quantity, premium and allocation in the execution ticket; exporting the packet sends no order. An unavailable exact contract remains blocked.

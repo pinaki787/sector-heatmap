@@ -1,6 +1,6 @@
 # Sector Pulse deployment guide
 
-Audited7October2026. [Technical rules](technical-guide.md), [user operations](user-functional-guide.md), [source/default catalog](source-reference.md). Installing files does not authorize orders, start a strategy, or establish that a broker connection is usable. This guide describes the current release procedure; runtime state must be checked at the time of any update.
+Updated 8 October 2026. [Technical rules](technical-guide.md), [user operations](user-functional-guide.md), [source/default catalog](source-reference.md). Installing files does not authorize orders, start a strategy, or establish that a broker connection is usable. This guide describes the current release procedure; runtime state must be checked at the time of any update.
 
 ## Package and platform boundaries
 
@@ -70,3 +70,9 @@ Isolated startup checks must use a new HOME/token path, no inherited broker cred
 - WhatsApp unavailable: macOS only, helper built, selected chat, unread metadata and OS permissions verified. Access errors fail closed; no claim of complete ingestion. Telegram needs actual bot/channel access, not a signed-in personal Telegram account.
 - Export unavailable: verify openpyxl import/project interpreter and recorded evidence; no Codex cache should be required. Missing old P&L/fee fields remain unknown, not zero.
 - Research source cannot run: supply missing historical inputs separately and install optional dependencies; no archive contains the bulk/private datasets. Research output cannot be promoted automatically.
+
+## October 8 source deployable
+
+Run `python3 scripts/package_release.py` on the reviewed committed checkout. Optional `--ref COMMIT` pins a prior commit; `--output DIRECTORY` chooses a destination. The default ignored `output/releases/` holds the date/commit-named tar.gz, SHA256 file and per-file manifest. Uncommitted edits are excluded. The builder rejects private/generated directories, runtime databases/logs, credential filenames and common credential patterns; still review staged source before publication.
+
+Verify with `shasum -a 256 ARCHIVE.tar.gz` on macOS or `sha256sum ARCHIVE.tar.gz` on Linux, comparing with its `.sha256` file. Extract into a fresh directory and use setup-only as above. The release includes the October 8 Renko/ATM-option changes and updated browser user guide. No credential overlay is regenerated, no active state is migrated, and archive creation does not restart services or runners. Read the [release notes](release-notes-2026-10-08.md) before upgrading.

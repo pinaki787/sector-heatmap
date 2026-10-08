@@ -341,3 +341,8 @@ Fresh installations include reviewed bundled NIFTY/SENSEX straddle sources with
 NumPy/pandas in the pinned runtime. Existing configured/legacy paths retain precedence.
 Straddle Live starts have separate explicit confirmation, not a universal EMA gate.
 The guides describe source behavior; they do not certify current runtime or profitability.
+
+
+## October 8 release
+
+Renko adds mandatory completed 1-minute/5-minute Supertrend agreement, optional market structure and five-minute zone exits, explicit manual entry override, and recorded chart/assessment evidence. Analysis Handoff buys one verified ATM Call/Put. Read the [updated user guide](docs/user-functional-guide.md) and [release notes](docs/release-notes-2026-10-08.md). Build a credential-free source deployable with `python3 scripts/package_release.py`; see the [deployment procedure](docs/deployment-guide.md).

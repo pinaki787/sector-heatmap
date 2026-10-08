@@ -14,7 +14,7 @@ def source_files():
 
 
 def render():
-    out=['# Generated source and settings reference','Generated from source on 7 October 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.']
+    out=['# Generated source and settings reference','Generated from source on 8 October 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.']
     for p in source_files():
         rel=p.relative_to(ROOT).as_posix();tree=ast.parse(p.read_text())
         out += ['## '+rel,'[Owning source](../'+rel+')']

@@ -1,6 +1,6 @@
 # Generated source and settings reference
 
-Generated from source on 7 October 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.
+Generated from source on 8 October 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.
 
 ## backtesting/coalindia_long_straddle/coalindia_long_straddle_check.py
 
@@ -978,6 +978,16 @@ Read-only live FYERS NIFTY iron-condor quote and payoff snapshot.
 
 - `data` → `{}`
 
+## scripts/package_release.py
+
+[Owning source](../scripts/package_release.py)
+
+Build and validate a source-only deployable from an exact Git commit.
+
+### Callables and explicit defaults
+
+- `build(ref='HEAD', output=None)`
+
 ## scripts/preview_trade_advisory.py
 
 [Owning source](../scripts/preview_trade_advisory.py)
@@ -1677,6 +1687,7 @@ FYERS-only, confirmation-gated ticket preparation and reconciliation.
 - `FyersExecutionService._live_submission_enabled(self)`
 - `FyersExecutionService._risk_settings(payload)`
 - `FyersExecutionService._preflight_option_spread(self, client, payload, proposal, minimum_rr)`
+- `FyersExecutionService._preflight_long_option(self, client, payload, proposal, minimum_rr)`
 - `FyersExecutionService._equity_leverage(self, symbol)`
 - `FyersExecutionService._preflight_equity(self, client, payload, proposal, invalidation, minimum_rr)`
 - `FyersExecutionService._preflight(self, payload)`
@@ -1725,6 +1736,7 @@ Local analysis handoff and read-only FYERS option-spread construction.
 - `_spread(identifier, label, direction, strategy, long_leg, short_leg, width, scenario)`
 - `_nearest_pair(legs, spot, long_higher=False)`
 - `build_defined_risk_spreads(chain_payload, expiry, master_records, direction, risk=None)`
+- `build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None)`
 - `validate_handoff_request(payload)`
 - `packet_prompt(recipient)`
 
@@ -2544,6 +2556,7 @@ Independent opt-in runner. Durable intent precedes every broker mutation.
 - `Runner.paper_rate(self)`
 - `Runner.paper_funds(self)`
 - `Runner.entry_preflight(self, order, contract, quote)`
+- `Runner.validate_entry_authorization(self, position)`
 - `Runner.submit(self, order, position, reason)`
 - `Runner.complete_pending(self, filled, price)`
 - `Runner.reconcile(self)`
@@ -3021,7 +3034,7 @@ Optional host-close EMA exit calculations; no order route or strategy mutation.
 
 [Owning source](../strategies/renko_supertrend/ema_proximity.py)
 
-Optional maximum fresh underlying distance from entry EMA10.
+New entries only: absolute underlying distance from EMA10, scaled by completed ATR.
 
 ### Callables and explicit defaults
 
@@ -3072,6 +3085,33 @@ Presentable, immutable journal export; spreadsheet generation has no order route
 ### Callables and explicit defaults
 
 - `export_xlsx(data, root)`
+
+## strategies/renko_supertrend/market_structure.py
+
+[Owning source](../strategies/renko_supertrend/market_structure.py)
+
+Optional directional structure gate from confirmed actual host pivots.
+
+### Callables and explicit defaults
+
+- `settings(payload)`
+- `check(rows, direction, seconds, event_at)`
+
+### Literal payload and lookup fallbacks
+
+- `market_structure_enabled` → `False`
+
+## strategies/renko_supertrend/mtf_supertrend.py
+
+[Owning source](../strategies/renko_supertrend/mtf_supertrend.py)
+
+Completed one/five-minute Supertrend agreement; no order routing.
+
+### Callables and explicit defaults
+
+- `latest(candles, config, tick_size, seconds, at)`
+- `agreement(one, five, direction)`
+- `check(one_rows, five_rows, config, tick_size, direction, at)`
 
 ## strategies/renko_supertrend/preferences.py
 
@@ -3197,6 +3237,10 @@ Independent Renko state using the existing durable FYERS lifecycle.
 - `Runner.preview(self, payload)`
 - `Runner.activate(self, payload, background=True)`
 - `Runner.stop(self)`
+- `Runner._chart_identity(self, payload)`
+- `Runner.chart_stop(self, payload)`
+- `Runner.chart_mode(self, payload)`
+- `Runner.prepare_zone_target(self, position, config)`
 - `Runner.session_bounds(self, c)`
 - `Runner.snapshot(self)`
 - `Runner.signal_key(self, sig)`
@@ -3204,6 +3248,8 @@ Independent Renko state using the existing durable FYERS lifecycle.
 - `Runner.step(self)`
 - `Runner.record_order(self, pending, status, filled=0, price=None)`
 - `Runner.complete_pending(self, filled, price)`
+- `Runner.override_entry(self, payload)`
+- `Runner.validate_entry_authorization(self, position)`
 - `Runner.submit(self, order, position, reason)`
 - `Runner.record_entry_assessment(self, sig, eligible, code, reason)`
 - `Runner.fresh_cross(self, sig)`
@@ -3213,17 +3259,20 @@ Independent Renko state using the existing durable FYERS lifecycle.
 - `Runner.exit_signal(self, sig, direction)`
 - `Runner.exit_ema(self, rows, c)`
 - `Runner.current_analysis(self, rows, c, tick)`
+- `Runner.supertrend_agreement(self, direction, at, host_rows=None)`
 - `Runner.signal(self)`
 
 ### Literal payload and lookup fallbacks
 
 - `accepting_entries` → `False`
 - `additional_slippage_points` → `0`
+- `broker` → `'FYERS'`
 - `cash_product` → `'INTRADAY'`
 - `ema_exit_enabled` → `True`
 - `ema_exit_length` → `10`
 - `ema_gaps` → `[]`
 - `entry_side` → `1`
+- `event_at` → `0`
 - `execution_route` → `'OPTIONS'`
 - `execution_signals` → `[]`
 - `filled` → `0`
@@ -3236,16 +3285,22 @@ Independent Renko state using the existing durable FYERS lifecycle.
 - `market_event_at` → `0`
 - `master_regular_session` → `''`
 - `master_regular_session` → `'0915-1530'`
+- `message` → `'No confirmed order intent or fill.'`
+- `mode` → `'PAPER'`
 - `netQty` → `0`
 - `order_history` → `[]`
 - `price_fingerprints` → `{}`
 - `quantity` → `0`
 - `quantity_multiplier` → `1`
+- `reason` → `'Confirmed market structure unavailable; entry blocked.'`
+- `reason` → `'One-minute/five-minute Supertrend agreement unavailable; entry blocked.'`
 - `reconciliation_events` → `[]`
 - `rows` → `[]`
 - `seen` → `[]`
 - `session_deadline` → `'15:10'`
 - `session_open` → `'09:15'`
+- `settings` → `{}`
+- `seven_day_session` → `False`
 - `sideways_archived` → `[]`
 - `sideways_enabled` → `False`
 - `sideways_events` → `[]`
@@ -3253,6 +3308,7 @@ Independent Renko state using the existing durable FYERS lifecycle.
 - `spot_fill_observations` → `[]`
 - `status` → `'PENDING'`
 - `timestamp` → `0`
+- `trades_used` → `0`
 - `trailing_basis` → `'OPTION_PREMIUM_PERCENT'`
 - `underlying` → `''`
 
@@ -3330,6 +3386,11 @@ Read-only browser stream and isolated FYERS order notifications.
 - `OrderNotifications.__init__(self, runner, wake, log_path)`
 - `OrderNotifications.start(self)`
 - `OrderNotifications.snapshot(self)`
+- `BrowserSnapshotCache.__init__(self, snapshot, clock=time.time)`
+- `BrowserSnapshotCache.refresh(self)`
+- `BrowserSnapshotCache.read(self, now)`
+- `browser_snapshot(runner, now)`
+- `browser_managers(runners, now)`
 - `browser_frame(runner, broker, config, order_stream, now=None)`
 
 ## strategies/renko_supertrend/trailing_stop.py
@@ -3349,6 +3410,23 @@ Optional monotonic full-position trailing exit; no partial profit targets.
 - `trailing_distance` → `10`
 - `trailing_enabled` → `False`
 
+## strategies/renko_supertrend/zone_target.py
+
+[Owning source](../strategies/renko_supertrend/zone_target.py)
+
+Optional completed-5m opposing-zone exit. Pure OHLC evidence; no execution.
+
+### Callables and explicit defaults
+
+- `settings(payload)`
+- `validate(rows)`
+- `zones(rows, timeline=None)`
+- `assess(rows, position, now)`
+
+### Literal payload and lookup fallbacks
+
+- `zone_target_enabled` → `False`
+
 ## dashboard-enhancements.js
 
 [Owning source](../dashboard-enhancements.js)
@@ -3359,7 +3437,7 @@ Optional monotonic full-position trailing exit; no partial profit targets.
 
 ### UI field and toggle identifiers
 
-`account-state`, `add-screener`, `ai-review-state`, `analysis-board`, `analysis-exclusions`, `analysis-panel`, `analysis-refresh-interval`, `analysis-status`, `analyze-screener-options`, `analyze-screeners`, `auto-ack`, `auto-completed`, `auto-cooldown`, `auto-daily-loss`, `auto-enabled`, `auto-end`, `auto-idea-risk`, `auto-index-underlyings`, `auto-kill`, `auto-limit-buffer`, `auto-max-dte`, `auto-max-orders`, `auto-max-positions`, `auto-max-spread`, `auto-min-dte`, `auto-min-rr`, `auto-mode`, `auto-option-evidence`, `auto-order-type`, `auto-planning-capital`, `auto-preview`, `auto-review`, `auto-risk-defined`, `auto-risk-reserve`, `auto-segments`, `auto-signals`, `auto-stale`, `auto-start`, `auto-status`, `auto-strategies`, `auto-symbols`, `auto-target`, `auto-uncertain`, `auto-universe`, `broker`, `broker-dot`, `broker-state`, `candidate-batch-actions`, `candidate-list`, `candidate-status`, `cash-product-choice`, `clear-candidate-selection`, `closed-pnl`, `closed-pnl-label`, `closed-positions`, `closed-summary`, `collect-candidates`, `confirm-funds`, `confirm-nifty-straddle-squareoff`, `confirm-straddle-squareoff`, `constituent-workflow`, `copy-packet`, `daily-loss-limit`, `download-packet`, `ema-band`, `ema-band-broker-chart`, `ema-band-chart-bars`, `ema-band-chart-timeframe`, `ema-band-confirmation`, `ema-band-contract`, `ema-band-cooldown`, `ema-band-direction`, `ema-band-execution-log`, `ema-band-length`, `ema-band-lots`, `ema-band-master-refresh`, `ema-band-master-status`, `ema-band-minimum-slope-atr`, `ema-band-mode`, `ema-band-mode-status`, `ema-band-paper-capital`, `ema-band-pnl-chart`, `ema-band-position-cards`, `ema-band-profit-protection-pct`, `ema-band-resistance-volume-exit`, `ema-band-resistance-volume-lookback`, `ema-band-resistance-volume-multiple`, `ema-band-runner-status`, `ema-band-runner-toggle`, `ema-band-search`, `ema-band-segment`, `ema-band-session`, `ema-band-slope-lookback`, `ema-band-status`, `ema-band-stop-pct`, `ema-band-strategy-direction`, `ema-band-target-pct`, `ema-band-ticket-preview`, `ema-band-timeframe`, `ema-band-tracked-positions`, `ema-band-underlying`, `ema-band-underlying-picker`, `ema-band-underlying-search`, `enforce-risk-controls`, `estimated-charges`, `estimated-charges-note`, `estimated-net-pnl`, `external-open-risk`, `funds`, `handoff`, `handoff-allocation-budget`, `handoff-batch-confirmation`, `handoff-batch-external-risk`, `handoff-batch-panel`, `handoff-batch-preview`, `handoff-batch-review`, `handoff-batch-status`, `idea-risk-limit`, `include-funds`, `kama`, `kama-breakout`, `kama-capability`, `kama-chart`, `kama-chart-type`, `kama-cooldown`, `kama-efficiency`, `kama-events`, `kama-execution-mode`, `kama-exit-session`, `kama-fast`, `kama-idea-risk`, `kama-invalidation`, `kama-invalidation-help`, `kama-length`, `kama-minimum-slope-atr`, `kama-mode`, `kama-paper-capital`, `kama-policy`, `kama-quantity`, `kama-reclaims`, `kama-refresh-interval`, `kama-runner-status`, `kama-runner-toggle`, `kama-size-help`, `kama-slope-lookback`, `kama-slow`, `kama-state`, `kama-timeframe`, `kama-trade-rows`, `kama-trade-summary`, `kama-underlying`, `kama-underlying-search`, `kama-underlying-status`, `live-pnl`, `market-overview`, `max-positions`, `minimum-rr`, `nifty-premium-chart`, `nifty-straddle`, `nifty-straddle-action-status`, `nifty-straddle-contract`, `nifty-straddle-entry-end`, `nifty-straddle-entry-start`, `nifty-straddle-lots`, `nifty-straddle-options`, `nifty-straddle-output`, `nifty-straddle-position`, `nifty-straddle-runner-state`, `nifty-straddle-squareoff-confirmation`, `nifty-straddle-squareoff-preview`, `nifty-straddle-squareoff-review`, `nifty-straddle-stoploss`, `nifty-straddle-tab`, `nifty-straddle-target`, `nifty-straddle-trades`, `nifty-straddle-updated`, `open-count`, `open-positions`, `order-type`, `packet-panel`, `packet-preview`, `packet-status`, `parser-lifecycle-refresh`, `parser-lifecycle-status`, `parser-protect`, `parser-protection-target`, `pipeline-kicker`, `pipeline-message`, `pipeline-track`, `planning-capital`, `policy-impact`, `policy-validation`, `premium-chart`, `premium-chart-updated`, `prepare-handoff-batch`, `prepare-packet`, `prepare-screener-order`, `prepare-ticket`, `preview-auto-policy`, `reauth`, `reauth-help`, `refresh-pipeline`, `refresh-screeners`, `risk-reserve`, `risk-strip`, `save-auto-draft`, `save-auto-policy`, `screener`, `screener-analysis`, `screener-analysis-next`, `screener-analysis-results`, `screener-analysis-status`, `screener-batch-selection`, `screener-bulk-selection`, `screener-clear-selection`, `screener-label`, `screener-options`, `screener-options-results`, `screener-options-status`, `screener-order`, `screener-order-confirmation`, `screener-order-external-risk`, `screener-order-preview`, `screener-order-product`, `screener-order-review`, `screener-order-status`, `screener-select-all`, `screener-selected-count`, `screener-sources`, `screener-status`, `screener-url`, `screener-watchlist`, `screener-watchlist-results`, `sector-body`, `sector-detail`, `sector-filter`, `sector-sort`, `sectors`, `select-all-candidates`, `sensex-straddle`, `sensex-straddle-tab`, `settings`, `settings-content`, `squareoff-nifty-straddle`, `squareoff-straddle`, `start-nifty-straddle`, `start-straddle`, `stop-basis`, `stop-nifty-straddle`, `stop-straddle`, `straddle-action-status`, `straddle-contract`, `straddle-entry-end`, `straddle-entry-start`, `straddle-lots`, `straddle-options`, `straddle-output`, `straddle-position`, `straddle-runner-state`, `straddle-squareoff-confirmation`, `straddle-squareoff-preview`, `straddle-squareoff-review`, `straddle-trades`, `straddle-updated`, `straddles`, `strongest-stocks`, `submit-handoff-batch`, `submit-screener-order`, `submit-ticket`, `ticket-broker`, `ticket-capability`, `ticket-confirmation`, `ticket-lots`, `ticket-panel`, `ticket-preview`, `ticket-proposal`, `ticket-review`, `ticket-status`, `trade-parser`, `trade-parser-ai-result`, `trade-parser-clear`, `trade-parser-entry-help`, `trade-parser-entry-mode`, `trade-parser-input`, `trade-parser-limit-price`, `trade-parser-lots`, `trade-parser-ltp`, `trade-parser-order`, `trade-parser-order-status`, `trade-parser-refresh-ltp`, `trade-parser-result`, `trade-parser-run`, `trade-parser-status`, `trade-parser-submit-order`, `trade-parser-trigger-price`, `weight-source`
+`account-state`, `add-screener`, `ai-review-state`, `analysis-board`, `analysis-exclusions`, `analysis-panel`, `analysis-refresh-interval`, `analysis-status`, `analyze-screener-options`, `analyze-screeners`, `auto-ack`, `auto-completed`, `auto-cooldown`, `auto-daily-loss`, `auto-enabled`, `auto-end`, `auto-idea-risk`, `auto-index-underlyings`, `auto-kill`, `auto-limit-buffer`, `auto-max-dte`, `auto-max-orders`, `auto-max-positions`, `auto-max-spread`, `auto-min-dte`, `auto-min-rr`, `auto-mode`, `auto-option-evidence`, `auto-order-type`, `auto-planning-capital`, `auto-preview`, `auto-review`, `auto-risk-defined`, `auto-risk-reserve`, `auto-segments`, `auto-signals`, `auto-stale`, `auto-start`, `auto-status`, `auto-strategies`, `auto-symbols`, `auto-target`, `auto-uncertain`, `auto-universe`, `broker`, `broker-dot`, `broker-state`, `candidate-batch-actions`, `candidate-list`, `candidate-status`, `cash-product-choice`, `clear-candidate-selection`, `closed-pnl`, `closed-pnl-label`, `closed-positions`, `closed-summary`, `collect-candidates`, `confirm-funds`, `confirm-nifty-straddle-squareoff`, `confirm-straddle-squareoff`, `constituent-workflow`, `copy-packet`, `daily-loss-limit`, `download-packet`, `ema-band`, `ema-band-broker-chart`, `ema-band-chart-bars`, `ema-band-chart-timeframe`, `ema-band-confirmation`, `ema-band-contract`, `ema-band-cooldown`, `ema-band-direction`, `ema-band-execution-log`, `ema-band-length`, `ema-band-lots`, `ema-band-master-refresh`, `ema-band-master-status`, `ema-band-minimum-slope-atr`, `ema-band-mode`, `ema-band-mode-status`, `ema-band-paper-capital`, `ema-band-pnl-chart`, `ema-band-position-cards`, `ema-band-profit-protection-pct`, `ema-band-resistance-volume-exit`, `ema-band-resistance-volume-lookback`, `ema-band-resistance-volume-multiple`, `ema-band-runner-status`, `ema-band-runner-toggle`, `ema-band-search`, `ema-band-segment`, `ema-band-session`, `ema-band-slope-lookback`, `ema-band-status`, `ema-band-stop-pct`, `ema-band-strategy-direction`, `ema-band-target-pct`, `ema-band-ticket-preview`, `ema-band-timeframe`, `ema-band-tracked-positions`, `ema-band-underlying`, `ema-band-underlying-picker`, `ema-band-underlying-search`, `enforce-risk-controls`, `estimated-charges`, `estimated-charges-note`, `estimated-net-pnl`, `external-open-risk`, `funds`, `handoff`, `handoff-allocation-budget`, `handoff-batch-confirmation`, `handoff-batch-external-risk`, `handoff-batch-panel`, `handoff-batch-preview`, `handoff-batch-review`, `handoff-batch-status`, `handoff-budget-label`, `handoff-option-lots`, `handoff-option-lots-field`, `idea-risk-limit`, `include-funds`, `kama`, `kama-breakout`, `kama-capability`, `kama-chart`, `kama-chart-type`, `kama-cooldown`, `kama-efficiency`, `kama-events`, `kama-execution-mode`, `kama-exit-session`, `kama-fast`, `kama-idea-risk`, `kama-invalidation`, `kama-invalidation-help`, `kama-length`, `kama-minimum-slope-atr`, `kama-mode`, `kama-paper-capital`, `kama-policy`, `kama-quantity`, `kama-reclaims`, `kama-refresh-interval`, `kama-runner-status`, `kama-runner-toggle`, `kama-size-help`, `kama-slope-lookback`, `kama-slow`, `kama-state`, `kama-timeframe`, `kama-trade-rows`, `kama-trade-summary`, `kama-underlying`, `kama-underlying-search`, `kama-underlying-status`, `live-pnl`, `market-overview`, `max-positions`, `minimum-rr`, `nifty-premium-chart`, `nifty-straddle`, `nifty-straddle-action-status`, `nifty-straddle-contract`, `nifty-straddle-entry-end`, `nifty-straddle-entry-start`, `nifty-straddle-lots`, `nifty-straddle-options`, `nifty-straddle-output`, `nifty-straddle-position`, `nifty-straddle-runner-state`, `nifty-straddle-squareoff-confirmation`, `nifty-straddle-squareoff-preview`, `nifty-straddle-squareoff-review`, `nifty-straddle-stoploss`, `nifty-straddle-tab`, `nifty-straddle-target`, `nifty-straddle-trades`, `nifty-straddle-updated`, `open-count`, `open-positions`, `order-type`, `packet-panel`, `packet-preview`, `packet-status`, `parser-lifecycle-refresh`, `parser-lifecycle-status`, `parser-protect`, `parser-protection-target`, `pipeline-kicker`, `pipeline-message`, `pipeline-track`, `planning-capital`, `policy-impact`, `policy-validation`, `premium-chart`, `premium-chart-updated`, `prepare-handoff-batch`, `prepare-packet`, `prepare-screener-order`, `prepare-ticket`, `preview-auto-policy`, `reauth`, `reauth-help`, `refresh-pipeline`, `refresh-screeners`, `risk-reserve`, `risk-strip`, `save-auto-draft`, `save-auto-policy`, `screener`, `screener-analysis`, `screener-analysis-next`, `screener-analysis-results`, `screener-analysis-status`, `screener-batch-selection`, `screener-bulk-selection`, `screener-clear-selection`, `screener-label`, `screener-options`, `screener-options-results`, `screener-options-status`, `screener-order`, `screener-order-confirmation`, `screener-order-external-risk`, `screener-order-preview`, `screener-order-product`, `screener-order-review`, `screener-order-status`, `screener-select-all`, `screener-selected-count`, `screener-sources`, `screener-status`, `screener-url`, `screener-watchlist`, `screener-watchlist-results`, `sector-body`, `sector-detail`, `sector-filter`, `sector-sort`, `sectors`, `select-all-candidates`, `sensex-straddle`, `sensex-straddle-tab`, `settings`, `settings-content`, `squareoff-nifty-straddle`, `squareoff-straddle`, `start-nifty-straddle`, `start-straddle`, `stop-basis`, `stop-nifty-straddle`, `stop-straddle`, `straddle-action-status`, `straddle-contract`, `straddle-entry-end`, `straddle-entry-start`, `straddle-lots`, `straddle-options`, `straddle-output`, `straddle-position`, `straddle-runner-state`, `straddle-squareoff-confirmation`, `straddle-squareoff-preview`, `straddle-squareoff-review`, `straddle-trades`, `straddle-updated`, `straddles`, `strongest-stocks`, `submit-handoff-batch`, `submit-screener-order`, `submit-ticket`, `ticket-broker`, `ticket-capability`, `ticket-confirmation`, `ticket-lots`, `ticket-panel`, `ticket-preview`, `ticket-proposal`, `ticket-review`, `ticket-status`, `trade-parser`, `trade-parser-ai-result`, `trade-parser-clear`, `trade-parser-entry-help`, `trade-parser-entry-mode`, `trade-parser-input`, `trade-parser-limit-price`, `trade-parser-lots`, `trade-parser-ltp`, `trade-parser-order`, `trade-parser-order-status`, `trade-parser-refresh-ltp`, `trade-parser-result`, `trade-parser-run`, `trade-parser-status`, `trade-parser-submit-order`, `trade-parser-trigger-price`, `weight-source`
 
 ## delta-adaptive.js
 
@@ -3491,11 +3569,11 @@ Optional monotonic full-position trailing exit; no partial profit targets.
 
 ### Named functions
 
-`applyStatus`, `cashEquity`, `chartAnalysisAvailable`, `chartCandles`, `chartStreamHealth`, `chartStreamStatus`, `clearAnalysis`, `configurationState`, `configurationText`, `connectStream`, `controls`, `disclosure`, `eventTable`, `executionMarkers`, `fiveMinuteZoneRows`, `hostZones`, `inrPolicy`, `instanceList`, `invalidate`, `load`, `managerTable`, `mount`, `paintAssessment`, `paintMarkers`, `paintPnl`, `paintRsi`, `paintSideways`, `paintStreamHealth`, `paintZones`, `persistDraft`, `pnlValues`, `positionAssessment`, `readCandle`, `rebuildSma`, `refreshBroker`, `renderTradeTable`, `renderTrades`, `request`, `restore`, `rsiHistory`, `rsiSma`, `rsiStep`, `rsiZone`, `saveBatchSelection`, `searchInstruments`, `signalNavigation`, `signalSettings`, `smaPeriod`, `status`, `syncChartControl`, `syncRsiHover`, `table`, `toggleRunner`, `toggleState`, `volumePoints`, `zoneBandPrimitive`, `zoneBandRect`
+`applyNamedFields`, `applyStatus`, `cashEquity`, `chartAnalysisAvailable`, `chartCandles`, `chartControlState`, `chartStreamHealth`, `chartStreamStatus`, `chooseConfiguration`, `clearAnalysis`, `closeConfigOptions`, `configurationLibrary`, `configurationState`, `configurationText`, `connectStream`, `controls`, `costPnlValues`, `deleteConfiguration`, `disclosure`, `eventTable`, `executionMarkers`, `fiveMinuteSupertrendPoints`, `fiveMinuteZoneRows`, `hostZones`, `inrPolicy`, `instanceList`, `invalidate`, `load`, `loadNamedConfiguration`, `managerTable`, `matchInstrumentConfiguration`, `mount`, `overrideState`, `paintAssessment`, `paintChartControls`, `paintConfigOptions`, `paintMarkers`, `paintPnl`, `paintRsi`, `paintSideways`, `paintStreamHealth`, `paintSupertrendPointers`, `paintZones`, `persistDraft`, `pnlValues`, `positionAssessment`, `preservePreviousDraft`, `readCandle`, `rebuildSma`, `refreshBroker`, `renderTradeTable`, `renderTrades`, `request`, `restore`, `restoredConfigurationFields`, `rsiHistory`, `rsiSma`, `rsiStep`, `rsiZone`, `saveBatchSelection`, `searchInstruments`, `signalNavigation`, `signalSettings`, `smaPeriod`, `status`, `storeConfiguration`, `syncChartControl`, `syncRsiHover`, `table`, `toggleRunner`, `toggleState`, `volumePoints`, `writeLibrary`, `zoneBandPrimitive`, `zoneBandRect`
 
 ### UI field and toggle identifiers
 
-`renko-`, `renko-action-error`, `renko-add-batch`, `renko-additional-slippage-points`, `renko-adopt`, `renko-adopted-managers`, `renko-adoption-reentry`, `renko-adoption-status`, `renko-adx-length`, `renko-adx-smoothing`, `renko-adx-threshold`, `renko-anchor`, `renko-assessment`, `renko-assessment-wire`, `renko-atr-length`, `renko-batch-help`, `renko-batch-result`, `renko-batch-summary`, `renko-batch-symbols`, `renko-box`, `renko-brick-mode`, `renko-broker`, `renko-broker-note`, `renko-broker-orders`, `renko-broker-positions`, `renko-broker-refresh`, `renko-candle-readout`, `renko-carry-policy`, `renko-cash-note`, `renko-cash-product`, `renko-cash-product-field`, `renko-chart`, `renko-chart-action-error`, `renko-chart-description`, `renko-chart-stack`, `renko-chart-toggle`, `renko-chart-toolbar`, `renko-chart-view`, `renko-commodity-holding`, `renko-commodity-holding-field`, `renko-config-name`, `renko-config-state`, `renko-daily-budget`, `renko-direction`, `renko-ema-exit-enabled`, `renko-ema-exit-length`, `renko-ema-proximity-distance`, `renko-ema-proximity-enabled`, `renko-ema-proximity-mode`, `renko-entry-audit`, `renko-event`, `renko-events`, `renko-events-page`, `renko-exit-fullscreen`, `renko-export-settings`, `renko-factor`, `renko-fit-chart`, `renko-full-chart`, `renko-history-from`, `renko-history-preset`, `renko-history-range`, `renko-history-to`, `renko-inr-policy-note`, `renko-instance-count`, `renko-instances`, `renko-intrabar-entries`, `renko-journal-mode`, `renko-latest-signal`, `renko-live-pnl`, `renko-lots`, `renko-manual-brick`, `renko-market`, `renko-market-policy-note`, `renko-max-premium`, `renko-max-trades`, `renko-mode`, `renko-mode-note`, `renko-new-instance`, `renko-newer-events`, `renko-older-events`, `renko-order-terms`, `renko-orders`, `renko-paper-capital`, `renko-paper-funds`, `renko-pnl`, `renko-policy`, `renko-price-source`, `renko-provisional-status`, `renko-readable-chart`, `renko-reset-chart`, `renko-retest-enabled`, `renko-retest-engulfing`, `renko-retest-harami`, `renko-retest-star`, `renko-retest-status`, `renko-rsi-chart`, `renko-rsi-hover`, `renko-rsi-readout`, `renko-rsi-slope-enabled`, `renko-rsi-slope-status`, `renko-rsi-sma-period`, `renko-rsi-sma-readout`, `renko-runner-message`, `renko-runner-panel`, `renko-save-settings`, `renko-search`, `renko-session-deadline`, `renko-sideways-enabled`, `renko-sideways-max-candles`, `renko-sideways-status`, `renko-signal-range`, `renko-spot-stop`, `renko-spot-target`, `renko-st`, `renko-start-selected`, `renko-state`, `renko-status`, `renko-stream-status`, `renko-supertrend`, `renko-symbol`, `renko-timeframe`, `renko-toggle`, `renko-trades`, `renko-trailing-basis`, `renko-trailing-distance`, `renko-trailing-enabled`, `renko-trailing-status`, `renko-use-adx`, `renko-widening-window`, `renko-workspace`, `renko-zone-status`
+`renko-`, `renko-action-error`, `renko-add-batch`, `renko-additional-slippage-points`, `renko-adopt`, `renko-adopted-managers`, `renko-adoption-reentry`, `renko-adoption-status`, `renko-adx-length`, `renko-adx-smoothing`, `renko-adx-threshold`, `renko-anchor`, `renko-assessment`, `renko-assessment-wire`, `renko-atr-length`, `renko-batch-help`, `renko-batch-result`, `renko-batch-summary`, `renko-batch-symbols`, `renko-box`, `renko-brick-mode`, `renko-broker`, `renko-broker-note`, `renko-broker-orders`, `renko-broker-positions`, `renko-broker-refresh`, `renko-candle-readout`, `renko-carry-policy`, `renko-cash-note`, `renko-cash-product`, `renko-cash-product-field`, `renko-chart`, `renko-chart-action-error`, `renko-chart-control-note`, `renko-chart-controls`, `renko-chart-description`, `renko-chart-mode`, `renko-chart-mode-state`, `renko-chart-stack`, `renko-chart-stop`, `renko-chart-toggle`, `renko-chart-toolbar`, `renko-chart-view`, `renko-commodity-holding`, `renko-commodity-holding-field`, `renko-config-dropdown`, `renko-config-name`, `renko-config-option-`, `renko-config-options`, `renko-config-state`, `renko-daily-budget`, `renko-delete-configuration`, `renko-direction`, `renko-ema-exit-enabled`, `renko-ema-exit-length`, `renko-ema-proximity-distance`, `renko-ema-proximity-enabled`, `renko-ema-proximity-mode`, `renko-entry-audit`, `renko-event`, `renko-events`, `renko-events-page`, `renko-exit-fullscreen`, `renko-export-settings`, `renko-factor`, `renko-fit-chart`, `renko-full-chart`, `renko-history-from`, `renko-history-preset`, `renko-history-range`, `renko-history-to`, `renko-inr-policy-note`, `renko-instance-count`, `renko-instances`, `renko-intrabar-entries`, `renko-journal-mode`, `renko-latest-signal`, `renko-live-pnl`, `renko-lots`, `renko-manual-brick`, `renko-market`, `renko-market-policy-note`, `renko-market-structure-enabled`, `renko-market-structure-state`, `renko-max-premium`, `renko-max-trades`, `renko-mode`, `renko-mode-note`, `renko-named-config-note`, `renko-new-instance`, `renko-newer-events`, `renko-older-events`, `renko-order-terms`, `renko-orders`, `renko-override-direction`, `renko-override-entry`, `renko-override-note`, `renko-paper-capital`, `renko-paper-funds`, `renko-pnl`, `renko-policy`, `renko-price-source`, `renko-provisional-status`, `renko-readable-chart`, `renko-reset-chart`, `renko-retest-enabled`, `renko-retest-engulfing`, `renko-retest-harami`, `renko-retest-star`, `renko-retest-status`, `renko-rsi-chart`, `renko-rsi-hover`, `renko-rsi-readout`, `renko-rsi-slope-enabled`, `renko-rsi-slope-status`, `renko-rsi-sma-period`, `renko-rsi-sma-readout`, `renko-runner-message`, `renko-runner-panel`, `renko-save-settings`, `renko-search`, `renko-session-deadline`, `renko-show-five-minute-label`, `renko-show-one-minute-label`, `renko-sideways-enabled`, `renko-sideways-max-candles`, `renko-sideways-status`, `renko-signal-range`, `renko-spot-stop`, `renko-spot-target`, `renko-st`, `renko-start-selected`, `renko-state`, `renko-status`, `renko-stream-status`, `renko-supertrend`, `renko-supertrend-pointers`, `renko-supertrend-visuals`, `renko-symbol`, `renko-timeframe`, `renko-toggle`, `renko-trades`, `renko-trailing-basis`, `renko-trailing-distance`, `renko-trailing-enabled`, `renko-trailing-status`, `renko-use-adx`, `renko-widening-window`, `renko-workspace`, `renko-zone-status`, `renko-zone-target-enabled`, `renko-zone-target-state`
 
 ## sector-dashboard-model.js
 

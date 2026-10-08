@@ -56,7 +56,7 @@ Defaults: widening window **2** (one increase), ADX **off**, Paper mode. Stricte
 
 ## Exit and session rules
 
-An owned Call exits when fresh underlying price is strictly below provisional EMA10; a Put exits strictly above. Equality alone is not a breach. Already-adverse restored positions do not require another crossing. EMA10 exits are independent of ADX, widening and opposite-entry eligibility. Opposite **confirmed** Supertrend reversal is an additional exit and honors the optional ADX filter.
+With Intrabar entries off, an owned Call exits on a completed host close strictly below the configured exit EMA; a Put exits strictly above. With Intrabar entries on, fresh provisional underlying price/EMA can trigger the same adverse breach. Equality alone is not a breach. Already-adverse restored positions do not require another crossing. EMA10 exits are independent of ADX, widening and opposite-entry eligibility. Opposite **confirmed** Supertrend reversal is an additional exit and honors the optional ADX filter.
 
 EMA exit can be disabled or use an editable period (1–1000, default 10). Optional absolute underlying target/stop prices also trigger on fresh ticks. These settings apply on the next Start; they do not change an armed run.
 
@@ -90,7 +90,7 @@ Run `python3 -m unittest discover -s strategies/renko_supertrend -t . -p 'test_*
 
 ## Investigation history and resume
 
-Read the private local churn investigation ledger (excluded from source release) before reassessing entry churn. It records every assessed hypothesis, reproduction, result and accepted/rejected/unresolved conclusion, and links archived evidence and the isolated correction patch. Documentation is not deployment; preserve original rules and refresh served process/state before further changes.
+Read the [churn investigation ledger](../../docs/renko-churn-investigation-ledger.md) before reassessing entry churn. It records every assessed hypothesis, reproduction, result and accepted/rejected/unresolved conclusion, and links archived evidence and the isolated correction patch. Documentation is not deployment; preserve original rules and refresh served process/state before further changes.
 # Cash equity selection and sizing
 
 The Renko Market picker includes **NSE cash equity** and **BSE cash equity**.
@@ -133,3 +133,8 @@ Carry entries require exact option expiry from the current master. The strategy 
 ## Canonical current reference
 
 The [technical guide](../../docs/technical-guide.md) supersedes older cutoff/workbook prose and explains every optional gate, cash/MCX/Delta holding distinction, fixed post-fill trail, strong five-minute chart zones and feed readiness. See the [deployment guide](../../docs/deployment-guide.md) for release/recovery and [source/default catalog](../../docs/source-reference.md) for exact function and setting ownership.
+
+
+## October 8 release behavior
+
+All entries, including explicit manual overrides, require fresh completed one-minute/five-minute Supertrend agreement. Optional confirmed host market structure and completed five-minute zone exits default off. Intrabar entries off requires completed-candle EMA exits; on permits intrabar EMA breaches. Manual overrides bypass automatic setup/structure/proximity/adverse-EMA entry checks while retaining timeframe agreement and execution controls. See the [updated user controls](../../docs/user-functional-guide.md#october-8-release-entry-controls-and-chart-evidence) and [technical additions](../../docs/technical-guide.md#october-8-execution-additions) for exact boundaries. These changes do not establish profitability.
