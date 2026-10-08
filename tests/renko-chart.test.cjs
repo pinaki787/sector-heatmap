@@ -48,7 +48,7 @@ test('volume preserves host timestamps, zero volume and missing-volume gaps',()=
  assert.equal(volumePoints(data,'synthetic').length,3);
 });
 
-const {chartAnalysisAvailable,chartStreamStatus}=require('../renko-supertrend.js');
+const {chartAnalysisAvailable,chartStreamStatus,chartStreamHealth}=require('../renko-supertrend.js');
 test('invalid history shows exact valid OHLC plus whitespace gaps and suppresses synthetic bodies',()=>{
  const d={rows:[bar,{...bar,timestamp:bar.timestamp+120}],forming:[],data_quality:{analysis_available:false,gaps:[{timestamp:bar.timestamp+60,reason:'invalid OHLC'}]}};
  assert.equal(chartAnalysisAvailable(d),false);
@@ -97,7 +97,7 @@ test('reset viewport keeps candles readable across narrow, wide and tall charts'
 
 test('live ticks with missing OHLC are distinguished from a disconnected feed',()=>{
  const frame={server_at:100,market:{connected:true,fresh:false,tick_fresh:true,tick_exchange_at:99,error:'Broker forming OHLC unavailable'},orders:{connected:true}};
- assert.match(chartStreamStatus(frame),'Live ticks · current candle OHLC unavailable');
+ assert.match(chartStreamStatus(frame),/Live ticks · current candle OHLC unavailable/);
  assert.equal(chartStreamHealth(frame).live,false);
- assert.match(chartStreamStatus({...frame,market:{...frame.market,connected:false}}),'disconnected');
+ assert.match(chartStreamStatus({...frame,market:{...frame.market,connected:false}}),/disconnected/);
 });
