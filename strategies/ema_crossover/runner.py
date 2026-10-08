@@ -320,13 +320,16 @@ class Runner:
             return preflight(self.state,order,contract,quote,self.paper_rate())
         return self.adapter.preflight(order,self.state['config'])
 
+    def validate_entry_authorization(self, position):
+        c = self.state['config']
+        last = self.state['last_signal']
+        if not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
+            raise ValueError('Entry authorization or signal expired during preflight.')
+
     def submit(self, order, position, reason):
         self.adapter.validate_order(order)
         if self.is_entry_order(order, position):
-            c = self.state['config']
-            last = self.state['last_signal']
-            if not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
-                raise ValueError('Entry authorization or signal expired during preflight.')
+            self.validate_entry_authorization(position)
         execution_quote = self.adapter.quote(order['symbol'])  # Recheck socket freshness immediately before persisting intent.
         if self.state['config']['mode']=='PAPER' and self.is_entry_order(order,position):
             self.entry_preflight(order,position,execution_quote)

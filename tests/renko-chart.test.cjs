@@ -66,3 +66,21 @@ test('actual EMA exit markers use local fill candle and recorded applied period,
  const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'EXIT · PAPER · EMA10 · FILLED');
  s.order_history[0].status='PENDING';assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]);
 });
+
+const {overrideState}=require('../renko-supertrend.js');
+test('override requires explicit direction and active matching mode, broker, chart and flat run',()=>{
+ const context={symbol:'BTCUSD',timeframe:'1 minute',broker:'DELTA_INDIA',mode:'PAPER'};
+ const state={manual_override_revision:'explicit-entry-v1',running:true,accepting_entries:true,trades_used:0,config:{underlying:'BTCUSD',timeframe:'1 minute',broker:'DELTA_INDIA',mode:'PAPER',max_trades:3}};
+ assert.equal(overrideState(state,context,'').disabled,true);assert.equal(overrideState(state,context,'BULLISH').disabled,false);
+ assert.equal(overrideState(state,context,'BEARISH').label,'Override Entry · PAPER');
+ for(const changes of [{position:{}},{pending:{}},{running:false},{accepting_entries:false},{manual_override_revision:null},{trades_used:3},{shutdown_pending:true}])assert.equal(overrideState({...state,...changes},context,'BEARISH').disabled,true);
+ for(const changes of [{symbol:'ETHUSD'},{timeframe:'5 minutes'},{mode:'LIVE'},{broker:'FYERS'}])assert.equal(overrideState(state,{...context,...changes},'BULLISH').disabled,true);
+ assert.equal(overrideState(state,context,'BULLISH',true).disabled,true);
+});
+
+test('fresh market feed can disclose delayed runner snapshot without faking tick age',()=>{
+ const {chartStreamHealth}=require('../renko-supertrend.js');
+ const a=chartStreamHealth({server_at:100,market:{connected:true,fresh:true,tick_exchange_at:98},orders:{connected:true},runner_snapshot_fresh:false},0);
+ assert.match(a.text,/Chart feed is live/);assert.match(a.text,/Runner status refresh delayed/);assert.match(a.text,/Tick age 2s/);
+ assert.match(chartStreamHealth({server_at:100,market:{connected:true,fresh:true,tick_exchange_at:98},orders:{connected:true}},6).text,/Chart updates stale/);
+});

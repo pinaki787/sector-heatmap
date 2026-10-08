@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');
+const {fiveMinuteSupertrendPoints:points}=require('../renko-supertrend.js');
+const rows=[{timestamp:0,supertrend:100,direction:'BULLISH'},{timestamp:300,supertrend:110,direction:'BEARISH'},{timestamp:600,supertrend:999,direction:'BEARISH',is_forming:true}];
+const plotted=[240,300,360,540,600,660,900].map(time=>({time}));
+const result=points(rows,plotted,900);
+assert.deepEqual(result.map(c=>c.value),[undefined,100,100,100,110,110,undefined]);
+assert.equal(result[1].color,'#57d6b0');assert.equal(result[4].color,'#ff9e80');
+assert.deepEqual(points(rows,plotted,599).map(c=>c.value),[undefined,100,100,100,undefined,undefined,undefined]);
+assert.deepEqual(points([],plotted,900),plotted);
+console.log('Five-minute Supertrend becomes visible only after close; forming, future and stale values are withheld');

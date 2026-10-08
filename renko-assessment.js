@@ -44,11 +44,12 @@
     if(c.retest_enabled)result.checks.push(q.retest_signal?'PASS · Confirmed retest pattern':q.retest_rsi_blocked?'WAIT · Confirmed retest blocked by RSI slope':provisional?'WAIT · Retest needs completed pattern':q.retest_touch_evidence?'WAIT · EMA10 touch recorded; matching pattern and directional close required':'WAIT · No confirmed retest entry; no active EMA10 touch evidence');
     if(c.rsi_slope_enabled)result.checks.push(`${q.rsi_slope_pass?'PASS':'WAIT'} · RSI14 slope ${finite(q.rsi14_slope)?q.rsi14_slope.toFixed(3):'warming up'} · ${bullish?'rising':'falling'} required`);
     else result.checks.push('OFF · RSI slope filter');
-    if(c.ema_proximity_enabled)result.checks.push(`PENDING · Proximity ≤ ${c.ema_proximity_distance} ${c.ema_proximity_mode==='ATR'?'completed ATR':'points'} at live preflight`);
+    if(c.ema_proximity_enabled)result.checks.push(`PENDING · Proximity entry only: ${c.ema_proximity_mode==='ATR'?'|price − EMA10| / completed ATR':'|price − EMA10|'} ≤ ${c.ema_proximity_distance}${c.ema_proximity_mode==='ATR'?'':' points'} at live preflight`);
     const diagnostics={WAITING_RSI_WARMUP:'No entry: RSI14 slope needs two seeded host-candle values.',WAITING_RSI_FLAT:'No entry: RSI14 slope is flat.',WAITING_RSI_DIRECTION:'No entry: RSI14 slope opposes entry direction.',WAITING_ADX:'No entry: ADX gate has not qualified.',WAITING_EMA_ALIGNMENT:'No entry: EMA10 / EMA30 direction alignment has not qualified.',WAITING_CLOSE:'No entry: close is on the wrong side of EMA10.',WAITING_WIDENING:'No entry: EMA gap is not strictly widening.',ENTRY_CUTOFF:'No entry: configured entry cutoff reached.'};
     const events=(s.execution_signals||[]).filter(e=>e.run_id===s.run_id&&e.timestamp===q.timestamp&&e.underlying===c.underlying).sort((a,b)=>(b.observed_at||0)-(a.observed_at||0));
     const event=events[0];
-    if(s.status==='BLOCKED'&&s.message){result.reason='Blocked at runner preflight: '+s.message;result.tone='blocked';}
+    if(event&&event.status==='BLOCKED'){result.reason='Blocked at runner preflight: '+(event.reason||'Execution preflight rejected this candle.');result.tone='blocked';if(c.ema_proximity_enabled&&/too far from EMA10/i.test(event.reason||''))result.checks=result.checks.map(x=>x.startsWith('PENDING · Proximity')?'BLOCKED · '+event.reason:x);}
+    else if(s.status==='BLOCKED'&&s.message){result.reason='Blocked at runner preflight: '+s.message;result.tone='blocked';}
     else if(event&&event.status==='FILLED'){result.reason='Latest entry assessment filled; see owned trade journal.';result.tone='pass';}
     else if(legacyRecovery){result.reason='Historical OHLC revised at '+new Date(recovery.at*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'})+'; this candle was excluded from entry eligibility. Its rule checks remain available below.';result.tone='blocked';}
     else if(decision&&decision.code!=='ELIGIBLE'){result.reason=diagnostics[decision.code]||decision.reason;}

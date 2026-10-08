@@ -3,6 +3,7 @@
 Order notifications wake reconciliation; REST remains authoritative for owned fills.
 No notification can submit an order or manufacture a journal fill.
 """
+from copy import deepcopy
 import json
 import threading
 import time
@@ -69,6 +70,57 @@ class OrderNotifications:
                 'basis':'FYERS order/trade websocket notifications; owned fills verified by broker reconciliation.'}
 
 
+class BrowserSnapshotCache:
+    """Read snapshots off the chart heartbeat; never acquire the strategy lock there."""
+    def __init__(self, snapshot, clock=time.time):
+        self.snapshot,self.clock=snapshot,clock
+        self.lock=threading.Lock()
+        self.value=None;self.captured_at=None;self.requested_at=None;self.busy=False
+
+    def refresh(self):
+        try:
+            value=self.snapshot()
+            with self.lock:
+                self.value=value;self.captured_at=self.clock()
+        except Exception:
+            pass  # Retain last evidence with its real timestamp, not a fresh-looking replacement.
+        finally:
+            with self.lock:self.busy=False
+
+    def read(self, now):
+        with self.lock:
+            if not self.busy and (self.requested_at is None or now-self.requested_at>=2):
+                self.busy=True;self.requested_at=now
+                self.worker=threading.Thread(target=self.refresh,daemon=True,name='renko-browser-snapshot')
+                self.worker.start()
+            fresh=self.captured_at is not None and 0<=now-self.captured_at<=5
+            value=deepcopy(self.value)
+            if value is not None and not fresh:
+                value['pnl']={**(value.get('pnl') or {}),'available':False,'unrealized':None}
+            return dict(runner=value,runner_snapshot_at=self.captured_at,runner_snapshot_fresh=fresh)
+
+
+_snapshot_caches_lock=threading.Lock()
+
+
+def browser_snapshot(runner, now):
+    with _snapshot_caches_lock:
+        cache=vars(runner).get('_browser_snapshot_cache')
+        if cache is None:
+            cache=BrowserSnapshotCache(runner.snapshot)
+            runner._browser_snapshot_cache=cache
+    return cache.read(now)
+
+
+def browser_managers(runners, now):
+    rows=[]
+    for key,runner in runners.items():
+        snapshot=browser_snapshot(runner,now)
+        if snapshot['runner'] is None:return {}  # Keep the prior UI until every manager has evidence.
+        rows.append(dict(id=key,**snapshot['runner'],snapshot_fresh=snapshot['runner_snapshot_fresh']))
+    return dict(adopted_managers=rows)
+
+
 def browser_frame(runner, broker, config, order_stream, now=None):
     now = time.time() if now is None else now
     forming, error = None, None
@@ -81,6 +133,6 @@ def browser_frame(runner, broker, config, order_stream, now=None):
         _, tick_at = broker.live_price(config, now)
     except (ValueError, RuntimeError) as exc:
         tick_error = str(exc)
-    return {'runner':runner.snapshot(),'forming':forming,'market':{'connected':broker.connected,
+    return {**browser_snapshot(runner,now),'forming':forming,'market':{'connected':broker.connected,
             'fresh':forming is not None,'error':error,'tick_exchange_at':tick_at,'tick_fresh':tick_at is not None,'tick_error':tick_error},'orders':order_stream.snapshot(),
             'server_at':now,'bar_seconds':broker.frame_seconds and next((n for s,n in broker.frame_seconds if s==config['underlying']),None)}

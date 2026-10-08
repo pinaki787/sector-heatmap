@@ -107,8 +107,8 @@
         <header class="head"><div><span class="label">FULL ALIGNMENT · USER-CONTROLLED HANDOFF</span><h1>From market evidence to a reviewable packet</h1><small class="muted">Collect, inspect and export locally. Nothing is sent to an AI recipient or broker automatically.</small></div><div class="status">FYERS data · FYERS execution selected</div></header>
         <div class="handoff-banner"><div class="handoff-mark">↗</div><div><strong>Preview and transmission are separate actions</strong><span>Choosing ChatGPT or Codex only labels the local packet. Preview, copy and download remain on this device. Account funds enter a packet only after both inclusion and confirmation are checked.</span></div></div>
         <div class="handoff-grid">
-          <section class="panel"><div class="step-title"><div><span class="label">1 · CHOOSE ROUTE & COLLECT</span><h2>Full-alignment stock candidates</h2><small class="muted">Completed 15m, 1H, Daily and Weekly evidence only.</small></div><button type="button" class="button" id="collect-candidates">Collect cash equity matches</button></div><span class="label" style="margin-top:14px">INSTRUMENT ROUTE — REQUIRED</span><div class="option-set execution route-set"><label class="option-card"><input type="radio" name="instrument-route" value="cash_equity" checked><b>Cash equity</b><small>Entry, structural stop, target, shares and cash-risk sizing only. No calls, puts or spreads.</small></label><label class="option-card"><input type="radio" name="instrument-route" value="stock_options"><b>Stock options</b><small>Validated stock-option contracts and defined-risk spreads only. No cash-share plan.</small></label></div><div id="candidate-status" class="handoff-status">Choose one route, then collect matches.</div><div id="candidate-list" class="candidate-list"></div><div id="candidate-batch-actions" class="packet-actions" hidden style="margin-top:12px"><button type="button" class="button secondary" id="select-all-candidates">Select all eligible</button><button type="button" class="button secondary" id="clear-candidate-selection">Clear selection</button><button type="button" class="button" id="prepare-handoff-batch">Prepare allocation for selected stocks</button></div></section>
-          <section class="panel"><span class="label">2 · OPTIONAL PLANNING PREFERENCES</span><h2>Your sizing and reward preferences</h2><label class="field" style="margin-top:12px"><input id="enforce-risk-controls" type="checkbox"> Apply these capital limits to analysis and ticket sizing</label><div class="field-grid" style="margin-top:12px"><label class="field">Planning capital (₹)<input id="planning-capital" type="number" min="1" step="1000" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="daily-loss-limit" type="number" min="1" step="100" value="5000"></label><label class="field">Per-idea risk allocation (₹)<input id="idea-risk-limit" type="number" min="1" step="100" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="risk-reserve" type="number" min="0" step="100" value="1000"></label><label class="field">Maximum simultaneous positions<input id="max-positions" type="number" min="1" step="1" value="3"></label><label class="field">Optional minimum reward:risk (0 = no gate)<input id="minimum-rr" type="number" min="0" step="0.1" value="0"></label><label class="field">Stop / invalidation basis<select id="stop-basis"><option value="price">Exact price level</option><option value="percent">Percent from entry / spot</option></select></label><label class="field">Order-type preference<select id="order-type"><option value="LIMIT">Limit (default, live eligible)</option><option value="MARKET">Market (preview only)</option></select></label></div><div id="policy-impact" class="risk-strip" aria-live="polite"></div><div id="policy-validation" class="handoff-status" role="status"></div><p class="muted">Capital values are used only if you enable capital controls. A reward:risk value is considered only when you enter one above zero. Validated spreads default to one lot and cash ideas to one share; choose a larger quantity in the ticket. Fresh FYERS contract, quote, liquidity, funds/margin and confirmation checks always apply.</p>
+          <section class="panel"><div class="step-title"><div><span class="label">1 · CHOOSE ROUTE & COLLECT</span><h2>Full-alignment stock candidates</h2><small class="muted">Completed 15m, 1H, Daily and Weekly evidence only.</small></div><button type="button" class="button" id="collect-candidates">Collect cash equity matches</button></div><span class="label" style="margin-top:14px">INSTRUMENT ROUTE — REQUIRED</span><div class="option-set execution route-set"><label class="option-card"><input type="radio" name="instrument-route" value="cash_equity" checked><b>Cash equity</b><small>Entry, structural stop, target, shares and cash-risk sizing only. No calls, puts or spreads.</small></label><label class="option-card"><input type="radio" name="instrument-route" value="stock_options"><b>Stock options</b><small>Bullish: Buy ATM Call. Bearish: Buy ATM Put. One option leg; no option selling.</small></label></div><div id="candidate-status" class="handoff-status">Choose one route, then collect matches.</div><div id="candidate-list" class="candidate-list"></div><div id="candidate-batch-actions" class="packet-actions" hidden style="margin-top:12px"><button type="button" class="button secondary" id="select-all-candidates">Select all eligible</button><button type="button" class="button secondary" id="clear-candidate-selection">Clear selection</button><button type="button" class="button" id="prepare-handoff-batch">Prepare allocation for selected stocks</button></div></section>
+          <section class="panel"><span class="label">2 · OPTIONAL PLANNING PREFERENCES</span><h2>Your sizing and reward preferences</h2><label class="field" style="margin-top:12px"><input id="enforce-risk-controls" type="checkbox"> Apply these capital limits to analysis and ticket sizing</label><div class="field-grid" style="margin-top:12px"><label class="field">Planning capital (₹)<input id="planning-capital" type="number" min="1" step="1000" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="daily-loss-limit" type="number" min="1" step="100" value="5000"></label><label class="field">Per-idea risk allocation (₹)<input id="idea-risk-limit" type="number" min="1" step="100" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="risk-reserve" type="number" min="0" step="100" value="1000"></label><label class="field">Maximum simultaneous positions<input id="max-positions" type="number" min="1" step="1" value="3"></label><label class="field">Optional minimum reward:risk (0 = no gate)<input id="minimum-rr" type="number" min="0" step="0.1" value="0"></label><label class="field">Stop / invalidation basis<select id="stop-basis"><option value="price">Exact price level</option><option value="percent">Percent from entry / spot</option></select></label><label class="field">Order-type preference<select id="order-type"><option value="LIMIT">Limit (default, live eligible)</option><option value="MARKET">Market (preview only)</option></select></label></div><div id="policy-impact" class="risk-strip" aria-live="polite"></div><div id="policy-validation" class="handoff-status" role="status"></div><p class="muted">Capital values are used only if you enable capital controls. A reward:risk value is considered only when you enter one above zero. Bought stock options default to one lot and cash ideas to one share; choose a larger quantity in the ticket. Fresh FYERS contract, quote, liquidity, funds/margin and confirmation checks always apply.</p>
           <span class="label" style="margin-top:14px">RECIPIENT — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="recipient" value="chatgpt"> ChatGPT</label><label class="choice"><input type="radio" name="recipient" value="codex" checked> Codex</label></div>
           <span class="label" style="margin-top:14px">LOCAL ACTION — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="handoff-action" value="preview"> Preview only</label><label class="choice"><input type="radio" name="handoff-action" value="export"> Prepare export</label></div>
           <div class="privacy-gate"><label class="choice"><input id="include-funds" type="checkbox"> Include freshly read FYERS available funds</label><label class="choice"><input id="confirm-funds" type="checkbox" disabled> I confirm funds may be included in this local packet</label></div>
@@ -116,7 +116,7 @@
         </div>
         <section id="analysis-panel" class="panel analysis-panel" hidden><div class="step-title"><div><span class="label">3 · REVIEW PROPOSALS</span><h2>Evidence-backed opportunity plans</h2><small id="ai-review-state" class="muted"></small></div><div class="status">Decision support only</div></div><div id="analysis-board" class="analysis-board"></div><div id="analysis-exclusions" class="excluded-list"></div></section>
         <section id="packet-panel" class="panel packet-panel" hidden><div class="step-title"><div><span class="label">3 · REVIEW</span><h2>Analysis packet</h2><small class="muted">No transmission has occurred.</small></div><div class="packet-actions"><button type="button" class="button secondary" id="copy-packet">Copy JSON</button><button type="button" class="button" id="download-packet" hidden>Download JSON</button></div></div><pre id="packet-preview" class="packet-preview"></pre></section>
-        <section id="ticket-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">OPTIONAL · SEPARATE BROKER ACTION</span><h2>Exact FYERS trade ticket</h2><small class="muted">A packet never authorizes this workflow.</small></div><div id="ticket-capability" class="status">Checking FYERS capability</div></div><p class="ticket-warning">FYERS is the user-selected route. Preparing a ticket refreshes token/profile, exact master contract, chain and Greeks, bid/ask, lot/tick, funds, margin coverage, positions and order state. Only debit spreads with fully funded protection-first premium can become submit-eligible; credit spreads remain blocked when exact basket margin is unavailable. Submission still requires an explicitly enabled runtime and your Submit order click.</p><div class="field-grid" style="margin-top:12px"><label class="field">Broker<input id="ticket-broker" value="fyers" readonly></label><label class="field">Defined-risk proposal<select id="ticket-proposal"><option value="">Choose a packet proposal</option></select></label><label class="field">Quantity / lots<input id="ticket-lots" type="number" min="1" step="1" value="1"></label><label class="field">Declared external open risk (₹)<input id="external-open-risk" type="number" min="0" step="100" placeholder="Required if FYERS has other open positions"></label></div><button type="button" class="button" id="prepare-ticket" style="margin-top:12px">Refresh FYERS and prepare exact preview</button><div id="ticket-status" class="handoff-status" role="status" aria-live="polite"></div><div id="ticket-review" hidden><div id="risk-strip" class="risk-strip"></div><pre id="ticket-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="ticket-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-ticket" disabled style="margin-top:10px">Submit order</button></div></section>
+        <section id="ticket-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">OPTIONAL · SEPARATE BROKER ACTION</span><h2>Exact FYERS trade ticket</h2><small class="muted">A packet never authorizes this workflow.</small></div><div id="ticket-capability" class="status">Checking FYERS capability</div></div><p class="ticket-warning">FYERS is the user-selected route. Preparing a ticket refreshes token/profile, exact master contract, chain and Greeks, bid/ask, lot/tick, funds, margin coverage, positions and order state. Stock-option entries buy one ATM Call for bullish or one ATM Put for bearish. Full premium funding is required; no short option leg is submitted. Submission still requires an explicitly enabled runtime and your Submit order click.</p><div class="field-grid" style="margin-top:12px"><label class="field">Broker<input id="ticket-broker" value="fyers" readonly></label><label class="field">Defined-risk proposal<select id="ticket-proposal"><option value="">Choose a packet proposal</option></select></label><label class="field">Quantity / lots<input id="ticket-lots" type="number" min="1" step="1" value="1"></label><label class="field">Declared external open risk (₹)<input id="external-open-risk" type="number" min="0" step="100" placeholder="Required if FYERS has other open positions"></label></div><button type="button" class="button" id="prepare-ticket" style="margin-top:12px">Refresh FYERS and prepare exact preview</button><div id="ticket-status" class="handoff-status" role="status" aria-live="polite"></div><div id="ticket-review" hidden><div id="risk-strip" class="risk-strip"></div><pre id="ticket-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="ticket-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-ticket" disabled style="margin-top:10px">Submit order</button></div></section>
         <section class="panel automation-panel"><details><summary>Optional unattended FYERS policy · disabled by default</summary><p class="ticket-warning">This is separate from per-order approval. It authors a bounded FYERS policy only; this dashboard contains no automatic signal runner. PAPER is the default. A LIVE profile also requires a separate runtime gate, a released kill switch, fresh FYERS preflight for every order, and all policy checks.</p><div class="choice-row"><label class="choice"><input id="auto-enabled" type="checkbox"> Enable policy after acknowledgement</label><label class="choice"><input id="auto-kill" type="checkbox" checked> Kill switch engaged</label><label class="choice"><input id="auto-uncertain" type="checkbox" checked disabled> Halt on uncertain order status</label><label class="choice"><input id="auto-completed" type="checkbox" checked disabled> Completed candles required</label><label class="choice"><input id="auto-option-evidence" type="checkbox" checked disabled> Full option chain/master/liquidity/Greeks/lot/tick evidence required</label><label class="choice"><input id="auto-risk-defined" type="checkbox" checked disabled> Stop or defined-risk spread required</label><label class="choice"><input id="auto-target" type="checkbox" checked disabled> Target required</label></div><div class="field-grid" style="margin-top:12px"><label class="field">Execution mode<select id="auto-mode"><option value="PAPER">Paper / dry-run</option><option value="LIVE">Live (extra runtime gate)</option></select></label><label class="field">Universe<select id="auto-universe"><option value="ALIGNED_EQUITIES_AND_OPTIONS">Aligned equities + index and stock options</option><option value="ALIGNED_EQUITIES">Aligned equities only</option><option value="ALIGNED_OPTIONS">Aligned options only</option></select></label><label class="field">Exact allowed FYERS underlyings, comma-separated<input id="auto-symbols" value="NSE:RELIANCE-EQ,NSE:NIFTY50-INDEX"></label><label class="field">Supported index underlyings<input id="auto-index-underlyings" value="NSE:NIFTY50-INDEX"></label><label class="field">Allowed segments, comma-separated<input id="auto-segments" value="NSE_CM,NSE_FO"></label><label class="field">Allowed strategies, comma-separated<input id="auto-strategies" value="EQUITY_LONG,EQUITY_SHORT,BULL_CALL_DEBIT,BEAR_PUT_DEBIT"></label><label class="field" style="grid-column:1/-1">Completed-candle signal conditions, one per line<textarea id="auto-signals">15m, 1h, Daily and Weekly completed candles must all be fresh
 Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGNMENT</textarea></label><label class="field">Planning capital (₹)<input id="auto-planning-capital" type="number" min="1" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="auto-daily-loss" type="number" min="1" max="5000" value="5000"></label><label class="field">Per-idea risk (₹)<input id="auto-idea-risk" type="number" min="1" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="auto-risk-reserve" type="number" min="0" value="1000"></label><label class="field">Maximum concurrent positions<input id="auto-max-positions" type="number" min="1" max="20" value="3"></label><label class="field">Maximum concurrent orders<input id="auto-max-orders" type="number" min="1" max="20" value="2"></label><label class="field">Minimum reward:risk<input id="auto-min-rr" type="number" min="1" max="10" step="0.1" value="1.5"></label><label class="field">Order type<select id="auto-order-type"><option value="LIMIT">Limit only</option></select></label><label class="field">Maximum limit buffer (%)<input id="auto-limit-buffer" type="number" min="0" max="5" step="0.1" value="0.5"></label><label class="field">Maximum bid/ask spread (%)<input id="auto-max-spread" type="number" min="0.1" max="20" step="0.1" value="8"></label><label class="field">Trading start (IST)<input id="auto-start" type="time" value="09:30"></label><label class="field">Trading end (IST)<input id="auto-end" type="time" value="15:00"></label><label class="field">Minimum DTE<input id="auto-min-dte" type="number" min="0" max="365" value="1"></label><label class="field">Maximum DTE<input id="auto-max-dte" type="number" min="0" max="365" value="14"></label><label class="field">Cooldown (minutes)<input id="auto-cooldown" type="number" min="1" max="1440" value="30"></label><label class="field">Stale-data veto (seconds)<input id="auto-stale" type="number" min="1" max="300" value="15"></label></div><div class="packet-actions" style="margin-top:12px"><button type="button" class="button secondary" id="save-auto-draft">Save disabled PAPER draft</button><button type="button" class="button secondary" id="preview-auto-policy">Preview complete policy</button></div><div id="auto-status" class="handoff-status" role="status" aria-live="polite"></div><div id="auto-review" hidden><pre id="auto-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact policy acknowledgement<input id="auto-ack" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button" id="save-auto-policy" disabled style="margin-top:10px">Save acknowledged policy</button></div></details></section>
       </section>
@@ -1594,7 +1594,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       input.addEventListener('change', () => {
         const selected = [...document.querySelectorAll('.candidate-select:checked')].map(item => item.value)
         $('analysis-board').querySelectorAll('.opportunity-card').forEach(card => { card.hidden = !selected.includes(card.dataset.candidateKey) })
-        $('candidate-batch-actions').hidden = selected.length === 0 || selectedInstrumentRoute() !== 'cash_equity'
+        $('candidate-batch-actions').hidden = selected.length === 0
         $('candidate-status').textContent = `${selected.length} recommendation(s) selected. A batch preview revalidates all of them together before any confirmation is possible.`
         $('analysis-panel').hidden = false
       })
@@ -1667,13 +1667,47 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       return `#${index + 1} ${candidate.name} (conviction ${score})`
     })
     const allocatedTotal = route === 'cash_equity' ? ranked.reduce((sum, candidate) => sum + Number(candidate.allocation?.estimated_notional || 0), 0) : 0
-    $('candidate-status').textContent = `Ranked using fresh FYERS available funds of ${money(availableFunds)} and conviction. Take first: ${top.join(' · ')}. ${route === 'cash_equity' ? `Suggested allocation totals ${money(allocatedTotal)} and remains editable.` : 'Each validated spread starts at one editable lot.'} All selections still require their own fresh ticket preview.`
+    $('candidate-status').textContent = `Ranked using fresh FYERS available funds of ${money(availableFunds)} and conviction. Take first: ${top.join(' · ')}. ${route === 'cash_equity' ? `Suggested allocation totals ${money(allocatedTotal)} and remains editable.` : 'Each validated long option starts at one editable lot.'} All selections still require their own fresh ticket preview.`
+  }
+  const handoffResultsKey='sector-pulse:handoff-results-v1'
+  let handoffCurrentRoute='cash_equity'
+  const handoffInputIds=['planning-capital','daily-loss-limit','idea-risk-limit','risk-reserve','max-positions','minimum-rr','enforce-risk-controls','stop-basis','order-type','handoff-allocation-budget','handoff-option-lots']
+  const saveHandoffResults=()=>{
+    if(!analysisRun||!candidateCollection)return
+    try{
+      const stored=JSON.parse(sessionStorage.getItem(handoffResultsKey)||'{}')
+      const display=JSON.parse(JSON.stringify(analysisRun))
+      for(const card of display.cards||[])card.analysis.active_invalidation=null
+      stored[handoffCurrentRoute]={savedAt:Date.now(),route:handoffCurrentRoute,analysisRun:display,candidateCollection,
+        selected:[...document.querySelectorAll('.candidate-select:checked')].map(input=>input.value),
+        inputs:Object.fromEntries(handoffInputIds.map(id=>[id,$(id)?.type==='checkbox'?$(id).checked:$(id)?.value]))}
+      sessionStorage.setItem(handoffResultsKey,JSON.stringify(stored))
+    }catch{}
+  }
+  const restoreHandoffResults=route=>{
+    try{
+      const stored=JSON.parse(sessionStorage.getItem(handoffResultsKey)||'{}')
+      const saved=stored[route]||(!route?Object.values(stored).sort((a,b)=>b.savedAt-a.savedAt)[0]:null)
+      if(!saved?.analysisRun||!saved.candidateCollection)return
+      handoffCurrentRoute=saved.route
+      document.querySelector(`input[name="instrument-route"][value="${saved.route}"]`).checked=true
+      for(const [id,value] of Object.entries(saved.inputs||{})){const input=$(id);if(!input)continue;if(input.type==='checkbox')input.checked=value===true;else if(value!=null)input.value=value}
+      analysisRun=saved.analysisRun;candidateCollection=saved.candidateCollection
+      renderCandidates();renderAnalysisCards()
+      for(const input of document.querySelectorAll('.candidate-select'))input.checked=(saved.selected||[]).includes(input.value)
+      document.querySelector('.candidate-select:checked')?.dispatchEvent(new Event('change'))
+      $('candidate-status').textContent='Retained analysis from '+new Date(saved.savedAt).toLocaleString('en-IN')+'. Place order refreshes the exact ticket; expired analysis requires Collect matches.'
+      $('cash-product-choice').hidden=saved.route!=='cash_equity'
+      updateHandoffBatchDefaults();invalidateTicketPreview('Retained analysis; refresh the exact ticket before submitting.')
+    }catch{}
   }
   const selectedCashProduct = () => document.querySelector('input[name="cash-product"]:checked')?.value || 'INTRADAY'
   const selectedCashExitPlan = () => document.querySelector('input[name="cash-exit-plan"]:checked')?.value || 'FIXED_TARGET'
   const instrumentRouteLabel = route => route === 'stock_options' ? 'Stock options' : 'Cash equity'
   const resetInstrumentRouteResults = () => {
+    saveHandoffResults()
     const route = selectedInstrumentRoute()
+    handoffCurrentRoute=route
     $('cash-product-choice').hidden = route !== 'cash_equity'
     candidateCollection = null; analysisRun = null; handoffPacket = null; ticketProposals = []
     $('candidate-list').innerHTML = ''
@@ -1682,7 +1716,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('candidate-status').className = 'handoff-status'
     $('candidate-status').textContent = `${instrumentRouteLabel(route)} selected. Collect fresh completed-candle matches.`
     $('collect-candidates').textContent = `Collect ${route === 'stock_options' ? 'stock option' : 'cash equity'} matches`
-    invalidateTicketPreview('Instrument route changed. Any prior proposal or ticket preview was cleared.')
+    invalidateTicketPreview('Instrument route changed. Refresh the exact ticket before submitting.')
+    updateHandoffBatchDefaults()
+    restoreHandoffResults(route)
   }
   const invalidateTicketPreview = message => {
     ticketPreview = null
@@ -1815,12 +1851,12 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       candidateCollection = { candidates: analysisRun.candidates || [], scope: analysisRun.scope, updated_at: analysisRun.source?.analysis_updated_at }
       renderCandidates()
       renderAnalysisCards()
+      saveHandoffResults()
       const stocks = candidateCollection.candidates.filter(item => item.kind === 'stock').length
       const autoStops = candidateCollection.candidates.filter(item => item.derived_invalidation?.status === 'READY').length
       $('candidate-status').textContent = `${instrumentRouteLabel(instrumentRoute)} · ${stocks} fully aligned stocks · ${autoStops} completed-candle stops populated · ${analysisRun.cards.length} route-specific proposals. ${analysisRun.ai_review.message}`
     } catch (error) {
-      candidateCollection = null
-      $('candidate-list').innerHTML = ''
+      if(!analysisRun){candidateCollection = null; $('candidate-list').innerHTML = ''}
       $('candidate-status').className = 'handoff-status error'; $('candidate-status').textContent = error.message
     } finally {
       const route = selectedInstrumentRoute()
@@ -1853,7 +1889,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
     return { selected, riskInputs, policy }
   }
-  $('prepare-handoff-batch').insertAdjacentHTML('beforebegin', '<label class="field" style="min-width:220px">Funds to allocate (₹)<input id="handoff-allocation-budget" type="number" min="1" step="1" placeholder="Enter batch budget"></label>')
+  $('prepare-handoff-batch').insertAdjacentHTML('beforebegin', '<label class="field" style="min-width:220px"><span id="handoff-budget-label">Funds to allocate (₹)</span><input id="handoff-allocation-budget" type="number" min="1" step="1" placeholder="Enter batch budget"></label>')
+  $('handoff-allocation-budget').closest('label').insertAdjacentHTML('afterend','<label class="field" id="handoff-option-lots-field" hidden>Lots per stock<input id="handoff-option-lots" type="number" min="1" step="1" value="1"></label>')
+  const updateHandoffBatchDefaults = () => {
+    const options=selectedInstrumentRoute()==='stock_options'
+    $('handoff-option-lots-field').hidden=!options
+    $('handoff-budget-label').textContent=options?'Optional budget (₹)':'Funds to allocate (₹)'
+    $('handoff-allocation-budget').placeholder=options?'Blank = one lot per stock':'Enter batch budget'
+  }
   const prepareHandoffBatch = async () => {
     const button = $('prepare-handoff-batch')
     $('handoff-batch-panel').hidden = false
@@ -1861,9 +1904,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const optionBatch = selectedInstrumentRoute() === 'stock_options'
       const { selected, riskInputs, policy } = selectedCandidatePayload()
       const allocationBudget = Number($('handoff-allocation-budget').value)
-      if (!(allocationBudget > 0)) throw new Error('Enter the funds you want to allocate across the selected stocks.')
+      if (!optionBatch && !(allocationBudget > 0)) throw new Error('Enter the funds you want to allocate across the selected stocks.')
+      const optionLots=Number($('handoff-option-lots').value||1)
+      if(optionBatch&&(!Number.isInteger(optionLots)||optionLots<1))throw new Error('Lots per stock must be a positive whole number.')
       const cards = selected.map(key => analysisRun?.cards?.find(card => card.candidate_key === key)).filter(Boolean)
-      if (cards.length !== selected.length) throw new Error(optionBatch ? 'Some selected stocks have no validated option spread. Review the excluded opportunities; fresh contracts and expiry are required.' : 'Refresh the recommendations before preparing the batch.')
+      if (cards.length !== selected.length) throw new Error(optionBatch ? 'Some selected stocks have no validated long option. Review the excluded opportunities; fresh contracts and expiry are required.' : 'Refresh the recommendations before preparing the batch.')
       button.disabled = true; button.textContent = 'Refreshing FYERS batch preflight…'
       $('handoff-batch-status').className = 'handoff-status'
       $('handoff-batch-status').textContent = 'Refreshing every symbol, quote, stop, funds, positions, orders and aggregate risk. Any failed item blocks the full batch.'
@@ -1872,12 +1917,12 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         const candidate = card.candidate; const plan = card.analysis
         const invalidation = Number(riskInputs[candidate.key]?.invalidation)
         const optionProposal = plan.proposal
-        if (optionBatch && (!optionProposal?.legs?.length || !optionProposal.expiry_iso)) throw new Error(`${candidate.name}: no validated option spread and expiry are available.`)
+        if (optionBatch && (!optionProposal?.legs?.length || !optionProposal.expiry_iso)) throw new Error(`${candidate.name}: no validated long option and expiry are available.`)
         return {
           broker: 'fyers', underlying: candidate.symbol,
-          proposal: optionBatch ? { ...optionProposal, kind: 'OPTION_SPREAD' } : { kind: 'EQUITY', label: `Analysis Handoff ${candidate.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: candidate.direction, quantity: 1, entry: plan.entry, target: plan.target },
+          proposal: optionBatch ? { ...optionProposal, kind: 'LONG_OPTION', source: 'ANALYSIS_HANDOFF' } : { kind: 'EQUITY', label: `Analysis Handoff ${candidate.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: candidate.direction, quantity: 1, entry: plan.entry, target: plan.target },
           expiry: optionBatch ? optionProposal.expiry_iso : undefined,
-          lots: optionBatch ? Number(optionProposal.sizing?.lots || 1) : undefined,
+          lots: optionBatch ? optionLots : undefined,
           invalidation, quantity: 1, cash_product: selectedCashProduct(),
           daily_loss_limit: policy.dailyLossLimit, idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
           max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
@@ -1885,7 +1930,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
           external_open_risk: external === '' ? null : Number(external), require_market_open: true,
         }
       })
-      const preview = await postJson('/api/trade-ticket/prepare-batch', { items, ...(selectedInstrumentRoute() === 'cash_equity' ? { allocation_budget: allocationBudget } : {}) })
+      const preview = await postJson('/api/trade-ticket/prepare-batch', { items, ...(!optionBatch || allocationBudget>0 ? { allocation_budget: allocationBudget } : {}) })
       handoffBatchPreview = preview
       $('handoff-batch-preview').textContent = JSON.stringify(preview, null, 2)
       $('handoff-batch-panel').hidden = false; $('handoff-batch-review').hidden = false
@@ -2884,6 +2929,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     if (!document.hidden) runScreenerScheduler()
   })
 
+  window.addEventListener('pagehide',saveHandoffResults)
+  document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',saveHandoffResults))
+  $('handoff').addEventListener('change',saveHandoffResults)
+  restoreHandoffResults('');updateHandoffBatchDefaults()
   syncStraddleOptions(); syncNiftyStraddleOptions(); renderPolicyImpact(); loadAutomationPolicy(); refreshAnalysis(); refreshAccount(); refreshClosed(); refreshTicketCapabilities(); loadKamaRunner(); refreshStraddle(); refreshNiftyStraddle(); runScreenerScheduler()
   setInterval(refreshAccount, accountRefreshMs)
   setInterval(refreshStraddle, straddleRefreshMs)

@@ -3,11 +3,11 @@ import json
 import os
 from pathlib import Path
 from .signals import settings
-from . import ema_proximity, trailing_stop
+from . import ema_proximity, trailing_stop, zone_target, market_structure
 
 KEYS=('symbol','timeframe','atr-length','factor','brick-mode','manual-brick','use-adx','adx-threshold','adx-length','adx-smoothing','widening-window','rsi-slope-enabled','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','mode','lots','max-trades','max-premium','daily-budget','spot-target','spot-stop','ema-exit-enabled','ema-exit-length','sideways-enabled','sideways-max-candles','additional-slippage-points','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','trailing-enabled','trailing-basis','trailing-distance','chart-view','history-preset','history-from','history-to')
 MAP={'atr-length':'atr_length','brick-mode':'brick_mode','manual-brick':'manual_brick','use-adx':'use_adx','adx-threshold':'adx_threshold','adx-length':'adx_length','adx-smoothing':'adx_smoothing','widening-window':'widening_window','rsi-slope-enabled':'rsi_slope_enabled','retest-enabled':'retest_enabled','retest-engulfing':'retest_engulfing','retest-harami':'retest_harami','retest-star':'retest_star'}
-KEYS=KEYS+('paper-capital','commodity-holding','cash-product','market','session-deadline','price-source','order-terms','carry-policy')
+KEYS=KEYS+('market-structure-enabled','zone-target-enabled','paper-capital','commodity-holding','cash-product','market','session-deadline','price-source','order-terms','carry-policy')
 
 def read(path):
     p=Path(path)
@@ -20,11 +20,11 @@ def write(path,payload,now):
     values=payload.get('settings')
     if not isinstance(values,dict):raise ValueError('A settings object is required.')
     c={k:values[k] for k in KEYS if k in values}
-    for k in ('rsi-slope-enabled','use-adx','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','ema-exit-enabled','sideways-enabled','ema-proximity-enabled','trailing-enabled'):
+    for k in ('rsi-slope-enabled','use-adx','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','ema-exit-enabled','sideways-enabled','ema-proximity-enabled','trailing-enabled','zone-target-enabled','market-structure-enabled'):
         if k in c and not isinstance(c[k],bool):raise ValueError('Saved checkbox settings must be booleans.')
     settings({MAP.get(k,k):v for k,v in c.items()})
     extras={k.replace('-','_'):v for k,v in c.items()}
-    ema_proximity.settings(extras);trailing_stop.settings(extras)
+    ema_proximity.settings(extras);trailing_stop.settings(extras);zone_target.settings(extras);market_structure.settings(extras)
     if c.get('commodity-holding','INTRADAY') not in ('INTRADAY','CARRY_FORWARD'):raise ValueError('Unknown MCX holding policy.')
     if c.get('cash-product','INTRADAY') not in ('INTRADAY','CNC'):raise ValueError('Unknown cash holding product.')
     if c.get('market','ALL') not in ('ALL','NSE_INDEX','BSE_INDEX','NSE_STOCK','BSE_STOCK','MCX','CRYPTO','NSE_EQUITY','BSE_EQUITY'):raise ValueError('Unknown Renko market.')

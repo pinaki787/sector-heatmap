@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from .batch import Batch
 from .delta_broker import Broker
@@ -41,6 +42,8 @@ def config(symbol='BTCUSD'):
 class ConcurrentRulesTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
+        mtf_patch=patch.object(Runner,'supertrend_agreement',return_value=dict(allowed=True,reason='MTF fixture agrees'))
+        mtf_patch.start();self.addCleanup(mtf_patch.stop)
     def arm(self,runner,cfg):
         runner.activate(dict(cfg,configuration_revision=runner.runtime_revision),background=False)
         runner.state['eligible_since']=runner.clock()-10

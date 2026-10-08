@@ -1,0 +1,74 @@
+--- a/strategies/renko_supertrend/runner.py
++++ b/strategies/renko_supertrend/runner.py
+@@ -638,6 +638,20 @@
+                 candidate = provisional(self.state['renko_engine'], self.adapter.forming(c,self.adapter.candles(c),self.clock()),c,self.adapter.host_tick_size(c['underlying']),self.clock())
+                 if candidate['entry_direction'] != last['cross_direction'] or (last.get('provisional') and candidate['timestamp'] != last['timestamp']):
+                     raise ValueError('Intrabar setup changed during preflight; no order.')
++        if order['side'] == 1 and hasattr(self.adapter, 'forming'):
++            # The entry setup and the configured exit must agree at submission.
++            # This also covers confirmed entries and custom exit EMA lengths.
++            c = self.state['config']
++            price, stamp = self.adapter.live_price(c, self.clock())
++            observation = ema_exit_observation(self.state['renko_engine'], price, stamp, c, self.clock())
++            length = c.get('ema_exit_length', 10)
++            if length != 10:
++                base = self.exit_ema(self.adapter.candles(c), c)
++                alpha = 2 / (length + 1)
++                observation['ema_exit'] = alpha * price + (1 - alpha) * base
++            observation['ema_exit_enabled'] = c.get('ema_exit_enabled', True)
++            if ema_adverse(observation, position['direction']):
++                raise ValueError('Fresh underlying price already breaches configured exit EMA; no entry.')
+         if order['side'] == 1:
+             self.state['rearm_after_exit']=False
+             metadata=getattr(self.adapter,'resolved_contracts',{}).get(order['symbol'],{})
+--- a/strategies/renko_supertrend/test_intrabar.py
++++ b/strategies/renko_supertrend/test_intrabar.py
+@@ -82,3 +82,48 @@
+         self.b.candles=lambda c:(_ for _ in ()).throw(AssertionError('Overdue exit must not wait for tick'))
+         self.r.step();self.assertIsNone(self.r.state['position'])
+         self.assertEqual(self.r.state['order_history'][-1]['reason'],'TIMED_SQUARE_OFF_1515')
++
++    def test_last_price_moves_after_forming_setup_no_entry_intent(self):
++        self.tick_mode();self.start()
++        self.b.live_price=lambda c,now:(80,now)
++        with self.assertRaisesRegex(ValueError,'already breaches'):self.r.step()
++        self.assertIsNone(self.r.state.get('position'))
++        self.assertIsNone(self.r.state.get('pending'))
++        self.assertEqual(self.r.state.get('order_history',[]),[])
++        self.assertEqual(self.b.sent,[])
++
++    def test_disabled_exit_does_not_add_exit_gate(self):
++        self.tick_mode();self.c['ema_exit_enabled']=False;self.start()
++        self.b.live_price=lambda c,now:(80,now)
++        self.r.step();self.assertIsNotNone(self.r.state['position'])
++        self.assertEqual(self.b.sent,[])
++
++    def test_stale_pre_submission_tick_blocks_entry(self):
++        self.tick_mode();self.start()
++        self.b.live_price=lambda c,now:(130,now-16)
++        with self.assertRaisesRegex(ValueError,'Fresh underlying'):self.r.step()
++        self.assertIsNone(self.r.state.get('pending'))
++        self.assertEqual(self.b.sent,[])
++
++    def test_confirmed_entry_checks_current_exit_not_only_closed_signal(self):
++        self.tick_mode();self.c['intrabar_entries']=False;self.start()
++        self.b.live_price=lambda c,now:(80,now)
++        with self.assertRaisesRegex(ValueError,'already breaches'):self.r.step()
++        self.assertIsNone(self.r.state.get('pending'))
++        self.assertEqual(self.b.sent,[])
++
++    def test_custom_exit_ema_blocks_even_when_ema10_setup_passes(self):
++        self.tick_mode();self.c['ema_exit_length']=30;self.start()
++        self.r.exit_ema=lambda rows,c:200
++        with self.assertRaisesRegex(ValueError,'already breaches'):self.r.step()
++        self.assertIsNone(self.r.state.get('pending'))
++        self.assertEqual(self.b.sent,[])
++
++    def test_bearish_entry_blocks_adverse_last_price(self):
++        self.tick_mode()
++        self.b.rows=[{**candle(i,p),'timestamp':self.b.now-185+i*60} for i,p in enumerate([130,120,110])]
++        self.b.price=100;self.start()
++        self.b.live_price=lambda c,now:(150,now)
++        with self.assertRaisesRegex(ValueError,'already breaches'):self.r.step()
++        self.assertIsNone(self.r.state.get('pending'))
++        self.assertEqual(self.b.sent,[])

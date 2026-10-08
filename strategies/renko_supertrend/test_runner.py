@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -41,6 +42,10 @@ class RenkoLifecycleTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.b=FakeBroker();self.path=Path(self.tmp.name)/'renko.json'
         self.r=Runner(self.b,self.path,lambda:self.b.now);self.addCleanup(self.r.release)
+        # Existing lifecycle scenarios isolate the new mandatory MTF gate.
+        # Real direction/source behavior is covered by test_mtf_supertrend.
+        mtf_patch=patch.object(Runner,'supertrend_agreement',return_value=dict(allowed=True,reason='MTF fixture agrees'))
+        mtf_patch.start();self.addCleanup(mtf_patch.stop)
         self.c=dict(strategy='RENKO_SUPERTREND_V1',underlying='NSE:NIFTY50-INDEX',timeframe='1 minute',
                     lots=1,mode='PAPER',atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,
                     exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False)
@@ -71,7 +76,7 @@ class RenkoLifecycleTests(unittest.TestCase):
         self.assertEqual(len(self.b.sent),1)
     def test_streaming_history_window_does_not_reseed_and_revision_blocks(self):
         self.r.state['config']=configuration(self.c)
-        self.r.signal();self.append(121);expected=series(self.b.rows,self.c)[-1];expected={**expected,'supertrend_cross_direction':expected['cross_direction'],'cross_direction':expected['entry_direction'],'ema_exit':expected['ema10'],'ema_exit_length':10,'ema_exit_enabled':True}
+        self.r.signal();self.append(121);expected=series(self.b.rows,self.c)[-1];expected={**expected,'supertrend_cross_direction':expected['cross_direction'],'cross_direction':expected['entry_direction'],'ema_exit':expected['ema10'],'ema_exit_length':10,'ema_exit_enabled':True,'mtf_supertrend':dict(allowed=True,reason='MTF fixture agrees')}
         self.b.rows=self.b.rows[1:]
         self.assertEqual(self.r.signal(),expected)
         self.b.rows[-1]['volume']=2

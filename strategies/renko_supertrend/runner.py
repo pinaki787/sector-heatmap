@@ -10,10 +10,11 @@ import threading
 from queue import SimpleQueue, Empty
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from strategies.ema_crossover.valuation import amount, multiplier
 from strategies.ema_crossover.runner import TIMEFRAMES
 from strategies.ema_crossover.runner import Runner as BaseRunner, configuration as rsi_configuration
 from strategies.ema_crossover.broker import FyersBroker as BaseBroker
-from . import sideways,costs
+from . import sideways,costs,zone_target,market_structure,mtf_supertrend
 from .ema_exit import settings as ema_exit_settings, confirmed_values
 from .risk import levels, hard_exit, validate_spot_levels
 from . import preferences
@@ -193,7 +194,7 @@ def configuration(payload):
                                 'ma_length': 14, 'ma_type': 'SMA', 'lots': 1 if route == 'CASH_EQUITY' else payload.get('lots'), 'trailing_enabled': False, 'spot_target':None, 'spot_stop':None})
     for key in ('rsi_length', 'ma_length', 'ma_type'):
         shared.pop(key)
-    return {**shared, **settings(payload), **levels(payload), **sideways.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',True)}), 'strategy': STRATEGY,
+    return {**shared, **settings(payload), **levels(payload), **sideways.settings(payload), **zone_target.settings(payload), **market_structure.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',True)}), 'strategy': STRATEGY,
             'commodity_holding': holding if str(payload.get('underlying','')).startswith('MCX:') else None, 'execution_route': route, 'quantity': quantity, 'cash_product': cash_product if route == 'CASH_EQUITY' else None, 'label': 'Renko Supertrend Strategy', 'intrabar_entries': payload.get('intrabar_entries', False),  'exit_policy': 'OPPOSITE_CONFIRMED_SIGNAL'}
 
 
@@ -422,8 +423,8 @@ class Broker(BaseBroker):
         result.update(option_route=route, execution_route=c.get('execution_route','OPTIONS'))
         result.update(host_tick_size=self.host_tick_size(c['underlying']),
                       exits='Fresh underlying EMA10 adverse breach (independent of ADX), opposite confirmed Supertrend reversal (selected ADX gate), or 15:10 IST wall-clock square-off. No same-candle re-entry.',
-                      entry_timing='INTRABAR_PROVISIONAL' if c.get('intrabar_entries',False) else 'COMPLETED_CANDLE', squareoff_time=policy['session_deadline']+' Asia/Kolkata',
-                      entries=f"Host-price EMA10/30 aligned with existing Supertrend regime; close beyond EMA10; strictly widening signed gap for {c['widening_window']} completed candles. Signal on qualification onset; re-arm when qualification breaks.",
+                      entry_timing='INTRABAR_PROVISIONAL' if c.get('intrabar_entries',False) else 'COMPLETED_CANDLE', squareoff_time=(policy['session_deadline']+' Asia/Kolkata') if policy.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',
+                      entries=f"Completed one-minute and five-minute Supertrend must agree with the requested side. Host-price EMA10/30 aligned with existing Supertrend regime; close beyond EMA10; strictly widening signed gap for {c['widening_window']} completed candles. Signal on qualification onset; re-arm when qualification breaks.",
                       risk='Research reconstruction. Provisional candidates can disappear; OHLC replay cannot prove tick fills. EMA10 breach exits independently of ADX; opposite confirmed Supertrend exits honor ADX. Wall-clock 15:10 IST square-off and entry cutoff require a running server; broker fills require fresh execution quotes and reconciliation. Existing FYERS sizing, preflight, durable intent and reconciliation apply.')
         if c.get('underlying','').startswith('MCX:'):
             result.update(product='MARGIN',holding_policy='Carry forward with pre-expiry protection' if c.get('commodity_holding') == 'CARRY_FORWARD' else 'Intraday strategy square-off; commodity options use MARGIN',squareoff_time='None · overnight carry; exact option pre-expiry protection applies' if c.get('commodity_holding') == 'CARRY_FORWARD' else result['squareoff_time'])
@@ -442,7 +443,11 @@ class Runner(BaseRunner):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         # Legacy saved runs retain their explicit pre-filter behavior. New setups default ON.
-        if self.state.get('config'):self.state['config'].setdefault('rsi_slope_enabled',False)
+        if self.state.get('config'):
+            self.state['config'].setdefault('rsi_slope_enabled',False)
+            self.state['config'].setdefault('zone_target_enabled',False)
+            self.state['config'].setdefault('market_structure_enabled',False)
+        self._zone_fetch_at=0
         self.position_ticks=SimpleQueue()
         prior=getattr(self.adapter,'on_tick',None)
         def wake_on_tick(tick):
@@ -528,7 +533,7 @@ class Runner(BaseRunner):
             initialization_anchor=engine.get('anchor'),host_bar_count=(engine.get('state') or {}).get('count'),
             observation_mode='INTRABAR' if sig.get('provisional') else 'CONFIRMED' if sig else 'WALL_CLOCK / INDICATORS_UNAVAILABLE',
             market_event_at=sig.get('market_event_at'),
-            indicators={k:deepcopy(sig.get(k)) for k in ('timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','ema10','ema30','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
+            indicators={k:deepcopy(sig.get(k)) for k in ('timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','ema10','ema30','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
             confirmed_gap_history=deepcopy((engine.get('state') or {}).get('ema_gaps',[])),
             confirmed_indicator_reference=deepcopy(engine.get('last')),
             provenance='Captured at strategy event; missing observations remain unknown. Confirmation and broker fill times are separate.')
@@ -554,7 +559,7 @@ class Runner(BaseRunner):
                 raise ValueError('Existing exposure must finish stopping/reconciliation before a new start.')
             p=self.preview(payload)
             if after_cutoff(self.clock(),p['config']):
-                raise ValueError('Selected segment entry cutoff has passed.')
+                raise ValueError('Optional saved crypto daily strategy cutoff '+str(p['config'].get('session_deadline'))+' IST has passed; crypto trades 24/7. Select Continuous trading to remove the daily cutoff, or retain this daily risk policy.' if p['config'].get('broker')=='DELTA_INDIA' else 'Selected segment entry cutoff has passed.')
             tick=self.adapter.host_tick_size(p['config']['underlying'])
             analysis(self.adapter.candles(p['config']),p['config'],tick)
             if payload.get('resume_run_id'):
@@ -573,9 +578,11 @@ class Runner(BaseRunner):
                     self.thread=threading.Thread(target=self.loop,name='renko-supertrend-runner',daemon=True)
                     self.thread.start()
                 return self.snapshot()
+            # Format the response message before activating a runner.
+            armed_message='Renko armed in '+p['config']['mode']+'; '+('fresh intrabar candidates' if p['config'].get('intrabar_entries') else 'completed-candle qualifications')+('; segment cutoff '+p['config']['session_deadline']+' IST' if p['config'].get('session_deadline') else '; continuous crypto; held contract expiry applies')+'. No historical signal replay.'
             self.state['run_id']='RENKO-RUN-'+secrets.token_hex(10)
             result=super().start(dict(preview_id=p['id'],confirmation=p['confirmation']),background)
-            self.event('WATCHING','Renko armed in '+p['config']['mode']+'; '+('fresh intrabar candidates' if p['config'].get('intrabar_entries') else 'completed-candle qualifications')+'; segment cutoff '+p['config'].get('session_deadline','15:10')+' IST. No historical signal replay.')
+            self.event('WATCHING',armed_message)
             return self.snapshot()
 
     def stop(self):
@@ -594,6 +601,57 @@ class Runner(BaseRunner):
                 self.state['position']['exit_reason']=reason;self.save()
             return self.snapshot()
 
+    def _chart_identity(self, payload):
+        c=self.state.get('config') or {}
+        if payload.get('controls_revision')!='stopped-flat-chart-controls-v1' or payload.get('run_id')!=self.state.get('run_id') or payload.get('mode')!=c.get('mode'):
+            raise ValueError('Chart runner context changed; refresh before using controls.')
+
+    def chart_stop(self, payload):
+        with self.lock:
+            self._chart_identity(payload)
+            return self.stop()  # Existing ownership/reconciliation/close pathway.
+
+    def chart_mode(self, payload):
+        with self.lock:
+            self._chart_identity(payload)
+            if self.state.get('running') or self.state.get('position') or self.state.get('pending') or (self.thread and self.thread.is_alive()):
+                raise ValueError('Mode switch requires stopped, flat, reconciled runner; Stop may close exposure first.')
+            mode=payload.get('next_mode')
+            if mode not in ('PAPER','LIVE'):
+                raise ValueError('Choose Paper or Live explicitly.')
+            if mode=='LIVE' and not self.adapter.live_enabled():
+                raise ValueError('Existing Live authorization/runtime gate is disabled.')
+            saved=self.read_preferences().get('settings',{})
+            result=self.save_preferences({'settings':{**saved,'mode':mode}})
+            # Deliberately preserve last-run config/journal, never activate here.
+            self.preview_value=None
+            return dict(settings=result,next_start_mode=mode,runner=self.snapshot())
+
+    def prepare_zone_target(self, position, config):
+        if not config.get('zone_target_enabled') or position.get('exit_requested'):
+            return
+        now=self.clock()
+        if now-self._zone_fetch_at < 10:
+            return
+        self._zone_fetch_at=now
+        try:
+            source=self.adapter.candles({**config,'timeframe':'5 minutes'})
+            decision=zone_target.assess(source,position,now)
+            prior=position.get('zone_target_assessment') or {}
+            if prior.get('candle_at')==decision['candle_at']:
+                position.pop('zone_target_error',None)
+                self.save()
+                return  # Never revise/replay an assessed touch after OHLC corrections.
+            if prior.get('candle_at') is not None and decision['candle_at']>prior['candle_at']+300:
+                position['zone_target_assessment']=dict(decision,reason=None,state='GAP_SKIPPED')
+                raise ValueError('Missed five-minute target candle; no historical touch replay.')
+            position['zone_target_assessment']=decision
+            position.pop('zone_target_error',None)
+            self.save()
+        except (ValueError,RuntimeError,AttributeError,KeyError) as error:
+            position['zone_target_error']=str(error)
+            self.save()  # Existing protective exits continue independently.
+
     def session_bounds(self,c):
         if c.get('broker') == 'DELTA_INDIA' and c.get('carry_policy') == 'CONTINUOUS':return 0,1440
         opening=c.get('session_open','09:15');ending=c.get('session_deadline','15:10')
@@ -602,6 +660,14 @@ class Runner(BaseRunner):
 
     def snapshot(self):
         result = super().snapshot()
+        result['market_structure_revision']=market_structure.REVISION
+        result['mtf_supertrend_revision']=mtf_supertrend.REVISION
+        result['zone_target_revision']=zone_target.REVISION
+        result['chart_controls_revision']='stopped-flat-chart-controls-v1'
+        result['next_start_mode']=self.read_preferences().get('settings',{}).get('mode','PAPER')
+        result['activation_message_revision']='continuous-cutoff-status-v2'
+        result['manual_override_revision']='explicit-entry-v1'
+        result['entry_proximity_revision']='entry-only-normalized-atr-v1'
         if result.get('running') and result.get('status')=='WATCHING_NO_ENTRY' and not result.get('position') and not result.get('pending') and hasattr(self.adapter,'tick'):
             try:
                 self.adapter.live_price(result['config'],self.clock())
@@ -777,6 +843,8 @@ class Runner(BaseRunner):
                         self.save()
                 except (ValueError,RuntimeError) as error:
                     self.state['intrabar_exit_error'] = str(error)
+            if self.state.get('running') and c and p and not pending:
+                self.prepare_zone_target(p,c)
             previous=self.state.get('last_processed_bar')
             try:
                 result=super().step()
@@ -877,9 +945,99 @@ class Runner(BaseRunner):
             self.save()
 
 
+    def override_entry(self, payload):
+        """One explicit entry in the already armed run; exits keep their normal rules."""
+        with self.lock:
+            c=self.state.get('config') or {}
+            identity=dict(run_id=self.state.get('run_id'),underlying=c.get('underlying'),
+                          timeframe=c.get('timeframe'),mode=c.get('mode'),broker=c.get('broker','FYERS'))
+            if not identity['run_id'] or any(payload.get(k)!=v for k,v in identity.items()) or payload.get('override_revision')!='explicit-entry-v1':
+                raise ValueError('Override context changed. Reload the current runner before entry.')
+            direction=payload.get('direction')
+            if direction not in ('BULLISH','BEARISH'):
+                raise ValueError('Choose Bullish or Bearish explicitly.')
+            request_id=payload.get('request_id')
+            if not isinstance(request_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}',request_id):
+                raise ValueError('A unique override request ID is required.')
+            requests=self.state.setdefault('override_requests',[])
+            prior=next((r for r in requests if r['request_id']==request_id),None)
+            if prior:
+                if prior['direction']!=direction or prior['run_id']!=identity['run_id']:
+                    raise ValueError('Override request ID was already used for another entry.')
+                return self.snapshot()  # A consumed request is never replayed, even after an exit.
+            if not self.state.get('running') or not self.state.get('accepting_entries') or not self.file_lock or self.state.get('squareoff_requested'):
+                raise ValueError('Override requires an already active runner accepting entries.')
+            if self.state.get('position') or self.state.get('pending'):
+                raise ValueError('Override requires a flat runner with no pending order.')
+            if self.state.get('trades_used',0)>=c['max_trades']:
+                raise ValueError('Maximum entry trades reached.')
+            now=self.clock();local=datetime.fromtimestamp(now,IST);opening,end=self.session_bounds(c)
+            if (local.weekday()>=5 and not c.get('seven_day_session',False)) or not opening<=local.hour*60+local.minute<end or after_cutoff(now,c):
+                raise ValueError('Override is outside the selected entry session/cutoff.')
+            if c['mode']=='LIVE' and not self.adapter.live_enabled():
+                raise ValueError('Live runtime gate disabled; no override entry.')
+            if not self.sideways_entry_gate():
+                raise ValueError('Sideways position range lock blocks new entries.')
+            # Refresh genuine analysis for exit management; never invent a signal crossover.
+            self.signal()
+            spot,stamp=self.adapter.live_price(c,self.clock())
+            if not math.isfinite(spot) or spot<=0 or not math.isfinite(stamp) or not 0<=self.clock()-stamp<=15:
+                raise ValueError('Fresh underlying tick required for override entry.')
+            validate_spot_levels(spot,direction,c)
+            interval=TIMEFRAMES[c['timeframe']];anchor=self.state['last_signal']['timestamp']
+            bar=anchor+int((stamp-anchor)//interval)*interval
+            if bar<=self.state.get('last_exit_bar',0):
+                raise ValueError('Override cannot re-enter on the same exit candle.')
+            contract=self.adapter.resolve(c,direction)
+            tick=contract.get('verified_tick_size',contract.get('tick_size'))
+            if c.get('trailing_enabled'):trailing_stop.settings(c)  # Retain configured trailing validation.
+            qty=c['quantity'] if c.get('execution_route')=='CASH_EQUITY' else c['lots']*contract['lot_size']
+            quote=self.adapter.quote(contract['symbol']);side=contract.get('entry_side',1)
+            order=self.adapter.order(contract['symbol'],qty,side,quote)
+            premium=amount(contract,qty,quote['ask']);day=local.date().isoformat()
+            if (c['max_premium'] is not None and premium>c['max_premium']) or (c['daily_budget'] is not None and premium+self.state['losses'].get(day,0)>c['daily_budget']):
+                raise ValueError('Full option premium exceeds per-entry cap or remaining daily loss budget.')
+            self.entry_preflight(order,contract,quote)
+            event_at=self.clock()
+            position=dict(symbol=contract['symbol'],direction=direction,entry_side=side,
+                          execution_route=c.get('execution_route','OPTIONS'),lot_size=contract['lot_size'],
+                          quantity=qty,quantity_multiplier=multiplier(contract),tick_size=tick,
+                          entry_price=None,opened_at=None,entry_signal_timestamp=bar,
+                          entry_mode='MANUAL_OVERRIDE',entry_event_at=event_at,override_request_id=request_id)
+            record=dict(request_id=request_id,run_id=identity['run_id'],direction=direction,
+                        requested_at=event_at,underlying_exchange_at=stamp,underlying_price=spot,status='CONSUMED')
+            requests.append(record);self.state['override_requests']=requests[-5000:]
+            self.save()  # Consume before durable order intent; unknown outcomes cannot be retried.
+            self._override_submission=(request_id,event_at)
+            try:
+                self.submit(order,position,'MANUAL_OVERRIDE_ENTRY')
+                if self.state.get('pending') or self.state.get('position'):
+                    record['status']='SUBMITTED'
+                else:
+                    record.update(status='BLOCKED_OR_UNKNOWN',error=self.state.get('message','No confirmed order intent or fill.'))
+            except Exception as error:
+                record.update(status='BLOCKED_OR_UNKNOWN',error=str(error))
+                self.save()
+                raise
+            finally:
+                self._override_submission=None
+            self.save()
+            return self.snapshot()
+
+    def validate_entry_authorization(self, position):
+        if position.get('entry_mode')!='MANUAL_OVERRIDE':
+            return super().validate_entry_authorization(position)
+        context=getattr(self,'_override_submission',None)
+        if context!=(position.get('override_request_id'),position.get('entry_event_at')) or not self.state.get('running') or not self.state.get('accepting_entries') or not 0<=self.clock()-position['entry_event_at']<=15:
+            raise ValueError('Manual entry authorization expired during preflight.')
+        price,stamp=self.adapter.live_price(self.state['config'],self.clock())
+        if not math.isfinite(price) or price<=0 or not math.isfinite(stamp) or not 0<=self.clock()-stamp<=15:
+            raise ValueError('Fresh underlying tick required for override entry.')
+
     def submit(self, order, position, reason):
         self.drain_position_ticks()
         proximity=None
+        manual=position.get('entry_mode')=='MANUAL_OVERRIDE' and reason=='MANUAL_OVERRIDE_ENTRY'
         if self.is_entry_order(order,position):
             c=self.state['config']
             if not self.sideways_entry_gate():raise ValueError('Sideways position range lock blocks new entries.')
@@ -890,20 +1048,27 @@ class Runner(BaseRunner):
             self.deadline()
             last = self.state['last_signal']
             if after_cutoff(self.clock(),self.state.get('config')):
-                raise ValueError('Selected segment entry cutoff has passed.')
-            if last.get('provisional') and hasattr(self.adapter,'forming'):
+                raise ValueError('Optional saved crypto daily strategy cutoff '+str(c.get('session_deadline'))+' IST has passed; crypto trades 24/7. Select Continuous trading to remove the daily cutoff, or retain this daily risk policy.' if c.get('broker')=='DELTA_INDIA' else 'Selected segment entry cutoff has passed.')
+            if not manual and last.get('provisional') and hasattr(self.adapter,'forming'):
                 c = self.state['config']
                 candidate = provisional(self.state['renko_engine'], self.adapter.forming(c,self.adapter.candles(c),self.clock()),c,self.adapter.host_tick_size(c['underlying']),self.clock())
                 if candidate['entry_direction'] != last['cross_direction'] or candidate['timestamp'] != last['timestamp']:
                     raise ValueError('Intrabar setup changed during preflight; no order.')
-        if self.is_entry_order(order,position) and hasattr(self.adapter, 'forming'):
+        if self.is_entry_order(order,position):
+            mtf_gate=self.supertrend_agreement(position['direction'],self.clock())
+            if not mtf_gate['allowed']:raise ValueError(mtf_gate['reason'])
+        if not manual and self.is_entry_order(order,position) and self.state['config'].get('market_structure_enabled'):
+            c=self.state['config']
+            gate=market_structure.check(self.adapter.candles(c),position['direction'],TIMEFRAMES[c['timeframe']],self.clock())
+            if not gate['allowed']:raise ValueError(gate['reason'])
+        if not manual and self.is_entry_order(order,position) and hasattr(self.adapter, 'forming'):
             # The entry setup and the configured exit must agree at submission.
             # This also covers confirmed entries and custom exit EMA lengths.
             c = self.state['config']
             price, stamp = self.adapter.live_price(c, self.clock())
             observation = ema_exit_observation(self.state['renko_engine'], price, stamp, c, self.clock())
             last=self.state['last_signal']
-            if last.get('retest_signal') and not last.get('provisional'):
+            if not manual and last.get('retest_signal') and not last.get('provisional'):
                 aligned=observation['close']>observation['ema10']>observation['ema30'] if position['direction']=='BULLISH' else observation['close']<observation['ema10']<observation['ema30']
                 if not last.get('signal_allowed') or not aligned:
                     raise ValueError('Confirmed retest direction/alignment changed at fresh-price preflight; no order.')
@@ -915,21 +1080,25 @@ class Runner(BaseRunner):
             observation['ema_exit_enabled'] = c.get('ema_exit_enabled', True)
             if ema_adverse(observation, position['direction']):
                 raise ValueError('Fresh underlying price already breaches configured exit EMA; no entry.')
-            proximity=ema_proximity.check(c,price,observation['ema10'],self.state['renko_engine']['last'].get('host_atr'))
+            if not manual:proximity=ema_proximity.check(c,price,observation['ema10'],self.state['renko_engine']['last'].get('host_atr'))
             if proximity:proximity.update(exchange_at=stamp,observed_at=self.clock())
-        elif self.is_entry_order(order,position) and self.state['config'].get('ema_proximity_enabled'):
+        elif not manual and self.is_entry_order(order,position) and self.state['config'].get('ema_proximity_enabled'):
             raise ValueError('Fresh underlying observation required for EMA proximity preflight.')
         if self.is_entry_order(order,position):
-            if self.state['last_signal'].get('retest_signal'):reason='EMA10_RETEST_BOUNCE'
+            if not manual and self.state['last_signal'].get('retest_signal'):reason='EMA10_RETEST_BOUNCE'
             self.state['rearm_after_exit']=False
             metadata=getattr(self.adapter,'resolved_contracts',{}).get(order['symbol'],{})
             position={**position,**{k:metadata.get(k) for k in ('option_type','strike','expiry_epoch','expiry_protection_at')},'run_id':self.state.get('run_id'),'underlying_symbol':self.state['config']['underlying']}
             position['entry_indicator_snapshot']=self.indicator_snapshot(self.state['last_signal'],reason)
+            position['entry_indicator_snapshot']['mtf_supertrend_preflight']=deepcopy(mtf_gate)
             if proximity:position['entry_indicator_snapshot']['ema_proximity_observation']=proximity
-            position.update(entry_mode='CONFIRMED',entry_event_at=self.state['last_signal']['timestamp']+TIMEFRAMES[self.state['config']['timeframe']])
+            if manual:
+                position['entry_indicator_snapshot'].update(observation_mode='MANUAL_OVERRIDE',override_request_id=position['override_request_id'],market_event_at=position['entry_event_at'])
+            else:
+                position.update(entry_mode='CONFIRMED',entry_event_at=self.state['last_signal']['timestamp']+TIMEFRAMES[self.state['config']['timeframe']])
         elif not position.get('exit_indicator_snapshot'):
             position={**position,'exit_indicator_snapshot':self.indicator_snapshot(self.state.get('last_signal'),reason)}
-        if self.is_entry_order(order,position) and self.state['last_signal'].get('provisional'):
+        if not manual and self.is_entry_order(order,position) and self.state['last_signal'].get('provisional'):
             position={**position,'entry_mode':'INTRABAR','entry_event_at':self.state['last_signal']['market_event_at']}
         return super().submit(order,position,reason)
 
@@ -939,7 +1108,7 @@ class Runner(BaseRunner):
                 'entry_direction','entry_diagnostic','cross_direction','signal_allowed','adx',
                 'rsi14','rsi14_slope','rsi_slope_pass','retest_signal','retest_ready',
                 'retest_touched','retest_touch_evidence','retest_patterns','retest_bounce',
-                'retest_rsi_blocked','provisional','market_event_at')
+                'retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend')
         record=dict(run_id=self.state.get('run_id'),underlying=c['underlying'],timeframe=c['timeframe'],
                     timestamp=sig['timestamp'],event_at=sig.get('market_event_at') if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']],
                     observed_at=now,eligible=bool(eligible),code=code,reason=reason,
@@ -961,17 +1130,19 @@ class Runner(BaseRunner):
             # exit intent; pending/exit_requested reconciliation owns that path.
             now=self.clock();seconds=TIMEFRAMES[self.state['config']['timeframe']]
             closed_at=sig['timestamp']+seconds
-            token=hashlib.sha256(json.dumps([p.get('lifecycle_id',p.get('opened_at',p['symbol'])),sig['timestamp'],sig['close'],sig.get('ema_exit',sig.get('ema10')),sig.get('supertrend_cross_direction')]).encode()).hexdigest()
+            token=hashlib.sha256(json.dumps([p.get('lifecycle_id',p.get('opened_at',p['symbol'])),sig['timestamp'],sig['close'],sig.get('ema_exit',sig.get('ema10')),sig.get('supertrend_cross_direction'),p.get('zone_target_assessment')]).encode()).hexdigest()
             prior=self.state.get('latest_exit_assessment') or {}
             if token==prior.get('token'):return False
-            valid=0<=now-closed_at<=seconds
+            zone=p.get('zone_target_assessment') or {}
+            zone_fresh=bool(self.state['config'].get('zone_target_enabled') and zone.get('reason') and 0<=now-zone.get('event_at',0)<300 and not p.get('zone_target_error'))
+            valid=0<=now-closed_at<=seconds or zone_fresh
             self.state['latest_exit_assessment']=dict(token=token,timestamp=sig['timestamp'],observed_at=now,event_at=closed_at,
                 eligible=valid,close=sig['close'],ema_exit=sig.get('ema_exit',sig.get('ema10')),
                 ema_exit_length=self.state['config'].get('ema_exit_length',10),
                 reason='Fresh completed protective-exit assessment.' if valid else 'Previously assessed or stale protective-exit candle.')
             self.save()
             cross=('BEARISH' if p['direction']=='BULLISH' else 'BULLISH') if ema_adverse(sig,p['direction']) else sig.get('supertrend_cross_direction')
-            return valid and bool(cross)
+            return valid and bool(cross or zone_fresh)
         now=self.clock();c=self.state['config'];seconds=TIMEFRAMES[c['timeframe']]
         provisional=bool(sig.get('provisional'))
         event_at=sig.get('market_event_at',0) if provisional else sig['timestamp']+seconds
@@ -992,6 +1163,10 @@ class Runner(BaseRunner):
         elif not sig.get('cross_direction'):
             code=sig.get('entry_diagnostic') if not sig.get('entry_qualified') else 'NO_ENTRY_EVENT'
             reason='Setup passes; waiting for a new strategy entry event.' if code=='NO_ENTRY_EVENT' else 'Configured strategy gate: '+str(code)
+        elif not (sig.get('mtf_supertrend') or {}).get('allowed'):
+            code,reason='SUPERTREND_TIMEFRAME_AGREEMENT',(sig.get('mtf_supertrend') or {}).get('reason','One-minute/five-minute Supertrend agreement unavailable; entry blocked.')
+        elif c.get('market_structure_enabled') and not (sig.get('market_structure') or {}).get('allowed'):
+            code,reason='MARKET_STRUCTURE',(sig.get('market_structure') or {}).get('reason','Confirmed market structure unavailable; entry blocked.')
         elif self.signal_key(sig) in self.state.get('seen',[]):
             code,reason='ALREADY_SUBMITTED','A durable order intent already consumed this signal.'
         else:code,reason='ELIGIBLE','Fresh post-arming strategy entry event; execution preflight still required.'
@@ -1017,13 +1192,21 @@ class Runner(BaseRunner):
 
     def exit_reason_for(self, sig, position):
         reason='EMA'+str(self.state['config'].get('ema_exit_length',10))+'_CONFIRMED_BREACH' if ema_adverse(sig,position['direction']) else self.exit_reason if self.exit_signal(sig,position['direction']) else None
+        zone=position.get('zone_target_assessment') or {}
+        source_fresh=0<=self.clock()-(sig['timestamp']+TIMEFRAMES[self.state['config']['timeframe']])<=TIMEFRAMES[self.state['config']['timeframe']]
+        if not source_fresh and self.state['config'].get('zone_target_enabled') and zone.get('reason') and 0<=self.clock()-zone.get('event_at',0)<300 and not position.get('zone_target_error'):reason=None
+        if not reason and self.state['config'].get('zone_target_enabled') and zone.get('reason') and 0<=self.clock()-zone['event_at']<300 and not position.get('zone_target_error'):
+            reason=zone['reason']
+            position['exit_indicator_snapshot']=self.indicator_snapshot(sig,reason)
+            position['exit_indicator_snapshot']['zone_target']=deepcopy(zone)
         assessment=self.state.get('latest_exit_assessment') or {}
         if reason and assessment.get('eligible') and assessment.get('timestamp')==sig['timestamp'] and self.exit_is_later(sig,position):
             position['exit_indicator_snapshot']=self.indicator_snapshot(sig,reason)
+            if reason.startswith('SD_5M_'):position['exit_indicator_snapshot']['zone_target']=deepcopy(zone)
         return reason
 
     def exit_is_later(self, sig, position):
-        return sig['timestamp'] >= position['entry_signal_timestamp'] if position.get('entry_mode') == 'INTRABAR' else super().exit_is_later(sig,position)
+        return sig['timestamp'] >= position['entry_signal_timestamp'] if position.get('entry_mode') in ('INTRABAR','MANUAL_OVERRIDE') else super().exit_is_later(sig,position)
 
     def exit_signal(self, sig, direction):
         return not sig.get('is_forming') and (ema_adverse(sig,direction) or sig.get('supertrend_cross_direction') == ('BEARISH' if direction == 'BULLISH' else 'BULLISH'))
@@ -1082,6 +1265,15 @@ class Runner(BaseRunner):
             self.event('HISTORY_RECOVERED', 'Revised completed prices rebuilt from the original history anchor. Previously assessed candles remain consumed; new fresh candles retain the arming/reconnection boundary.')
             return rebuilt
 
+    def supertrend_agreement(self, direction, at, host_rows=None):
+        c=self.state['config']
+        try:
+            one=host_rows if host_rows is not None and c['timeframe']=='1 minute' else self.adapter.candles({**c,'timeframe':'1 minute'})
+            five=host_rows if host_rows is not None and c['timeframe']=='5 minutes' else self.adapter.candles({**c,'timeframe':'5 minutes'})
+            return mtf_supertrend.check(one,five,c,self.adapter.host_tick_size(c['underlying']),direction,at)
+        except Exception as error:
+            return dict(revision=mtf_supertrend.REVISION,allowed=False,reason='Supertrend agreement source unavailable; entry blocked: '+str(error))
+
     def signal(self):
         c = self.state['config']
         tick = self.adapter.host_tick_size(c['underlying'])
@@ -1095,6 +1287,16 @@ class Runner(BaseRunner):
         if c.get('intrabar_entries') and not sig.get('retest_signal') and not self.state.get('position') and self.state.get('accepting_entries'):
             sig = provisional(result,self.adapter.forming(c,rows,self.clock()),c,tick,self.clock())
             sig = {**sig, 'supertrend_cross_direction':None, 'cross_direction':sig['entry_direction']}
+        if c.get('market_structure_enabled') and not self.state.get('position'):
+            event_at=sig.get('market_event_at',self.clock()) if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']]
+            sig['market_structure']=market_structure.check(rows,sig.get('cross_direction') or sig.get('direction'),TIMEFRAMES[c['timeframe']],event_at)
+        if not self.state.get('position'):
+            event_at=sig.get('market_event_at',self.clock()) if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']]
+            sig['mtf_supertrend']=self.supertrend_agreement(sig.get('cross_direction') or sig.get('direction'),event_at,rows)
+            regime=sig['direction'] if sig.get('entry_qualified') and sig['mtf_supertrend']['allowed'] else None
+            if regime and regime!=self.state.get('mtf_entry_regime') and not sig.get('cross_direction'):
+                sig.update(cross_direction=regime,entry_direction=regime,entry_diagnostic='SUPERTREND_TIMEFRAME_AGREEMENT_ONSET')
+            self.state['mtf_entry_regime']=regime
         sig.update(ema_exit=self.exit_ema(rows,c) if c.get('ema_exit_length',10)!=10 else sig['ema10'],ema_exit_length=c.get('ema_exit_length',10),ema_exit_enabled=c.get('ema_exit_enabled',True))
         if not c.get('ema_exit_enabled',True):sig['ema_exit_enabled']=False
         self.state['last_signal'] = sig

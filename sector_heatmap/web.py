@@ -45,7 +45,7 @@ from .automation import AutomationPolicyService
 from .analysis import calculate_timeframe_state, mtf_alignment
 from .analysis_config import TIMEFRAMES
 from .handoff import (
-    FyersCmMaster, FyersFoMaster, apply_invalidation_choice, build_defined_risk_spreads, build_equity_opportunity, evidence_conviction, fetch_fyers_chain, packet_prompt,
+    FyersCmMaster, FyersFoMaster, apply_invalidation_choice, build_defined_risk_spreads, build_long_option_proposals, build_equity_opportunity, evidence_conviction, fetch_fyers_chain, packet_prompt,
     size_equity_candidate, validate_handoff_request, validate_risk_policy,
 )
 from fyers_apiv3 import fyersModel
@@ -3149,7 +3149,7 @@ def run_server():
                     chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
                     symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
                     master_records = fyers_fo_master.lookup(symbols)
-                    item["options"] = build_defined_risk_spreads(chain, expiry, master_records, candidate["direction"], risk)
+                    item["options"] = build_long_option_proposals(chain, expiry, master_records, candidate["direction"], risk)
                 except Exception as error:
                     item["options"] = {"status": "UNAVAILABLE", "reason": str(error), "proposals": []}
             candidates.append(item)
@@ -3272,24 +3272,24 @@ def run_server():
                     try:
                         chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
                         symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
-                        options = build_defined_risk_spreads(chain, expiry, fyers_fo_master.lookup(symbols), candidate["direction"], risk)
+                        options = build_long_option_proposals(chain, expiry, fyers_fo_master.lookup(symbols), candidate["direction"], risk)
                         ready = []
                         for proposal in options.get("proposals") or []:
                             sizing = proposal.get("sizing") or {}
                             if sizing.get("status") not in {"SIZED", "USER_SIZED"} or not sizing.get("lots"):
-                                exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": "A validated spread exists but the configured risk/capital does not support one lot."})
+                                exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": "A validated long option exists but the configured risk/capital does not support one lot."})
                                 continue
                             minimum_rr = policy.get("minimum_reward_to_risk")
-                            target_profit_per_lot = min(proposal["max_profit_per_lot"], proposal["max_loss_per_lot"] * minimum_rr) if minimum_rr is not None else None
-                            target_points = (proposal["entry_points"] + target_profit_per_lot / proposal["lot_size"] if proposal["structure"] == "DEBIT" else max(0, proposal["entry_points"] - target_profit_per_lot / proposal["lot_size"])) if target_profit_per_lot is not None else None
+                            target_profit_per_lot = proposal['max_loss_per_lot'] * minimum_rr if minimum_rr is not None else None
+                            target_points = (proposal["entry_points"] + target_profit_per_lot / proposal["lot_size"] if proposal["structure"] in {"DEBIT", "LONG_OPTION"} else max(0, proposal["entry_points"] - target_profit_per_lot / proposal["lot_size"])) if target_profit_per_lot is not None else None
                             ready.append({
                                 **proposal,
                                 "underlying": candidate["symbol"], "expiry": options.get("expiry"), "expiry_iso": options.get("expiry_iso"),
-                                "spot": options.get("spot"), "target_exit_points": round(target_points, 2),
+                                "spot": options.get("spot"), "target_exit_points": round(target_points, 2) if target_points is not None else None,
                                 "underlying_invalidation": invalidation,
                                 "exit_conditions": [
                                     f"Exit if the underlying reaches invalidation ₹{invalidation:.2f}." if invalidation else "No valid underlying invalidation; do not trade.",
-                                    f"Target spread value {target_points:.2f} points from your selected 1:{minimum_rr:g} reward:risk preference." if target_points is not None else "No reward:risk target was imposed; choose an exit objective when you prepare the ticket.",
+                                    f"Target option premium {target_points:.2f} points from your selected 1:{minimum_rr:g} reward:risk preference." if target_points is not None else "No reward:risk target was imposed; choose an exit objective when you prepare the ticket.",
                                     "Exit/stand aside if any leg quote, liquidity, Greeks/OI/volume, expiry, or completed-candle alignment becomes stale or invalid.",
                                 ],
                                 "liquidity_evidence": {"rules": options.get("liquidity_rules"), "legs": [{"symbol": leg.get("symbol"), "bid": leg.get("bid"), "ask": leg.get("ask"), "spread_pct": leg.get("spread_pct"), "open_interest": leg.get("open_interest"), "volume": leg.get("volume"), "greeks": leg.get("greeks"), "lot_size": leg.get("lot_size"), "tick_size": leg.get("tick_size")} for leg in proposal.get("legs", [])]},
@@ -3298,7 +3298,7 @@ def run_server():
                         if ready:
                             proposal = max(ready, key=lambda item: (item.get("reward_to_risk") or 0, -(item.get("max_loss_per_lot") or float("inf"))))
                             option_analysis = {
-                                "status": "REQUIRES_INVALIDATION_ACCEPTANCE", "kind": "OPTION_SPREAD", "direction": candidate["direction"],
+                                "status": "REQUIRES_INVALIDATION_ACCEPTANCE", "kind": "LONG_OPTION", "direction": candidate["direction"],
                                 "entry": options.get("spot"), "invalidation_choices": plan.get("invalidation_choices"),
                                 "recommended_invalidation": plan.get("recommended_invalidation"), "active_invalidation": None,
                                 "thesis": plan.get("thesis"), "entry_trigger": plan.get("entry_trigger"), "proposal": proposal,
@@ -3307,7 +3307,7 @@ def run_server():
                             cards.append({"candidate_key": candidate["key"], "candidate": candidate, "analysis": option_analysis})
                         if not ready:
                             reason = join_unique_reasons(options.get("rejected_proposals") or [])
-                            exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": reason or options.get("reason") or "No exact defined-risk spread passed the configured gates."})
+                            exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": reason or options.get("reason") or "No exact long-option entry passed the configured gates."})
                     except Exception as error:
                         exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": str(error)})
         analysis_id = secrets.token_urlsafe(12)
@@ -3356,7 +3356,7 @@ def run_server():
         if not isinstance(fresh_price, (int, float)) or fresh_price <= 0:
             raise RuntimeError("FYERS returned an invalid current price for the selected underlying.")
         refreshed = {**opportunity, "entry": float(fresh_price), "current_price": float(fresh_price)}
-        if opportunity.get("kind") == "OPTION_SPREAD":
+        if opportunity.get("kind") in {"OPTION_SPREAD", "LONG_OPTION"}:
             option_proposal = opportunity.get("proposal")
             tick_size = 0.05
         else:
@@ -3683,8 +3683,11 @@ def run_server():
                     while True:
                         frame = browser_frame(renko_supertrend,renko_chart_broker,config,renko_order_stream)
                         frame['bar_seconds'] = seconds
-                        with renko_adoptions.lock:
-                            frame['adopted_managers']=[dict(id=k,**r.snapshot()) for k,r in renko_adoptions.runners.items()]
+                        from strategies.renko_supertrend.stream import browser_managers
+                        if renko_adoptions.lock.acquire(blocking=False):
+                            try: managers=dict(renko_adoptions.runners)
+                            finally:renko_adoptions.lock.release()
+                            frame.update(browser_managers(managers,frame['server_at']))
                         with renko_display_lock:
                             context = renko_display_context.get(context_key)
                         if context and frame['forming']:
@@ -3942,7 +3945,7 @@ def run_server():
                 payload = self.read_json()
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
-                if bound_instrument and path.endswith(('/preview','/start','/adopt')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
+                if bound_instrument and path.endswith(('/preview','/start','/adopt','/override-entry')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
                 if path=='/api/renko-instances/start-selected':
                     if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
                     origin=self.headers.get('Origin')
@@ -3996,7 +3999,10 @@ def run_server():
                                '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
                                '/api/renko-supertrend/preview': renko_supertrend.preview,
                                '/api/renko-supertrend/start': renko_supertrend.activate,
-                               '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop()}
+                               '/api/renko-supertrend/override-entry': renko_supertrend.override_entry,
+                               '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop(),
+                               '/api/renko-supertrend/chart-stop': renko_supertrend.chart_stop,
+                               '/api/renko-supertrend/chart-mode': renko_supertrend.chart_mode}
                     if path not in actions:
                         raise ValueError('Unknown Renko strategy action.')
                     self.send_json(200, actions[path](payload))

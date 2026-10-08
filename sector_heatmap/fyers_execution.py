@@ -17,7 +17,7 @@ from fyers_apiv3 import fyersModel
 
 from .config import _atomic_private_write, load_config
 from .equity_exit_plan import build_equity_exit_plan
-from .handoff import FyersCmMaster, FyersFoMaster, MIN_REWARD_TO_RISK, fetch_fyers_chain
+from .handoff import FyersCmMaster, FyersFoMaster, MIN_REWARD_TO_RISK, MAX_SPREAD_PCT, fetch_fyers_chain, build_long_option_proposals
 
 
 HARD_MAX_DAILY_LOSS = 5000.0
@@ -231,6 +231,7 @@ class FyersExecutionService:
             message = str(error)
         return {
             "selected_broker": "fyers",
+            "long_option_entry_revision": "handoff-buy-call-put-v1",
             "fyers_configured": configured,
             "live_submission_enabled": self._live_submission_enabled(),
             "live_gate_name": self.live_gate_name,
@@ -370,6 +371,46 @@ class FyersExecutionService:
             "expiry": chain_expiry_iso,
         }
 
+    def _preflight_long_option(self, client, payload, proposal, minimum_rr):
+        direction = str(proposal.get('direction') or '').upper()
+        requested = proposal.get('legs') or []
+        expected = 'CE' if direction == 'BULLISH' else 'PE' if direction == 'BEARISH' else None
+        if len(requested) != 1 or requested[0].get('action') != 'BUY' or requested[0].get('option_type') != expected or not expected:
+            raise ValueError('A stock-option entry must be one BUY Call for bullish or one BUY Put for bearish; SELL legs are forbidden.')
+        chain, expiry = fetch_fyers_chain(client, str(payload.get('underlying') or ''))
+        symbols = [r.get('symbol') for r in chain.get('data', {}).get('optionsChain', []) if r.get('symbol')]
+        options = build_long_option_proposals(chain, expiry, self.master.lookup(symbols), direction,
+                    dict(invalidation=payload.get('invalidation'), stop_basis='price', minimum_reward_to_risk=minimum_rr))
+        if options['status'] != 'READY' or options.get('expiry_iso') != payload.get('expiry'):
+            raise FyersExecutionUnavailable(options.get('reason') or 'Fresh exact option expiry changed.')
+        selected = options['proposals'][0]['legs'][0]
+        if requested[0].get('symbol') != selected['symbol'] or float(requested[0].get('strike')) != selected['strike']:
+            raise FyersExecutionUnavailable('The exact ATM option changed; collect fresh analysis before preparing an order.')
+        lots = _number(payload.get('lots'))
+        if lots is None or lots < 1 or lots != int(lots):
+            raise ValueError('Lots must be a positive whole number.')
+        quote = (_fresh_depth_quote(client, selected['symbol'], self.now()) if payload.get('require_market_open') is True
+                 else _quotes(client.quotes({'symbols': selected['symbol']})).get(selected['symbol']))
+        if not quote:
+            raise FyersExecutionUnavailable('Fresh two-sided option quote unavailable.')
+        if (quote['ask']-quote['bid']) / ((quote['ask']+quote['bid'])/2) * 100 > MAX_SPREAD_PCT:
+            raise FyersExecutionUnavailable('Fresh option bid/ask spread exceeds the liquidity limit.')
+        price = _round_tick(quote['ask'], selected['tick_size'])
+        quantity = int(lots) * int(selected['lot_size'])
+        premium = round(price * quantity, 2)
+        target = _number(proposal.get('target_exit_points'))
+        rr = (target-price)/price if target is not None and target > price else None
+        contract = dict(action='BUY', symbol=selected['symbol'], quantity=quantity, lot_size=selected['lot_size'],
+                        tick_size=selected['tick_size'], expiry_epoch=selected['expiry_epoch'], strike=selected['strike'],
+                        option_type=expected, quote=quote, limit_price=price,
+                        chain=dict(oi=selected['open_interest'], volume=selected['volume'], greeks=selected['greeks']))
+        return dict(kind='LONG_OPTION', contracts=[contract], lots=int(lots), lot_size=selected['lot_size'], quantity=quantity,
+                    entry_points=price, max_loss_per_lot=round(price*selected['lot_size'], 2), worst_case_risk=premium,
+                    max_profit=None, reward_to_risk=round(rr, 2) if rr is not None else None,
+                    reward_to_risk_below_preference=minimum_rr is not None and rr is not None and rr < minimum_rr,
+                    minimum_cash_required=premium, margin=dict(status='PREMIUM_FUNDED', message='Single bought option; full premium required, no short leg.'),
+                    submission_eligible=True, expiry=options['expiry_iso'])
+
     def _equity_leverage(self, symbol):
         if self.equity_margin_provider:
             data = self.equity_margin_provider()
@@ -464,7 +505,12 @@ class FyersExecutionService:
         if payload.get("require_market_open") is True:
             _require_cash_session(self.now())
         proposal = payload.get("proposal") or {}
-        instrument = self._preflight_equity(client, payload, proposal, invalidation, minimum_rr) if str(proposal.get("kind") or "").upper() == "EQUITY" else self._preflight_option_spread(client, payload, proposal, minimum_rr)
+        kind = str(proposal.get('kind') or '').upper()
+        if proposal.get('source') == 'ANALYSIS_HANDOFF' and kind != 'LONG_OPTION':
+            raise ValueError('Analysis Handoff stock options require a single bought Call/Put; spread tickets must be refreshed.')
+        instrument = (self._preflight_equity(client, payload, proposal, invalidation, minimum_rr) if kind == 'EQUITY'
+                      else self._preflight_long_option(client, payload, proposal, minimum_rr) if kind == 'LONG_OPTION'
+                      else self._preflight_option_spread(client, payload, proposal, minimum_rr))
         if payload.get("require_market_open") is True:
             _fresh_market_state(self.now(), instrument)
         funds_response, positions_response, orders_response = client.funds(), client.positions(), client.orderbook()
@@ -492,7 +538,7 @@ class FyersExecutionService:
             raise FyersExecutionUnavailable(f"Worst-case risk ₹{instrument['worst_case_risk']:.2f} exceeds available new-idea risk ₹{available_new_risk:.2f}.")
         if instrument["minimum_cash_required"] > available_balance:
             raise FyersExecutionUnavailable("Fresh FYERS funds do not cover the protection-first premium requirement.")
-        option_policy = option_order_policy(instrument["expiry"], self.now().date()) if instrument["kind"] == "OPTION_SPREAD" else None
+        option_policy = option_order_policy(instrument["expiry"], self.now().date()) if instrument["kind"] != "EQUITY" else None
         preview = {
             "broker": "FYERS", "status": "PREVIEW_ONLY",
             "created_at": self.now().astimezone().isoformat(),
@@ -521,7 +567,7 @@ class FyersExecutionService:
                 "mapping_note": "Standard FYERS order without BO/CO exits." if instrument["kind"] == "EQUITY" else option_policy["mapping_note"],
                 "minimum_reward_to_risk": minimum_rr, "reward_to_risk_policy": "ADVISORY",
                 "rounding": "Quantities use whole shares/lots; limit prices round down to the FYERS master tick.",
-                "sequence": "Single equity limit order." if instrument["kind"] == "EQUITY" else "BUY protection leg first, then SELL leg in one FYERS basket call.",
+                "sequence": "Single equity limit order." if instrument["kind"] == "EQUITY" else "Single BUY option limit order; no SELL leg." if instrument['kind'] == 'LONG_OPTION' else "BUY protection leg first, then SELL leg in one FYERS basket call.",
                 "automatic_retry": False,
             },
             "warnings": ([f"Fresh reward-to-risk {instrument['reward_to_risk']:.2f} is below the advisory preference 1:{minimum_rr:g}. This does not block the preview or require separate approval."]
@@ -596,11 +642,11 @@ class FyersExecutionService:
         if len(set(symbols)) != len(symbols):
             raise ValueError("A FYERS batch cannot contain the same underlying more than once.")
         kinds = {str((item.get("proposal") or {}).get("kind") or "OPTION_SPREAD").upper() for item in items}
-        if len(kinds) != 1 or not kinds <= {"EQUITY", "OPTION_SPREAD"}:
+        if len(kinds) != 1 or not kinds <= {"EQUITY", "OPTION_SPREAD", "LONG_OPTION"}:
             raise ValueError("A batch must contain only equities or only defined-risk option spreads.")
         if kinds == {"EQUITY"} and payload.get("allocation_budget") is not None:
             return self._budget_equity_batch(payload, items)
-        option_batch = kinds == {"OPTION_SPREAD"}
+        option_batch = kinds in ({"OPTION_SPREAD"}, {"LONG_OPTION"})
         if option_batch and len(items) > 10:
             raise ValueError("Select at most 10 option spreads per batch.")
         if option_batch:
@@ -643,6 +689,10 @@ class FyersExecutionService:
         estimated_preferred_costs = estimated_preferred_notional * 0.002 + 20 * sum(len(item[2]["instrument"]["contracts"]) for item in preferred)
         estimated_preferred_risk = sum(item[1] * item[2]["instrument"]["worst_case_risk"] for item in preferred)
         spendable = max(0.0, funds - buffer)
+        if option_batch and payload.get('allocation_budget') is not None:
+            optional_budget=_number(payload['allocation_budget'])
+            if optional_budget is None or optional_budget<=0:raise ValueError('Optional option budget must be positive.')
+            spendable=min(spendable,optional_budget)
         cash_scale = spendable / (estimated_preferred_notional * 1.002 + 20 * sum(len(item[2]["instrument"]["contracts"]) for item in preferred)) if estimated_preferred_notional else 0.0
         risk_scale = ledger["available_for_new_idea"] / estimated_preferred_risk if ledger["available_for_new_idea"] is not None and estimated_preferred_risk else 1.0
         scale = min(1.0, cash_scale, risk_scale)
@@ -713,7 +763,7 @@ class FyersExecutionService:
             raise PreviewChanged(self.prepare_batch(stored["payload"]))
         if not refreshed["submission_eligible"] or not all(item["submission_eligible"] for item in refreshed["items"]):
             raise PermissionError("Every batch item must pass fresh submission eligibility.")
-        if refreshed["items"][0]["instrument"]["kind"] == "OPTION_SPREAD":
+        if refreshed["items"][0]["instrument"]["kind"] in {"OPTION_SPREAD", "LONG_OPTION"}:
             return self._submit_option_batch(preview_id, refreshed)
         client = _current_client(self.client_factory)
         orders = []
@@ -798,7 +848,7 @@ class FyersExecutionService:
             "limitPrice": leg["limit_price"], "stopPrice": 0, "validity": "DAY",
             "disclosedQty": 0, "offlineOrder": False,
         } for leg in refreshed["instrument"]["contracts"]]
-        response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] == "EQUITY" else client.place_basket_orders(orders)
+        response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] in {"EQUITY", "LONG_OPTION"} else client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         if not order_ids:
             status = "EXECUTION_STATUS_UNCERTAIN"

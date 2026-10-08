@@ -9,7 +9,10 @@ class OptionalGuardTests(unittest.TestCase):
         self.assertIsNone(ema.check({},None,None,None))
     def test_atr_distance_boundary_both_sides(self):
         c={**ema.settings({}),'ema_proximity_enabled':True}
-        for price in (90,110):self.assertEqual(ema.check(c,price,100,20)['max_points'],10)
+        for price in (90,110):
+            evidence=ema.check(c,price,100,20)
+            self.assertEqual(evidence['max_points'],10);self.assertEqual(evidence['distance_atr'],.5)
+            self.assertEqual(evidence['scope'],'NEW_ENTRY_ONLY');self.assertEqual(evidence['configured_limit'],.5)
         for price in (89.99,110.01):
             with self.assertRaisesRegex(ValueError,'too far'):ema.check(c,price,100,20)
         with self.assertRaises(ValueError):ema.check(c,100,100,None)
@@ -69,3 +72,24 @@ class ProximityLifecycleTests(unittest.TestCase):
         evidence=self.r.state['position']['entry_indicator_snapshot']['ema_proximity_observation']
         self.assertEqual(evidence['price'],130);self.assertEqual(evidence['max_points'],100)
         self.assertEqual(evidence['exchange_at'],self.b.now)
+
+    def test_entry_proximity_never_blocks_existing_ema_exit(self):
+        from unittest.mock import patch
+        self.prepare(100);self.r.step();self.assertIsNotNone(self.r.state['position'])
+        self.b.price=80
+        with patch('strategies.renko_supertrend.runner.ema_proximity.check',side_effect=AssertionError('Entry filter called for exit')):
+            self.r.step()
+        self.assertIsNone(self.r.state['position'])
+        self.assertEqual(self.r.state['order_history'][-1]['reason'],'EMA10_INTRABAR_BREACH')
+        self.assertEqual(self.b.sent,[])
+
+
+class NormalizedProximityTests(unittest.TestCase):
+    def test_scale_invariance_and_saved_threshold(self):
+        c=ema.settings(dict(ema_proximity_enabled=True,ema_proximity_distance=.37))
+        for price,reference,atr in [(103.7,100,10),(207.4,200,20)]:
+            result=ema.check(c,price,reference,atr)
+            self.assertAlmostEqual(result['distance_atr'],.37)
+            self.assertEqual(result['configured_limit'],.37)
+        with self.assertRaisesRegex(ValueError,'completed ATR; limit 0.37 ATR'):
+            ema.check(c,104,100,10)

@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import hashlib
+from .stream import browser_snapshot, browser_managers
 import json
 from pathlib import Path
 import threading
@@ -47,7 +48,7 @@ class Service:
 
     def chart_config(self, query):
         raw={k:query[k][0] for k in settings({}) if k in query}
-        for key,default in [('use_adx','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        for key,default in [('use_adx','false'),('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
         carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
         if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
         deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
@@ -112,10 +113,10 @@ class Service:
         if (handler.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'): raise PermissionError('Local dashboard required.')
         origin=handler.headers.get('Origin')
         if origin and urlparse(origin).netloc!=handler.headers.get('Host'): raise PermissionError('Cross-origin actions forbidden.')
-        actions=dict(settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.stop(),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control})
+        actions=dict(settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.stop(),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode})
         action=path[len(PREFIX):]
         if action not in actions: raise ValueError('Unknown Delta Renko action.')
-        if self.instrument and action in ('preview','start','adopt') and payload.get('underlying')!=self.instrument:raise ValueError('Action instrument differs from selected instance.')
+        if self.instrument and action in ('preview','start','adopt','override-entry') and payload.get('underlying')!=self.instrument:raise ValueError('Action instrument differs from selected instance.')
         handler.send_json(200,actions[action](payload)); return True
 
     def stream(self, handler, query):
@@ -126,7 +127,14 @@ class Service:
                 forming=None; error=None
                 try: forming=self.chart_broker.forming(config,[],time.time())
                 except ValueError as exc: error=str(exc)
-                frame=dict(runner=self.runner.snapshot(),forming=forming,market=dict(connected=self.chart_broker.connected,fresh=forming is not None,error=error),orders=dict(connected=False,basis='Delta REST reconciliation; broker order notifications not claimed.'),server_at=time.time(),bar_seconds=TIMEFRAMES[config['timeframe']],adopted_managers=[dict(id=k,**r.snapshot()) for k,r in self.adoptions.runners.items()])
+                now=time.time();tick_at=None;tick_error=None
+                try:_,tick_at=self.chart_broker.live_price(config,now)
+                except (ValueError,RuntimeError) as exc:tick_error=str(exc)
+                frame=dict(**browser_snapshot(self.runner,now),forming=forming,market=dict(connected=self.chart_broker.connected,fresh=forming is not None,error=error,tick_exchange_at=tick_at,tick_error=tick_error),orders=dict(connected=False,basis='Delta REST reconciliation; broker order notifications not claimed.'),server_at=now,bar_seconds=TIMEFRAMES[config['timeframe']])
+                if self.adoptions.lock.acquire(blocking=False):
+                    try:managers=dict(self.adoptions.runners)
+                    finally:self.adoptions.lock.release()
+                    frame.update(browser_managers(managers,now))
                 with self.lock: context=self.context.get(json.dumps(config,sort_keys=True))
                 if context and forming:
                     try: frame['display_analysis']=provisional(*context[:1],forming,context[1],context[2],time.time())

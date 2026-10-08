@@ -352,8 +352,8 @@ def evidence_conviction(candidate, opportunity, option_proposal=None):
         score += 1; reasons.append(f"planned reward:risk is 1:{rr:g}")
     if option_proposal:
         legs = option_proposal.get("legs") or []
-        if len(legs) == 2 and all(leg.get("validated") for leg in legs):
-            score += 1; reasons.append("both option legs pass quote, spread, Greeks, OI and volume gates")
+        if len(legs) == (1 if option_proposal.get("kind") == "LONG_OPTION" else 2) and all(leg.get("validated") for leg in legs):
+            score += 1; reasons.append("option contract evidence passes quote, spread, Greeks, OI and volume gates")
         else:
             reasons.append("option evidence is incomplete or illiquid")
     rating = "High" if score >= (6 if option_proposal else 5) else "Moderate" if score >= 3 else "Low"
@@ -676,6 +676,58 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
         "rejected_contracts": rejected,
         "reason": None if proposals else "No adjacent pair passed exact-contract, Greeks, OI, volume and spread validation.",
     }
+
+
+def build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None):
+    """Analysis Handoff buys one exact ATM Call/Put; never generates a short leg."""
+    risk = risk or {}
+    if direction not in ('BULLISH', 'BEARISH'):
+        raise ValueError('Choose a bullish Call or bearish Put direction.')
+    rows = chain_payload.get('data', {}).get('optionsChain') or []
+    spot_row = next((r for r in rows if r.get('option_type') == ''), None)
+    spot = _positive_number((spot_row or {}).get('ltp'))
+    expiry_display = expiry.get('date')
+    try:
+        expiry_iso = datetime.strptime(expiry_display, '%d-%m-%Y').date().isoformat()
+    except (TypeError, ValueError):
+        expiry_iso = None
+    result = dict(status='UNAVAILABLE', spot=spot, expiry=expiry_display, expiry_iso=expiry_iso,
+                  proposals=[], rejected_proposals=[], reason='Exact ATM option evidence unavailable.')
+    option_type = 'CE' if direction == 'BULLISH' else 'PE'
+    choices = [r for r in rows if r.get('option_type') == option_type and _positive_number(r.get('strike_price'))]
+    if not spot or not choices or not expiry_iso:
+        return result
+    nearest = min(choices, key=lambda r: (abs(float(r['strike_price'])-spot), float(r['strike_price'])))
+    leg = _leg(nearest, master_records.get(nearest.get('symbol')))
+    if not leg['validated'] or str(leg.get('expiry_epoch')) != str(expiry.get('expiry')):
+        return dict(result, reason='Exact ATM option failed contract, expiry, quote, liquidity or Greeks validation.')
+    if not _positive_number(leg.get('lot_size')) or float(leg['lot_size']) != int(leg['lot_size']) or not _positive_number(leg.get('tick_size')):
+        return dict(result, reason='Verified positive whole lot size and tick size are required.')
+    entry, lot = leg['ask'], int(leg['lot_size'])
+    maximum_loss = entry * lot
+    rr = _positive_number(risk.get('minimum_reward_to_risk'))
+    invalidation, error = _invalidation_price(spot, direction, risk)
+    lots = 1
+    if risk.get('enforce_risk_controls'):
+        budget, budget_error = risk_budget(risk.get('planning_capital'), risk.get('max_loss_value'), risk.get('max_loss_unit'))
+        if budget_error or error:
+            return dict(result, reason=budget_error or error)
+        lots = math.floor(budget / maximum_loss)
+    if error:
+        return dict(result, reason=error)
+    proposal = dict(proposal_id='long-call' if direction == 'BULLISH' else 'long-put',
+                    kind='LONG_OPTION', source='ANALYSIS_HANDOFF', label='Buy ATM Call' if direction == 'BULLISH' else 'Buy ATM Put',
+                    direction=direction, structure='LONG_OPTION', status='ANALYSIS_ONLY',
+                    legs=[dict(leg, action='BUY')], entry_points=entry, lot_size=lot,
+                    max_loss_per_lot=round(maximum_loss, 2), max_profit_per_lot=None,
+                    reward_to_risk=rr, target_exit_points=round(entry*(1+rr), 2) if rr else None,
+                    reward_to_risk_basis='Selected premium target relative to full premium at risk; not a forecast.',
+                    scenario='Bullish buys a Call; bearish buys a Put. No short option leg.',
+                    pricing_note='Full paid premium is the maximum option loss, excluding costs.',
+                    sizing=dict(status=('SIZED' if lots else 'NO_SIZE_AVAILABLE') if risk.get('enforce_risk_controls') else 'USER_SIZED',
+                                lots=lots, quantity=lots*lot, underlying_invalidation=invalidation,
+                                estimated_max_loss=round(lots*maximum_loss, 2)))
+    return dict(result, status='READY', proposals=[proposal], reason=None)
 
 
 def validate_handoff_request(payload):

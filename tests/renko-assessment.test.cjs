@@ -52,3 +52,11 @@ test('invalid runner history reports the exact error instead of a current gate d
  const s=base();s.last_signal.timestamp=1200;s.status='BLOCKED';s.message='Invalid Renko host candle OHLC.';
  const a=assessment(s,view,now);assert.equal(a.fresh,false);assert.match(a.reason,/Entry data unavailable: Invalid Renko host candle OHLC/);
 });
+
+test('saved same-candle execution blocker survives WATCHING status and replaces pending proximity',()=>{
+ const s=base();Object.assign(s.last_signal,{entry_qualified:true,entry_diagnostic:'QUALIFIED',cross_direction:'BEARISH',ema_widening:true});
+ s.latest_entry_assessment={run_id:'current',underlying:'BTCUSD',timeframe:'5 minutes',timestamp:1500,observed_at:1802,eligible:true,code:'ELIGIBLE',signal:s.last_signal};
+ s.execution_signals=[{run_id:'current',underlying:'BTCUSD',timestamp:1500,eligible:true,status:'BLOCKED',reason:'Entry too far from EMA10: 52.88 underlying points; maximum 19.02.'}];
+ const a=assessment(s,view,now);assert.match(a.reason,/Blocked at runner preflight: Entry too far/);assert.equal(a.tone,'blocked');assert.ok(a.checks.some(x=>x.startsWith('BLOCKED · Entry too far')));assert.ok(!a.checks.some(x=>x.startsWith('PENDING · Proximity')));
+ s.execution_signals[0].timestamp=1200;assert.match(assessment(s,view,now).reason,/Entry signal eligible/);
+});
