@@ -1,0 +1,42 @@
+/* Shared Sector Pulse backdrop. Decorative imagery never overlays controls. */
+body { isolation: isolate; }
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: no-repeat;
+}
+body::before {
+  background-image: linear-gradient(rgba(9,17,31,.24),rgba(9,17,31,.64)), url('/assets/nse-building-zadeus.jpg');
+  background-position: center;
+  background-size: cover;
+  opacity: .23;
+  filter: saturate(1.05);
+}
+body::after {
+  background-image: url('/assets/currency-motifs.svg'), url('/assets/bull-bear-algo.png');
+  background-position: center 65%;
+  background-size: min(1400px, 100vw) auto;
+  opacity: .23;
+}
+.desk .panel, #workspace .panel, #signin {
+  background: rgba(16,29,49,.96);
+}
+.background-credit {
+  display: block;
+  margin: 18px 0 0;
+  color: #91a7c4;
+  font: 10px/1.5 Inter, system-ui, sans-serif;
+}
+.background-credit a { color: #a9dcff; }
+.desk > .work > .background-credit { margin-bottom: 18px; }
+@media (max-width: 600px) {
+  body::after { background-size: auto 54vh; background-position: center 68%; opacity: .16; }
+  body::before { opacity: .14; }
+}
+@media print {
+  body::before, body::after { display: none; }
+}

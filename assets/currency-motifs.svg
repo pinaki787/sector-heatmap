@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" fill="none">
+  <defs>
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f4dc9e"/><stop offset=".45" stop-color="#b68e42"/><stop offset="1" stop-color="#725326"/></linearGradient>
+  </defs>
+  <g transform="translate(628 846) rotate(-12)">
+    <circle r="73" fill="#57431f"/><circle r="67" fill="url(#coin)" stroke="#f7e3b0" stroke-width="3"/>
+    <circle r="57" stroke="#806329" stroke-width="2"/><circle r="61" stroke="#f7df98" stroke-dasharray="2 5"/>
+    <text y="28" text-anchor="middle" fill="#523d1c" font-family="Arial,sans-serif" font-size="84" font-weight="700">$</text>
+  </g>
+  <g transform="translate(894 846) rotate(12)">
+    <circle r="73" fill="#57431f"/><circle r="67" fill="url(#coin)" stroke="#f7e3b0" stroke-width="3"/>
+    <circle r="57" stroke="#806329" stroke-width="2"/><circle r="61" stroke="#f7df98" stroke-dasharray="2 5"/>
+    <text y="28" text-anchor="middle" fill="#523d1c" font-family="Arial,sans-serif" font-size="84" font-weight="700">₹</text>
+  </g>
+</svg>

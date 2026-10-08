@@ -1,7 +1,9 @@
 # Multiple users and broker accounts
 
 Sector Pulse now has an opt-in localhost setup portal with separate user logins
-and multiple FYERS / Delta India accounts per user. Each account gets its own
+and multiple FYERS / Delta India accounts per user. Login and account setup use the same dark colours, typography, panels,
+fields and buttons as the Sector Pulse dashboard. Both share a faint NSE building
+photograph and decorative bull/bear artwork behind readable foreground panels. Each account gets its own
 source snapshot and dashboard port, private broker credentials and token cache,
 settings, strategy state, Paper balance and journal. Different accounts can run
 side by side; switching accounts does not change or stop an existing strategy.

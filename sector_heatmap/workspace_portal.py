@@ -31,9 +31,9 @@ def handler_factory(store,runtime,port):
             if not self.trusted_host():
                 self.response(403,{'error':'Use the displayed 127.0.0.1 portal address.'});return
             path=urlparse(self.path).path
-            files={'/':'workspace-portal.html','/workspace-portal.js':'workspace-portal.js','/workspace-portal.css':'workspace-portal.css'}
+            files={'/':'workspace-portal.html','/workspace-portal.js':'workspace-portal.js','/workspace-portal.css':'workspace-portal.css','/sector-pulse-background.css':'sector-pulse-background.css','/assets/nse-building-zadeus.jpg':'assets/nse-building-zadeus.jpg','/assets/bull-bear-algo.png':'assets/bull-bear-algo.png','/assets/currency-motifs.svg':'assets/currency-motifs.svg'}
             if path in files:
-                name=files[path];mime='text/html' if name.endswith('.html') else 'text/javascript' if name.endswith('.js') else 'text/css'
+                name=files[path];mime='text/html' if name.endswith('.html') else 'text/javascript' if name.endswith('.js') else 'image/jpeg' if name.endswith('.jpg') else 'image/png' if name.endswith('.png') else 'image/svg+xml' if name.endswith('.svg') else 'text/css'
                 self.response(200,(ROOT/name).read_bytes(),mime);return
             try:
                 user=store.session(cookie_token(self.headers))
