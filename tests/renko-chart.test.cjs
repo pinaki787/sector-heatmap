@@ -84,3 +84,13 @@ test('fresh market feed can disclose delayed runner snapshot without faking tick
  assert.match(a.text,/Chart feed is live/);assert.match(a.text,/Runner status refresh delayed/);assert.match(a.text,/Tick age 2s/);
  assert.match(chartStreamHealth({server_at:100,market:{connected:true,fresh:true,tick_exchange_at:98},orders:{connected:true}},6).text,/Chart updates stale/);
 });
+
+const {readableChartViewport}=require('../renko-supertrend.js');
+test('reset viewport keeps candles readable across narrow, wide and tall charts',()=>{
+ const small=readableChartViewport(360,360,500),wide=readableChartViewport(1800,620,500),tall=readableChartViewport(1800,1000,500);
+ assert.ok(wide.range.to-wide.range.from>small.range.to-small.range.from);
+ assert.ok(tall.spacing>wide.spacing);
+ assert.ok(small.range.to-small.range.from<35);
+ assert.equal(wide.scaleMargins.top+wide.scaleMargins.bottom,.32);
+ assert.equal(readableChartViewport(360,360,5).range.from,0);
+});

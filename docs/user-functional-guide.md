@@ -233,3 +233,7 @@ Administrators can add users but do not receive access to their trading workspac
 ## Shared appearance
 
 Login, account setup and the trading dashboard use the same dark Sector Pulse colours, typography, panels, fields and buttons. A licensed NSE building photograph and decorative green bull, red bear and dollar/rupee coin motifs appear faintly behind the interface. These background symbols are decoration; they do not indicate a signal or account state. Foreground controls and chart canvases retain readable surfaces.
+
+### Candlestick Reset view
+
+Reset view restores automatic price scaling and adjusts candle spacing to the chart width and height. Price charts grow with the available width; the RSI panel stays aligned to the same visible candles. Distant supply/demand boundaries do not stretch the candle price scale. Fit history remains available for reviewing all loaded candles.
