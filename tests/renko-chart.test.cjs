@@ -94,3 +94,10 @@ test('reset viewport keeps candles readable across narrow, wide and tall charts'
  assert.equal(wide.scaleMargins.top+wide.scaleMargins.bottom,.32);
  assert.equal(readableChartViewport(360,360,5).range.from,0);
 });
+
+test('live ticks with missing OHLC are distinguished from a disconnected feed',()=>{
+ const frame={server_at:100,market:{connected:true,fresh:false,tick_fresh:true,tick_exchange_at:99,error:'Broker forming OHLC unavailable'},orders:{connected:true}};
+ assert.match(chartStreamStatus(frame),'Live ticks · current candle OHLC unavailable');
+ assert.equal(chartStreamHealth(frame).live,false);
+ assert.match(chartStreamStatus({...frame,market:{...frame.market,connected:false}}),'disconnected');
+});

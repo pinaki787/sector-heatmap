@@ -237,3 +237,7 @@ Login, account setup and the trading dashboard use the same dark Sector Pulse co
 ### Candlestick Reset view
 
 Reset view restores automatic price scaling and adjusts candle spacing to the chart width and height. Price charts grow with the available width; the RSI panel stays aligned to the same visible candles. Distant supply/demand boundaries do not stretch the candle price scale. Fit history remains available for reviewing all loaded candles.
+
+### Chart P&L and partial data availability
+
+P&L remains visible in a compact strip above the candles, including fullscreen. Runner controls and expandable entry assessment stay on the chart screen without covering candles. The stream distinguishes fresh ticks with unavailable current-candle OHLC from a full disconnection. Missing forming OHLC triggers at most three chart recovery attempts per host candle, spaced at least ten seconds apart. Completed candles remain visible during recovery; no synthetic broker OHLC is invented. A cached history refresh warning does not mean that all market data has stopped.
