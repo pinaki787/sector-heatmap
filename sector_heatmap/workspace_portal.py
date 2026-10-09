@@ -21,7 +21,9 @@ def handler_factory(store,runtime,port):
             self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-            if cookie:self.send_header('Set-Cookie',cookie)
+            if cookie:
+                self.send_header('Set-Cookie','sector_pulse_local_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+                self.send_header('Set-Cookie',cookie)
             self.end_headers();self.wfile.write(data)
 
         def trusted_host(self):
@@ -39,6 +41,9 @@ def handler_factory(store,runtime,port):
                 user=store.session(cookie_token(self.headers))
                 if path=='/api/workspaces/me':
                     self.response(200,user);return
+                if path=='/api/workspaces/users':
+                    from .section_permissions import FEATURES
+                    self.response(200,{'users':store.users(user),'sections':FEATURES});return
                 if path=='/api/workspaces/accounts':
                     rows=store.accounts(user)
                     for a in rows:
@@ -76,6 +81,8 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/password':
                     store.change_password(user,payload.get('current_password'),payload.get('new_password'))
                     self.response(200,{'signed_out':True},cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return
+                if path=='/api/workspaces/user-sections':
+                    self.response(200,store.set_features(user,payload.get('username'),payload.get('features')));return
                 if path=='/api/workspaces/users':
                     self.response(201,store.create_user(payload.get('username',''),payload.get('password',''),actor=user));return
                 if path=='/api/workspaces/accounts':

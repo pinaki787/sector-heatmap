@@ -69,6 +69,11 @@ def assess(rows, position, now):
     event_at = c['timestamp'] + SECONDS
     if not 0 <= now-event_at < SECONDS:
         raise ValueError('Five-minute target source is stale.')
+    return assess_known(c,closed[-2] if len(closed)>1 else None,zones(closed[:-1]),position,now)
+
+def assess_known(c, previous, known, position, now):
+    """Same decision against already confirmed zones, used by chart replay."""
+    event_at=c['timestamp']+SECONDS
     direction = position.get('direction')
     if direction not in ('BULLISH', 'BEARISH'):
         raise ValueError('Owned underlying direction required.')
@@ -76,13 +81,12 @@ def assess(rows, position, now):
     result = dict(revision=REVISION, candle_at=c['timestamp'], event_at=event_at, observed_at=now, reason=None, state='NO_TARGET', zone=None, close=c['close'])
     if opened is None or c['timestamp'] < opened:
         return dict(result, state='WAIT_FOR_WHOLE_POST_FILL_CANDLE')
-    if len(closed) < 2 or closed[-2]['timestamp'] + SECONDS != c['timestamp']:
+    if previous is None or previous['timestamp']+SECONDS!=c['timestamp']:
         raise ValueError('Consecutive five-minute evidence required for target assessment.')
     # c's own range/close cannot create the zone that exits this position.
-    known = zones(closed[:-1])
     side = 'supply' if direction == 'BULLISH' else 'demand'
     z = known[side]
-    previous_close = closed[-2]['close']
+    previous_close = previous['close']
     if not z or z['broken_at'] is not None or (previous_close > z['upper'] if side == 'supply' else previous_close < z['lower']):
         return result
     result.update(zone=deepcopy(z), side=side, state='UNTOUCHED')

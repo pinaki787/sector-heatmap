@@ -4,7 +4,8 @@ The Renko runner must authorize each intent before invoking this boundary. Exist
 Delta durable intents, native validation and unknown-ack recovery remain in use.
 """
 from copy import deepcopy
-from .delta_contracts import owned_order, order_intent, position
+from .delta_contracts import owned_order, order_intent, position, perpetual_contract
+from decimal import Decimal
 
 
 class Execution:
@@ -58,19 +59,27 @@ class Execution:
             raise ValueError('Order is not owned by the Renko strategy.')
         return owned_order(owned, self.account_identity)
 
-    def submit(self, symbol, size, side, quote, token, signal_symbol, reason):
+    def submit(self, symbol, size, side, quote, token, signal_symbol, reason, reduce_only=None):
         """Only a server-owned runner may invoke this; no client runner flag exists."""
         self.authenticate()
         with self.delta.lock:
             if self.delta.runner.get('running') or self.delta.runner.get('pending') or self.delta.live.get('runner_position'):
                 raise ValueError('Existing Delta strategy ownership blocks a separate Renko order.')
             product = self.delta.product(symbol)
-            payload = order_intent(symbol, size, side, quote, product, self.delta.clock())
+            payload = order_intent(symbol, size, side, quote, product, self.delta.clock(), reduce_only=reduce_only)
             # Stable identity is the shared runner's persisted tag. Delta.submit
             # separately persists native intent before touching the exchange.
             payload.pop('product_id')
             payload.update(request_id=token, signal_symbol=signal_symbol, execution_reason=reason)
-            if side == 1:
+            if product.get('contract_type')=='perpetual_futures' and not payload['reduce_only']:
+                if signal_symbol!=symbol:raise ValueError('Perpetual execution must match the selected signal product.')
+                meta=perpetual_contract(product)
+                funds=self.delta._private('GET','/v2/wallet/balances')['result']
+                balances=[Decimal(str(w['available_balance'])) for w in funds if (w.get('asset_symbol') or (w.get('asset') or {}).get('symbol'))==meta['settlement_currency']]
+                required=Decimal(str(size))*Decimal(meta['contract_value'])*Decimal(str(quote['ask']))*(1+Decimal(str(meta['taker_commission_rate']))*Decimal('1.18')+Decimal('.01'))
+                if len(balances)!=1 or not balances[0].is_finite() or balances[0]<required:
+                    raise ValueError('Full perpetual notional, fees/GST and reserve must be covered by verified same-currency funds.')
+            if not payload['reduce_only']:
                 if self.delta._position(product['id']) != 0:
                     raise ValueError('Existing broker position blocks a new Renko entry.')
                 if any(row.get('product_id') == product['id'] for row in self.active_orders()):

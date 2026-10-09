@@ -22,6 +22,12 @@ def order_cost(row):
     try:
         qty=number(row['filled']); price=number(row['average_price']); units=number(row['quantity_multiplier'])
         if min(qty,price,units)<=0:return None
+        if row.get('execution_route')=='DELTA_PERPETUAL':
+            commission=row.get('native_commission')
+            fee=number(commission) if commission is not None else qty*units*price*number(row['taker_commission_rate'])
+            return dict(commission=float(fee),gst=float(fee*number(MODEL['gst'])),total=float(fee*(1+number(MODEL['gst']))),
+                        kind='PERPETUAL_TRADING_FEE_ESTIMATE',currency=row['quote_currency'],
+                        model=dict(id='DELTA_PERPETUAL_TRADING_FEES_ONLY',basis='Recorded commission or product taker rate on fill notional; estimated GST. Funding/liquidation excluded.'))
         commission=row.get('native_commission')
         if commission is not None:
             fee=number(commission);kind='BROKER_COMMISSION_PLUS_ESTIMATED_GST'
@@ -44,12 +50,15 @@ def trade_costs(trade,ledger):
     if len({get(r)['currency'] for r in rows})!=1:return unavailable
     bought=trade['entry_filled'];sold=trade['exit_filled'];remaining=trade['remaining_quantity']
     if not bought or remaining is None or sold>bought:return unavailable
-    buy=sum(get(r)['total'] for r in rows if r['side']=='BUY');sell=sum(get(r)['total'] for r in rows if r['side']=='SELL')
+    buy=sum(get(r)['total'] for r in rows if r.get('is_entry',r['side']=='BUY'));sell=sum(get(r)['total'] for r in rows if not r.get('is_entry',r['side']=='BUY'))
     allocated=buy*sold/bought
     cfg=(trade.get('entry_indicator_snapshot') or {}).get('settings') or {}
     slip=float(cfg.get('additional_slippage_points') or 0)*sold*2*trade['quantity_multiplier']
     gross=trade.get('realized_pnl')
     net=gross-allocated-sell-slip if isinstance(gross,(float,int)) and math.isfinite(gross) else 0 if not sold else None
+    if trade.get('execution_route')=='DELTA_PERPETUAL':
+        return dict(available=False,realized_net=None,unrealized_net=None,trading_fees=sum(get(r)['total'] for r in rows),
+                    model=get(rows[0])['model'],reason='Funding/liquidation evidence unavailable; all-in net and after-cost loss filtering remain unknown.')
     incurred={key:sum(get(r)[key] for r in rows) for key in ('commission','gst','total')}
     return dict(available=True,model=MODEL,kind='NATIVE_COST_ESTIMATE',currency=get(rows[0])['currency'],incurred=incurred,
                 entry_costs_incurred=buy,exit_costs_incurred=sell,entry_costs_allocated_realized=allocated,

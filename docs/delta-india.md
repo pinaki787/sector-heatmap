@@ -94,3 +94,55 @@ Delta India → Workflow → Backtest offers bounded BTCUSD/ETHUSD futures param
 ## Current source precedence
 
 This document contains historical route additions. The [technical guide](technical-guide.md) is the canonical distinction between current ATM options, legacy futures configurations, manual exact-symbol orders, ATR versus step trailing, virtual Paper capital, INR display and exit-only restart monitoring. [User guide](user-functional-guide.md) gives operations; [deployment guide](deployment-guide.md) covers authentication and safe transfer. Earlier statements that Paper lacks fees or that all Stop/restart cases suspend monitoring are superseded by the module-specific rules in those guides. No research shortlist is activated by documentation.
+
+
+### Renko Supertrend: explicit crypto perpetual execution
+
+Renko's Delta India Trade product control offers **Options · buy ATM Call / Put** (the legacy default) and **Perpetual futures · long / short**. The futures route executes the exact selected perpetual, including PAXGUSD. Options never fall back to futures. FYERS futures are outside this feature. Loading a legacy named options configuration resets the product selection to Options. Saving or changing the selection affects the next explicit Start, never active exposure.
+
+A fresh qualified bullish entry buys long; a fresh qualified bearish entry sells short. Selected indicator/filter rules remain shared with Renko options. A sell reduces a held long and a buy reduces a held short. Closing/reversal signals do not automatically authorize a replacement position: freshness, rearming, trade quota and the prohibition on same-candle re-entry still apply. Completed-candle exits, hard underlying levels, percent/point trailing and explicit daily cutoffs retain their selected behavior. Short percent trailing tracks the lowest executable ask and closes on a rebound.
+
+Sizing is 1–100 whole contracts, using the broker's verified linear contract value, tick size and identical native quote/settlement currencies. Initial/maintenance margin metadata and entry permissions must be available. For this initial implementation, both Paper and Live require **full notional collateral**, plus product taker fees, estimated GST and a 1% reserve, instead of estimating buying power from exchange leverage. The app does not readjust account leverage or margin mode. This collateral policy does not guarantee a maximum loss or prevent exchange liquidation; actual broker margin settings remain authoritative. Paper reserves entry notional and provisions product-specific fees per fill. Its capital is virtual and separate from Live funds.
+
+Live keeps the existing opt-in gate, authenticated account identity, exact-product flatness, external-order and other-manager ownership checks, durable idempotent intent, signed quantity reconciliation, partial-fill handling and unknown-ack blocking. Perpetual entries are explicitly non-reduce-only; exits are explicitly reduce-only IOC limits. Restart retains owned exposure/pending intent and leaves the Renko runner stopped. External perpetual-position adoption remains unsupported and is shown as ineligible; this feature manages positions opened through the runner.
+
+Perpetual journals identify LONG/SHORT and whole contracts, use signed fill P&L, and value liquidation at bid for longs / ask for shorts. Trading fee estimates exclude funding and liquidation costs, so all-in net P&L remains unavailable. The optional after-cost quick-loss sideways filter is rejected for perpetuals until funding evidence is supported. Optional per-entry and remaining daily entry risk limits use full notional, not inferred margin or a claimed maximum loss.
+
+The selector requires the backend capability `delta-perpetual-v1`; a running older backend leaves it disabled pending a safe process reload. Adding source code does not deploy, start a runner, place orders or change broker settings. Broker contract definitions come from the [official India products API](https://api.india.delta.exchange/v2/products) and [API documentation](https://docs.delta.exchange/).
+
+Renko independent indicators now have separate **Strategy** and **Indicator**
+checkbox columns. Supply/demand is in Risk & exit settings → Independent
+indicator exits, with its own Strategy and Indicator checkboxes. Its Indicator
+selection plots five-minute zones and projects zone exits using completed candles
+and zones confirmed before the decision candle opened. Existing entry/exit switches still govern execution; their
+`*_indicator` partners govern historical chart replay, overlays and study panels.
+Legacy drafts copy each saved switch into its Indicator partner. Saved runner
+configurations are not changed by migration or chart edits. A shared study stays
+visible while either its entry or exit Indicator checkbox selects it. Actual
+fills remain visible as execution evidence, separately from historical signals.
+
+The ten entry study rules (Supertrend, first/second EMA, widening, RSI
+slope, ADX, retest, swing structure, EMA proximity and higher-timeframe agreement) and eight independent exit rules (Supertrend reversal, configurable
+EMA breach, second EMA breach, RSI opposing slope, gap contraction, ADX threshold
+opposing swings and strong five-minute supply/demand targets) each retain both destinations in preferences and exports.
+Chart entry filters use their own completed host/higher-timeframe evidence.
+Shared periods, thresholds and retest patterns apply to the selected destinations.
+Cost limits, quick-loss locks and trailing risk controls remain execution
+controls; this change does not turn option-price
+trailing stops or cost-based locks into underlying-candle backtests.
+
+After restart, retained exposure is labelled **Resume position monitoring**,
+rather than Stop Runner. Explicit recovery validates the saved run/account and
+manages only its existing position, with new entries disabled and no historical
+signal replay. Unresolved pending orders block this recovery action. Delta held
+contract valuation uses the independent public chart quote connection: fresh
+quotes can value stopped exposure without starting its execution loop. Stale or
+missing quotes remain unavailable. Recovery can execute saved exits when the
+user explicitly resumes it; simply loading the dashboard never resumes it.
+
+Supply/demand visualization retains the latest qualifying strong five-minute zone
+per side. Broken zones are marked explicitly. Thin zones use a minimum six-pixel
+highlight so they remain visible on wide price scales; axis boundary prices remain
+exact. Higher-contrast bands and captions drawn above overlays distinguish active
+demand from broken supply. This display treatment does not widen price bounds,
+change pivot/departure criteria, or weaken the strategy's strong-zone exit test.

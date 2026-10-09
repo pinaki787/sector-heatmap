@@ -48,7 +48,7 @@ class RenkoLifecycleTests(unittest.TestCase):
         mtf_patch.start();self.addCleanup(mtf_patch.stop)
         self.c=dict(strategy='RENKO_SUPERTREND_V1',underlying='NSE:NIFTY50-INDEX',timeframe='1 minute',
                     lots=1,mode='PAPER',atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,
-                    exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False)
+                    exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False,ema_exit_enabled=True)
     def start(self):
         p=self.r.preview(self.c);self.r.start(dict(preview_id=p['id'],confirmation=p['confirmation']),background=False)
         self.r.state['eligible_since']=self.b.now-10
@@ -76,7 +76,7 @@ class RenkoLifecycleTests(unittest.TestCase):
         self.assertEqual(len(self.b.sent),1)
     def test_streaming_history_window_does_not_reseed_and_revision_blocks(self):
         self.r.state['config']=configuration(self.c)
-        self.r.signal();self.append(121);expected=series(self.b.rows,self.c)[-1];expected={**expected,'supertrend_cross_direction':expected['cross_direction'],'cross_direction':expected['entry_direction'],'ema_exit':expected['ema10'],'ema_exit_length':10,'ema_exit_enabled':True,'mtf_supertrend':dict(allowed=True,reason='MTF fixture agrees')}
+        self.r.signal();self.append(121);expected=series(self.b.rows,self.c)[-1];expected={**expected,'supertrend_cross_direction':expected['cross_direction'],'cross_direction':expected['entry_direction'],'ema_exit':expected['ema10'],'ema_exit_length':10,'ema_exit_enabled':True}
         self.b.rows=self.b.rows[1:]
         self.assertEqual(self.r.signal(),expected)
         self.b.rows[-1]['volume']=2

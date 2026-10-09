@@ -3,6 +3,7 @@
 Never used to authorize orders. A changed completed candle causes a full chart
 recalculation, rather than splicing incompatible path-dependent state.
 """
+from sector_heatmap.fyers_history import history as bounded_history
 import hashlib
 import json
 import math
@@ -78,7 +79,7 @@ class ChartHistory:
                         stop=min(last,cursor+timedelta(days=2))
                         time.sleep(max(0,self.next_request_at-time.monotonic()))
                         self.next_request_at=time.monotonic()+self.min_interval
-                        response=client.history(dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
+                        response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
                         if isinstance(response,dict) and response.get('s')=='no_data':response={'s':'ok','candles':[]}
                         if not isinstance(response,dict) or response.get('s')!='ok' or not isinstance(response.get('candles'),list):
                             raise RuntimeError('FYERS chart history unavailable: '+str(response.get('message','invalid response') if isinstance(response,dict) else 'invalid response'))
@@ -112,7 +113,7 @@ class ChartHistory:
                     try:
                         time.sleep(max(0,self.next_request_at-time.monotonic()))
                         self.next_request_at=time.monotonic()+self.min_interval
-                        response=client.history(dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=day,range_to=day,cont_flag=0,oi_flag=1))
+                        response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=day,range_to=day,cont_flag=0,oi_flag=1))
                         if isinstance(response,dict) and response.get('s')=='ok':
                             repairs.update({int(r[0]):r for r in response.get('candles',[]) if not candle_issue(r)})
                     except (RuntimeError,ValueError,OSError):

@@ -25,7 +25,7 @@ def check(config,price,ema10,confirmed_atr):
     # Permit only floating-point roundoff at the inclusive configured boundary.
     if distance>maximum and not math.isclose(distance,maximum,rel_tol=1e-12,abs_tol=1e-12):
         normalized=f' ({distance_atr:.3f} completed ATR; limit {c["ema_proximity_distance"]:g} ATR)' if c['ema_proximity_mode']=='ATR' else ''
-        raise ValueError(f'Entry too far from EMA10: {distance:.2f} underlying points; maximum {maximum:.2f}.'+normalized)
+        raise ValueError(f'Entry too far from EMA{config.get("ema_fast_length",10)}: {distance:.2f} underlying points; maximum {maximum:.2f}.'+normalized)
     return dict(price=price,ema10=ema10,distance_points=distance,max_points=maximum,
                 mode=c['ema_proximity_mode'],confirmed_atr=confirmed_atr,distance_atr=distance_atr,
                 configured_limit=c['ema_proximity_distance'],scope='NEW_ENTRY_ONLY',

@@ -19,13 +19,14 @@ class TelegramParser:
    if len(matches)==1:
     product=matches[0];mapping=dict(status='EXACT',contract=dict(symbol=product['symbol'],description=product['contract_type'],lot_size=1,tick_size=product['tick_size'],contract_value=product['contract_value'],quote_currency=product['quoting_currency']))
    else:mapping=dict(status='UNRESOLVED',message='Include one exact listed Delta symbol, such as ETHUSD. Option expiry and strike must be explicit; no automatic ATM mapping.')
-  ident=secrets.token_urlsafe(24);ticket=dict(ticket_id=ident,broker=broker,text=text,parsed=parsed,mapping=mapping,expires_at=self.clock()+120,queue_id=queue['id'] if queue else None,revision=queue['revision'] if queue else None)
+  ident=secrets.token_urlsafe(24);ticket=dict(ticket_id=ident,broker=broker,text=text,parsed=parsed,mapping=mapping,expires_at=self.clock()+120,queue_id=queue['id'] if queue else None,revision=queue['revision'] if queue else None,connection_route=getattr(self.polling,'route','BOT'))
   self.tickets[ident]=deepcopy(ticket);self.tickets={k:v for k,v in self.tickets.items() if v['expires_at']>=self.clock()};return ticket
  def submit(self,p,automatic=False):
   t=self.tickets.get(p.get('ticket_id'))
   if not t or t['expires_at']<self.clock():raise ValueError('Parse a fresh recommendation before submitting.')
   if t['broker']!=p.get('broker') or t['text']!=p.get('text'):raise ValueError('Broker or message changed. Parse again.')
   if t['mapping']['status']!='EXACT':raise ValueError('An exact listed contract is required.')
+  if t.get('queue_id') and t.get('connection_route','BOT')!=getattr(self.polling,'route','BOT'):raise ValueError('Connection route changed. Load and parse again.')
   if t.get('queue_id'):self.polling.snapshot(t['queue_id'],t['revision'])
   if p.get('mode')!='CONFIRMATION' and not automatic:raise ValueError('Auto submission runs only from explicitly started channel polling.')
   symbol=t['mapping']['contract']['symbol'];entry_mode=p.get('entry_mode',t['parsed']['entry_instruction'])

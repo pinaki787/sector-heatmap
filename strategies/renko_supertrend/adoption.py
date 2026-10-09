@@ -102,7 +102,7 @@ class Manager:
         def submit(order,position,reason):
             with self.intent_lock:
                 with self.cache_lock:self.position_cache=None;self.order_cache=None
-                if order['side']==1 and (runner.state.get('config') or {}).get('mode')=='LIVE':
+                if runner.is_entry_order(order,position) and (runner.state.get('config') or {}).get('mode')=='LIVE':
                     claimed=set(self.owners())
                     for other in list(self.runners.values()):
                         if other is runner:continue
@@ -131,7 +131,7 @@ class Manager:
                             reason=ownership_error or ('Already managed by a dashboard strategy.' if p['symbol'] in owned else 'Select to review and apply Renko settings.'))
             except (ValueError,TypeError,KeyError) as error:item.update(eligible=False,reason=str(error))
             result.append(item)
-        return dict(account_identity=account,observed_at=time.time(),positions=result,ownership_error=ownership_error,
+        return dict(exit_policy_update_revision='latest-settings-attached-exit-v2',account_identity=account,observed_at=time.time(),positions=result,ownership_error=ownership_error,
                     orders=[{k:r.get(k) for k in ('id','symbol','side','qty','filledQty','remainingQuantity','tradedPrice','productType','status')} for r in orders],
                     managers=[dict(id=k,**r.snapshot()) for k,r in self.runners.items()])
 
@@ -154,9 +154,21 @@ class Manager:
                     r.event('ADOPTION_PAUSED','Monitoring paused by user; broker position and claim preserved. No square-off order requested.')
                 elif action=='resume':
                     if r.state.get('running') or (r.thread and r.thread.is_alive()):raise ValueError('Manager is running or finishing shutdown.')
-                    c=r.state['config'];context=r.adapter.validate_config(c)
+                    c=r.state['config']
+                    latest=payload.get('config')
+                    if latest is not None:
+                        if payload.get('confirmation')!='START LIVE STRATEGY MONITORING':
+                            raise ValueError('Confirm starting live strategy monitoring.')
+                        if not isinstance(latest,dict) or latest.get('underlying')!=c.get('underlying') or latest.get('mode')!='LIVE':
+                            raise ValueError('Monitoring settings must match the attached LIVE instrument.')
+                        if r.state.get('pending') or (r.state.get('position') or {}).get('exit_requested'):
+                            raise ValueError('Resolve the existing order intent before changing monitoring settings.')
+                        c=r.configure({**c,**latest})
+                    context=r.adapter.validate_config(c)
                     if context['account_identity']!=r.state['account_identity']:raise ValueError('Broker account changed.')
                     pending=r.state.get('pending')
+                    if payload.get('exit_profile') and (payload.get('exit_profile')!='EMA30_ONLY' or pending):
+                        raise ValueError('EMA30 transition requires a paused position with no pending intent.')
                     if pending:
                         matches=[v for v in r.adapter.orders() if (pending.get('id') and str(v.get('id'))==pending['id']) or str(v.get('orderTag','')).split(':')[-1]==pending['tag']]
                         expected=pending['order']
@@ -177,7 +189,23 @@ class Manager:
                         if not pos or len(matches)!=1 or identity(matches[0])!={k:pos[k] for k in ('symbol','quantity','entry_price','product')}:
                             raise ValueError('Broker quantity, average, product or side changed; manual reconciliation required.')
                         if any(v.get('symbol')==pos['symbol'] and int(v.get('status',0)) not in {1,2,5,7} for v in r.adapter.orders()):raise ValueError('External pending order blocks resume.')
-                        preview=r.preview(c)
+                        if payload.get('exit_profile')=='EMA30_ONLY':
+                            if payload.get('confirmation')!='ENABLE EMA30 LIVE EXIT' or payload.get('symbol')!=pos['symbol']:
+                                raise ValueError('Confirm the exact position before enabling EMA30 live exits.')
+                            if pos.get('exit_requested'):
+                                raise ValueError('An exit is already requested; changing its rules is blocked.')
+                            from .exit_indicators import DEFAULTS
+                            c=r.configure({**c,**{key:False for key in DEFAULTS},'ema_exit_enabled':True,'ema_exit_length':30})
+                            r.state['config']=c
+                            r.event('EXIT_POLICY_UPDATED','User selected EMA30 indicator exit; other indicator exits disabled. Position and entry permissions preserved.')
+                        original_config=r.state['config']
+                        if latest is not None:r.state['config']=c
+                        try:preview=r.preview(c)
+                        except Exception:
+                            r.state['config']=original_config
+                            raise
+                        if latest is not None:
+                            r.event('MONITORING_SETTINGS_UPDATED','Latest selected strategy settings applied before resuming existing-position management.')
                         BaseRunner.start(r,dict(preview_id=preview['id'],confirmation=preview['confirmation']),False)
                         r.state['accepting_entries']=r.state.get('adoption_reentry',False);r.save()
                         if background:

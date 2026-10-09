@@ -12,6 +12,7 @@ from fyers_apiv3.FyersWebsocket import data_ws
 from sector_heatmap.config import load_config
 from sector_heatmap.fyers_execution import _current_client, available_funds
 from sector_heatmap.market_data import configure_websocket_ca_bundle
+from sector_heatmap.fyers_history import account_read
 from .valuation import amount, multiplier
 
 
@@ -108,7 +109,7 @@ class FyersBroker:
         with self.lock:
             self.symbols.add(c['underlying'])
         client = _current_client()
-        profile = client.get_profile()
+        profile = account_read(client, 'get_profile')
         if not isinstance(profile,dict) or profile.get('s')!='ok':
             raise ValueError('FYERS authentication failed. Refresh the broker session.')
         account = (profile.get('data') or {}).get('fy_id')
@@ -135,16 +136,29 @@ class FyersBroker:
             return dict(connected=self.connected, generation=getattr(self,"connection_epoch",0), error=self.stream_error, subscribed=sorted(self.symbols),freshness=freshness,revision='fyers-topic-recovery-v1')
 
     def subscribe_all(self):
-        # SDK mutates channel state on every subscribe; retain the complete set for reconnects.
-        with self.subscription_lock:
-            with self.lock:
-                socket=self.socket
-                symbols=sorted(self.symbols)
-                if not socket or not self.connected:
-                    return
-                now=time.time()
-                self.last_subscribe.update({symbol:now for symbol in symbols})
-            socket.subscribe(symbols=symbols,data_type='SymbolUpdate')
+        # The SDK resolves symbols over HTTP without a timeout. Never perform
+        # that work while a strategy/status reader is holding its state lock.
+        # One worker per adapter prevents repeated ticks from leaking threads.
+        if not self.subscription_lock.acquire(blocking=False):
+            return
+        def subscribe():
+            try:
+                with self.lock:
+                    socket=self.socket
+                    generation=self.stream_generation
+                    symbols=sorted(self.symbols)
+                    if not socket or not self.connected:
+                        return
+                    now=time.time()
+                    self.last_subscribe.update({symbol:now for symbol in symbols})
+                socket.subscribe(symbols=symbols,data_type='SymbolUpdate')
+            except Exception:
+                with self.lock:
+                    if generation == self.stream_generation:
+                        self.stream_error='FYERS subscription failed; awaiting automatic retry.'
+            finally:
+                self.subscription_lock.release()
+        threading.Thread(target=subscribe,daemon=True,name='ema-cross-subscriptions').start()
 
     def start(self):
         if self.socket:
@@ -285,13 +299,13 @@ class FyersBroker:
             raise ValueError('MARKET requests require zero limit/stop prices and regular-session routing.')
 
     def positions(self):
-        r=_current_client().positions()
+        r=account_read(_current_client(), 'positions')
         if not isinstance(r,dict) or r.get('s')!='ok' or not isinstance(r.get('netPositions'),list):
             raise ValueError('FYERS positions unavailable.')
         return r['netPositions']
 
     def orders(self):
-        r=_current_client().orderbook()
+        r=account_read(_current_client(), 'orderbook')
         if not isinstance(r,dict) or r.get('s')!='ok' or not isinstance(r.get('orderBook'),list):
             raise ValueError('FYERS orderbook unavailable.')
         return r['orderBook']
@@ -314,7 +328,7 @@ class FyersBroker:
             raise ValueError('Outstanding order in the same option contract blocks entry.')
         # FYERS uses one shared Available Balance across equity and MCX.
         # Select only that limit row, never sum the non-additive fund-limit rows.
-        funds=_current_client().funds()
+        funds=account_read(_current_client(), 'funds')
         balance=available_funds(funds)
         premium = amount(self.contract(order['symbol']), order['qty'], quote['ask'])
         if not math.isfinite(balance) or balance<premium*1.01:
@@ -332,7 +346,7 @@ class FyersBroker:
 
     def authenticated_client(self):
         client=_current_client()
-        profile=client.get_profile()
+        profile=account_read(client, 'get_profile')
         account=(profile.get('data') or {}).get('fy_id') if isinstance(profile,dict) and profile.get('s')=='ok' else None
         if not account or hashlib.sha256(str(account).encode()).hexdigest()!=self.account_identity:
             raise ValueError('FYERS account changed or identity unavailable; execution blocked.')

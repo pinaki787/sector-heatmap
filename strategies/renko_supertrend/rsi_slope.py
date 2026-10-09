@@ -1,16 +1,16 @@
 """Wilder RSI14 of host closes, identical seeding/flat convention to chart display."""
-def observe(state,close):
+def observe(state,close,length=14):
  old=state.get('rsi_host',{})
  previous=old.get('value')
  next=dict(old,previous=close)
  if 'previous' in old:
   delta=close-old['previous'];gain=max(delta,0);loss=max(-delta,0)
   count=old.get('count',0)+1;next['count']=count
-  if count<=14:
-   next['gain']=old.get('gain',0)+gain/14;next['loss']=old.get('loss',0)+loss/14
+  if count<=length:
+   next['gain']=old.get('gain',0)+gain/length;next['loss']=old.get('loss',0)+loss/length
   else:
-   next['gain']=(old['gain']*13+gain)/14;next['loss']=(old['loss']*13+loss)/14
-  next['value']=None if count<14 else ((50 if next['gain']==0 else 100) if next['loss']==0 else 100-100/(1+next['gain']/next['loss']))
+   next['gain']=(old['gain']*(length-1)+gain)/length;next['loss']=(old['loss']*(length-1)+loss)/length
+  next['value']=None if count<length else ((50 if next['gain']==0 else 100) if next['loss']==0 else 100-100/(1+next['gain']/next['loss']))
  state['rsi_host']=next
  current=next.get('value');slope=None if previous is None or current is None else current-previous
  return dict(rsi14=current,rsi14_previous=previous,rsi14_slope=slope)

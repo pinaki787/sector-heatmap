@@ -35,7 +35,7 @@ test('one toggle waits during requests and draining, restart only once flat',()=
  assert.deepEqual(toggleState({running:false,position:null,pending:null}),{label:'Start Runner',disabled:false});
  assert.deepEqual(toggleState({running:true,accepting_entries:true}),{label:'Stop Runner',disabled:false});
  assert.deepEqual(toggleState({running:true,accepting_entries:false,pending:{}}),{label:'Stopping…',disabled:true});
- assert.equal(toggleState({running:false,position:{},accepting_entries:false}).label,'Stop Runner');
+ assert.equal(toggleState({running:false,position:{},accepting_entries:false}).label,'Resume position monitoring');
  assert.equal(toggleState({running:false,shutdown_pending:true}).disabled,true);
  assert.equal(toggleState({},true).disabled,true);
 });

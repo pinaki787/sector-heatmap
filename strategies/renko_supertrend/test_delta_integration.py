@@ -92,6 +92,14 @@ class FeedTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.b=Broker(SimpleNamespace(clock=lambda:NOW),Path(self.temp.name));self.b.subscribe('BTCUSD',60);self.b.connected=True
+    def test_public_stream_uses_trusted_ca_bundle_without_disabling_tls(self):
+        import certifi
+        with patch('websocket.WebSocketApp') as socket:
+            socket.return_value.run_forever.side_effect=lambda **kw:self.b.stopping.set()
+            self.b.start();self.b.thread.join(2)
+            self.assertFalse(self.b.thread.is_alive())
+            ssl=socket.return_value.run_forever.call_args.kwargs['sslopt']
+            self.assertEqual(ssl,{'ca_certs':certifi.where()})
     def message(self,**change):
         return dict(type='candlestick_1m',sy='BTCUSD',ts=NOW*1000000,cst=(NOW//60*60)*1000000,res='1m',o=100,h=102,l=99,c=101,v=0,**change)
     def test_backend_candle_is_fresh_and_zero_volume_is_preserved(self):

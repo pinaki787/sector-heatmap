@@ -15,6 +15,24 @@ async function refresh() {
   $('signin').hidden = true; $('workspace').hidden = false;
   $('user').textContent = currentUser.username + (currentUser.admin ? ' · ADMINISTRATOR' : '');
   $('admin').hidden = !currentUser.admin;
+  $('user-master-link').hidden = !currentUser.admin;
+  $('owner-dashboard-link').hidden = !currentUser.admin;
+  $('user-list').replaceChildren();
+  if(currentUser.admin){
+    const {users,sections}=await api('users');
+    const table=document.createElement('table');table.style.width='100%';
+    const head=table.createTHead().insertRow();for(const name of ['Username','Role']){const th=document.createElement('th');th.textContent=name;head.append(th);}
+    head.append(Object.assign(document.createElement('th'),{textContent:'Visible sections'}));
+    const body=table.createTBody();for(const user of users){
+      const row=body.insertRow();row.insertCell().textContent=user.username;row.insertCell().textContent=user.admin?'Administrator':'User';
+      const cell=row.insertCell();if(user.admin){cell.textContent='All sections';continue;}
+      const assigned=new Set(user.features);const controls=[];
+      for(const [key,name] of Object.entries(sections)){const label=document.createElement('label');label.style.display='inline-flex';label.style.gap='6px';label.style.margin='6px 14px 6px 0';const check=document.createElement('input');check.type='checkbox';check.checked=assigned.has(key);check.value=key;label.append(check,document.createTextNode(name));cell.append(label);controls.push(check);}
+      const save=document.createElement('button');save.type='button';save.textContent='Save sections';save.onclick=async()=>{save.disabled=true;try{await api('user-sections',{username:user.username,features:controls.filter(c=>c.checked).map(c=>c.value)});message('Sections saved for '+user.username+'.');}catch(e){message(e.message);}finally{save.disabled=false;}};cell.append(save);
+    }
+    $('user-list').append(table);
+    if(location.pathname==='/user-master')$('admin').scrollIntoView({block:'start'});
+  }
   const {accounts} = await api('accounts');
   $('accounts').replaceChildren();
   if (!accounts.length) {
@@ -70,7 +88,7 @@ function bind(form, task) {
 }
 bind('login', async data => { currentUser = await api('login', Object.fromEntries(data)); $('login').reset(); await refresh(); });
 bind('add-account', async data => { await api('accounts', Object.fromEntries(data)); $('add-account').reset(); await refresh(); message('Workspace created. Save its connection settings before broker login.'); });
-bind('add-user', async data => { await api('users', Object.fromEntries(data)); $('add-user').reset(); message('User created. They can sign in and add their own broker accounts.'); });
+bind('add-user', async data => { await api('users', Object.fromEntries(data)); $('add-user').reset(); await refresh(); message('User created. They can sign in and add their own broker accounts.'); });
 bind('change-password', async data => {
   await api('password', Object.fromEntries(data)); $('change-password').reset(); currentUser = null;
   $('accounts').replaceChildren(); $('workspace').hidden = true; $('signin').hidden = false;

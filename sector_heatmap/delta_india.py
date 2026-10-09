@@ -272,7 +272,7 @@ class DeltaIndia:
             result=dict(broker='DELTA_INDIA',complete=True,available_types=sorted({r['contract_type'] for r in instruments}),instruments=instruments,listed_count=len(unique),supported_live_count=len(instruments),fetched_at=self.clock(),forex_supported=False,forex_message='Only listed supported India crypto derivatives are selectable. This integration provides no forex pair routing.')
             self.cache['catalog']=(self.clock(),result);return deepcopy(result)
     def _metadata(self,r):
-        return {k:r.get(k) for k in ('id','symbol','description','contract_type','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
+        return {k:r.get(k) for k in ('id','symbol','description','contract_type','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate','initial_margin','maintenance_margin','product_specs')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
     def product(self,symbol):
         if not isinstance(symbol,str) or not re.fullmatch(r'[A-Z0-9][A-Z0-9_-]{0,79}',symbol):raise ValueError('Select an exact listed Delta India symbol.')
         cached=self.cache.get(('product',symbol))

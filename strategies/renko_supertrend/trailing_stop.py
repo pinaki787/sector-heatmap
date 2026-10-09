@@ -27,7 +27,7 @@ def advance(state,config,direction,price,exchange_at,received_at,now,opened_at):
     if price<=0 or not 0<=now-exchange_at<=15 or not 0<=now-received_at<=15 or exchange_at<opened_at:
         raise ValueError('Trailing requires fresh post-fill prices; no stale exit.')
     c=settings(config)
-    bullish=(c['trailing_basis']=='OPTION_PREMIUM_PERCENT' and config.get('execution_route')!='CASH_EQUITY') or direction=='BULLISH'
+    bullish=(c['trailing_basis']=='OPTION_PREMIUM_PERCENT' and config.get('execution_route') not in ('CASH_EQUITY','DELTA_PERPETUAL')) or direction=='BULLISH'
     if state:
         if state['basis']!=c['trailing_basis'] or state['distance']!=c['trailing_distance']:
             raise ValueError('Open-position trailing settings cannot change silently.')

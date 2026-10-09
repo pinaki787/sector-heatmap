@@ -114,7 +114,7 @@ class SourceMathTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'exactly once'):e.update(a)
 
     def test_defaults_and_input_validation_match_source_ranges(self):
-        self.assertEqual(settings({}),dict(rsi_slope_enabled=True,atr_length=5,factor=3.0,brick_mode='Auto',manual_brick=12.8,use_adx=False,adx_threshold=20.0,adx_length=14,adx_smoothing=14,widening_window=2,retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True))
+        self.assertEqual(settings({}),dict(supertrend_enabled=True,ema_fast_enabled=True,ema_slow_enabled=True,ema_widening_enabled=True,ema_fast_length=10,ema_slow_length=30,rsi_slope_length=14,rsi_slope_enabled=True,atr_length=5,factor=3.0,brick_mode='Auto',manual_brick=12.8,use_adx=False,adx_threshold=20.0,adx_length=14,adx_smoothing=14,widening_window=2,retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True))
         for cfg in (dict(atr_length=True),dict(manual_brick=0),dict(factor=float('nan')),dict(adx_threshold=101),dict(use_adx='false')):
             with self.assertRaises(ValueError):settings(cfg)
         self.assertEqual(settings(dict(adx_threshold=0))['adx_threshold'],0)

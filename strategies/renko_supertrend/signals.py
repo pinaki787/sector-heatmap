@@ -1,3 +1,4 @@
+from . import exit_indicators, market_structure
 """Sequential port of source.pine, including Pine-style missing-value warm-up."""
 from copy import deepcopy
 from .retest import evaluate as retest_evaluate
@@ -6,7 +7,9 @@ import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-DEFAULTS = dict(atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
+from .indicator_selection import DEFAULTS as INDICATOR_DEFAULTS, validate as validate_indicators, qualify as qualify_indicators
+
+DEFAULTS = dict(**INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
                 use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
 
 
@@ -36,6 +39,7 @@ def settings(payload):
     if c['retest_enabled'] and not any(c[k] for k in ('retest_engulfing','retest_harami','retest_star')):raise ValueError('Select at least one retest candlestick pattern.')
     if not 2 <= c['widening_window'] <= 100:
         raise ValueError('Widening window must be from 2 to 100 completed candles.')
+    validate_indicators(c)
     return c
 
 
@@ -71,10 +75,10 @@ def rma(state, key, value, length):
     return s['value']
 
 
-def ema_setup(state, close, direction, allowed, window):
+def ema_setup(state, close, direction, allowed, window, config=None, reversal=None, rsi=None):
     # Pine ta.ema seeds with the first non-na source, then alpha=2/(length+1).
-    for length in (10, 30):
-        key = f'ema{length}'
+    cfg = {**INDICATOR_DEFAULTS, **(config or {})}
+    for key, length in (('ema10', cfg['ema_fast_length']), ('ema30', cfg['ema_slow_length'])):
         old = state.get(key)
         state[key] = close if old is None else (2.0 / (length + 1)) * close + (1 - 2.0 / (length + 1)) * old
     gap = state['ema10'] - state['ema30']
@@ -85,13 +89,19 @@ def ema_setup(state, close, direction, allowed, window):
     aligned = gap > 0 if bullish else gap < 0
     price_ok = close > state['ema10'] if bullish else close < state['ema10']
     widening = len(signed) == window and all(g > 0 for g in signed) and all(a < b for a, b in zip(signed, signed[1:]))
-    qualified = aligned and price_ok and widening and allowed
-    setup = 'BULLISH' if bullish else 'BEARISH'
+    selected = qualify_indicators(cfg, close, state['ema10'], state['ema30'], direction, allowed, widening, reversal, rsi)
+    if config is not None:
+        direction, qualified, reason = selected
+        bullish = direction < 0
+    else:
+        qualified = aligned and price_ok and widening and allowed
+    setup = 'BULLISH' if direction < 0 else 'BEARISH' if direction > 0 else 'NEUTRAL'
     entry = setup if qualified and state.get('ema_qualified') != setup else None
     # Re-arm only after the completed-candle setup ceases to qualify.
     state['ema_qualified'] = setup if qualified else None
-    reason = 'QUALIFIED' if qualified else 'WAITING_ADX' if not allowed else 'WAITING_EMA_ALIGNMENT' if not aligned else 'WAITING_CLOSE' if not price_ok else 'WAITING_WIDENING'
-    return dict(ema10=state['ema10'], ema30=state['ema30'], ema_gap=gap, ema_widening=widening,
+    if config is None:
+        reason = 'QUALIFIED' if qualified else 'WAITING_ADX' if not allowed else 'WAITING_EMA_ALIGNMENT' if not aligned else 'WAITING_CLOSE' if not price_ok else 'WAITING_WIDENING'
+    return dict(selected_direction=setup, ema10=state['ema10'], ema30=state['ema30'], ema_gap=gap, ema_widening=widening,
                 entry_qualified=qualified, entry_diagnostic=reason, entry_direction=entry,
                 entry_buy_signal=entry == 'BULLISH', entry_sell_signal=entry == 'BEARISH')
 
@@ -132,7 +142,23 @@ def project_lifecycle(state, timestamp, entry_direction, reversal_direction, sec
 
 class Engine:
     def __init__(self, config=None, tick_size=0.05, state=None):
+        self.raw_config = dict(config or {})
         self.config = settings(config or {})
+        self.chart_zone_rows=(config or {}).get('_chart_zone_rows',[])
+        self.chart_zone_timeline=[]
+        if (config or {}).get('chart_zone_target_enabled'):
+            from . import zone_target
+            zone_target.zones(self.chart_zone_rows,self.chart_zone_timeline)
+        self.chart_zone_times=[r['timestamp']+300 for r in self.chart_zone_rows]
+        self.chart_higher=[]
+        if (config or {}).get('chart_entry_guards') and (config or {}).get('higher_timeframe_enabled'):
+            frame=(config or {}).get('supertrend_timeframe','5 minutes')
+            seconds={'1 minute':60,'2 minutes':120,'3 minutes':180,'5 minutes':300,'10 minutes':600,'15 minutes':900,'30 minutes':1800,'1 hour':3600}[frame]
+            higher=Engine({**(config or {}),'timeframe':frame,'chart_entry_guards':False,'chart_zone_target_enabled':False},tick_size)
+            self.chart_higher=[(r['timestamp']+seconds,higher.update(r)) for r in completed((config or {}).get('_chart_higher_rows',[]))]
+            self.chart_higher_seconds=seconds
+        self.chart_higher_times=[at for at,row in self.chart_higher]
+
         self.deadline = (config or {}).get('session_deadline','15:15')
         self.host_seconds = {'1 minute':60,'2 minutes':120,'3 minutes':180,'5 minutes':300,'10 minutes':600,'15 minutes':900,'30 minutes':1800,'1 hour':3600}.get((config or {}).get('timeframe'),300)
         if isinstance(tick_size, bool) or not math.isfinite(float(tick_size)) or float(tick_size) <= 0:
@@ -197,20 +223,79 @@ class Engine:
         sell = allowed and direction > 0 and pd < 0
         s.update(rc=s['rc'], ro=s['ro'], synthetic_atr=atr, upper=upper, lower=lower, st=st, direction=direction, previous=c, count=s['count'] + 1)
         previous_emas=(s.get('ema10'),s.get('ema30'))
-        entry = ema_setup(s, c['close'], direction, allowed, cfg['widening_window'])
+        rsi_observation = rsi_observe(s, c['close'], cfg['rsi_slope_length'])
+        prior_gap=s.get('ema_gaps',[])[-1] if s.get('ema_gaps') else None
+        entry = ema_setup(s, c['close'], direction, allowed, cfg['widening_window'], cfg, 'BULLISH' if buy else 'BEARISH' if sell else None, rsi_observation)
+        selected_direction = entry['selected_direction']
         if cfg['retest_enabled']:
             retest=retest_evaluate(s,c,previous,previous_emas,pd,direction,entry,allowed,{**cfg,'host_seconds':self.host_seconds})
             entry.update(retest)
             if retest['retest_signal']:
                 entry.update(entry_direction=retest['retest_direction'],entry_qualified=True,entry_diagnostic='EMA10_RETEST_BOUNCE',entry_buy_signal=direction<0,entry_sell_signal=direction>0)
-        rsi_apply(entry,s,rsi_observe(s,c['close']),'BULLISH' if direction<0 else 'BEARISH',cfg['rsi_slope_enabled'])
-        projection = project_lifecycle(s, c['timestamp'], entry['entry_direction'], 'BULLISH' if buy else 'BEARISH' if sell else None, self.host_seconds,c['close'],entry['ema10'],self.deadline)
+        rsi_apply(entry,s,rsi_observation,selected_direction,cfg['rsi_slope_enabled'])
+        raw=self.raw_config or {}
+        if raw.get('chart_entry_guards') and any(raw.get(k) for k in ('ema_proximity_enabled','market_structure_enabled','higher_timeframe_enabled')):
+            from . import ema_proximity
+            from bisect import bisect_right
+            s['chart_host_rows']=(s.get('chart_host_rows',[])+[c])[-1000:]
+            event_at=c['timestamp']+self.host_seconds
+            blocked=None
+            if entry['entry_qualified'] and raw.get('ema_proximity_enabled'):
+                try:ema_proximity.check(raw,c['close'],entry['ema10'],host_atr)
+                except ValueError:blocked='WAITING_EMA_PROXIMITY'
+            if entry['entry_qualified'] and raw.get('market_structure_enabled') and not market_structure.check(s['chart_host_rows'],selected_direction,self.host_seconds,event_at)['allowed']:
+                blocked='WAITING_CONFIRMED_STRUCTURE'
+            if entry['entry_qualified'] and raw.get('higher_timeframe_enabled'):
+                index=bisect_right(self.chart_higher_times,event_at)-1
+                higher=self.chart_higher[index] if index>=0 else None
+                if not higher or index<29 or not 0<=event_at-higher[0]<self.chart_higher_seconds or higher[1]['direction']!=selected_direction:
+                    blocked='WAITING_HIGHER_TIMEFRAME_AGREEMENT'
+            qualified=entry['entry_qualified'] and not blocked
+            entry_direction=selected_direction if qualified and s.get('chart_qualified')!=selected_direction else None
+            s['chart_qualified']=selected_direction if qualified else None
+            if blocked:s['ema_qualified']=None
+            entry.update(entry_qualified=qualified,entry_diagnostic=blocked or entry['entry_diagnostic'],entry_direction=entry_direction,entry_buy_signal=entry_direction=='BULLISH',entry_sell_signal=entry_direction=='BEARISH')
+        if any(key in raw for key in exit_indicators.DEFAULTS):
+            held=s.get('projected_position')
+            exit_signal={**c,**entry,**rsi_observation,'adx':adx,'exit_previous_ema_gap':prior_gap,'supertrend_cross_direction':'BULLISH' if direction<0 and pd>0 else 'BEARISH' if direction>0 and pd<0 else None}
+            if raw.get('market_structure_exit_enabled'):
+                s['exit_structure_rows']=(s.get('exit_structure_rows',[])+[c])[-1000:]
+                if held:exit_signal['exit_market_structure']=market_structure.check(s['exit_structure_rows'],held['direction'],self.host_seconds,c['timestamp']+self.host_seconds)
+            exit_reason=exit_indicators.reason({**cfg,**raw},exit_signal,held['direction']) if held else None
+            zone_event_at=None
+            if held and raw.get('chart_zone_target_enabled') and not exit_reason:
+                from . import zone_target
+                from bisect import bisect_right
+                source=self.chart_zone_rows
+                event_at=c['timestamp']+self.host_seconds
+                previous_event=s.get('chart_zone_assessed_at',held['entry_timestamp']+self.host_seconds)
+                for index in range(max(1,bisect_right(self.chart_zone_times,previous_event)),bisect_right(self.chart_zone_times,event_at)):
+                    at=self.chart_zone_times[index]
+                    try:
+                        assessment=zone_target.assess_known(source[index],source[index-1],self.chart_zone_timeline[index-1],{'direction':held['direction'],'opened_at':held['entry_timestamp']+self.host_seconds},at)
+                        if assessment.get('reason'):
+                            exit_reason=assessment['reason'];zone_event_at=at;break
+                    except ValueError:pass
+                s['chart_zone_assessed_at']=event_at
+            reversal=('BEARISH' if held['direction']=='BULLISH' else 'BULLISH') if exit_reason else None
+            period=raw.get('ema_exit_length',10)
+            previous_exit=s.get('projection_exit_ema')
+            s['projection_exit_ema']=c['close'] if previous_exit is None else 2/(period+1)*c['close']+(1-2/(period+1))*previous_exit
+            projection=project_lifecycle(s,c['timestamp'],entry['entry_direction'],reversal,self.host_seconds,c['close'],s['projection_exit_ema'] if raw.get('ema_exit_enabled',False) else None,self.deadline)
+            if projection.get('lifecycle_reason')=='OPPOSITE_CONFIRMED_SUPERTREND':
+                projection['lifecycle_reason']=exit_reason
+                if zone_event_at is not None:projection['lifecycle_event_at']=zone_event_at
+            if projection.get('lifecycle_reason')=='EMA10_CONFIRMED_BREACH':projection['lifecycle_reason']='EMA'+str(period)+'_CONFIRMED_BREACH'
+        else:
+            projection = project_lifecycle(s, c['timestamp'], entry['entry_direction'], ('BULLISH' if buy else 'BEARISH' if sell else None) if cfg['supertrend_enabled'] else entry['entry_direction'], self.host_seconds,c['close'],entry['ema10'] if cfg['ema_fast_enabled'] and (self.raw_config or {}).get('ema_exit_enabled',True) else None,self.deadline)
+
+        if not (cfg['ema_fast_enabled'] or cfg['ema_slow_enabled']) and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='CONFIRMED_SELECTED_INDICATORS'
         if entry.get('retest_signal') and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='EMA10_RETEST_BOUNCE'
         return {**c, **entry, **projection, 'host_atr': host_atr, 'regime_atr': regime_atr, 'low_atr': low_atr, 'volatility_ratio': ratio, 'effective_factor': effective,
                 'auto_box': auto, 'box': box, 'steps': steps, 'synthetic_open': s['ro'], 'synthetic_close': s['rc'], 'synthetic_tr': synthetic_tr,
                 'synthetic_atr': atr, 'upper': upper, 'lower': lower, 'supertrend': st, 'pine_direction': direction,
-                'direction': 'BULLISH' if direction < 0 else 'BEARISH', 'adx': adx, 'signal_allowed': allowed,
-                'buy_signal': buy, 'sell_signal': sell, 'cross_direction': 'BULLISH' if buy else 'BEARISH' if sell else None}
+                'direction': selected_direction, 'adx': adx, 'signal_allowed': allowed,
+                'raw_supertrend_cross_direction': ('BULLISH' if direction<0 and pd>0 else 'BEARISH' if direction>0 and pd<0 else None), 'buy_signal': buy, 'sell_signal': sell, 'cross_direction': ('BULLISH' if buy else 'BEARISH' if sell else None) if cfg['supertrend_enabled'] else None}
 
 
 def series(candles, config=None, tick_size=0.05):

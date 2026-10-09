@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -869,6 +870,8 @@ def run_server():
     from .workspace_guard import WorkspaceGuard
     workspace_guard = WorkspaceGuard.from_environment()
     port = int(os.getenv("HEATMAP_PORT", "8080"))
+    from .local_dashboard_auth import LocalDashboardAuth
+    local_auth = None if workspace_guard else LocalDashboardAuth.configured(ROOT, port)
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
     feed = FyersLiveFeed(token) if token else None
     if feed: feed.start()
@@ -1377,15 +1380,18 @@ def run_server():
 
     ema_history_cache = {}
     ema_history_lock = threading.RLock()
+    ema_history_key_locks = {}
+    ema_quote_lock = threading.RLock()
+    ema_daily_reference_lock = threading.RLock()
     ema_quote_cache = {}
     ema_daily_reference_cache = {}
     rsi_table = RsiTable()
     delta_india = DeltaIndia(ROOT / ".private" / "delta-india-paper.json",credentials=load_config)
     from .delta_backtest_server import ensure_research_worker
     ensure_research_worker()  # Public-data research has its own process; broker runners are untouched.
-    from .telegram_polling import TelegramPolling
+    from .telegram_subscriber import TelegramConnections
     from .telegram_parser import TelegramParser
-    telegram_polling = TelegramPolling(ROOT / '.private' / 'telegram-review.json')
+    telegram_polling = TelegramConnections(ROOT / '.private' / 'telegram-review.json')
     telegram_parser = TelegramParser(parse_trade_recommendation, trade_recommendation_preview,
                                     submit_trade_recommendation_direct, delta_india, parser_submissions, telegram_polling)
     telegram_polling.auto_submit = telegram_parser.auto
@@ -1450,6 +1456,8 @@ def run_server():
         # selected expiry around a roll.
         key = (symbol, timeframe)
         with ema_history_lock:
+            history_key_lock = ema_history_key_locks.setdefault(key, threading.RLock())
+        with history_key_lock:
             cached = ema_history_cache.get(key)
             if cached and cached.get('retry_at', 0) > time.monotonic():
                 raise RuntimeError('FYERS history temporarily unavailable; waiting before retry.')
@@ -1459,7 +1467,8 @@ def run_server():
                 request = {"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": (now - timedelta(days=lookback_days)).date().isoformat(), "range_to": now.date().isoformat(), "cont_flag": 0, "oi_flag": 1}
                 if cached:
                     request['range_from'] = now.date().isoformat()
-                response = client.history(request)
+                from .fyers_history import history as bounded_history
+                response = bounded_history(client, request)
                 if not isinstance(response, dict) or response.get('s') != 'ok' or not isinstance(response.get('candles'), list):
                     if not cached:
                         cached = {'at':0,'rows':[],'refreshed_at':None}
@@ -1563,12 +1572,13 @@ def run_server():
             snapshot['price_exchange_at'] = datetime.fromtimestamp(float(raw_tick.get('exch_feed_time',raw_tick.get('last_traded_time')))).astimezone().isoformat()
         except ValueError:
             snapshot['price_source'] = 'REST fallback; 10-second cache'
-            with ema_history_lock:
+            with ema_quote_lock:
                 saved_quote = ema_quote_cache.get(symbol)
                 if saved_quote and time.monotonic()-saved_quote[0] < 10:
                     quote = saved_quote[1]
                 else:
-                    quote = client.quotes({'symbols':symbol})
+                    from .fyers_history import quotes as bounded_quotes
+                    quote = bounded_quotes(client, {'symbols':symbol})
                     ema_quote_cache[symbol] = (time.monotonic(),quote,datetime.now().astimezone().isoformat())
         if ema_history_cache.get((symbol,timeframe),{}).get('retry_at',0) <= time.monotonic():
             snapshot['history_error'] = None
@@ -1614,10 +1624,11 @@ def run_server():
                 candle["low"] = min(float(candle["low"]), live_price)
         if references:
             day = datetime.now(ZoneInfo('Asia/Kolkata')).date().isoformat()
-            with ema_history_lock:
+            with ema_daily_reference_lock:
                 daily = ema_daily_reference_cache.get(symbol)
                 if not daily or daily.get('day') != day or (daily.get('error') and time.monotonic() >= daily.get('retry_at',0)):
-                    raw_daily = client.history({'symbol':symbol,'resolution':'D','date_format':1,'range_from':(now-timedelta(days=45)).date().isoformat(),'range_to':day,'cont_flag':0})
+                    from .fyers_history import history as bounded_history
+                    raw_daily = bounded_history(client, {'symbol':symbol,'resolution':'D','date_format':1,'range_from':(now-timedelta(days=45)).date().isoformat(),'range_to':day,'cont_flag':0})
                     if isinstance(raw_daily,dict) and raw_daily.get('s')=='ok':
                         daily={'day':day,'rows':raw_daily.get('candles',[])}
                         ema_daily_reference_cache[symbol]=daily
@@ -3393,7 +3404,8 @@ def run_server():
     renko_order_stream = OrderNotifications(renko_supertrend, renko_stream_wake, ROOT / '.private')
     from strategies.renko_supertrend.adoption import Manager as RenkoAdoptionManager
     def renko_adoption_account():
-        profile=ema_readonly_client().get_profile()
+        from .fyers_history import account_read
+        profile=account_read(ema_readonly_client(), 'get_profile')
         account=(profile.get('data') or {}).get('fy_id') if isinstance(profile,dict) and profile.get('s')=='ok' else None
         if not account:raise ValueError('FYERS account identity unavailable; refresh authentication.')
         return hashlib.sha256(str(account).encode()).hexdigest()
@@ -3514,13 +3526,29 @@ def run_server():
         return rows
 
 
+    from .telegram_managed import OptionTickets
+    def telegram_option_runner(symbol):
+        key=renko_make_instance('DELTA_INDIA',symbol)
+        return renko_lookup_instance('DELTA_INDIA',key)
+    telegram_options=OptionTickets(delta_india,telegram_parser.parse_text,telegram_option_runner,lambda:deepcopy(delta_default_service.runner.state.get('config') or {}),polling=telegram_polling)
+
+    from .telegram_paper import PaperPipeline
+    telegram_paper=PaperPipeline(telegram_options,telegram_polling,ROOT/'.private'/'telegram-paper-pipeline.json')
+
     class Handler(SimpleHTTPRequestHandler):
         def workspace_stream_valid(self):
+            if local_auth:
+                try: local_auth.authorize(self.headers); return True
+                except PermissionError: return False
             if not workspace_guard: return True
-            try: workspace_guard.authorize(self.headers); return True
+            try:
+                from .section_permissions import allowed
+                user,_ = workspace_guard.authorize(self.headers)
+                return allowed(user,self.path.split("?",1)[0])
             except PermissionError: return False
 
         def do_HEAD(self):
+            if local_auth and not local_auth.check(self): return
             if workspace_guard and not workspace_guard.check(self): return
             super().do_HEAD()
 
@@ -3552,11 +3580,17 @@ def run_server():
                 return
 
         def do_GET(self):
+            if local_auth:
+                if local_auth.get(self) or local_auth.portal(self): return
+                if not local_auth.check(self): return
+                if self.path.split("?", 1)[0] == "/auth/login":
+                    body=(ROOT / "dashboard-login.html").read_bytes()
+                    self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
             if workspace_guard and not workspace_guard.check(self): return
             if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
-                context = workspace_guard.context(*self.workspace_identity) if workspace_guard else {'workspace': None}
-                body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';').encode()
-                self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
+                context = workspace_guard.context(*self.workspace_identity) if workspace_guard else ({'workspace':None,'admin':True,'allowed_features':None} if local_auth else {'workspace':None})
+                body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';' + ('document.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src="/dashboard-login.js";document.head.append(s);});' if local_auth else '')).encode()
+                self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path.split('?', 1)[0] == '/api/workspace-context':
                 self.send_json(200, workspace_guard.context(*self.workspace_identity) if workspace_guard else {'workspace': None}); return
             if workspace_guard and self.path.split('?', 1)[0] == '/workspace-entry':
@@ -3611,7 +3645,7 @@ def run_server():
                     self.send_json(409, {"error": str(error)})
                 return
             if path == '/api/telegram/status':
-                self.send_json(200, telegram_polling.status()); return
+                self.send_json(200, dict(telegram_polling.status(),paper_pipeline=telegram_paper.status())); return
             if path.startswith("/api/delta-india/"):
                 try:
                     query=parse_qs(urlparse(self.path).query)
@@ -3681,9 +3715,15 @@ def run_server():
                               'timeframe':str((query.get('timeframe') or ['5 minutes'])[0])}
                     raw = {key:query[key][0] for key in renko_supertrend_settings({}) if key in query}
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower()=='true'
-                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
-                    display_settings = renko_supertrend_settings(raw)
+                    from strategies.renko_supertrend.ema_exit import settings as exit_settings
+                    from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults
+                    raw.update({key:str((query.get(key) or [str(default)])[0]).lower()=='true' for key,default in exit_defaults.items()})
+                    display_settings = {**{key:raw[key] for key in exit_defaults}, **renko_supertrend_settings(raw), **exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]})}
+                    from strategies.renko_supertrend.chart_destinations import query_settings as chart_destination_settings
+                    display_settings.update(chart_destination_settings(query))
+                    display_settings['chart_zone_target_enabled']=(query.get('chart_zone_target_enabled') or ['false'])[0]=='true'
                     context_key = json.dumps([config,display_settings],sort_keys=True)
                     renko_chart_broker.session_policy(config)  # Authoritative instrument validation.
                     from strategies.ema_crossover.runner import TIMEFRAMES
@@ -3729,18 +3769,31 @@ def run_server():
                     timeframe = str((query.get('timeframe') or ['5 minutes'])[0])
                     raw = {key: query[key][0] for key in renko_supertrend_settings({}) if key in query}
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower() == 'true'
-                    for flag,default in [('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
-                    config = renko_supertrend_settings(raw)
+                    from strategies.renko_supertrend.ema_exit import settings as exit_settings
+                    from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults
+                    raw.update({key:str((query.get(key) or [str(default)])[0]).lower()=='true' for key,default in exit_defaults.items()})
+                    config = {**{key:raw[key] for key in exit_defaults}, **renko_supertrend_settings(raw), **exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]})}
+                    from strategies.renko_supertrend.chart_destinations import query_settings as chart_destination_settings
+                    config.update(chart_destination_settings(query))
+                    config['chart_zone_target_enabled']=(query.get('chart_zone_target_enabled') or ['false'])[0]=='true'
                     policy = renko_broker.session_policy({'underlying':symbol})
                     try:option_route=renko_broker.route_availability({'underlying':symbol})
                     except ValueError as error:option_route={'available':False,'message':str(error)}
+                    display_settings=dict(config)
                     config.update(policy)
                     holding=str((query.get('commodity_holding') or ['INTRADAY'])[0])
                     if holding not in ('INTRADAY','CARRY_FORWARD'):raise ValueError('Unknown MCX holding policy.')
                     if symbol.startswith('MCX:') and holding == 'CARRY_FORWARD':
                         config.update(commodity_holding=holding,session_deadline=None)
                     tick = renko_broker.host_tick_size(symbol)
+                    if config.get('chart_entry_guards') and config.get('higher_timeframe_enabled'):
+                        higher_analysis,_,_,_=renko_chart_history.load(ema_readonly_client(),symbol,config['supertrend_timeframe'],str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),{**config,'chart_entry_guards':False,'chart_zone_target_enabled':False,'underlying':symbol,'timeframe':config['supertrend_timeframe']},tick)
+                        config['_chart_higher_rows']=higher_analysis['rows']
+                    if config.get('chart_zone_target_enabled'):
+                        zone_analysis,_,_,_=renko_chart_history.load(ema_readonly_client(),symbol,'5 minutes',str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),{**config,'chart_zone_target_enabled':False,'underlying':symbol,'timeframe':'5 minutes'},tick)
+                        config['_chart_zone_rows']=zone_analysis['rows']
                     analyzed,rows,forming_rows,history = renko_chart_history.load(ema_readonly_client(),symbol,timeframe,
                         str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),
                         {**config,'underlying':symbol,'timeframe':timeframe},tick)
@@ -3750,7 +3803,7 @@ def run_server():
                     candles=rows+forming_rows
                     renko_chart_broker.observe({**config,'underlying':symbol,'timeframe':timeframe},candles)
                     with renko_display_lock:
-                        context_key=json.dumps([{'underlying':symbol,'timeframe':timeframe},renko_supertrend_settings(raw)],sort_keys=True)
+                        context_key=json.dumps([{'underlying':symbol,'timeframe':timeframe},display_settings],sort_keys=True)
                         if not analysis_available:renko_display_context.pop(context_key,None)
                         else:renko_display_context[context_key]={'confirmed':{'last':analyzed['last'],'state':analyzed['state']},'config':{**config,'underlying':symbol,'timeframe':timeframe},'tick':tick}
                         if len(renko_display_context)>20:renko_display_context.pop(next(iter(renko_display_context)))
@@ -3767,7 +3820,7 @@ def run_server():
                             candles = [c for c in candles if not c.get('is_forming')] + [forming]
                         except (ValueError,RuntimeError) as error:
                             candidate_error = str(error)
-                    self.send_json(200, {'symbol': symbol, 'timeframe': timeframe, 'settings': config,
+                    self.send_json(200, {'symbol': symbol, 'timeframe': timeframe, 'settings': {k:v for k,v in config.items() if not k.startswith('_chart')},
                         'tick_size': tick, 'rows': [r for r in rows if r['timestamp'] >= float((query.get('since') or ['0'])[0])] if (query.get('revision') or [''])[0] == history['analysis_revision'] else rows, 'incremental': (query.get('revision') or [''])[0] == history['analysis_revision'], 'history':history, 'latest': rows[-1] if rows and analysis_available else None, 'data_quality':data_quality,
                         'initialization_anchor': analyzed['anchor'],
                         'host_bar_count': analyzed['state']['count'], 'forming': [c for c in candles if c.get('is_forming')],
@@ -3960,6 +4013,9 @@ def run_server():
             return payload
 
         def do_POST(self):
+            if local_auth:
+                if local_auth.post(self) or local_auth.portal(self, mutation=True): return
+                if not local_auth.check(self, mutation=True): return
             if workspace_guard and not workspace_guard.check(self, mutation=True): return
             path = self.path.split("?", 1)[0]
             try:
@@ -4021,6 +4077,7 @@ def run_server():
                                '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
                                '/api/renko-supertrend/preview': renko_supertrend.preview,
                                '/api/renko-supertrend/start': renko_supertrend.activate,
+                               '/api/renko-supertrend/resume-position': renko_supertrend.resume_position,
                                '/api/renko-supertrend/override-entry': renko_supertrend.override_entry,
                                '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop(),
                                '/api/renko-supertrend/chart-stop': renko_supertrend.chart_stop,
@@ -4040,7 +4097,7 @@ def run_server():
                 if path == "/api/kama/runner/stop":
                     self.send_json(200, stop_kama_runner()); return
                 if path.startswith('/api/telegram/'):
-                    actions={'config':telegram_polling.configure,'verify':lambda p:telegram_polling.verify(),
+                    actions={'paper-start':telegram_paper.start,'paper-stop':lambda p:telegram_paper.stop(),'option-preview':telegram_options.preview,'option-submit':telegram_options.submit,'config':telegram_polling.configure,'route':telegram_polling.select,'login':telegram_polling.subscriber.login,'disconnect':telegram_polling.subscriber.disconnect,'verify':lambda p:telegram_polling.verify(),
                              'start':telegram_polling.start,'stop':lambda p:telegram_polling.stop(),
                              'parse':telegram_parser.parse,'submit':telegram_parser.submit,'reconcile':telegram_parser.reconcile}
                     action=actions.get(path.rsplit('/',1)[-1])

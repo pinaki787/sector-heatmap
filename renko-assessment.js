@@ -8,7 +8,7 @@
     const q=decision?.signal||latest,seconds=intervals[c?.timeframe];
     const result={title:'Latest runner assessment',reason:'No armed runner assessment available.',checks:[],timestamp:null,close:null,provisional:false,fresh:false,tone:'waiting',context:'Runner evidence only · no historical annotations'};
     if(!c)return result;
-    result.rules=`Rules: EMA10/30 alignment + ${c.widening_window}-candle widening${c.use_adx?' + ADX > '+c.adx_threshold:''}${c.retest_enabled?' or confirmed retest':''}${c.ema_proximity_enabled?' · proximity '+c.ema_proximity_distance+' '+c.ema_proximity_mode+' at preflight':''} · exit ${c.ema_exit_enabled?'EMA'+c.ema_exit_length:'EMA off'}`;
+    result.rules='Rules: '+[c.supertrend_enabled!==false?'Renko Supertrend':null,c.ema_fast_enabled!==false?'EMA '+(c.ema_fast_length||10):null,c.ema_slow_enabled!==false?'EMA '+(c.ema_slow_length||30):null,c.ema_widening_enabled!==false?c.widening_window+'-candle widening':null,c.rsi_slope_enabled?'RSI '+(c.rsi_slope_length||14)+' slope':null,c.use_adx?'ADX > '+c.adx_threshold:null,c.market_structure_enabled?'Swing structure':null,c.ema_proximity_enabled?'EMA proximity':null].filter(Boolean).join(' + ')+' · exit '+(c.ema_exit_enabled?'EMA'+c.ema_exit_length:'EMA off');
     result.context=`Active ${c.mode} · ${c.underlying} · ${c.timeframe}`;
     if(c.underlying!==view.symbol||c.timeframe!==view.timeframe){result.reason=`Chart differs from active runner (${c.underlying} · ${c.timeframe}).`;return result;}
     const provisional=!!q?.provisional;
@@ -34,18 +34,18 @@
     result.assessed_at=decision?.observed_at??null;
     result.history_revised_at=decision?.history_revised_at??s.history_revised_at??recovery?.at??null;
     const bullish=q.direction==='BULLISH',bearish=q.direction==='BEARISH';
-    if((bullish||bearish)&&finite(q.ema10)&&finite(q.ema30)&&finite(q.close)){
-      const aligned=bullish?q.close>q.ema10&&q.ema10>q.ema30:q.close<q.ema10&&q.ema10<q.ema30;
+    if((c.ema_fast_enabled!==false||c.ema_slow_enabled!==false)&&(bullish||bearish)&&finite(q.ema10)&&finite(q.ema30)&&finite(q.close)){
+      const fast=c.ema_fast_enabled!==false,slow=c.ema_slow_enabled!==false;const aligned=(!fast||(bullish?q.close>q.ema10:q.close<q.ema10))&&(!slow||(bullish?q.close>q.ema30:q.close<q.ema30))&&(!(fast&&slow)||(bullish?q.ema10>q.ema30:q.ema10<q.ema30));
       result.checks.push(`${aligned?'PASS':'WAIT'} · ${bullish?'Bullish':'Bearish'} close / EMA10 / EMA30`);
     }
     if(c.use_adx)result.checks.push(`${q.signal_allowed===true?'PASS':q.signal_allowed===false?'WAIT':'UNKNOWN'} · ADX ${finite(q.adx)?q.adx.toFixed(1):'unavailable'} > ${c.adx_threshold}`);
     else result.checks.push('OFF · ADX gate');
-    if(typeof q.ema_widening==='boolean')result.checks.push(`${q.ema_widening?'PASS':'WAIT'} · EMA gap widening (${c.widening_window})`);
+    if(c.ema_widening_enabled!==false&&typeof q.ema_widening==='boolean')result.checks.push(`${q.ema_widening?'PASS':'WAIT'} · EMA gap widening (${c.widening_window})`);
     if(c.retest_enabled)result.checks.push(q.retest_signal?'PASS · Confirmed retest pattern':q.retest_rsi_blocked?'WAIT · Confirmed retest blocked by RSI slope':provisional?'WAIT · Retest needs completed pattern':q.retest_touch_evidence?'WAIT · EMA10 touch recorded; matching pattern and directional close required':'WAIT · No confirmed retest entry; no active EMA10 touch evidence');
     if(c.rsi_slope_enabled)result.checks.push(`${q.rsi_slope_pass?'PASS':'WAIT'} · RSI14 slope ${finite(q.rsi14_slope)?q.rsi14_slope.toFixed(3):'warming up'} · ${bullish?'rising':'falling'} required`);
     else result.checks.push('OFF · RSI slope filter');
     if(c.ema_proximity_enabled)result.checks.push(`PENDING · Proximity entry only: ${c.ema_proximity_mode==='ATR'?'|price − EMA10| / completed ATR':'|price − EMA10|'} ≤ ${c.ema_proximity_distance}${c.ema_proximity_mode==='ATR'?'':' points'} at live preflight`);
-    const diagnostics={WAITING_RSI_WARMUP:'No entry: RSI14 slope needs two seeded host-candle values.',WAITING_RSI_FLAT:'No entry: RSI14 slope is flat.',WAITING_RSI_DIRECTION:'No entry: RSI14 slope opposes entry direction.',WAITING_ADX:'No entry: ADX gate has not qualified.',WAITING_EMA_ALIGNMENT:'No entry: EMA10 / EMA30 direction alignment has not qualified.',WAITING_CLOSE:'No entry: close is on the wrong side of EMA10.',WAITING_WIDENING:'No entry: EMA gap is not strictly widening.',ENTRY_CUTOFF:'No entry: configured entry cutoff reached.'};
+    const diagnostics={WAITING_SUPERTREND_REVERSAL:'No entry: waiting for a selected Supertrend reversal.',NO_DIRECTIONAL_INDICATOR:'No entry: select a directional indicator.',WAITING_SELECTED_ALIGNMENT:'No entry: selected indicators do not agree.',WAITING_RSI_WARMUP:'No entry: RSI14 slope needs two seeded host-candle values.',WAITING_RSI_FLAT:'No entry: RSI14 slope is flat.',WAITING_RSI_DIRECTION:'No entry: RSI14 slope opposes entry direction.',WAITING_ADX:'No entry: ADX gate has not qualified.',WAITING_EMA_ALIGNMENT:'No entry: EMA10 / EMA30 direction alignment has not qualified.',WAITING_CLOSE:'No entry: close is on the wrong side of EMA10.',WAITING_WIDENING:'No entry: EMA gap is not strictly widening.',ENTRY_CUTOFF:'No entry: configured entry cutoff reached.'};
     const events=(s.execution_signals||[]).filter(e=>e.run_id===s.run_id&&e.timestamp===q.timestamp&&e.underlying===c.underlying).sort((a,b)=>(b.observed_at||0)-(a.observed_at||0));
     const event=events[0];
     if(event&&event.status==='BLOCKED'){result.reason='Blocked at runner preflight: '+(event.reason||'Execution preflight rejected this candle.');result.tone='blocked';if(c.ema_proximity_enabled&&/too far from EMA10/i.test(event.reason||''))result.checks=result.checks.map(x=>x.startsWith('PENDING · Proximity')?'BLOCKED · '+event.reason:x);}

@@ -49,6 +49,7 @@ class WorkspaceStore:
                 broker TEXT NOT NULL, label TEXT NOT NULL, account_ref TEXT NOT NULL,
                 port INTEGER UNIQUE NOT NULL, live_enabled INTEGER NOT NULL DEFAULT 0,
                 credential_identity TEXT UNIQUE, UNIQUE(broker, account_ref));
+            CREATE TABLE IF NOT EXISTS user_features(user_id TEXT NOT NULL,feature TEXT NOT NULL,PRIMARY KEY(user_id,feature));
             CREATE TABLE IF NOT EXISTS attempts(username TEXT PRIMARY KEY, failures INTEGER NOT NULL,
                 until REAL NOT NULL);
             ''')
@@ -121,7 +122,10 @@ class WorkspaceStore:
                              (hashlib.sha256(token.encode()).hexdigest(), self.clock())).fetchone()
         if not row:
             raise PermissionError('Session expired. Sign in again.')
-        return dict(row)
+        user=dict(row)
+        from .section_permissions import FEATURES
+        with self.db() as db:user['features']=list(FEATURES) if user['admin'] else [r[0] for r in db.execute('SELECT feature FROM user_features WHERE user_id=? ORDER BY feature',(user['id'],))]
+        return user
 
     def logout(self, token):
         with self.db() as db:
@@ -137,6 +141,31 @@ class WorkspaceStore:
             salt=secrets.token_hex(16)
             db.execute('UPDATE users SET salt=?,password=? WHERE id=?',(salt,password_hash(new_password,salt),user['id']))
             db.execute('DELETE FROM sessions WHERE user_id=?',(user['id'],))
+
+    def users(self, actor):
+        from .section_permissions import FEATURES
+        with self.db() as db:
+            if not actor or not db.execute('SELECT 1 FROM users WHERE id=? AND admin=1', (actor['id'],)).fetchone():
+                raise PermissionError('Only an administrator can open User Master.')
+            rows=[]
+            for user in db.execute('SELECT id,username,admin FROM users ORDER BY username').fetchall():
+                rows.append({'username':user['username'],'admin':bool(user['admin']),'features':list(FEATURES) if user['admin'] else [r[0] for r in db.execute('SELECT feature FROM user_features WHERE user_id=? ORDER BY feature',(user['id'],))]})
+            return rows
+
+    def set_features(self, actor, username, features):
+        from .section_permissions import FEATURES
+        if not isinstance(features,list) or len(features)>len(FEATURES) or any(not isinstance(f,str) or f not in FEATURES for f in features):
+            raise ValueError('Select supported dashboard sections.')
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not actor or not db.execute('SELECT 1 FROM users WHERE id=? AND admin=1',(actor['id'],)).fetchone():
+                raise PermissionError('Only an administrator can assign sections.')
+            target=db.execute('SELECT id,admin FROM users WHERE username=?',(str(username).strip().lower(),)).fetchone()
+            if not target:raise ValueError('User does not exist.')
+            if target['admin']:raise PermissionError('Administrators retain access to every section.')
+            db.execute('DELETE FROM user_features WHERE user_id=?',(target['id'],))
+            db.executemany('INSERT INTO user_features VALUES(?,?)',[(target['id'],f) for f in sorted(set(features))])
+        return {'username':str(username).strip().lower(),'features':sorted(set(features))}
 
     def accounts(self, user):
         with self.db() as db:
@@ -213,7 +242,7 @@ def cookie_token(headers):
     cookie = SimpleCookie()
     try:
         cookie.load(headers.get('Cookie',''))
-        return cookie[COOKIE].value if COOKIE in cookie else ''
+        return cookie[COOKIE].value if COOKIE in cookie else cookie['sector_pulse_local_session'].value if 'sector_pulse_local_session' in cookie else ''
     except Exception:
         return ''
 
@@ -267,6 +296,9 @@ class WorkspaceRuntime:
         folder=self.store.folder(account)
         folder.mkdir(parents=True,exist_ok=True,mode=0o700)
         source=folder/'source'
+        def valid(path):
+            parts=Path(path).parts
+            return bool(parts) and not Path(path).is_absolute() and '..' not in parts and not any(p.startswith('.') for p in parts) and not any(p in ('output','outputs','tmp','node_modules','__pycache__','cache') for p in parts)
         if not source.exists():
             stage=folder/('source-'+secrets.token_hex(8))
             stage.mkdir(mode=0o700)
@@ -304,6 +336,21 @@ class WorkspaceRuntime:
                 import shutil
                 shutil.rmtree(stage)
                 raise
+        # Refresh only reviewed public source; account credentials and journals stay local.
+        if (self.source/'.git').exists():
+            inventory=subprocess.check_output(['git','ls-files','-z'],cwd=self.source).decode().split('\0')
+            inventory += ['strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js']
+            public=[]
+            for name in sorted(set(inventory)):
+                path=Path(name)
+                if not name or not valid(name) or path.suffix not in ('.py','.js','.html','.css'):continue
+                if len(path.parts)>1 and path.parts[0] not in ('sector_heatmap','strategies','vendor'):continue
+                original=self.source/path
+                if not original.is_file() or original.is_symlink():continue
+                target=source/path;target.parent.mkdir(parents=True,exist_ok=True)
+                payload=original.read_bytes();target.write_bytes(payload)
+                public.append({'path':name,'sha256':hashlib.sha256(payload).hexdigest()})
+            private_write(folder/'public-source-overlay.json',json.dumps(public,indent=2))
         (source/'.private').mkdir(parents=True,exist_ok=True,mode=0o700)
         credentials=folder/'credentials.json'
         if credentials.exists():

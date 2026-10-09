@@ -10,6 +10,9 @@ import re
 RESOLUTIONS = {'1 minute': '1m', '3 minutes': '3m', '5 minutes': '5m',
                '15 minutes': '15m', '30 minutes': '30m', '1 hour': '1h'}
 PRODUCT = 'DELTA_LONG_OPTION'
+FUTURES_PRODUCT = 'DELTA_PERPETUAL'
+FUTURES_ROUTE = 'DELTA_PERPETUAL'
+FUTURES_REVISION = 'delta-perpetual-v1'
 TERMINAL = {'closed': 2, 'cancelled': 1, 'REJECTED': 5}
 
 
@@ -54,7 +57,17 @@ def configuration(payload):
         raise ValueError('Choose an optional daily strategy cutoff in IST after 00:00.')
     # Shared capital/timeframe validation currently requires an Indian exchange
     # prefix. It validates no contract there; Delta metadata is validated below.
-    config = renko_configuration({**payload, 'underlying': 'NSE:DELTA-VALIDATION'})
+    route = payload.get('execution_route', 'OPTIONS')
+    if route not in ('OPTIONS', FUTURES_ROUTE):
+        raise ValueError('Choose Delta options or perpetual futures explicitly.')
+    if route == FUTURES_ROUTE and payload.get('sideways_enabled', False):
+        raise ValueError('Perpetual after-cost sideways filtering requires funding evidence; clear that optional filter.')
+    contracts=whole(payload.get('lots'), 'Delta contracts', True)
+    if contracts>100000:raise ValueError('Delta quantity exceeds 100000 whole contracts.')
+    config = renko_configuration({**payload, 'lots':min(contracts,100), 'execution_route': 'OPTIONS', 'underlying': 'NSE:DELTA-VALIDATION'})
+    config['lots']=contracts
+    config.update(execution_route=route)
+    if route == FUTURES_ROUTE:config['collateral_policy']='FULL_NOTIONAL'
     config.update(underlying=symbol, broker='DELTA_INDIA',
                   price_source='PERPETUAL_LAST_TRADE', order_terms='MARKETABLE_LIMIT_IOC',
                   session_open='00:00', session_deadline=deadline,
@@ -96,20 +109,60 @@ def option_contract(product, now):
                 broker='DELTA_INDIA', product=PRODUCT)
 
 
+def perpetual_contract(product, require_entry=True):
+    """Linear native perpetual only; reserve full notional, never set leverage."""
+    if product.get('contract_type') != 'perpetual_futures':
+        raise ValueError('Perpetual execution requires the exact listed perpetual.')
+    if product.get('state') != 'live' or product.get('trading_status') != 'operational':
+        raise ValueError('Delta perpetual is not operational.')
+    currency = product.get('quoting_currency')
+    if (product.get('notional_type') != 'vanilla' or product.get('is_quanto') is not False
+            or not product.get('underlying') or product.get('contract_unit_currency') != product['underlying']
+            or not currency or currency != product.get('settlement_currency')):
+        raise ValueError('Verified linear native perpetual units and currencies required.')
+    initial = decimal(product.get('initial_margin'), 'Initial margin percent', True)
+    maintenance = decimal(product.get('maintenance_margin'), 'Maintenance margin percent', True)
+    rate = decimal(product.get('taker_commission_rate'), 'Taker commission rate', True)
+    if not maintenance <= initial <= 100 or rate >= 1:
+        raise ValueError('Invalid perpetual margin or fee metadata.')
+    if require_entry and (product.get('product_specs') or {}).get('only_reduce_only_orders_allowed') is not False:
+        raise ValueError('Perpetual entry permissions unavailable or reduce-only.')
+    value = decimal(product.get('contract_value'), 'Contract value', True)
+    return dict(symbol=product['symbol'], product_id=whole(product.get('id'), 'Product ID', True),
+                lot_size=1, quantity_multiplier=float(value), contract_value=str(value),
+                tick_size=float(decimal(product.get('tick_size'), 'Tick size', True)),
+                quote_currency=currency, settlement_currency=currency, underlying_asset=product['underlying'],
+                broker='DELTA_INDIA', product=FUTURES_PRODUCT, execution_route=FUTURES_ROUTE,
+                initial_margin_percent=float(initial), maintenance_margin_percent=float(maintenance),
+                taker_commission_rate=float(rate), collateral_policy='FULL_NOTIONAL')
+
+
+def contract_metadata(product, now):
+    return perpetual_contract(product, require_entry=False) if product.get('contract_type') == 'perpetual_futures' else option_contract(product, now)
+
+
 def position(row, product, now):
-    meta = option_contract(product, now)
+    meta = contract_metadata(product, now)
     if whole(row.get('product_id'), 'Position product ID', True) != meta['product_id']:
         raise ValueError('Position/product identity differs.')
     if row.get('product_symbol') != meta['symbol']:
         raise ValueError('Position symbol differs from listed product.')
-    size = whole(row.get('size'), 'Position size', True)
+    size = whole(row.get('size'), 'Position size')
+    if not size or (meta['product'] == PRODUCT and size < 0):
+        raise ValueError('Nonzero signed perpetual or positive long-option quantity required.')
     price = decimal(row.get('entry_price'), 'Broker entry average', True)
-    return {**meta, 'netQty': size, 'netAvg': float(price), 'side': 1,
-            'productType': PRODUCT}
+    return {**meta, 'netQty': size, 'netAvg': float(price), 'side': 1 if size > 0 else -1,
+            'productType': meta['product']}
 
 
-def order_intent(symbol, size, side, quote, product, now):
-    meta = option_contract(product, now)
+def order_intent(symbol, size, side, quote, product, now, reduce_only=None):
+    meta = contract_metadata(product, now)
+    futures = meta['product'] == FUTURES_PRODUCT
+    if futures and reduce_only is False:perpetual_contract(product)
+    if futures and not isinstance(reduce_only, bool):
+        raise ValueError('Perpetual entry/exit intent must be explicit.')
+    if not futures and reduce_only is not None and reduce_only is not (side == -1):
+        raise ValueError('Long option entries BUY; exits SELL reduce-only.')
     if symbol != meta['symbol'] or side not in (1, -1) or isinstance(side, bool):
         raise ValueError('Exact contract and explicit BUY/SELL required.')
     size = whole(size, 'Order size', True)
@@ -132,7 +185,7 @@ def order_intent(symbol, size, side, quote, product, now):
         raise ValueError('No positive marketable IOC exit price available.')
     return dict(mode='LIVE', symbol=symbol, contracts=size,
                 side='buy' if side == 1 else 'sell', order_type='limit_order',
-                time_in_force='ioc', limit_price=str(limit), reduce_only=side == -1,
+                time_in_force='ioc', limit_price=str(limit), reduce_only=reduce_only if futures else side == -1,
                 product_id=meta['product_id'], strategy='RENKO_SUPERTREND_V1')
 
 
@@ -151,7 +204,8 @@ def owned_order(owned, expected_account):
     if state == 'closed' and filled != size:
         raise ValueError('Closed order has inconsistent fills.')
     side = request.get('side')
-    if side not in ('buy', 'sell') or request.get('reduce_only') is not (side == 'sell'):
+    futures = (owned.get('product') or {}).get('contract_type') == 'perpetual_futures'
+    if side not in ('buy', 'sell') or not isinstance(request.get('reduce_only'), bool) or (not futures and request['reduce_only'] is not (side == 'sell')):
         raise ValueError('Renko exits must be reduce-only; entries must BUY.')
     if request.get('order_type') != 'limit_order' or request.get('time_in_force') != 'ioc':
         raise ValueError('Delta Renko order terms differ from IOC-limit policy.')
@@ -160,7 +214,7 @@ def owned_order(owned, expected_account):
     return dict(id=str(owned.get('order_id') or owned['client_order_id']),
                 symbol=owned['symbol'], side=1 if side == 'buy' else -1,
                 qty=size, filledQty=filled, remainingQuantity=size-filled,
-                tradedPrice=price, productType=PRODUCT, status=status,
+                tradedPrice=price, productType=FUTURES_PRODUCT if futures else PRODUCT, status=status,
                 orderTag=owned['request_id'], native_status=state,
                 product_id=whole(request.get('product_id'), 'Order product ID', True),
                 reduce_only=request['reduce_only'], limit_price=request['limit_price'],

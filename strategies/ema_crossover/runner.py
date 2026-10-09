@@ -140,16 +140,19 @@ class Runner:
         self.state['events'] = (self.state['events'] + [dict(at=self.clock(), status=status, message=message)])[-100:]
         self.save()
 
+    def valuation_quote(self, symbol):
+        return self.adapter.quote(symbol)
+
     def snapshot(self):
         with self.lock:
             pnl = dict(unrealized=None, realized=self.state.get('realized_pnl', 0), basis='Executable bid; before fees', available=False)
             if self.state['position']:
                 try:
                     pos = self.state['position']
-                    bid = self.adapter.quote(pos['symbol'])['ask' if pos.get('entry_side',1)==-1 else 'bid']
+                    bid = self.valuation_quote(pos['symbol'])['ask' if pos.get('entry_side',1)==-1 else 'bid']
                     pnl.update(unrealized=amount(pos, pos['quantity'], (bid-pos['entry_price'])*pos.get('entry_side',1)), available=True, updated_at=self.clock())
-                except Exception:
-                    pass
+                except Exception as error:
+                    pnl['quote_error']=str(error) if isinstance(error,ValueError) else 'Held-contract quote unavailable.'
             else:
                 pnl.update(unrealized=0, available=True)
             evidence=self.path.parent.parent/'output'

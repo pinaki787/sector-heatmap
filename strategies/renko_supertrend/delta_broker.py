@@ -13,7 +13,7 @@ from pathlib import Path
 import threading
 import time
 
-from .delta_contracts import RESOLUTIONS, PRODUCT, option_contract, position, owned_order, whole
+from .delta_contracts import RESOLUTIONS, PRODUCT, FUTURES_PRODUCT, FUTURES_ROUTE, perpetual_contract, contract_metadata, option_contract, position, owned_order, whole
 from .delta_execution import Execution
 from .runner import Broker as FyersRenkoBroker
 from strategies.ema_crossover.runner import TIMEFRAMES
@@ -72,10 +72,14 @@ class Broker:
         if not math.isfinite(tick) or tick<=0: raise ValueError('Verified Delta host tick required.')
         return tick
 
-    def contract(self, symbol): return option_contract(self.delta.product(symbol),self.delta.clock())
+    def contract(self, symbol): return contract_metadata(self.delta.product(symbol),self.delta.clock())
 
     def route_availability(self, config):
         asset = self.underlying(config['underlying'])[13]
+        if config.get('execution_route') == FUTURES_ROUTE:
+            meta = perpetual_contract(self.delta.product(config['underlying']))
+            return dict(available=True,execution_route=FUTURES_ROUTE,contract=meta,
+                        message='Exact Delta perpetual; bullish LONG / bearish SHORT; full notional collateral reserve, broker leverage unchanged.')
         rows = self.rows('DELTA_OPTIONS')
         counts = {kind:sum(r[13]==asset and r[16]==kind for r in rows) for kind in ('CE','PE')}
         return dict(available=all(counts.values()),contract_counts=counts,
@@ -92,8 +96,8 @@ class Broker:
         self.subscribe(config['underlying'],TIMEFRAMES[config['timeframe']])
         self.warm_options(config)
         return dict(broker='DELTA_INDIA',account_identity=identity,underlying=config['underlying'],
-                    execution='Nearest-expiry ATM long Call/Put',order_type='Marketable LIMIT IOC',
-                    product=PRODUCT,price_source='Perpetual last-trade candles',
+                    execution='Exact perpetual LONG/SHORT' if config.get('execution_route')==FUTURES_ROUTE else 'Nearest-expiry ATM long Call/Put',order_type='Marketable LIMIT IOC',
+                    product=FUTURES_PRODUCT if config.get('execution_route')==FUTURES_ROUTE else PRODUCT,price_source='Perpetual last-trade candles',
                     risk='Native quote/settlement currency, whole contracts, reduce-only exits. IOC can fill partially. Daily cutoff is an explicit policy, not an exchange close. Costs require native fee evidence.')
 
     def authenticated_client(self):
@@ -158,7 +162,7 @@ class Broker:
             if self.thread and self.thread.is_alive(): return
             self.stopping.clear()
             def run():
-                import websocket
+                import websocket,certifi
                 while not self.stopping.is_set():
                     def opened(socket):
                         with self.lock:
@@ -172,7 +176,7 @@ class Broker:
                         try: self.ingest(json.loads(text))
                         except (ValueError,TypeError): pass
                     self.socket=websocket.WebSocketApp('wss://public-socket.india.delta.exchange',on_open=opened,on_message=message,on_error=failed,on_close=closed)
-                    self.socket.run_forever(ping_interval=20,ping_timeout=10)
+                    self.socket.run_forever(ping_interval=20,ping_timeout=10,sslopt={'ca_certs':certifi.where()})
                     self.connected=False
                     self.stopping.wait(2)
             self.thread=threading.Thread(target=run,daemon=True,name='delta-renko-public-stream'); self.thread.start()
@@ -241,6 +245,12 @@ class Broker:
             return deepcopy(data)
 
     def resolve(self, config, direction):
+        if direction not in ('BULLISH','BEARISH'):raise ValueError('Explicit signal direction required.')
+        if config.get('execution_route') == FUTURES_ROUTE:
+            meta = perpetual_contract(self.delta.product(config['underlying']))
+            meta['entry_side'] = 1 if direction == 'BULLISH' else -1
+            self.subscribe(meta['symbol']);self.resolved_contracts[meta['symbol']]=meta
+            return meta
         resolved=self.delta.chart_option(config['underlying'],'BUY' if direction=='BULLISH' else 'SELL')
         meta=self.contract(resolved['symbol'])
         if meta['expiry_epoch']-self.delta.clock() <= 60:raise ValueError('Resolved option is inside its exact expiry protection window.')
@@ -281,13 +291,13 @@ class Broker:
         if self.delta._position(product['id'])!=size: raise ValueError('Delta broker quantity differs from owned exposure; no closing order sent.')
 
     def order(self, symbol, qty, side, quote):
-        self.contract(symbol)
-        return dict(symbol=symbol,qty=qty,side=side,productType=PRODUCT,type=1,limitPrice=0,stopPrice=0,offlineOrder=False)
+        meta=self.contract(symbol)
+        return dict(symbol=symbol,qty=qty,side=side,productType=meta['product'],type=1,limitPrice=0,stopPrice=0,offlineOrder=False)
 
     def validate_order(self, order):
-        self.contract(order['symbol'])
+        meta=self.contract(order['symbol'])
         whole(order['qty'],'Order size',True)
-        if order['side'] not in (1,-1) or order['productType']!=PRODUCT or order['type']!=1: raise ValueError('Delta long-option IOC order required.')
+        if order['side'] not in (1,-1) or order['productType']!=meta['product'] or order['type']!=1: raise ValueError('Exact Delta contract IOC order required.')
 
     def preflight(self, order, config):
         self.validate_order(order); self.authenticated_client(); quote=self.quote(order['symbol'])
@@ -296,11 +306,14 @@ class Broker:
         if any(r['symbol']==order['symbol'] and r['status'] not in (1,2,5,7) for r in self.orders()): raise ValueError('Existing Delta order blocks entry.')
         wallets=self.delta._private('GET','/v2/wallet/balances')['result']; meta=self.contract(order['symbol'])
         available=[Decimal(str(w['available_balance'])) for w in wallets if (w.get('asset_symbol') or (w.get('asset') or {}).get('symbol'))==meta['settlement_currency']]
-        if len(available)!=1 or available[0]<Decimal(str(order['qty']*meta['quantity_multiplier']*quote['ask']*(1+.035*1.18+.01))): raise ValueError('Verified same-currency balance must cover premium, capped option fee/GST and 1% reserve; no currency conversion assumed.')
+        if meta['product']==FUTURES_PRODUCT:perpetual_contract(self.delta.product(order['symbol']))
+        fee=meta['taker_commission_rate'] if meta['product']==FUTURES_PRODUCT else .035
+        if len(available)!=1 or not available[0].is_finite() or available[0]<Decimal(str(order['qty']*meta['quantity_multiplier']*quote['ask']*(1+fee*1.18+.01))):
+            raise ValueError('Verified same-currency balance must cover full premium/notional, fees/GST and 1% reserve; broker leverage is unchanged.')
 
     def place(self, order):
         self.validate_order(order); self.authenticated_client()
-        result=self.execution.submit(order['symbol'],order['qty'],order['side'],self.quote(order['symbol']),order['orderTag'],getattr(self,'signal_symbol',None),getattr(self,'execution_reason','RENKO'))
+        result=self.execution.submit(order['symbol'],order['qty'],order['side'],self.quote(order['symbol']),order['orderTag'],getattr(self,'signal_symbol',None),getattr(self,'execution_reason','RENKO'),reduce_only=order.get('reduce_only'))
         if result['status']=='REJECTED': return dict(s='error',code=400,message='Delta rejected native IOC order.')
         if result.get('order_id'): return dict(s='ok',id=str(result['order_id']))
         return dict(s='error',code=201,message='Delta acknowledgement unknown; reconcile persisted tag.')

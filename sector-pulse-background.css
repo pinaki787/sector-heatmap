@@ -10,7 +10,7 @@ body::after {
   background-repeat: no-repeat;
 }
 body::before {
-  background-image: linear-gradient(rgba(9,17,31,.24),rgba(9,17,31,.64)), url('/assets/nse-building-zadeus.jpg');
+  background-image: linear-gradient(rgba(9,17,31,.24),rgba(9,17,31,.64));
   background-position: center;
   background-size: cover;
   opacity: .23;
@@ -40,3 +40,17 @@ body::after {
 @media print {
   body::before, body::after { display: none; }
 }
+
+/* Let the decorative artwork show through the navigation without reducing text opacity. */
+.desk > .side { background: rgba(9,17,31,.72); }
+
+/* Account controls belong to the sidebar footer, separate from strategy navigation. */
+.desk .account-dock { margin-top: 0; padding: 12px 4px 0; border-top: 1px solid #294766; }
+.desk .account-identity { margin: 0 8px 8px; color: #91a7c4; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.desk .account-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.desk .account-action { display: inline-flex; align-items: center; justify-content: center; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: #b3c4da; text-decoration: none; font: 600 12px Inter, system-ui, sans-serif; cursor: pointer; }
+.desk .account-action:hover { color: #fff; background: #18324e; }
+.desk .account-action:focus-visible { outline: 3px solid #7dbdff; outline-offset: 2px; }
+.desk .account-signout { color: #91a7c4; }
+@media (min-width: 951px) { .desk > .side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; gap: 16px; } .desk .side > .nav { flex: 1; min-height: 120px; overflow-y: auto; align-content: start; } .desk .side > .brand, .desk .side > .broker-card, .desk .account-dock { flex-shrink: 0; } .desk .side > .broker-card { margin-top: 0; } }
+@media (max-width: 950px) { .desk .account-dock { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; } .desk .account-identity { margin: 0; } }

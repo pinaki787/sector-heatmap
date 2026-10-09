@@ -57,7 +57,7 @@ class WorkspaceGuard:
             raise PermissionError('Save broker credentials in user and broker setup while the dashboard is stopped.')
 
     def context(self,user,account):
-        return dict(username=user['username'],workspace={k:account[k] for k in ('id','label','broker','account_ref','live_enabled')},
+        return dict(username=user['username'],admin=bool(user['admin']),allowed_features=user.get('features',[]),workspace={k:account[k] for k in ('id','label','broker','account_ref','live_enabled')},
                     portal_url=f'http://127.0.0.1:{self.portal_port}/')
 
     def check(self,handler,mutation=False):
@@ -65,6 +65,9 @@ class WorkspaceGuard:
             user,account=self.authorize(handler.headers,mutation)
             if handler.path.split('?',1)[0].startswith('/api/whatsapp/'):
                 raise PermissionError('Native WhatsApp uses the shared desktop session and is unavailable in isolated user workspaces.')
+            from .section_permissions import allowed
+            if not allowed(user,handler.path.split('?',1)[0]):
+                raise PermissionError('This section is not assigned to your user.')
             handler.workspace_identity=(user,account)
             return True
         except PermissionError as e:

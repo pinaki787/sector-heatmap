@@ -20,7 +20,7 @@ def trade_history(orders,position=None,unrealized=None,valuation=None):
         remaining=trade['remaining_quantity']
         owns=position and position.get('lifecycle_id')==trade['lifecycle_id']
         def ids(rs):return [r['paper_order_id'] for r in rs if r.get('paper_order_id')] if paper else [r['order_id'] for r in rs if r.get('order_id')]
-        result.append({**trade,'row_type':('PAPER ' if paper else 'LIVE ')+('CASH EQUITY TRADE' if meta.get('execution_route')=='CASH_EQUITY' else 'OPTION TRADE'), 'execution_route':meta.get('execution_route','OPTIONS'),
+        result.append({**trade,'row_type':('PAPER ' if paper else 'LIVE ')+('CASH EQUITY TRADE' if meta.get('execution_route')=='CASH_EQUITY' else 'PERPETUAL FUTURES TRADE' if meta.get('execution_route')=='DELTA_PERPETUAL' else 'OPTION TRADE'), 'execution_route':meta.get('execution_route','OPTIONS'),
             'trade_id':('PAPER-TRADE-' if paper else 'LIVE-TRADE-')+trade['lifecycle_id'],'run_id':meta.get('run_id'),
             'underlying_symbol':meta.get('underlying_symbol'),'option_type':meta.get('option_type'),'strike':meta.get('strike'),'expiry_epoch':meta.get('expiry_epoch'),
             'entry_order_ids':ids(entries),'exit_order_ids':ids(exits),

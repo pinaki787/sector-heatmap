@@ -47,6 +47,42 @@ class AdoptionTests(unittest.TestCase):
         self.assertEqual(r.state['position']['entry_origin'],'BROKER_POSITION_ADOPTION')
         self.assertFalse(r.state.get('order_history'))
         self.assertEqual(result['managers'][0]['status'],'POSITION_ADOPTED')
+    def test_paused_manager_resumes_with_ema30_without_initial_order(self):
+        self.apply();key=next(iter(self.m.runners));r=self.m.runners[key]
+        self.m.control(dict(id=key,action='pause'),False)
+        r.release()
+        self.m.control(dict(id=key,action='resume',exit_profile='EMA30_ONLY',symbol='NSE:TESTCE',confirmation='ENABLE EMA30 LIVE EXIT'),False)
+        self.assertTrue(r.state['running'])
+        self.assertTrue(r.state['config']['ema_exit_enabled'])
+        self.assertEqual(r.state['config']['ema_exit_length'],30)
+        self.assertFalse(r.state['config']['supertrend_exit_enabled'])
+        self.assertEqual(r.state['position']['quantity'],20)
+        self.assertEqual(r.adapter.sent,[])
+
+    def test_ema30_transition_requires_exact_confirmation(self):
+        self.apply();key=next(iter(self.m.runners));r=self.m.runners[key]
+        self.m.control(dict(id=key,action='pause'),False);r.release()
+        with self.assertRaisesRegex(ValueError,'Confirm the exact'):
+            self.m.control(dict(id=key,action='resume',exit_profile='EMA30_ONLY',symbol='NSE:OTHER'),False)
+        self.assertFalse(r.state['running']);self.assertFalse(r.state['config']['ema_exit_enabled'])
+        self.assertEqual(r.adapter.sent,[])
+
+    def test_restart_applies_latest_selected_settings_without_entry(self):
+        self.apply();key=next(iter(self.m.runners));r=self.m.runners[key]
+        self.m.control(dict(id=key,action='pause'),False);r.release()
+        latest={**r.state['config'],'mode':'LIVE','ema_exit_enabled':True,'ema_exit_length':30,'supertrend_exit_enabled':False}
+        self.m.control(dict(id=key,action='resume',config=latest,confirmation='START LIVE STRATEGY MONITORING'),False)
+        self.assertTrue(r.state['running']);self.assertEqual(r.state['config']['ema_exit_length'],30)
+        self.assertTrue(r.state['config']['ema_exit_enabled']);self.assertFalse(r.state['config']['supertrend_exit_enabled'])
+        self.assertEqual(r.state['position']['quantity'],20);self.assertEqual(r.adapter.sent,[])
+
+    def test_restart_rejects_settings_for_other_instrument(self):
+        self.apply();key=next(iter(self.m.runners));r=self.m.runners[key]
+        self.m.control(dict(id=key,action='pause'),False);r.release()
+        with self.assertRaisesRegex(ValueError,'match the attached'):
+            self.m.control(dict(id=key,action='resume',config={**r.state['config'],'mode':'LIVE','underlying':'OTHER'},confirmation='START LIVE STRATEGY MONITORING'),False)
+        self.assertFalse(r.state['running']);self.assertEqual(r.adapter.sent,[])
+
     def test_pending_remainder_blocks_even_with_positive_filled_position(self):
         self.shared['orders']=[dict(symbol='NSE:TESTCE',status=6,filledQty=20,qty=40)]
         with self.assertRaisesRegex(ValueError,'Pending'):self.apply()
