@@ -9,10 +9,28 @@ from sector_heatmap.market_data import FyersLiveFeed, configure_websocket_ca_bun
 
 
 class AuthenticationConfigTests(unittest.TestCase):
+    def test_public_callback_must_match_configured_https_origin_exactly(self):
+        config = {"FYERS_APP_ID": "APP-100", "FYERS_SECRET_KEY": "secret",
+                  "FYERS_REDIRECT_URI": "https://trading.example.com/callback"}
+        with patch.object(authentication, "public_origin", return_value="https://trading.example.com"), patch.object(authentication, "load_config", return_value=config):
+            self.assertEqual(authentication.validated_config(expected_port=8080), config)
+            for bad in ("https://evil.example/callback", "http://trading.example.com/callback",
+                        "https://trading.example.com/callback?next=evil", "https://trading.example.com/callback/"):
+                config["FYERS_REDIRECT_URI"] = bad
+                with self.subTest(bad=bad), self.assertRaises(RuntimeError):
+                    authentication.validated_config(expected_port=8080)
+
+    def test_public_callback_requires_explicit_public_origin_configuration(self):
+        config = {"FYERS_APP_ID": "APP-100", "FYERS_SECRET_KEY": "secret",
+                  "FYERS_REDIRECT_URI": "https://trading.example.com/callback"}
+        with patch.object(authentication, "public_origin", return_value=""), patch.object(authentication, "load_config", return_value=config):
+            with self.assertRaises(RuntimeError):
+                authentication.validated_config(expected_port=8080)
+
     def test_missing_secret_has_actionable_error(self):
         config = {"FYERS_APP_ID": "APP-100", "FYERS_REDIRECT_URI": "http://127.0.0.1:8080/callback"}
         with patch.object(authentication, "load_config", return_value=config):
-            with self.assertRaisesRegex(RuntimeError, "FYERS_SECRET_KEY.*environment or a supported private config file"):
+            with self.assertRaisesRegex(RuntimeError, "FYERS_SECRET_KEY.*User and broker setup"):
                 authentication.validated_config(expected_port=8080)
 
     def test_dashboard_port_must_match_registered_callback(self):

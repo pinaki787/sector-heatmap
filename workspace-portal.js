@@ -71,8 +71,8 @@ function edit(account) {
   currentAccount = account; $('configuration').hidden = false;
   $('configuration-title').textContent = 'Connect ' + account.label;
   $('callback').textContent = account.broker === 'FYERS' ? `Register FYERS redirect URI: http://127.0.0.1:${account.port}/callback. Complete browser login inside this account’s dashboard after saving.` : 'Use your Delta India application key and secret. Configure its allowed IP and permissions in Delta.';
-  $('key-label').firstChild.textContent = account.broker === 'FYERS' ? 'Application ID' : 'India API key';
-  $('secret-label').firstChild.textContent = account.broker === 'FYERS' ? 'Application secret' : 'India API secret';
+  $('key-label').firstChild.textContent = account.broker === 'FYERS' ? 'FYERS client ID (App ID)' : 'India API key';
+  $('secret-label').firstChild.textContent = account.broker === 'FYERS' ? 'FYERS secret key' : 'India API secret';
   $('credential-key').value = ''; $('credential-key').required = !account.configured;
   $('credential-secret').value = ''; $('credential-secret').required = !account.configured;
   $('live-enabled').checked = !!account.live_enabled;
@@ -98,7 +98,7 @@ bind('configure', async () => {
   const credentials = currentAccount.broker === 'FYERS' ? {FYERS_APP_ID: $('credential-key').value, FYERS_SECRET_KEY: $('credential-secret').value} : {DELTA_INDIA_API_KEY: $('credential-key').value, DELTA_INDIA_API_SECRET: $('credential-secret').value};
   await api('configure', {account_id: currentAccount.id, credentials, live_enabled: $('live-enabled').checked});
   $('configure').reset(); $('configuration').hidden = true; currentAccount = null;
-  await refresh(); message('Connection saved. Launch the account dashboard when ready.');
+  await refresh(); message('Connection saved privately for your user and this broker account. Launch its dashboard to complete broker login.');
 });
 $('cancel-config').onclick = () => { $('configure').reset(); $('configuration').hidden = true; currentAccount = null; };
 $('logout').onclick = async () => {

@@ -356,7 +356,9 @@ class WorkspaceRuntime:
         if credentials.exists():
             values=json.loads(credentials.read_text())
             if account['broker']=='FYERS':
-                private_write(source/'.fyers.env','\n'.join(k+'='+v for k,v in values.items())+'\n')
+                # FYERS loads the registered private profile directly.
+                # Remove legacy generated duplicates on the next stopped-workspace launch.
+                (source/".fyers.env").unlink(missing_ok=True)
             else:
                 private_write(source/'.private/delta-india-credentials.json',json.dumps(values))
         return folder

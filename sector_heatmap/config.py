@@ -3,10 +3,24 @@ import json
 import os
 import tempfile
 import time
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".fyers.env"
 TOKEN_FILE = Path(os.getenv("FYERS_TOKEN_FILE", Path.home() / ".fyers" / "token.json")).expanduser()
+
+def public_origin():
+    value = os.getenv('SECTOR_PULSE_PUBLIC_ORIGIN', '')
+    settings = ROOT / '.private/server-settings.json'
+    if not value and settings.exists():
+        value = json.loads(settings.read_text()).get('public_origin', '')
+    if not value:
+        return ''
+    parsed = urlparse(value)
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment or parsed.port not in (None, 443)):
+        raise ValueError('Public origin must be an HTTPS origin without credentials, a path or query.')
+    return value
 
 def _read_env_file(path):
     values = {}
@@ -58,25 +72,54 @@ def _read_token_cache():
         values["FYERS_REFRESH_TOKEN"] = str(cached["refresh_token"])
     return values
 
+def _workspace_profile():
+    # Registered account credentials are authoritative in multi-user dashboards.
+    registry = os.getenv('SECTOR_PULSE_WORKSPACE_REGISTRY')
+    account_id = os.getenv('SECTOR_PULSE_WORKSPACE_ID')
+    if not registry and not account_id:
+        return None
+    if not registry or not account_id:
+        raise ValueError('Incomplete account workspace context.')
+    from .workspaces import WorkspaceStore
+    store = WorkspaceStore(registry)
+    with store.db() as db:
+        row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+    if not row:
+        raise ValueError('Unknown broker account workspace.')
+    folder = store.folder(dict(row)).resolve()
+    if ROOT.resolve() != folder / 'source':
+        raise ValueError('Broker configuration must be loaded from its own account workspace.')
+    if row['broker'] != 'FYERS':
+        return {}
+    path = folder / 'credentials.json'
+    values = json.loads(path.read_text()) if path.exists() else {}
+    return {key: values[key] for key in ('FYERS_APP_ID', 'FYERS_SECRET_KEY', 'FYERS_REDIRECT_URI') if key in values}
+
+
 def load_config():
     # The token cache is deliberately applied after static configuration.  An
     # access token is short-lived and is renewed through OAuth, whereas a
     # launcher can keep an old FYERS_ACCESS_TOKEN in its inherited environment
     # indefinitely.  Letting that old environment value win would make every
     # successful browser reauthentication appear expired after the restart.
+    profile = _workspace_profile()
     cached_token_values = _read_token_cache()
     values = {}
-    for path in reversed(_user_config_files()):
-        values.update(_normalize_aliases(_read_env_file(path)))
-    values.update(_normalize_aliases(_read_env_file(ENV_FILE)))
-    environment = {key: value for key, value in os.environ.items() if key.startswith("FYERS_")}
-    values.update(_normalize_aliases(environment))
-    if not values.get("FYERS_APP_ID") and cached_token_values.get("FYERS_APP_ID"):
+    if profile is not None:
+        values.update(profile)
+    else:
+        for path in reversed(_user_config_files()):
+            values.update(_normalize_aliases(_read_env_file(path)))
+        values.update(_normalize_aliases(_read_env_file(ENV_FILE)))
+        environment = {key: value for key, value in os.environ.items() if key.startswith("FYERS_")}
+        values.update(_normalize_aliases(environment))
+    if profile is None and not values.get("FYERS_APP_ID") and cached_token_values.get("FYERS_APP_ID"):
         values["FYERS_APP_ID"] = cached_token_values["FYERS_APP_ID"]
-    values.setdefault("FYERS_REDIRECT_URI", f"http://127.0.0.1:{os.getenv('HEATMAP_PORT', '8080')}/callback")
+    origin = public_origin() or f"http://127.0.0.1:{os.getenv('HEATMAP_PORT', '8080')}"
+    values.setdefault("FYERS_REDIRECT_URI", origin + "/callback")
     cached_access_token = cached_token_values.get("FYERS_ACCESS_TOKEN")
     cached_app_id = cached_token_values.get("FYERS_APP_ID")
-    if cached_access_token and (not values.get("FYERS_APP_ID") or cached_app_id == values.get("FYERS_APP_ID")):
+    if cached_access_token and ((values.get("FYERS_APP_ID") and cached_app_id == values.get("FYERS_APP_ID")) or (profile is None and not values.get("FYERS_APP_ID"))):
         values["FYERS_ACCESS_TOKEN"] = cached_access_token
     cached_token = values.get("FYERS_ACCESS_TOKEN", "")
     if ":" in cached_token and values.get("FYERS_APP_ID") and cached_token.split(":", 1)[0] != values["FYERS_APP_ID"]:

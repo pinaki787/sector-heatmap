@@ -143,6 +143,7 @@ class WorkspaceTests(unittest.TestCase):
         subprocess.run(['git','add','.'],cwd=repo,check=True)
         subprocess.run(['git','-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','fixture'],cwd=repo,check=True)
         (repo/'.fyers.env').write_text('PRIVATE=secret')
+        self.store.configure(self.alice,self.a["id"],{"FYERS_APP_ID":"OWN-100","FYERS_SECRET_KEY":"own-secret"})
         runtime=WorkspaceRuntime(self.store,repo)
         folder=runtime.provision(self.a);other=runtime.provision(self.b)
         self.assertFalse((folder/'source/.fyers.env').exists())

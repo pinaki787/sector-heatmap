@@ -10,12 +10,61 @@ pnpm 10.17.1, builds the UI, and starts the dashboard.
 | Windows | `setup_and_run.bat` |
 | macOS / Linux | `sh setup_and_run.sh` |
 
-Python 3.10+ and Node.js 20.19+ (including `npx`) must already be installed. The
-scripts are idempotent: rerunning them reuses `.venv` and the locked dependency
+On Windows, Python 3.10+ and Node.js 20.19+ (including `npx`) must already be installed.
+On macOS/Linux, missing compatible Python and Node.js tools are downloaded automatically.
+The scripts are idempotent: rerunning them reuses `.venv` and the locked dependency
 sets. They do not read credentials aloud, place orders, or make any broker trade.
 They stop immediately if dependency installation or the UI build fails.
 For CI or setup validation without starting the long-running server, set
 `HEATMAP_SETUP_ONLY=1` before invoking either script.
+
+### Public HTTPS server installation
+
+On Ubuntu/Debian or Oracle Linux / RHEL-family Linux, run as the ordinary application owner with
+sudo access (not as root):
+
+```sh
+HEATMAP_SERVER_SETUP=1 HEATMAP_DOMAIN=trading.pinakicloud.com \
+HEATMAP_CERT_EMAIL=you@example.com HEATMAP_TEST_RENEWAL=1 sh setup_and_run.sh
+```
+
+The POSIX installer automatically selects/downloads Python 3.12 for the locked
+packages, repairs copied virtual environments with a backup, and downloads a
+checksum-verified Node.js when needed. Server mode installs Apache TLS support,
+issues/reuses a Let's Encrypt certificate, forwards HTTPS to localhost:8080,
+maps only the exact HTTPS Origin for backend CSRF checks, enables the SELinux
+HTTP relay permission where applicable, opens host firewall HTTP/HTTPS, and installs boot and
+renewal services. Renewal checks run twice daily and reload Apache after renewal.
+No additional Apache password prompt is added. The dashboard's own login remains;
+on a fresh install, initial admin credentials are written privately to
+`.private/initial-dashboard-login.txt`. Existing users/passwords are preserved.
+The Certbot contact email is optional; omit it to register without email.
+
+Before running, point the domain's A/AAAA records to this server and allow inbound
+TCP **80 and 443** in the cloud Security List/NSG. The installer cannot edit cloud
+firewall rules or FYERS app settings. Register this exact Redirect URL in the
+[FYERS API dashboard](https://myapi.fyers.in/dashboard):
+`https://trading.pinakicloud.com/callback` (replace the domain for another server).
+Server mode stores its public origin in `.private/server-settings.json` and uses
+that callback by default. Explicit `FYERS_REDIRECT_URI` overrides are preserved;
+update an old override to the same HTTPS callback if one exists. OAuth state and
+cross-origin request checks remain enforced. For public OAuth, use the dashboard's
+Refresh authentication control, rather than the standalone local callback tool.
+
+Reruns preserve `.env`, `.fyers.env`, credentials, runtime data and existing
+accounts. Changed managed Apache/systemd files are backed up under
+`/var/lib/sector-heatmap/config-backups`. A process already on port 8080 is left
+running; the application boot service is enabled for the next boot. New Python
+code needs a controlled restart to take effect in an existing process. Fresh
+installs start the app as its ordinary owner with live-order gates defaulting off.
+Use `systemctl status sector-heatmap.service certbot-renew.timer` to inspect the
+services, and `journalctl -u sector-heatmap.service` for application service logs.
+
+To inspect generated system configuration without applying it:
+
+```sh
+.venv/bin/python scripts/configure_server.py --domain trading.pinakicloud.com --plan
+```
 
 For a transferred archive, extract it into an ordinary writable directory. Copy
 `.fyers.env.example` to `.fyers.env` and enter the destination terminal's FYERS
