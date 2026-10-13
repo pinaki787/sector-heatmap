@@ -343,9 +343,11 @@ class Runner:
         if self.is_entry_order(order, position):
             if self.state.get('trades_used', 0) >= self.state['config']['max_trades']:
                 raise ValueError('Maximum entry trades reached.')
-            self.state['trades_used'] = self.state.get('trades_used', 0) + 1
+            if not getattr(self.adapter, 'count_confirmed_entries', False):
+                self.state['trades_used'] = self.state.get('trades_used', 0) + 1
         self.state['pending'] = dict(order=order, tag=tag, id=None, position=position, reason=reason,
-                                     submitted_at=self.clock(), cancel_requested=False)
+                                     submitted_at=self.clock(), cancel_requested=False,
+                                     count_on_fill=bool(getattr(self.adapter, 'count_confirmed_entries', False)))
         self.record_order(self.state['pending'], 'SUBMITTING')
         self.event('SUBMITTING', f"Submitting {reason}: {order['symbol']} qty {order['qty']} as MARKET (FYERS MPP).")
         if self.state['config']['mode'] == 'PAPER':
@@ -369,8 +371,11 @@ class Runner:
         elif isinstance(result, dict) and result.get('s') == 'error' and result.get('code') != 201:
             self.record_order(self.state['pending'], 'REJECTED')
             self.state['pending'] = None
-            self.state.update(accepting_entries=False, running=False)
-            self.event('ORDER_REJECTED', str(result.get('message', 'FYERS rejected order')))
+            if result.get('entry_deferred') is True and self.is_entry_order(order, position) and getattr(self.adapter, 'count_confirmed_entries', False):
+                self.event('ENTRY_DEFERRED', str(result['message']))
+            else:
+                self.state.update(accepting_entries=False, running=False)
+                self.event('ORDER_REJECTED', str(result.get('message', 'FYERS rejected order')))
         else:
             self.record_order(self.state['pending'], 'UNKNOWN')
             self.event('ORDER_STATUS_UNKNOWN', 'No definitive FYERS acknowledgement. Saved intent remains blocked for reconciliation.')
@@ -380,6 +385,8 @@ class Runner:
         if filled < 0 or filled > pending['order']['qty'] or (filled and (not math.isfinite(price) or price <= 0)):
             raise ValueError('Invalid confirmed fill quantity/price.')
         if self.is_entry_order(pending['order'], pending['position']) and filled:
+            if pending.get('count_on_fill', False):
+                self.state['trades_used'] = self.state.get('trades_used', 0) + 1
             self.state['position'] = {**pending['position'], 'quantity': filled, 'entry_price': price,
                                       'opened_at': self.clock(), 'entry_order_id': pending['id']}
             self.state['position']['trailing']=trailing_initial(price,pending['position'].get('tick_size'),pending['position'].get('trailing_config',{}),filled,pending['position'].get('lot_size'))

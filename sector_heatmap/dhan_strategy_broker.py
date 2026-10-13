@@ -26,7 +26,12 @@ def whole(value,label):
 from .dhan_execution import fresh_quote_snapshot
 from . import dhan_mcx
 
+class QuoteMovedBeforeSubmission(ValueError):
+    pass
+
+
 class Broker:
+    count_confirmed_entries = True
     def __init__(self, service, clock=time.time):
         self.service=service; self.clock=clock
         self.lock=threading.RLock(); self.account_identity=None
@@ -393,6 +398,8 @@ class Broker:
         attempt={'post_started':False}
         try:
             return self._place_checked(order,attempt)
+        except QuoteMovedBeforeSubmission as error:
+            return dict(s='error',code=400,entry_deferred=True,message=str(error))
         except Exception as error:
             if attempt['post_started']:
                 return dict(s='error',code=201,message='Dhan submission outcome is uncertain; reconcile the saved correlation ID.')
@@ -429,7 +436,7 @@ class Broker:
             else:self.preflight(order,{})
             # Preserve the exact previewed limit; a moved market is not silently chased.
             if order['side']==1 and quote['ask']>order['limitPrice'] or order['side']==-1 and quote['bid']<order['limitPrice']:
-                raise ValueError('Dhan executable quote moved beyond the order limit.')
+                raise QuoteMovedBeforeSubmission('Dhan executable quote moved beyond the order limit; no order sent. Waiting for a new eligible signal.')
             native=self._native(order,client)
             with path.open('x') as f:
                 os.chmod(path,0o600);json.dump(dict(status='SUBMITTING',ticket=native),f);f.flush();os.fsync(f.fileno())
