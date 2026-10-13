@@ -16,6 +16,18 @@ class McxDiscovery(unittest.TestCase):
             row('nc','OPTFUT','2026-11-16','CE'),row('np','OPTFUT','2026-11-16','PE')]
     def test_discovery_uses_native_exact_expiry_hosts(self):
         self.assertEqual([r['symbol'] for r in mcx.search(self.rows,self.now)],['MCX:CRUDEOIL-OCT','MCX:CRUDEOIL-NOV'])
+    def test_all_market_search_includes_spaced_commodity_query(self):
+        from sector_heatmap.dhan_strategy_broker import Broker
+        broker=Broker(None,clock=lambda:self.now)
+        broker._rows=lambda:self.rows
+        for query in ('crude oil','CRUDEOIL','crude  oil'):
+            with self.subTest(query=query):
+                self.assertEqual([r['symbol'] for r in broker.search(query,'ALL')],
+                    ['MCX:CRUDEOIL-OCT','MCX:CRUDEOIL-NOV'])
+                self.assertEqual(len(broker.search(query,'MCX')),2)
+        self.assertEqual(broker.search('crude oil','NSE_INDEX'),[])
+        self.assertEqual(broker.search('crude oil'),[])
+
     def test_host_matches_form_normalized_case_without_changing_expiry(self):
         self.assertEqual(mcx.host(self.rows,'MCX:CRUDEOIL-OCT',self.now)['SEM_SMST_SECURITY_ID'],'oct')
 

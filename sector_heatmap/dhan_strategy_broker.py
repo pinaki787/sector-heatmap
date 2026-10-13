@@ -82,7 +82,7 @@ class Broker:
         return matches[0]
 
     def search(self,text,market=None):
-        text=text.upper();rows=self._rows()
+        text=text.strip().upper();rows=self._rows()
         if market=='MCX' or text.startswith('MCX:'):return dhan_mcx.search(rows,self.clock(),text)
         today=datetime.fromtimestamp(self.clock(),IST).date().isoformat()
         eligible={(r['SEM_EXM_EXCH_ID'],contract_underlying(r)) for r in rows
@@ -90,8 +90,11 @@ class Broker:
         hosts=[r for r in rows if r['SEM_EXM_EXCH_ID'] in ('NSE','BSE') and r['SEM_SEGMENT'] in ('I','E')
                and text in r['SEM_TRADING_SYMBOL'] and (r['SEM_EXM_EXCH_ID'],r['SEM_TRADING_SYMBOL']) in eligible]
         hosts.sort(key=lambda r:(r['SEM_TRADING_SYMBOL']!=text,r['SEM_SEGMENT']!='I',r['SEM_TRADING_SYMBOL']))
-        return [dict(symbol=r['SEM_EXM_EXCH_ID']+':'+r['SEM_TRADING_SYMBOL'],
+        matches=[dict(symbol=r['SEM_EXM_EXCH_ID']+':'+r['SEM_TRADING_SYMBOL'],
                      description=r.get('SEM_CUSTOM_SYMBOL') or r['SEM_TRADING_SYMBOL'],underlying=r['SEM_TRADING_SYMBOL']) for r in hosts[:50]]
+        if market=='ALL':
+            matches=dhan_mcx.search(rows,self.clock(),text)+matches
+        return matches[:50]
 
     def host_tick_size(self,symbol):
         row=self.underlying(symbol)

@@ -22,11 +22,11 @@ def commodity(row):
     return value
 
 def futures(rows, now, text=''):
-    query=text.upper().removeprefix('MCX:')
+    query=''.join(text.upper().removeprefix('MCX:').split())
     result=[r for r in rows if r.get('SEM_EXM_EXCH_ID')=='MCX'
             and r.get('SEM_SEGMENT')=='M' and r.get('SEM_INSTRUMENT_NAME') in ('FUTCOM','FUTIDX')
             and r.get('SEM_OPTION_TYPE')=='XX' and current(r,now)
-            and query in r.get('SEM_TRADING_SYMBOL','').upper()]
+            and query in ''.join(r.get('SEM_TRADING_SYMBOL','').upper().split())]
     return sorted(result,key=lambda r:(commodity(r),r['SEM_EXPIRY_DATE'],r['SEM_SMST_SECURITY_ID']))
 
 def host(rows,symbol,now):
@@ -62,10 +62,25 @@ def paired_options(options):
     return {key for key,kinds in pairs.items() if kinds=={'CE','PE'}}
 
 def search(rows,now,text=''):
+    # Index option series once. Re-scanning the full security master for every
+    # future stalls concurrent searches and status requests on an empty query.
+    hosts=futures(rows,now)
+    families={}
+    for future in hosts:
+        families.setdefault(commodity(future),[]).append(future)
+    options_by_host={}
+    for row in rows:
+        if row.get('SEM_EXM_EXCH_ID')!='MCX' or row.get('SEM_SEGMENT')!='M' or row.get('SEM_OPTION_TYPE') not in ('CE','PE') or not current(row,now):
+            continue
+        family=commodity(row)
+        following=[future for future in families.get(family,[])
+                   if future['SEM_EXPIRY_DATE']>=row['SEM_EXPIRY_DATE']
+                   and (family!='MCXBULLDEX' or future['SEM_EXPIRY_DATE'][:10]==row['SEM_EXPIRY_DATE'][:10])]
+        if following:
+            options_by_host.setdefault(following[0]['SEM_SMST_SECURITY_ID'],[]).append(row)
     result=[]
     for row in futures(rows,now,text):
-        options=option_series(rows,row,now)
-        if paired_options(options):
+        if paired_options(options_by_host.get(row['SEM_SMST_SECURITY_ID'],[])):
             result.append(dict(symbol=('MCX:'+row['SEM_TRADING_SYMBOL']).upper(),
                 underlying=row['SEM_CUSTOM_SYMBOL'],description=row['SEM_CUSTOM_SYMBOL'],
                 security_id=row['SEM_SMST_SECURITY_ID'],exchange_segment='MCX_COMM'))

@@ -2,6 +2,7 @@
 (function(root){
 'use strict';
 let key='',version=0,last=0;
+let dhanPending='';
 function selection(){
  const view=document.querySelector('.view.active')?.id;
  const kind={ sectors:'sector', handoff:'handoff',broker:'account', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
@@ -31,6 +32,7 @@ function fyersConnect(connect,account){
 async function update(){
  const card=document.querySelector('.broker-card');if(!card||!root.BrokerForms)return;
  const {account,broker}=selection(),next=broker+'|'+(account?.id||'');
+ if(broker==='DHAN'&&dhanPending===next)return;
  if(next===key&&Date.now()-last<30000)return;key=next;last=Date.now();const generation=++version;
  const legacy=false;
  const state=document.getElementById('broker-state')?.closest('b'),refresh=document.getElementById('reauth'),label=card.querySelector('.label');
@@ -49,8 +51,13 @@ async function update(){
  try{
   let message;
   if(broker==='DHAN'&&account){
-   const response=await fetch('/api/dhan/status?account_id='+encodeURIComponent(account.id));if(!response.ok)throw Error();
-   const data=await response.json();message=data.authenticated?'Connected':'Not connected';
+   dhanPending=next;
+   const controller=new AbortController();
+   const timeout=setTimeout(()=>controller.abort(),12000);
+   try{
+    const response=await fetch('/api/dhan/status?account_id='+encodeURIComponent(account.id),{signal:controller.signal});if(!response.ok)throw Error();
+    const data=await response.json();message=data.authenticated?'Connected':'Not connected';
+   }finally{clearTimeout(timeout);if(dhanPending===next)dhanPending='';}
   }else if(broker==='DELTA_INDIA'){
    const response=await fetch((account?'/broker-workspace/'+account.id:'')+'/api/delta-india/status');if(!response.ok)throw Error();
    const data=await response.json();if(data.credentials==='CONFIGURED'){const auth=await fetch((account?'/broker-workspace/'+account.id:'')+'/api/delta-india/verify-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});message=auth.ok?'Connected':'Not connected';}else message='Not connected';
@@ -59,11 +66,11 @@ async function update(){
    const data=await response.json();message=data.connected===true||data.authenticated===true?'Connected':'Not connected';
   }
   if(generation===version){panel.textContent=name+' · '+message;connect.hidden=message==='Connected';}
- }catch{if(generation===version){panel.textContent=name+' · Not connected';connect.hidden=false;}}
+ }catch(error){if(generation===version){panel.textContent=name+(broker==='DHAN'?' · Status unavailable — retrying':' · Not connected');connect.hidden=broker==='DHAN';}}
 }
 root.addEventListener('broker-account-change',()=>{key='';update();});
 root.addEventListener('broker-accounts-ready',update);
-document.addEventListener('change',()=>{key='';update();});
+document.addEventListener('change',()=>{if(selection().broker!=='DHAN')key='';update();});
 document.addEventListener('click',()=>queueMicrotask(update));
 setInterval(update,3000);
 })(window);
