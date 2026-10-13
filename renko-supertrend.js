@@ -872,6 +872,7 @@
     compactRailStyle.textContent=`
       #renko-chart-stack #renko-chart-rail{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;width:100%;align-items:start}
       #renko-chart-stack #renko-chart-rail>details{display:contents!important}
+      #renko-chart-stack #renko-chart-rail>details::details-content{display:contents!important}
       #renko-chart-stack #renko-chart-rail>details>summary{grid-row:1;grid-column:var(--rail-column);border:1px solid #334154;border-radius:5px;background:#182536;padding:8px;min-width:0;cursor:pointer;font:12px Arial,sans-serif}
       #renko-chart-stack #renko-chart-rail>details[open]>summary{background:#29425d;border-color:#719fe8}
       #renko-chart-stack #renko-chart-rail>details>:not(summary){grid-row:2;grid-column:1/-1;width:100%!important;box-sizing:border-box}
