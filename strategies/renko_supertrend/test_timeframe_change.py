@@ -33,6 +33,19 @@ class TimeframeChangeTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.r.chart_timeframe(self.payload)
         self.assertEqual(self.r.state['config']['timeframe'],'1 minute')
         self.assertEqual(self.b.sent,[])
+    def test_higher_timeframe_pair_survives_deferred_change(self):
+        self.r.state['config'].update(higher_timeframe_enabled=True,supertrend_timeframe='5 minutes')
+        self.r.state['position']={'symbol':'TEST'}
+        self.r.chart_timeframe(self.payload)
+        self.assertEqual(self.r.state['config']['supertrend_timeframe'],'5 minutes')
+        self.assertEqual(self.r.state['pending_timeframe']['supertrend_timeframe'],'15 minutes')
+        self.r.state['position']=None
+        self.r.apply_pending_timeframe()
+        self.assertEqual(self.r.state['config']['supertrend_timeframe'],'15 minutes')
+        self.r.chart_timeframe({**self.payload,'timeframe':'1 minute'})
+        self.assertEqual(self.r.state['config']['supertrend_timeframe'],'5 minutes')
+        self.assertEqual(self.b.sent,[])
+
     def test_select_current_cancels_queued_change(self):
         self.r.state['position']={'symbol':'TEST'}
         self.r.chart_timeframe(self.payload)

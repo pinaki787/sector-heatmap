@@ -678,14 +678,15 @@ class Runner(BaseRunner):
                 raise ValueError('Runner identity changed; refresh before changing timeframe.')
             target=payload.get('timeframe')
             if target not in TIMEFRAMES:raise ValueError('Unsupported host timeframe.')
-            candidate=self.configure({**c,'timeframe':target})
+            higher={'1 minute':'5 minutes','5 minutes':'15 minutes'}.get(target,c.get('supertrend_timeframe','5 minutes'))
+            candidate=self.configure({**c,'timeframe':target,'supertrend_timeframe':higher})
             if candidate.get('broker')=='DELTA_INDIA' and target in ('2 minutes','10 minutes'):
                 raise ValueError('Delta does not support this host timeframe.')
             if target==c.get('timeframe'):
                 self.state.pop('pending_timeframe',None)
                 self.save()
                 return self.snapshot()
-            self.state['pending_timeframe']=dict(timeframe=target,run_id=self.state.get('run_id'),requested_at=self.clock())
+            self.state['pending_timeframe']=dict(timeframe=target,supertrend_timeframe=higher,run_id=self.state.get('run_id'),requested_at=self.clock())
             self.save()
             self.apply_pending_timeframe()
             return self.snapshot()
@@ -697,7 +698,7 @@ class Runner(BaseRunner):
             self.state.pop('pending_timeframe',None)
             self.save()
             return False
-        c=self.configure({**self.state['config'],'timeframe':request['timeframe']})
+        c=self.configure({**self.state['config'],'timeframe':request['timeframe'],'supertrend_timeframe':request.get('supertrend_timeframe',self.state['config'].get('supertrend_timeframe','5 minutes'))})
         # Build the replacement before changing any live analysis/configuration.
         rebuilt=analysis(self.adapter.candles(c),c,self.adapter.host_tick_size(c['underlying']))
         now=self.clock()
