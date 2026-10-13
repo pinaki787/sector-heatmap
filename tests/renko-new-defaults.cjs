@@ -10,7 +10,7 @@ w.BrokerForms={ready:Promise.resolve(),accounts:()=>[],account:()=>null,route:(s
 w.eval(fs.readFileSync('renko-supertrend.js','utf8'));await w.RenkoSupertrend.mount('renko-supertrend');await new Promise(r=>setTimeout(r,30));
 const el=id=>w.document.getElementById('renko-'+id);
 for(const id of ['retest-enabled','rsi-level-enabled','rsi-level-enabled-indicator','volume-enabled','rsi-sma-enabled'])assert.equal(el(id).checked,!saved,broker+' '+id);
-assert.equal(el('higher-timeframe-enabled').checked,true);assert.equal(el('higher-timeframe-enabled-indicator').checked,true);assert.equal(el('brick-mode').value,'Manual');assert.equal(el('supertrend-timeframe').value,'5 minutes');
+assert.equal(el('higher-timeframe-enabled').checked,true);assert.equal(el('higher-timeframe-enabled-indicator').checked,true);assert.equal(el('brick-mode').value,'Manual');assert.equal(el('sideways-enabled').checked,true);assert.equal(el('sideways-max-candles').value,'2');assert.equal(el('supertrend-timeframe').value,'5 minutes');
 assert.equal(el('rsi-bullish-max').value,saved?'66':'70');assert.equal(el('rsi-bullish-min').value,'60');
 for(const id of ['structure-family-enabled','zones-family-enabled'])assert.equal(el(id).checked,saved,broker+' '+id);
 assert.equal(el('rsi-bullish-max').disabled,false);assert.equal(el('rsi-level-enabled-indicator').disabled,false);
