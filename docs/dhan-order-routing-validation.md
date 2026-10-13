@@ -60,3 +60,11 @@ The deployed application work and authorized non-trading validation are complete
 the supported bought-option routes, including MCX Renko. This does not assert a real
 fill or guarantee broker availability. GitHub publication is the remaining external
 access blocker; no live test is required or authorized to clear it.
+
+## GitHub publication completed — 2026-10-13
+
+Ubuntu GitHub SSH authentication and repository write access now succeed. The
+reviewed commits through `3a50c6472ef0c33727c611a69ae2267b216d3d13` were pushed to
+`origin/main`; `git ls-remote` confirmed the identical commit on GitHub. The origin
+URL now uses SSH. This supersedes the publication blockers recorded above.
+No application service, runner, or broker order was changed for this publication.
