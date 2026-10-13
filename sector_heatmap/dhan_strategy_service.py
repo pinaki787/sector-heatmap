@@ -28,7 +28,7 @@ class DhanRenkoRunner(Runner):
     from .dhan_recovery import reconcile_external_close
 
     def event(self, code, message):
-        message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT IOC').replace('FYERS','Dhan')
+        message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT').replace('FYERS','Dhan')
         return super().event(code, message)
 
     configure=staticmethod(renko_configuration)
@@ -96,14 +96,14 @@ class DhanRenkoRunner(Runner):
         super().record_order(pending,status,filled,price)
         for row in self.state['order_history']:
             if row['tag']==pending['tag']:
-                row.update(dhan_exchange_rate=self.adapter.contract(row['symbol']).get('dhan_exchange_rate'),broker='DHAN',account_id=self.adapter.service.account['id'],requested_type='LIMIT',validity='IOC')
+                row.update(dhan_exchange_rate=self.adapter.contract(row['symbol']).get('dhan_exchange_rate'),broker='DHAN',account_id=self.adapter.service.account['id'],requested_type='LIMIT',validity=pending['order'].get('validity','IOC'))
 
 
 class DhanRsiRunner(RsiRunner):
     from .dhan_recovery import reconcile_external_close
 
     def event(self, code, message):
-        message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT IOC').replace('FYERS','Dhan')
+        message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT').replace('FYERS','Dhan')
         return super().event(code, message)
 
     configure=staticmethod(rsi_config)
@@ -112,7 +112,7 @@ class DhanRsiRunner(RsiRunner):
         super().record_order(pending,status,filled,price)
         for row in self.state['order_history']:
             if row['tag']==pending['tag']:
-                row.update(dhan_exchange_rate=self.adapter.contract(row['symbol']).get('dhan_exchange_rate'),broker='DHAN',account_id=self.adapter.service.account['id'],requested_type='LIMIT',validity='IOC')
+                row.update(dhan_exchange_rate=self.adapter.contract(row['symbol']).get('dhan_exchange_rate'),broker='DHAN',account_id=self.adapter.service.account['id'],requested_type='LIMIT',validity=pending['order'].get('validity','IOC'))
 
 
 class Service(ChartService):

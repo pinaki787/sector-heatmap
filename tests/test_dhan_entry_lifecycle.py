@@ -46,3 +46,25 @@ class EntryLifecycleTests(TestCase):
         self.assertEqual(r.state['status'],'ORDER_STATUS_UNKNOWN')
         self.assertIsNotNone(r.state['pending'])
         self.assertEqual(r.state['trades_used'],0)
+
+    def test_mcx_day_ticket_and_native_payload(self):
+        self.broker.contracts['MCX_COMM:77']=dict(self.broker.contract('NSE_FNO:1'),exchange_segment='MCX_COMM',security_id='77')
+        self.broker.contract=lambda symbol:self.broker.contracts['MCX_COMM:77']
+        order=self.broker.order('MCX_COMM:77',25,1,dict(bid=9.95,ask=10))
+        self.assertEqual(order['validity'],'DAY')
+        self.broker.validate_order(order)
+        self.assertEqual(self.broker._native(order,self.client)['validity'],'DAY')
+    def test_day_pending_cancel_waits_for_terminal_reconciliation(self):
+        r=self.runner();self.submit(r);p=r.state['pending']
+        p['order']['validity']='DAY'
+        p['submitted_at']=self.now-31
+        self.client.orders=[dict(orderId='123',dhanClientId='owner',exchangeSegment='NSE_FNO',securityId='1',transactionType='BUY',productType='MARGIN',quantity=25,filledQty=0,averageTradedPrice=0,orderStatus='PENDING',correlationId=p['tag'])]
+        with patch.object(self.broker,'validate_order'):
+            r.reconcile()
+        self.assertIsNotNone(r.state['pending'])
+        self.assertTrue(r.state['pending']['cancel_requested'])
+        self.assertTrue(any(m=='DELETE' for m,p,b in self.client.calls))
+        self.client.orders[0]['orderStatus']='CANCELLED'
+        r.reconcile()
+        self.assertIsNone(r.state['pending'])
+        self.assertEqual(r.state['trades_used'],0)

@@ -303,13 +303,13 @@ class Broker:
         price=(Decimal(str(quote['ask' if side==1 else 'bid']))/tick).to_integral_value(
             rounding=ROUND_CEILING if side==1 else ROUND_FLOOR)*tick
         return dict(symbol=symbol,qty=qty,side=side,type=1,productType='MARGIN',
-                    limitPrice=float(price),stopPrice=0,validity='IOC',offlineOrder=False)
+                    limitPrice=float(price),stopPrice=0,validity='DAY' if meta['exchange_segment']=='MCX_COMM' else 'IOC',offlineOrder=False)
 
     def validate_order(self,order):
         meta=self.contract(order['symbol']);qty=number(order['qty'],'Quantity',True)
         price=number(order['limitPrice'],'Limit price',True);tick=number(meta['tick_size'],'Tick',True)
-        if qty!=int(qty) or int(qty)%meta['lot_size'] or order['side'] not in (1,-1) or order['type']!=1 or order['productType']!='MARGIN' or order.get('validity')!='IOC' or price%tick or order.get('stopPrice')!=0 or order.get('offlineOrder') is not False:
-            raise ValueError('Whole-lot Dhan LIMIT IOC option order required.')
+        if qty!=int(qty) or int(qty)%meta['lot_size'] or order['side'] not in (1,-1) or order['type']!=1 or order['productType']!='MARGIN' or order.get('validity') not in ('DAY','IOC') or (meta['exchange_segment']!='MCX_COMM' and order.get('validity')!='IOC') or price%tick or order.get('stopPrice')!=0 or order.get('offlineOrder') is not False:
+            raise ValueError('Whole-lot Dhan LIMIT order with supported validity required.')
 
     def _account_rows(self,path):
         client=self.authenticated_client();rows=client.request('GET',path)
@@ -391,7 +391,7 @@ class Broker:
         return dict(dhanClientId=client.client_id,correlationId=order.get('orderTag'),
                     transactionType='BUY' if order['side']==1 else 'SELL',exchangeSegment=meta['exchange_segment'],
                     securityId=meta['security_id'],quantity=int(order['qty']),productType='MARGIN',
-                    orderType='LIMIT',validity='IOC',price=order['limitPrice'],triggerPrice=0,
+                    orderType='LIMIT',validity=order['validity'],price=order['limitPrice'],triggerPrice=0,
                     disclosedQuantity=0,afterMarketOrder=False)
 
     def place(self,order):
