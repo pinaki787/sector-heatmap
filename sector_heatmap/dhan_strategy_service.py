@@ -25,6 +25,8 @@ def rsi_config(payload):
 
 
 class DhanRenkoRunner(Runner):
+    from .dhan_recovery import reconcile_external_close
+
     def event(self, code, message):
         message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT IOC').replace('FYERS','Dhan')
         return super().event(code, message)
@@ -37,6 +39,7 @@ class DhanRenkoRunner(Runner):
         from strategies.renko_supertrend.dhan_costs import MODEL
         value['cost_pnl'].update(model=MODEL,brokerage_per_executed_order=20)
         value['dhan_cost_revision']='dhan-options-costs-v1'
+        value['external_close_recovery_revision']='dhan-external-close-v1'
         return value
 
     def record_order(self,pending,status,filled=0,price=None):
@@ -47,6 +50,8 @@ class DhanRenkoRunner(Runner):
 
 
 class DhanRsiRunner(RsiRunner):
+    from .dhan_recovery import reconcile_external_close
+
     def event(self, code, message):
         message=message.replace('MARKET (FYERS MPP)', 'marketable LIMIT IOC').replace('FYERS','Dhan')
         return super().event(code, message)
@@ -133,7 +138,7 @@ class Service(ChartService):
             from .dhan_form_routes import write
             handler.send_json(200,write(self,action[5:],payload));return
         actions=dict(preview=self.runner.preview,start=self.runner.activate if self.strategy=='renko' else self.runner.start,
-                     stop=lambda p:self.runner.stop())
+                     stop=lambda p:self.runner.stop(),**{'reconcile-external-close':lambda p:self.runner.reconcile_external_close(p)})
         if self.strategy=='renko':
             actions.update(settings=self.runner.save_preferences,**{'chart-timeframe':self.runner.chart_timeframe,
                 'chart-mode':self.runner.chart_mode,'chart-stop':self.runner.chart_stop,

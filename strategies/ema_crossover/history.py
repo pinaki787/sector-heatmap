@@ -16,7 +16,7 @@ def position_history(orders):
         def qty(rs):return sum(r.get('filled',0) or 0 for r in rs)
         def avg(rs):
             n=qty(rs)
-            return sum(r['filled']*r['average_price'] for r in rs)/n if n and all(not r.get('filled') or isinstance(r.get('average_price'),(float,int)) and math.isfinite(r['average_price']) for r in rs) else None
+            return sum(r['filled']*r['average_price'] for r in rs if r.get('filled'))/n if n and all(not r.get('filled') or isinstance(r.get('average_price'),(float,int)) and math.isfinite(r['average_price']) for r in rs) else None
         bought,sold=qty(entries),qty(exits);buy,sell=avg(entries),avg(exits)
         linked=not lifecycle.startswith('unpaired:') and bool(entries) and len({r.get('symbol') for r in rows})==1
         matched=sold if linked and 0<=sold<=bought else None

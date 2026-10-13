@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   const defaultAnalysisReadyPollMs = 5 * 1000
   const analysisLoadingPollMs = 750
   const accountRefreshMs = 10 * 1000
@@ -2847,7 +2847,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   setInterval(() => { if (emaViewVisible()) loadEmaBrokerChart(currentEmaRunnerState) }, 1000)
   window.EmaCrossover.mount(initialView)
   window.EmaCrossoverLive.mount()
-  window.RenkoSupertrend.mount(initialView)
+  await window.RenkoSupertrend.mount(initialView)
   window.RenkoEngine.mount(initialView)
   window.DeltaIndiaWorkspace.mount(initialView)
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)) }); document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view)); try { localStorage.setItem(viewStorageKey, button.dataset.view) } catch {} }))

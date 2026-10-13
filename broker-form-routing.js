@@ -70,7 +70,7 @@ async function scopedFetch(key,url,options){
 function setAccounts(value){accounts=value;resolveReady();}
 function remember(kind,id){
  const url=new URL(location.href);
- if(id){url.searchParams.set(kind+'Account',id);if(kind!=='manual'){url.searchParams.set('brokerForm',kind);url.searchParams.set('brokerAccount',id);if(kind!=='renko')url.searchParams.delete('renkoBroker');}}
+ if(id){url.searchParams.set(kind+'Account',id);if(kind!=='manual'){url.searchParams.set('brokerForm',kind);url.searchParams.set('brokerAccount',id);}}
  else{url.searchParams.delete(kind+'Account');if(url.searchParams.get('brokerForm')===kind){url.searchParams.delete('brokerForm');url.searchParams.delete('brokerAccount');}}
  history.replaceState(null,'',url);
 }

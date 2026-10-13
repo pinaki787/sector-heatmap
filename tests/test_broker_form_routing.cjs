@@ -96,3 +96,14 @@ test('Dhan account data uses native endpoints without rewriting analysis as FYER
  const {router,accounts}=setup();
  assert.equal(router.route('account','/api/account',accounts[0]),'https://portal.example/api/dhan/account?account_id=dhan-owner');
 });
+
+test('positions selection preserves the independently selected Renko broker and instance',()=>{
+ const {router,accounts,location}=setup();
+ location.href='https://portal.example/?renkoAccount=dhan-owner&renkoBroker=DHAN&renkoInstance=retained';
+ router.onChange('account',accounts[1]);
+ const p=new URLSearchParams(location.search);
+ assert.equal(p.get('renkoAccount'),'dhan-owner');
+ assert.equal(p.get('renkoBroker'),'DHAN');
+ assert.equal(p.get('renkoInstance'),'retained');
+ assert.equal(p.get('accountAccount'),'fyers-owner');
+});
