@@ -18,6 +18,12 @@ for(const id of ['structure-family-enabled','zones-family-enabled'])assert.equal
 assert.equal(el('rsi-bullish-max').disabled,false);assert.equal(el('rsi-level-enabled-indicator').disabled,false);
 el('rsi-bullish-max').value='72';el('rsi-level-enabled-indicator').checked=false;
 assert.equal(el('rsi-bullish-max').value,'72');assert.equal(el('rsi-level-enabled').checked,!saved);
+const panels=Array.from(w.document.querySelectorAll('#renko-chart-rail>details'));
+assert.equal(panels.length,5);
+panels[1].open=true;panels[1].dispatchEvent(new w.Event('toggle'));
+assert.equal(panels[1].open,true);
+panels[2].open=true;panels[2].dispatchEvent(new w.Event('toggle'));
+assert.equal(panels[1].open,false);assert.equal(panels[2].open,true);
 w.close();console.log(broker,saved?'saved preserved':'new defaults PASS');
 }
 })().catch(e=>{console.error(e);process.exitCode=1});

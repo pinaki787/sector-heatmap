@@ -858,6 +858,28 @@
     chartFold('controls','Runner controls',el('chart-controls'),chartRail,null,false);
     chartFold('range','Quick-loss range',el('sideways-status'),chartRail,null,false);
     assessmentDetails.classList.add('renko-chart-fold');
+    exitDetails.classList.add('renko-chart-fold');
+    const railPanels=Array.from(chartRail.children).filter(node=>node.tagName==='DETAILS');
+    railPanels.forEach((panel,index)=>{
+      panel.style.setProperty('--rail-column',String(index+1));
+      panel.open=false;
+      panel.addEventListener('toggle',()=>{
+        panel.querySelector('summary')?.setAttribute('aria-expanded',String(panel.open));
+        if(panel.open)for(const other of railPanels)if(other!==panel)other.open=false;
+      });
+    });
+    const compactRailStyle=document.createElement('style');
+    compactRailStyle.textContent=`
+      #renko-chart-stack #renko-chart-rail{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;width:100%;align-items:start}
+      #renko-chart-stack #renko-chart-rail>details{display:contents!important}
+      #renko-chart-stack #renko-chart-rail>details>summary{grid-row:1;grid-column:var(--rail-column);border:1px solid #334154;border-radius:5px;background:#182536;padding:8px;min-width:0;cursor:pointer;font:12px Arial,sans-serif}
+      #renko-chart-stack #renko-chart-rail>details[open]>summary{background:#29425d;border-color:#719fe8}
+      #renko-chart-stack #renko-chart-rail>details>:not(summary){grid-row:2;grid-column:1/-1;width:100%!important;box-sizing:border-box}
+      #renko-chart-stack #renko-chart-rail>details:not([open])>:not(summary){display:none!important}
+      @media(max-width:600px){#renko-chart-stack #renko-chart-rail>details>summary{font-size:10px;padding:6px 3px;overflow-wrap:anywhere}}
+    `;
+    document.head.append(compactRailStyle);
+
     function adjustableStudyHeight(host,key,label){
       const storage='sector-pulse:study-panel-height:'+key;
       const minimum=key==='candles'?180:70,maximum=key==='candles'?900:500;
