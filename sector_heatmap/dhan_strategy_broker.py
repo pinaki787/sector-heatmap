@@ -24,6 +24,7 @@ def whole(value,label):
     return int(result)
 
 from .dhan_execution import fresh_quote_snapshot
+from . import dhan_mcx
 
 class Broker:
     def __init__(self, service, clock=time.time):
@@ -55,20 +56,23 @@ class Broker:
     @staticmethod
     def _segment(row):
         if row['SEM_SEGMENT']=='I': return 'IDX_I'
-        return row['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO'}.get(row['SEM_SEGMENT'],'_UNSUPPORTED')
+        return row['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM'}.get(row['SEM_SEGMENT'],'_UNSUPPORTED')
 
     def _meta(self,row):
         raw_lot=number(row['SEM_LOT_UNITS'],'Master lot size',True)
         if raw_lot!=int(raw_lot): raise ValueError('Invalid Dhan lot size.')
         segment=self._segment(row)
-        return dict(symbol=segment+':'+row['SEM_SMST_SECURITY_ID'],
+        meta=dict(symbol=segment+':'+row['SEM_SMST_SECURITY_ID'],
                     security_id=row['SEM_SMST_SECURITY_ID'],exchange_segment=segment,
                     trading_symbol=row['SEM_TRADING_SYMBOL'],lot_size=int(raw_lot),
                     tick_size=float(number(row['SEM_TICK_SIZE'],'Master tick',True)/100),
                     quantity_multiplier=1,dhan_exchange_rate=(0.000355299 if segment=='NSE_FNO' else 0.000325 if row.get('SEM_INSTRUMENT_NAME')=='OPTIDX' else 0.00005) if segment in ('NSE_FNO','BSE_FNO') else None,option_type=row.get('SEM_OPTION_TYPE'),
                     expiry=row.get('SEM_EXPIRY_DATE','')[:10],product='MARGIN',broker='DHAN')
+        if segment=='MCX_COMM':meta.update(dhan_mcx.valuation(row),dhan_exchange_rate=0.000418)
+        return meta
 
     def underlying(self,symbol):
+        if symbol.startswith('MCX:'):return dhan_mcx.host(self._rows(),symbol,self.clock())
         exchange,ticker=symbol.split(':',1)
         aliases={'NIFTY50-INDEX':'NIFTY','NIFTYBANK-INDEX':'BANKNIFTY','SENSEX-INDEX':'SENSEX'}
         ticker=aliases.get(ticker,ticker.removesuffix('-EQ'))
@@ -77,8 +81,9 @@ class Broker:
         if len(matches)!=1: raise ValueError('Underlying missing or ambiguous in current Dhan master.')
         return matches[0]
 
-    def search(self,text):
+    def search(self,text,market=None):
         text=text.upper();rows=self._rows()
+        if market=='MCX' or text.startswith('MCX:'):return dhan_mcx.search(rows,self.clock(),text)
         today=datetime.fromtimestamp(self.clock(),IST).date().isoformat()
         eligible={(r['SEM_EXM_EXCH_ID'],contract_underlying(r)) for r in rows
                   if r['SEM_SEGMENT']=='D' and r['SEM_OPTION_TYPE'] in ('CE','PE') and r['SEM_EXPIRY_DATE'][:10]>=today}
@@ -93,12 +98,18 @@ class Broker:
         return float(number(row['SEM_TICK_SIZE'],'Host tick',True)/(1 if row['SEM_SEGMENT']=='I' else 100))
 
     def session_policy(self,config):
-        self.underlying(config['underlying'])
+        row=self.underlying(config['underlying'])
+        if row['SEM_SEGMENT']=='M':
+            dhan_mcx.valuation(row)
+            return dhan_mcx.session(self.clock())
         return dict(session_open='09:15',session_deadline='15:10',session_segment='NSE_FNO',
                     session_source='INDIAN_CASH_MARKET',seven_day_session=False)
 
     def route_availability(self,config):
         row=self.underlying(config['underlying']); ticker=row['SEM_TRADING_SYMBOL']
+        if row['SEM_SEGMENT']=='M':
+            pairs=dhan_mcx.paired_options(dhan_mcx.option_series(self._rows(),row,self.clock()))
+            return dict(available=bool(pairs),message='Dhan MCX bought Call / Put on the selected futures month; native quotes and execution.')
         kinds={r['SEM_OPTION_TYPE'] for r in self._rows() if r['SEM_EXM_EXCH_ID']==row['SEM_EXM_EXCH_ID']
                and r['SEM_SEGMENT']=='D' and contract_underlying(r)==ticker
                and r['SEM_EXPIRY_DATE'][:10]>=datetime.fromtimestamp(self.clock(),IST).date().isoformat()}
@@ -158,6 +169,10 @@ class Broker:
         rows=[r for r in self._rows() if r['SEM_EXM_EXCH_ID']==host['SEM_EXM_EXCH_ID'] and
               r['SEM_SEGMENT']=='D' and contract_underlying(r)==host['SEM_TRADING_SYMBOL']
               and r['SEM_OPTION_TYPE']==kind and r['SEM_EXPIRY_DATE'][:10]>=today]
+        if host['SEM_SEGMENT']=='M':
+            series=dhan_mcx.option_series(self._rows(),host,self.clock())
+            pairs=dhan_mcx.paired_options(series)
+            rows=[r for r in series if r['SEM_OPTION_TYPE']==kind and (r['SEM_EXPIRY_DATE'],Decimal(r['SEM_STRIKE_PRICE'])) in pairs and self.clock()<dhan_mcx.entry_cutoff(r)]
         if not rows: raise ValueError('No current Dhan option for this direction.')
         expiry=min(r['SEM_EXPIRY_DATE'] for r in rows)
         candidates=[r for r in rows if r['SEM_EXPIRY_DATE']==expiry]
@@ -165,7 +180,9 @@ class Broker:
         matches=[r for r in candidates if abs(float(r['SEM_STRIKE_PRICE'])-spot)==strike]
         # Deterministic lower strike for an exact half-step tie.
         row=min(matches,key=lambda r:float(r['SEM_STRIKE_PRICE']))
-        meta=self._meta(row);self.contracts[meta['symbol']]=meta
+        meta=self._meta(row)
+        if host['SEM_SEGMENT']=='M':meta['expiry_protection_at']=dhan_mcx.entry_cutoff(row)
+        self.contracts[meta['symbol']]=meta
         return meta
 
     def warm_options(self,config): pass
@@ -220,7 +237,7 @@ class Broker:
             buckets={}
             for bar in rows:
                 dt=datetime.fromtimestamp(bar['timestamp'],IST)
-                anchor=dt.replace(hour=9,minute=15,second=0,microsecond=0).timestamp()
+                anchor=dt.replace(hour=9,minute=0 if row['SEM_SEGMENT']=='M' else 15,second=0,microsecond=0).timestamp()
                 opening=anchor+int((bar['timestamp']-anchor)//seconds)*seconds
                 buckets.setdefault(opening,[]).append(bar)
             aggregate=[]
@@ -353,7 +370,7 @@ class Broker:
         funds=client.request('GET','/fundlimit')
         if str(funds.get('dhanClientId'))!=str(client.client_id):raise PermissionError('Dhan funds ownership mismatch.')
         available=number(funds.get('availabelBalance',funds.get('availableBalance')),'Available funds')
-        premium=Decimal(str(quote['ask']))*order['qty']
+        premium=Decimal(str(quote['ask']))*order['qty']*Decimal(str(self.contract(order['symbol'])['quantity_multiplier']))
         if available<premium*Decimal('1.01'):raise ValueError('Dhan funds insufficient for premium plus reserve.')
         native=self._native(order,client)
         margin=client.request('POST','/margincalculator',{k:v for k,v in native.items() if k in
@@ -383,7 +400,14 @@ class Broker:
         if not self.live_enabled():raise PermissionError('Dhan live capability disabled.')
         self.validate_order(order);client=self.authenticated_client()
         now=datetime.fromtimestamp(self.clock(),IST)
-        if now.weekday()>4 or not 9*60+15<=now.hour*60+now.minute<15*60+30:
+        meta=self.contract(order['symbol'])
+        opening,closing=9*60+15,15*60+30
+        if meta['exchange_segment']=='MCX_COMM':
+            ending=dhan_mcx.session(self.clock())['master_regular_session'][-4:]
+            opening,closing=dhan_mcx.trading_bounds(self.clock())
+            row=next(r for r in self._rows() if r['SEM_SMST_SECURITY_ID']==meta['security_id'] and self._segment(r)=='MCX_COMM')
+            if order['side']==1 and self.clock()>=dhan_mcx.entry_cutoff(row):raise ValueError('Dhan MCX pre-expiry protection blocks new entry.')
+        if now.weekday()>4 or not opening<=now.hour*60+now.minute<closing:
             raise ValueError('Dhan exchange session closed.')
         ips=client.request('GET','/ip/getIP')
         if self.service.egress() not in (ips.get('primaryIP'),ips.get('secondaryIP')):

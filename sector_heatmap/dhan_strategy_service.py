@@ -34,6 +34,56 @@ class DhanRenkoRunner(Runner):
     configure=staticmethod(renko_configuration)
     runtime_revision='dhan-renko-owned-options-v1'
 
+
+    def session_bounds(self,c):
+        if c.get('underlying','').startswith('MCX:'):
+            from .dhan_mcx import trading_bounds
+            return trading_bounds(self.clock())
+        return super().session_bounds(c)
+
+    def deadline(self):
+        c=self.state.get('config') or {}
+        if c.get('underlying','').startswith('MCX:'):
+            from .dhan_mcx import session,entry_cutoff
+            c.update(session(self.clock()))
+            pending=self.state.get('pending') or {}
+            held=self.state.get('position') or pending.get('position')
+            if self.state.get('running') and held:
+                try:
+                    # Compute from persisted exact contract metadata, even after
+                    # that contract disappears from the current instrument master.
+                    symbol=held['symbol']
+                    meta=self.adapter.contracts.get(symbol) or self.adapter.contract(symbol)
+                    row=dict(SM_SYMBOL_NAME=meta['commodity'],SEM_EXPIRY_DATE=meta['expiry'])
+                    cutoff=entry_cutoff(row)
+                    if self.clock()>=cutoff:
+                        held.update(exit_requested=True,exit_reason='MCX_PRE_EXPIRY_EXIT',expiry_protection_at=cutoff)
+                        self.state['accepting_entries']=False
+                except (ValueError,KeyError) as error:
+                    cutoff=held.get('expiry_protection_at')
+                    if not cutoff:
+                        held.update(exit_requested=True,exit_reason='MCX_EXPIRY_UNVERIFIED',expiry_error=str(error))
+                        self.state['accepting_entries']=False
+                    if cutoff and self.clock()>=cutoff:
+                        held.update(exit_requested=True,exit_reason='MCX_PRE_EXPIRY_EXIT')
+                        self.state['accepting_entries']=False
+                self.save()
+            if c.get('commodity_holding')=='CARRY_FORWARD':return
+        return super().deadline()
+
+    def step(self):
+        c=self.state.get('config') or {}
+        if c.get('underlying','').startswith('MCX:'):
+            from .dhan_mcx import session_open
+            with self.lock:
+                self.deadline()
+                if self.state.get('running') and not session_open(self.clock()):
+                    if self.state.get('pending'):self.reconcile()
+                    self.state.update(status='OUTSIDE_SESSION',message='Dhan MCX session closed; ownership retained and no stale-price execution.')
+                    self.save()
+                    return
+        return super().step()
+
     def snapshot(self):
         value=super().snapshot()
         from strategies.renko_supertrend.dhan_costs import MODEL
@@ -97,7 +147,7 @@ class Service(ChartService):
     def chart(self,query):
         result=super().chart(query)
         result['history']['source']='Dhan account Data API OHLCV; REST polling; missing candles are never synthesized.'
-        result['squareoff_time']='15:10 Asia/Kolkata'
+        result['squareoff_time']=result['session_policy']['session_deadline']+' Asia/Kolkata'
         return result
 
     def get_action(self,handler,action,query):
@@ -107,7 +157,7 @@ class Service(ChartService):
         if action=='runner':
             value=self.runner.snapshot();value['instrument']=self.instrument
         elif action=='settings' and self.strategy=='renko':value=self.runner.read_preferences()
-        elif action=='search':value=dict(matches=self.chart_broker.search((query.get('q') or [''])[0]))
+        elif action=='search':value=dict(matches=self.chart_broker.search((query.get('q') or [''])[0],(query.get('market') or [None])[0]))
         elif action=='manual-brick' and self.strategy=='renko':value=self.manual_brick(query)
         elif action=='chart' and self.strategy=='renko':value=self.chart(query)
         elif action=='stream' and self.strategy=='renko':return self.stream(handler,query)

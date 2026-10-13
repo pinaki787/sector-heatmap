@@ -190,9 +190,13 @@ class DhanMaster:
                 raise ValueError('Dhan proposal contract ID differs from the current native master.')
         expiry=row['SEM_EXPIRY_DATE'][:10]
         if expiry and expiry < now.date().isoformat():raise ValueError('Dhan contract has expired.')
-        return {'security_id':row['SEM_SMST_SECURITY_ID'],'exchange_segment':segment(row), 'symbol':row['SEM_TRADING_SYMBOL'],
+        result={'security_id':row['SEM_SMST_SECURITY_ID'],'exchange_segment':segment(row), 'symbol':row['SEM_TRADING_SYMBOL'],
                 'lot_size':int(number(row['SEM_LOT_UNITS'],'Lot size',True)), 'tick_size':float(number(row['SEM_TICK_SIZE'],'Tick size',True)/100),
-                'option_type':row['SEM_OPTION_TYPE'],'strike':float(number(row.get('SEM_STRIKE_PRICE') or 0,'Master strike')),'expiry':expiry,'kind':kind}
+                'option_type':row['SEM_OPTION_TYPE'],'strike':float(number(row.get('SEM_STRIKE_PRICE') or 0,'Master strike')),'expiry':expiry,'kind':kind,'quantity_multiplier':1}
+        if segment(row)=='MCX_COMM':
+            from . import dhan_mcx
+            result.update(dhan_mcx.valuation(row),entry_cutoff=dhan_mcx.entry_cutoff(row))
+        return result
 
 
 class DhanExecutionService:
@@ -245,8 +249,6 @@ class DhanExecutionService:
 
     def _preflight(self, payload):
         now=self.now().astimezone(IST)
-        if now.weekday()>4 or not (9*60+15 <= now.hour*60+now.minute < 15*60+30):
-            raise ValueError('Dhan manual tickets require an open Indian cash-market session.')
         if str(payload.get('broker','')).upper()!='DHAN':raise ValueError('Explicitly select Dhan for this ticket.')
         if payload.get('account_id') and payload['account_id']!=self.account['id']:raise PermissionError('Ticket account differs from this Dhan workspace.')
         proposal=payload.get('proposal') or {}
@@ -268,9 +270,17 @@ class DhanExecutionService:
         ips=client.request('GET','/ip/getIP')
         if self.egress() not in (ips.get('primaryIP'),ips.get('secondaryIP')):raise ValueError('This server’s outgoing IP is not whitelisted for this Dhan account.')
         contract=self.master.resolve(payload,now)
-        if contract['exchange_segment'] not in ('NSE_EQ','BSE_EQ','NSE_FNO','BSE_FNO'):
+        opening,closing=9*60+15,15*60+30
+        if contract['exchange_segment']=='MCX_COMM':
+            from . import dhan_mcx
+            end=dhan_mcx.session(now.timestamp())['master_regular_session'][-4:]
+            opening,closing=dhan_mcx.trading_bounds(now.timestamp())
+            if now.timestamp()>=contract['entry_cutoff']:raise ValueError('Dhan MCX pre-expiry protection blocks new entry.')
+        if now.weekday()>4 or not opening<=now.hour*60+now.minute<closing:
+            raise ValueError('Dhan manual tickets require an open session for the selected contract.')
+        if contract['exchange_segment'] not in ('NSE_EQ','BSE_EQ','NSE_FNO','BSE_FNO','MCX_COMM'):
             raise ValueError('Dhan manual tickets currently support NSE/BSE equities and bought options.')
-        option=contract['exchange_segment'].endswith('_FNO')
+        option=contract['exchange_segment'].endswith('_FNO') or contract['exchange_segment']=='MCX_COMM'
         if option and contract.get('option_type') not in ('CE','PE'):raise ValueError('Futures need a dedicated Dhan risk adapter.')
         proposal=payload.get('proposal') or {}
         action='BUY' if option else payload.get('transaction_type') or ('SELL' if proposal.get('direction')=='BEARISH' else 'BUY')
@@ -292,8 +302,9 @@ class DhanExecutionService:
         price=(selected_price/tick).to_integral_value(rounding=ROUND_CEILING if action=='BUY' else ROUND_FLOOR)*tick
         stop=number(payload.get('invalidation'),'Explicit stop/invalidation',True)
         target_value=payload.get('target_price',proposal.get('target'))
+        multiplier=number(contract.get('quantity_multiplier',1),'Contract multiplier',True)
         if option:
-            risk=price*quantity
+            risk=price*quantity*multiplier
         else:
             if (action=='BUY' and stop>=price) or (action=='SELL' and stop<=price):raise ValueError('Stop must be on the loss side of the Dhan limit price.')
             risk=abs(price-stop)*quantity
@@ -316,7 +327,7 @@ class DhanExecutionService:
         # Dhan returns a positive surplus in insufficientBalance; derive coverage from balances.
         margin_cash=number(margin.get('availableBalance',cash),'Margin available balance')
         cash=min(cash,margin_cash)
-        required=max(required,price*quantity) if option else required
+        required=max(required,price*quantity*multiplier) if option else required
         if cash<required:raise ValueError(f'Insufficient Dhan funds/margin: available ₹{cash:.2f}; required ₹{required:.2f}.')
         open_positions=[row for row in positions if float(row.get('netQty',0))!=0]
         realized_loss=sum(max(0,-float(row.get('realizedProfit',0))) for row in positions)
@@ -350,7 +361,7 @@ class DhanExecutionService:
             ticket={k:v for k,v in ticket.items() if k not in ('validity','triggerPrice','disclosedQuantity','afterMarketOrder')}
             ticket.update(stopLossPrice=protection['stop_loss_price'],targetPrice=protection['target_price'],trailingJump=0)
         warnings=([protection['assumptions'],'Dhan Super Order requests linked premium stop-loss and target legs. Broker acknowledgement is not fill or exit-leg confirmation.'] if protection else ['Stop and target are planning levels; this normal LIMIT entry does not place protective exit orders.'])
-        if price*quantity>50000:warnings.append('Order notional exceeds ₹50,000.')
+        if price*quantity*multiplier>50000:warnings.append('Order notional exceeds ₹50,000.')
         if target_value is not None:
             target=number(target_value,'Target',True)
             if not option and ((action=='BUY' and target<=price) or (action=='SELL' and target>=price)):raise ValueError('Target must be on the profit side of the entry.')

@@ -453,7 +453,7 @@
     if(isDhan){
       for(const option of Array.from(el('market').options)){
         option.textContent=option.textContent.replace('FYERS','Dhan');
-        if(['MCX','CRYPTO','NSE_EQUITY','BSE_EQUITY'].includes(option.value))option.disabled=true;
+        if(['CRYPTO','NSE_EQUITY','BSE_EQUITY'].includes(option.value))option.disabled=true;
       }
     }
     for(const id of ['search','symbol','timeframe','mode','lots','paper-capital','max-trades'])launch.append(el(id).closest('label'));
@@ -1348,7 +1348,7 @@ el('higher-timeframe-enabled').disabled=lastRunner?.mtf_supertrend_revision!=='o
     async function searchInstruments(){
       clearTimeout(searchTimer);version++;clearAnalysis();const seq=++searchVersion,q=el('search').value.trim(),market=el('market').value;
       searchTimer=setTimeout(async()=>{try{
-        const r=await fetch(((isDelta||isDhan)?apiBase+'search?q=':'/api/ema-band/underlying-search?q=')+encodeURIComponent(q) +((isDelta||isDhan)?'':'&market='+encodeURIComponent(market)));
+        const r=await fetch(((isDelta||isDhan)?apiBase+'search?q=':'/api/ema-band/underlying-search?q=')+encodeURIComponent(q) +(isDelta?'':'&market='+encodeURIComponent(market)));
         const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Search failed');if(seq!==searchVersion)return;
         const prior=el('symbol').value;el('symbol').replaceChildren(new Option('Select an underlying',''));
         for(const item of d.matches||[])el('symbol').add(new Option(item.underlying+' · '+item.symbol,item.symbol));

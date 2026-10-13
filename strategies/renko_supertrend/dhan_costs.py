@@ -1,10 +1,11 @@
 """Dhan retail option fee estimates, not contract-note charges."""
 from .costs import D,rounded,valid,settings
 MODEL=dict(id='DHAN_OPTIONS_2026_10_V1',verified_on='2026-10-11',
- sources=['https://options-trader.co/pricing/','https://dhan.co/pricing/'],
+ sources=['https://options-trader.co/pricing/','https://dhan.co/pricing/','https://www.mcxccl.com/clearing-settlement/commodities-transaction-tax','https://www.mcxccl.com/clearing-settlement/faq'],
  brokerage_per_executed_order=20,
  basis='Retail regular option premium trades only; estimated charges, excludes exercise and delivery.')
 def fee(turnover,side,exchange_rate=None):
+    if exchange_rate==0.000418:return mcx_fee(turnover,side)
     if exchange_rate not in (0.000355299,0.000325,0.00005):raise ValueError('Verified Dhan exchange rate unavailable.')
     t=D(turnover)
     parts=dict(brokerage=D(20),exchange=rounded(t*D(exchange_rate)),sebi=rounded(t*D('0.000001')),
@@ -37,5 +38,19 @@ def trade_costs(trade,ledger):
     open_slip=slip*D(remaining*2)*mult
     unrealized=trade.get('unrealized_pnl')
     open_net=float(rounded(D(unrealized)-open_buy-D(projected['total'])-open_slip)) if remaining and projected and valid(unrealized) else 0.0 if not remaining else None
-    parts={k:float(sum(D(ledger[key][k]) for key in keys)) for k in ['brokerage','exchange','sebi','ipft','stt','stamp','gst','total']}
+    parts={k:float(sum(D(ledger[key].get(k,0)) for key in keys)) for k in ['brokerage','exchange','sebi','ipft','stt','ctt','stamp','gst','total']}
     return dict(available=True,model=MODEL,kind='PAPER_ESTIMATE' if trade['mode']=='PAPER' else 'LIVE_FILL_BASED_ESTIMATE_UNRECONCILED',incurred=parts,entry_costs_incurred=float(buy),exit_costs_incurred=float(sell),entry_costs_allocated_realized=float(rounded(buy_alloc)),entry_costs_remaining=float(rounded(open_buy)),estimated_exit_costs=projected,realized_net=realized_net,unrealized_net=open_net,additional_slippage_points=float(slip),realized_additional_slippage=float(realized_slip),open_liquidation_additional_slippage=float(open_slip),actual_slippage='Embedded in execution fill prices; separately measured amount unavailable, no double deduction.',orders=[dict(order_key=k,**ledger[k]) for k in keys])
+
+
+def mcx_fee(turnover,side):
+    """Regular non-agricultural option premium trades; excludes exercise/delivery."""
+    if side not in ('BUY','SELL'):raise ValueError('Explicit fee side required.')
+    t=D(turnover)
+    if t<0:raise ValueError('Premium turnover cannot be negative.')
+    parts=dict(brokerage=D(20),exchange=rounded(t*D('.000418')),
+               sebi=rounded(t*D('.000001')),ipft=D(0),stt=D(0),
+               ctt=rounded(t*D('.0005'),'1') if side=='SELL' else D(0),
+               stamp=rounded(t*D('.00003'),'1') if side=='BUY' else D(0))
+    parts['gst']=rounded(sum(parts[k] for k in ('brokerage','exchange','sebi','ipft'))*D('.18'))
+    return {**{k:float(v) for k,v in parts.items()},'total':float(sum(parts.values())),
+            'premium_turnover':float(t),'segment':'MCX_COMM'}

@@ -257,3 +257,109 @@ class Tests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class McxBrokerTests(unittest.TestCase):
+    setUp=Tests.setUp
+    def mcx(self):
+        def commodity(id,kind,option,expiry):
+            return dict(SEM_SMST_SECURITY_ID=id,SEM_TRADING_SYMBOL='CRUDEOIL-'+id,
+                        SEM_CUSTOM_SYMBOL='Crude '+id,SM_SYMBOL_NAME='CRUDEOIL',
+                        SEM_SEGMENT='M',SEM_EXM_EXCH_ID='MCX',SEM_LOT_UNITS='1',
+                        SEM_TICK_SIZE='10',SEM_INSTRUMENT_NAME=kind,SEM_OPTION_TYPE=option,
+                        SEM_STRIKE_PRICE='100',SEM_EXPIRY_DATE=expiry+' 23:30:00')
+        self.rows += [commodity('900','FUTCOM','XX','2026-10-19'),
+                      commodity('901','OPTFUT','CE','2026-10-15'),commodity('902','OPTFUT','PE','2026-10-15')]
+        return dict(underlying='MCX:CRUDEOIL-900',timeframe='3 minutes')
+    def test_mcx_native_resolve_and_valuation(self):
+        config=self.mcx()
+        self.assertEqual(self.broker.search('CRUDE',market='MCX')[0]['symbol'],config['underlying'])
+        for direction,kind in [('BULLISH','CE'),('BEARISH','PE')]:
+            meta=self.broker.resolve(config,direction)
+            self.assertEqual((meta['exchange_segment'],meta['option_type'],meta['quantity_multiplier']),('MCX_COMM',kind,100))
+            self.assertGreater(meta['expiry_protection_at'],self.now)
+        self.assertEqual(self.broker.session_policy(config)['session_open'],'09:00')
+    def test_mcx_margin_counts_full_contract(self):
+        self.mcx();order=self.broker.order('MCX_COMM:901',1,1,dict(bid=9.95,ask=10))
+        self.client.balance=500
+        with self.assertRaisesRegex(ValueError,'premium'):self.broker.preflight(order,{})
+    def test_mcx_evening_native_payload(self):
+        self.mcx();self.now=datetime(2026,10,12,20,tzinfo=IST).timestamp()
+        self.client.now=self.now
+        order=self.broker.order('MCX_COMM:901',1,1,dict(bid=9.95,ask=10));order['orderTag']='mcx-test'
+        self.assertEqual(self.broker.place(order)['s'],'ok')
+        ticket=next(v for m,p,v in self.client.calls if m=='POST' and p=='/orders')
+        self.assertEqual((ticket['exchangeSegment'],ticket['quantity'],ticket['productType']),('MCX_COMM',1,'MARGIN'))
+    def test_mcx_preexpiry_entry_block(self):
+        self.mcx();self.now=datetime(2026,10,15,12,tzinfo=IST).timestamp()
+        self.client.now=self.now
+        with self.assertRaisesRegex(ValueError,'No current'):self.broker.resolve(dict(underlying='MCX:CRUDEOIL-900'),'BULLISH')
+        order=self.broker.order('MCX_COMM:901',1,1,dict(bid=9.95,ask=10));order['orderTag']='blocked'
+        self.assertIn('pre-expiry',self.broker.place(order)['message'])
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+
+    def test_carry_exit_uses_holiday_aware_deadline_without_order(self):
+        config=self.mcx()
+        runner=DhanRenkoRunner(self.broker,Path(self.temp.name)/'mcx-carry.json',clock=lambda:self.now)
+        meta=self.broker.resolve(config,'BULLISH')
+        runner.state.update(config=dict(config,broker='DHAN',commodity_holding='CARRY_FORWARD'),
+                            running=True,accepting_entries=True,
+                            position=dict(symbol=meta['symbol'],expiry_epoch=meta['expiry_epoch'],
+                                          expiry_protection_at=meta['expiry_protection_at']))
+        self.now=datetime(2026,10,14,23,1,tzinfo=IST).timestamp()
+        runner.deadline()
+        self.assertTrue(runner.state['position']['exit_requested'])
+        self.assertFalse(runner.state['accepting_entries'])
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+    def test_closed_session_preserves_held_position(self):
+        config=self.mcx()
+        runner=DhanRenkoRunner(self.broker,Path(self.temp.name)/'mcx-closed.json',clock=lambda:self.now)
+        meta=self.broker.resolve(config,'BULLISH')
+        runner.state.update(config=dict(config,broker='DHAN',commodity_holding='CARRY_FORWARD'),
+                            running=True,accepting_entries=True,position=dict(symbol=meta['symbol'],
+                            expiry_epoch=meta['expiry_epoch'],expiry_protection_at=meta['expiry_protection_at']))
+        self.now=datetime(2026,10,13,2,tzinfo=IST).timestamp()
+        runner.step()
+        self.assertEqual(runner.state['status'],'OUTSIDE_SESSION')
+        self.assertIsNotNone(runner.state['position'])
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+
+    def test_mcx_paper_round_trip_uses_contract_value_and_cost_lock(self):
+        self.mcx()
+        self.order=self.broker.order('MCX_COMM:901',1,1,dict(bid=9.95,ask=10))
+        runner=DhanRenkoRunner(self.broker,Path(self.temp.name)/'paper-fill.json',clock=lambda:self.now)
+        config=renko_configuration(dict(broker='DHAN',strategy='RENKO_SUPERTREND_V1',underlying='MCX:CRUDEOIL-900',lots='1',timeframe='1 minute',mode='PAPER',exit_policy='OPPOSITE_CONFIRMED_SIGNAL',sideways_enabled=True,retest_enabled=True))
+        runner.state.update(config=config,running=True,accepting_entries=True,trades_used=0,
+                            last_signal=dict(timestamp=self.now-60,close=100,entry_direction='BULLISH'))
+        self.broker.authenticated_client()
+        position=dict(symbol='MCX_COMM:901',direction='BULLISH',entry_side=1,lot_size=1,quantity=1,
+                      quantity_multiplier=100,tick_size=.1,entry_price=None,opened_at=None,entry_signal_timestamp=self.now-60)
+        from unittest.mock import patch
+        runner.state['renko_engine']={'anchor':{},'last':{'host_atr':1}}
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100)):
+            runner.submit(self.order,position,'EMA10_RETEST_BOUNCE')
+        self.assertIsNotNone(runner.state['position'])
+        row=runner.state['order_history'][-1]
+        self.assertEqual(row['broker'],'DHAN');self.assertEqual(row['dhan_exchange_rate'],.000418)
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+        held=runner.state['position']
+        held['exposure_range'].update(high=101,low=99,ticks=2)
+        self.now+=60;self.client.now=self.now
+        exit_order=self.broker.order(held['symbol'],held['quantity'],-1,dict(bid=9.95,ask=10))
+        runner.submit(exit_order,held,'OPPOSITE_CONFIRMED_SIGNAL')
+        self.assertIsNone(runner.state['position'])
+        self.assertEqual(runner.state['order_history'][0]['quantity_multiplier'],100)
+        self.assertTrue(runner.state['sideways_lock']['active'])
+        self.assertLess(runner.state['sideways_lock']['realized_pnl'],0)
+        self.assertFalse(runner.sideways_entry_gate())
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+        runner.state.update(running=False,accepting_entries=False)
+
+    def test_missing_expiry_metadata_blocks_entries_and_requests_exit(self):
+        config=self.mcx()
+        runner=DhanRenkoRunner(self.broker,Path(self.temp.name)/'mcx-unknown-expiry.json',clock=lambda:self.now)
+        runner.state.update(config=dict(config,broker='DHAN',commodity_holding='CARRY_FORWARD'),
+                            running=True,accepting_entries=True,position=dict(symbol='MCX_COMM:missing'))
+        runner.deadline()
+        self.assertFalse(runner.state['accepting_entries'])
+        self.assertEqual(runner.state['position']['exit_reason'],'MCX_EXPIRY_UNVERIFIED')
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))

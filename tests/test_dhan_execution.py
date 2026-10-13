@@ -304,3 +304,32 @@ class DefiniteRejectionTests(unittest.TestCase):
         self.assertEqual(self.service.reconcile()['unresolved'],0)
         self.assertTrue(self.service.prepare(self.payload)['preview_id'])
         self.assertEqual(len([c for c in self.client.calls if c[:2]==('POST','/orders')]),1)
+
+class McxManualTests(unittest.TestCase):
+    setUp=DhanExecutionTests.setUp
+    tearDown=DhanExecutionTests.tearDown
+    def prepare(self):
+        self.clock=datetime(2026,10,12,20,0,tzinfo=IST)
+        self.payload.update(exchange_segment='MCX_COMM',security_id='901',quantity=1,
+                            idea_risk_limit=20000,daily_loss_limit=30000)
+        self.service.master.resolve=lambda payload,now:dict(security_id='901',exchange_segment='MCX_COMM',
+            symbol='CRUDEOIL-15Oct2026-7750-CE',lot_size=1,tick_size=.1,option_type='CE',
+            expiry='2026-10-15',kind='NATIVE',quantity_multiplier=100,
+            entry_cutoff=datetime(2026,10,14,23,tzinfo=IST).timestamp())
+    def test_evening_preview_values_full_premium(self):
+        self.prepare();result=self.service._preflight(self.payload)
+        self.assertEqual(result['instrument']['worst_case_risk'],10000)
+        self.assertEqual(result['margin_required'],10000)
+        self.assertEqual(result['ticket']['quantity'],1)
+        self.assertEqual(result['ticket']['productType'],'MARGIN')
+        self.assertFalse(any(m=='POST' and p=='/orders' for m,p,_ in self.client.calls))
+    def test_cash_and_risk_not_understated(self):
+        self.prepare();self.client.cash=5000
+        with self.assertRaisesRegex(ValueError,'Insufficient'):self.service._preflight(self.payload)
+        self.client.cash=100000;self.payload['idea_risk_limit']=1000
+        with self.assertRaisesRegex(ValueError,'risk budget'):self.service._preflight(self.payload)
+    def test_expiry_and_short_option_blocked(self):
+        self.prepare();self.payload['transaction_type']='SELL'
+        with self.assertRaisesRegex(ValueError,'Short options'):self.service._preflight(self.payload)
+        self.payload['transaction_type']='BUY';self.clock=datetime(2026,10,15,12,tzinfo=IST)
+        with self.assertRaisesRegex(ValueError,'pre-expiry'):self.service._preflight(self.payload)
