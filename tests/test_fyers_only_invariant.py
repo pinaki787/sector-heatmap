@@ -9,10 +9,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class BrokerBoundaryTests(unittest.TestCase):
     def test_only_explicitly_supported_brokers_can_be_provisioned(self):
-        self.assertEqual(BROKERS,{'FYERS','DELTA_INDIA'})
+        self.assertEqual(BROKERS,{'FYERS','DHAN','DELTA_INDIA'})
         policy=' '.join((ROOT/'BROKER_POLICY.md').read_text().split())
-        self.assertIn('supported trading brokers are FYERS and Delta India',policy)
-        self.assertIn('no automatic substitution',policy)
+        self.assertIn('supported trading brokers are FYERS, Dhan and Delta India',policy)
+        self.assertIn('no automatic data or execution substitution',policy)
 
     def test_workspace_actions_never_fall_back_to_another_broker(self):
         guard=WorkspaceGuard(None,'test',8100,8079)

@@ -277,7 +277,7 @@ class RealizedPnlReportTests(unittest.TestCase):
         self.assertIn('Live mode places real FYERS orders with real money.', dashboard)
         self.assertIn('Start Runner', dashboard)
         self.assertIn('/api/ema-band/runner/start', dashboard)
-        self.assertIn("window.confirm('Start the LIVE EMA Band runner?", dashboard)
+        self.assertIn("window.confirm('Start the LIVE EMA Band runner with the selected broker account?", dashboard)
 
     def test_ema_chart_requests_oi_and_exposes_retained_position_registry(self):
         backend = (Path(__file__).resolve().parents[1] / "sector_heatmap" / "web.py").read_text(encoding="utf-8")

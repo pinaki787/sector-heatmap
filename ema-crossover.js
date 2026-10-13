@@ -36,7 +36,7 @@
       <section class="panel" style="margin-top:15px"><span class="label">STRATEGY RULES</span><div class="choice-row"><span class="choice">ATM Call: completed RSI crosses above the selected RSI MA.</span><span class="choice">ATM Put: completed RSI crosses below the selected RSI MA.</span><span class="choice">Call exit: later completed RSI crosses below its MA. Put exit: later completed RSI crosses above its MA. Equality holds.</span></div><p class="muted">RSI uses Wilder smoothing; choose SMA or EMA for its moving average. Signals and opposite-cross exits use completed candles only. One owned position at a time.</p><div id="cross-history"></div></section></section>`);
     const el = id => document.getElementById('cross-' + id);
     const stamp = t => new Date(t * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) + ' IST';
-    async function get(url) { const response = await fetch(url); const data = await response.json(); if (!response.ok || data.error) throw Error(data.error || 'Data request failed'); return data; }
+    async function get(url) { const response = await root.BrokerForms.fetch('rsi',url); const data = await response.json(); if (!response.ok || data.error) throw Error(data.error || 'Data request failed'); return data; }
     let version = 0, searchVersion = 0, timer, marketChart;
     function clear() { version++; marketChart?.destroy(); marketChart=null; el('chart').classList.add('chart-empty'); el('chart').textContent = 'Select an instrument to show the chart.'; el('history').textContent = ''; ['trend', 'event', 'values'].forEach(id => el(id).textContent = '—'); el('status').textContent = 'Chart updates automatically after selecting an instrument.'; }
     ['symbol','timeframe','rsi-length','sma-length','ma-type'].forEach(id => el(id).addEventListener('change', () => {clear(); if(el('symbol').value)load();}));
@@ -45,6 +45,7 @@
       const q = el('search').value.trim(); if (q.length < 2) return;
       timer = setTimeout(async () => { try { const data = await get('/api/ema-band/underlying-search?q=' + encodeURIComponent(q)); if (seq !== searchVersion) return; for (const item of data.matches || []) el('symbol').add(new Option(item.underlying + ' · ' + item.symbol, item.symbol)); el('status').textContent = data.matches?.length ? 'Select an instrument to display its chart.' : 'No matching instruments.'; } catch (e) { if (seq === searchVersion) el('status').textContent = e.message; } }, 300);
     });
+    root.addEventListener('broker-account-change',event=>{if(event.detail.kind==='rsi'){marketChart?.destroy();marketChart=null;clear();searchVersion++;el('symbol').replaceChildren(new Option('Search the selected broker master',''));el('search').value='';}});
     let loading = false, nextAttemptAt=0;
     async function load() {
       if(loading || Date.now()<nextAttemptAt || !el('symbol').value)return;
@@ -60,7 +61,7 @@
         el('trend').textContent = last.rsi > last.rsiMa ? 'BULLISH' : last.rsi < last.rsiMa ? 'BEARISH' : 'NEUTRAL';
         el('event').textContent = last.signal || 'NO FRESH CROSS'; el('values').textContent = last.rsi.toFixed(2) + ' / ' + last.rsiMa.toFixed(2);
         el('status').textContent = `${data.symbol} · ${data.timeframe} · Last completed bar: ${stamp(last.timestamp)} · Forming candle shown; signals use completed closes.`;
-        if(!marketChart)marketChart=root.EmaCloudChart.mount(el('chart'));
+        if(!marketChart)marketChart=root.EmaCloudChart.mount(el('chart'),{broker:root.BrokerForms.account('rsi')?.broker||'FYERS',mtf:root.BrokerForms.account('rsi')?.broker==='DHAN'?false:undefined});
         marketChart.update(data,10,30,rsiLength,smaLength,maType);if(data.history_error||data.history_gap)marketChart.error(data.history_error||'Latest completed candle awaiting reconciliation');else marketChart.healthy();nextAttemptAt=0;
         const history=el('history');history.replaceChildren();
         const title=document.createElement('p');title.textContent='Recent completed RSI crossover events';title.style.cssText='font-weight:600;margin:20px 0 6px';

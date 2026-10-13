@@ -17,12 +17,23 @@ BASE='https://api.india.delta.exchange'
 RESOLUTIONS={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'1d':86400,'1w':604800}
 SUPPORTED={'perpetual_futures','futures','call_options','put_options'}
 
+class DeltaIPv4Adapter(requests.adapters.HTTPAdapter):
+    # Keep outbound API traffic on the server's explicitly whitelisted IPv4.
+    def init_poolmanager(self, connections, maxsize, block=False, **kwargs):
+        kwargs['source_address']=('0.0.0.0',0)
+        return super().init_poolmanager(connections,maxsize,block=block,**kwargs)
+
+def delta_request_session():
+    session=requests.Session()
+    session.mount(BASE,DeltaIPv4Adapter())
+    return session
+
 class DeltaReadUnavailable(ValueError):
     """Temporary public-data outage; execution remains suspended until recovery."""
 
 class DeltaIndia:
     def __init__(self,state_path,credentials=lambda:{},requester=None,clock=time.time):
-        self.path=Path(state_path);self.credentials=credentials;self.requester=requester or requests;self.clock=clock
+        self.path=Path(state_path);self.credentials=credentials;self.requester=requester or delta_request_session();self.clock=clock
         self.lock=threading.RLock();self.cache={};self.previews={};self.auth_state='NOT_CHECKED';self.paper={'schema':1,'position':None,'trades':[]}
         self.auth_at=0;self.auth_identity=None;self.live_path=self.path.with_name('delta-india-live.json');self.key_path=self.path.with_name('delta-india-credentials.json')
         self.live={'schema':1,'orders':{},'runner_position':None};self.runner={'running':False,'message':'Stopped','last_candle':None};self.stop_event=threading.Event()

@@ -11,7 +11,8 @@ TOKEN_FILE = Path(os.getenv("FYERS_TOKEN_FILE", Path.home() / ".fyers" / "token.
 
 def public_origin():
     value = os.getenv('SECTOR_PULSE_PUBLIC_ORIGIN', '')
-    settings = ROOT / '.private/server-settings.json'
+    registry = os.getenv('SECTOR_PULSE_WORKSPACE_REGISTRY')
+    settings = Path(registry).resolve().parent.parent / 'server-settings.json' if registry else ROOT / '.private/server-settings.json'
     if not value and settings.exists():
         value = json.loads(settings.read_text()).get('public_origin', '')
     if not value:

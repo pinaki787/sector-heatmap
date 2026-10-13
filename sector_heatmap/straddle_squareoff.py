@@ -6,6 +6,7 @@ import secrets
 from threading import Lock
 
 from fyers_apiv3 import fyersModel
+from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
 
 PREVIEW_TTL_SECONDS = 30
@@ -34,7 +35,7 @@ class StraddleSquareOffService:
         if ":" not in token:
             raise RuntimeError("Fresh FYERS credentials are unavailable; no position was changed.")
         app_id, access_token = token.split(":", 1)
-        return fyersModel.FyersModel(client_id=app_id, token=access_token, is_async=False, log_path="")
+        return ipv4_fyers_client(client_id=app_id, token=access_token, is_async=False, log_path="")
 
     def _runner(self, name):
         runner = self.runners.get(str(name or "").strip().lower())

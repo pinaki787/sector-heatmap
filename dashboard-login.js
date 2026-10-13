@@ -2,6 +2,22 @@
   const form=document.querySelector('#dashboard-login');
   const api='/api/dashboard-auth/';
   if(!form){
+    let renewing=false;
+    const signIn=()=>{const next=location.pathname+location.search;location.replace('/auth/login?next='+encodeURIComponent(next));};
+    async function renew(){
+      if(renewing||document.visibilityState==='hidden')return;
+      renewing=true;
+      try{
+        const r=await fetch(api+'renew',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',cache:'no-store'});
+        if(r.status===401||r.status===403)signIn();
+      }catch(e){/* Temporary network errors do not prove session expiry. */}
+      finally{renewing=false;}
+    }
+    setInterval(renew,5*60*1000);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')renew();});
+    window.addEventListener('focus',renew);
+    renew();
+
     const dock=document.createElement('section');dock.className='account-dock';dock.setAttribute('aria-label','Your account');
     const identity=document.createElement('div');identity.className='account-identity';identity.textContent='Your account';
     const actions=document.createElement('div');actions.className='account-actions';dock.append(identity,actions);

@@ -10,6 +10,8 @@ def settings(payload):
     return result
 
 def reason(config,sig,direction):
+    from .indicator_families import apply
+    config=apply(config)
     # Any selected exit can close a position; unselected entry rules cannot.
     opposite='BEARISH' if direction=='BULLISH' else 'BULLISH'
     if sig.get('is_forming'):return None

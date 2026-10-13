@@ -49,7 +49,7 @@ def analysis(candles, config, tick_size, saved=None, retain=500):
     rows = completed(candles)
     if not rows:
         raise ValueError('No completed Renko host candles available.')
-    identity = dict(engine_version='ema-session-history-v5', config={**settings(config),**exit_indicators.settings(config)}, symbol=config['underlying'], timeframe=config['timeframe'], tick_size=tick_size, session_deadline=config.get('session_deadline','15:10'))
+    identity = dict(engine_version='nse-bse-atr5-div12-v1' if str(config.get('underlying','')).upper().startswith(('NSE:','BSE:')) else 'ema-session-history-v5', config={**settings(config),**exit_indicators.settings(config)}, symbol=config['underlying'], timeframe=config['timeframe'], tick_size=tick_size, session_deadline=config.get('session_deadline','15:10'))
     if config.get('chart_zone_target_enabled'):
         identity['chart_zone_source']=hashlib.sha256(json.dumps(config.get('_chart_zone_rows',[]),sort_keys=True).encode()).hexdigest()
     if config.get('chart_entry_guards'):
@@ -173,6 +173,9 @@ def provisional(confirmed, forming, config, tick_size, now):
 
 
 def configuration(payload):
+    from . import indicator_families
+    family_explicit=any(key in payload for key in indicator_families.DEFAULTS)
+    payload=indicator_families.apply(payload)
     if not isinstance(payload.get('intrabar_entries', False), bool):
         raise ValueError('Intrabar entry mode must be explicitly enabled or disabled.')
     if payload.get('strategy') != STRATEGY:
@@ -180,12 +183,10 @@ def configuration(payload):
     if payload.get('exit_policy') != 'OPPOSITE_CONFIRMED_SIGNAL':
         raise ValueError('Confirm opposite confirmed-signal exits; no same-candle re-entry.')
     selected=settings(payload)
-    if not any(selected[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','rsi_slope_enabled')):raise ValueError('Select at least one directional indicator before starting; ADX is a strength filter.')
+    if not any(selected[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','rsi_slope_enabled','rsi_level_enabled')):raise ValueError('Select at least one directional indicator before starting; ADX is a strength filter.')
     route = payload.get('execution_route', 'OPTIONS')
     if route not in ('OPTIONS', 'CASH_EQUITY'):
         raise ValueError('Choose options or cash equity explicitly.')
-    if route == 'CASH_EQUITY' and payload.get('sideways_enabled',False):
-        raise ValueError('Cash equity after-cost sideways filter is unavailable; clear that optional filter before starting cash equity.')
     holding=payload.get('commodity_holding') or 'INTRADAY'
     if holding not in ('INTRADAY','CARRY_FORWARD'):raise ValueError('Choose MCX Intraday or Carry forward.')
     if holding == 'CARRY_FORWARD' and not str(payload.get('underlying','')).startswith('MCX:'):raise ValueError('Commodity carry-forward requires an MCX underlying.')
@@ -206,8 +207,12 @@ def configuration(payload):
                                 'ma_length': 14, 'ma_type': 'SMA', 'lots': 1 if route == 'CASH_EQUITY' else payload.get('lots'), 'trailing_enabled': False, 'spot_target':None, 'spot_stop':None})
     for key in ('rsi_length', 'ma_length', 'ma_type'):
         shared.pop(key)
-    return {**shared, **destinations.settings(payload), **exit_indicators.settings(payload), **settings(payload), **levels(payload), **sideways.settings(payload), **zone_target.settings(payload), **market_structure.settings(payload), **mtf_supertrend.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',False)}), 'strategy': STRATEGY,
+    result = {**shared, **destinations.settings(payload), **exit_indicators.settings(payload), **settings(payload), 'indicator_family_choices':payload['indicator_family_choices'], **levels(payload), **sideways.settings(payload), **zone_target.settings(payload), **market_structure.settings(payload), **mtf_supertrend.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',False)}), 'strategy': STRATEGY,
             'commodity_holding': holding if str(payload.get('underlying','')).startswith('MCX:') else None, 'execution_route': route, 'quantity': quantity, 'cash_product': cash_product if route == 'CASH_EQUITY' else None, 'label': 'Renko Supertrend Strategy', 'intrabar_entries': payload.get('intrabar_entries', False),  'exit_policy': 'OPPOSITE_CONFIRMED_SIGNAL'}
+    result=indicator_families.apply(result)
+    if not family_explicit:
+        for key in (*indicator_families.DEFAULTS,'indicator_family_choices','indicator_family_applied'):result.pop(key,None)
+    return result
 
 
 class Broker(BaseBroker):
@@ -538,7 +543,12 @@ class Runner(BaseRunner):
             self.state.setdefault('sideways_events',[]).append(deepcopy(lock))
             self.save()
             return True
-        self.state.update(status='SIDEWAYS_LOCKED',message=f"Sideways locked inside position range {lock['low']:.2f}–{lock['high']:.2f}; only a strict fresh breakout unlocks new entries.")
+        if lock.get('review_required'):
+            message='Quick-close protection is locked: actual exposure range is incomplete; review required before new entries.'
+        else:
+            basis='Net result unavailable; protective lock' if lock.get('net_result_available') is False else 'Quick-loss lock'
+            message=f"{basis} inside position range {lock['low']:.2f}–{lock['high']:.2f}; only a strict fresh breakout unlocks new entries."
+        self.state.update(status='SIDEWAYS_LOCKED',message=message)
         self.save()
         return False
 
@@ -551,7 +561,7 @@ class Runner(BaseRunner):
             initialization_anchor=engine.get('anchor'),host_bar_count=(engine.get('state') or {}).get('count'),
             observation_mode='INTRABAR' if sig.get('provisional') else 'CONFIRMED' if sig else 'WALL_CLOCK / INDICATORS_UNAVAILABLE',
             market_event_at=sig.get('market_event_at'),
-            indicators={k:deepcopy(sig.get(k)) for k in ('timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','ema10','ema30','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
+            indicators={k:deepcopy(sig.get(k)) for k in ('timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max','rsi_level_enabled','rsi_level_pass','rsi_level_diagnostic','rsi_bullish_above','rsi_bearish_below','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','ema10','ema30','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
             confirmed_gap_history=deepcopy((engine.get('state') or {}).get('ema_gaps',[])),
             confirmed_indicator_reference=deepcopy(engine.get('last')),
             provenance='Captured at strategy event; missing observations remain unknown. Confirmation and broker fill times are separate.')
@@ -575,6 +585,7 @@ class Runner(BaseRunner):
                 raise ValueError('Strategy revision changed; reload the dashboard before Start Runner.')
             if self.state.get('position') or self.state.get('pending'):
                 raise ValueError('Existing exposure must finish stopping/reconciliation before a new start.')
+            self.state.pop('pending_timeframe',None)
             self.state.pop('management_only',None)
             p=self.preview(payload)
             if after_cutoff(self.clock(),p['config']):
@@ -659,6 +670,48 @@ class Runner(BaseRunner):
             self._chart_identity(payload)
             return self.stop()  # Existing ownership/reconciliation/close pathway.
 
+    def chart_timeframe(self, payload):
+        """Change one owned runner; defer while any exposure/order remains."""
+        with self.lock:
+            c=self.state.get('config') or {}
+            if payload.get('run_id')!=self.state.get('run_id') or payload.get('underlying')!=c.get('underlying') or payload.get('mode')!=c.get('mode'):
+                raise ValueError('Runner identity changed; refresh before changing timeframe.')
+            target=payload.get('timeframe')
+            if target not in TIMEFRAMES:raise ValueError('Unsupported host timeframe.')
+            candidate=self.configure({**c,'timeframe':target})
+            if candidate.get('broker')=='DELTA_INDIA' and target in ('2 minutes','10 minutes'):
+                raise ValueError('Delta does not support this host timeframe.')
+            if target==c.get('timeframe'):
+                self.state.pop('pending_timeframe',None)
+                self.save()
+                return self.snapshot()
+            self.state['pending_timeframe']=dict(timeframe=target,run_id=self.state.get('run_id'),requested_at=self.clock())
+            self.save()
+            self.apply_pending_timeframe()
+            return self.snapshot()
+
+    def apply_pending_timeframe(self):
+        request=self.state.get('pending_timeframe')
+        if not request or self.state.get('position') or self.state.get('pending'):return False
+        if request.get('run_id')!=self.state.get('run_id'):
+            self.state.pop('pending_timeframe',None)
+            self.save()
+            return False
+        c=self.configure({**self.state['config'],'timeframe':request['timeframe']})
+        # Build the replacement before changing any live analysis/configuration.
+        rebuilt=analysis(self.adapter.candles(c),c,self.adapter.host_tick_size(c['underlying']))
+        now=self.clock()
+        interval=TIMEFRAMES[c['timeframe']]
+        self.state.update(config=c,renko_engine=rebuilt,last_signal=None,last_processed_bar=rebuilt['last']['timestamp'],
+                          eligible_since=(int(now//interval)+1)*interval)
+        self.state.pop('latest_entry_assessment',None)
+        self.state.pop('latest_exit_assessment',None)
+        self.state.pop('pending_timeframe',None)
+        self.preview_value=None
+        self.event('TIMEFRAME_CHANGED','Host timeframe changed to '+c['timeframe']+'; prior signals excluded. Existing mode, quota, P&L and runner activation preserved.')
+        self.save()
+        return True
+
     def chart_mode(self, payload):
         with self.lock:
             self._chart_identity(payload)
@@ -710,6 +763,7 @@ class Runner(BaseRunner):
         result = super().snapshot()
         result['auto_recovery']=self.recovery.snapshot() if hasattr(self,'recovery') else {'status':'INITIALIZING'}
         result['indicator_selection_revision']='independent-indicators-v1'
+        result['indicator_family_revision']='indicator-family-masters-v1'
         result['indicator_destinations_revision']=destinations.REVISION
         result['position_recovery_revision']='management-only-recovery-v1'
         result['market_structure_revision']=market_structure.REVISION
@@ -758,10 +812,10 @@ class Runner(BaseRunner):
         net_realized=sum(t['costs']['realized_net'] for t in current) if all(t['costs'].get('realized_net') is not None for t in current) else None
         opened=[t for t in current if t.get('remaining_quantity')]
         net_open=sum(t['costs']['unrealized_net'] for t in opened) if all(t['costs'].get('unrealized_net') is not None for t in opened) else None
-        result['cost_pnl']=dict(realized_net=net_realized,unrealized_net=net_open,total_net=net_realized+net_open if net_realized is not None and net_open is not None else None,basis='After estimated charges and configured additional slippage; open value assumes liquidation at fresh option bid.',brokerage_per_executed_order=15,additional_slippage_points=(self.state.get('config') or {}).get('additional_slippage_points',0),model=costs.MODEL)
+        result['cost_pnl']=dict(realized_net=net_realized,unrealized_net=net_open,total_net=net_realized+net_open if net_realized is not None and net_open is not None else None,basis='After estimated charges and configured additional slippage; open value assumes liquidation at fresh option bid.',brokerage_per_executed_order=20,additional_slippage_points=(self.state.get('config') or {}).get('additional_slippage_points',0),model=costs.MODEL)
         if (self.state.get('config') or {}).get('execution_route') == 'CASH_EQUITY':
             result['cost_pnl'].update(model={'id':'CASH_EQUITY_FEES_UNVERIFIED'},basis='Cash gross P&L only; verified cash charge model unavailable. After-cost values unavailable.',realized_net=None,unrealized_net=None,total_net=None)
-        result['sideways_status']=dict(enabled=(self.state.get('config') or {}).get('sideways_enabled',False),max_candles=(self.state.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS',lock=deepcopy(self.state.get('sideways_lock')),events=deepcopy(self.state.get('sideways_events',[])))
+        result['sideways_status']=dict(revision='quick-close-cost-fallback-v2',enabled=(self.state.get('config') or {}).get('sideways_enabled',False),max_candles=(self.state.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK',lock=deepcopy(self.state.get('sideways_lock')),events=deepcopy(self.state.get('sideways_events',[])))
         signals=deepcopy([event for event in self.state.get('execution_signals',[]) if event.get('run_id')==self.state.get('run_id')])
         for event in signals:
             if event.get('status')=='WAITING FOR OPTION QUOTE' and self.clock()-event['event_at']>TIMEFRAMES[self.state['config']['timeframe']]:
@@ -815,6 +869,7 @@ class Runner(BaseRunner):
     def step(self):
         self.recovery.beat()
         with self.lock:
+            self.apply_pending_timeframe()
             self.drain_position_ticks()
             c=self.state.get('config') or {}
             if self.state.get('running') and overnight(c):
@@ -980,17 +1035,23 @@ class Runner(BaseRunner):
         if exit_filled and prior and not self.state.get('position'):
             exposure=prior.get('exposure_range')
             trade=next((t for t in trade_history(self.state.get('order_history',[])) if t['lifecycle_id']==prior['lifecycle_id']),None)
-            if trade:
-                lock=sideways.freeze(exposure,self.clock(),trade['costs'].get('realized_net'),TIMEFRAMES[self.state['config']['timeframe']],self.state['config'],trade['trade_id'],self.state['config']['underlying'])
-                for row in self.state.get('order_history',[]):
-                    if row.get('lifecycle_id')==prior['lifecycle_id']:
-                        row['exposure_range']=deepcopy(exposure)
-                        row['exposure_host_candles']=sideways.candle_count(exposure['entry_at'],self.clock(),TIMEFRAMES[self.state['config']['timeframe']]) if exposure else None
-                        row['sideways_lock_trigger']=deepcopy(lock)
-                if lock:
-                    self.state['sideways_lock']=lock
-                    self.state.setdefault('sideways_events',[]).append(deepcopy(lock))
-                self.save()
+            cost_evidence=(trade or {}).get('costs') or {}
+            net=cost_evidence.get('realized_net') if cost_evidence.get('available') is True else None
+            if not exposure:
+                exposure=sideways.observe(None,prior.get('first_fill_confirmed_at',prior.get('opened_at')),None,None,self.clock())
+            trade_id=(trade or {}).get('trade_id') or f"{self.state['config']['mode']}-TRADE-{prior['lifecycle_id']}"
+            lock=sideways.freeze(exposure,self.clock(),net,TIMEFRAMES[self.state['config']['timeframe']],self.state['config'],trade_id,self.state['config']['underlying'],cost_evidence={k:cost_evidence.get(k) for k in ('available','reason','currency')})
+            for row in self.state.get('order_history',[]):
+                if row.get('lifecycle_id')==prior['lifecycle_id']:
+                    row['exposure_range']=deepcopy(exposure)
+                    row['exposure_host_candles']=lock['host_candles'] if lock else sideways.candle_count(exposure['entry_at'],self.clock(),TIMEFRAMES[self.state['config']['timeframe']])
+                    row['sideways_lock_trigger']=deepcopy(lock)
+            if lock:
+                self.state['sideways_lock']=lock
+                self.state.setdefault('sideways_events',[]).append(deepcopy(lock))
+                detail='loss after estimated costs' if lock['loss_confirmed'] else 'net result unavailable; conservative protection, not a confirmed loss'
+                self.event('SIDEWAYS_RANGE_LOCKED',f"Quick-close range locked: {detail}." + (' Exposure evidence incomplete; review required.' if lock['review_required'] else ' Fresh strict breakout required before another entry.'))
+            self.save()
         if exit_filled and not self.state.get('position'):
             self.state['rearm_after_exit']=True
             self.save()

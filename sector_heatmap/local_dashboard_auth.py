@@ -2,7 +2,7 @@
 from http.cookies import SimpleCookie
 import json
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote,parse_qs,urlparse
 from .workspaces import WorkspaceStore, WorkspaceRuntime, COOKIE, cookie_token
 
 PUBLIC = {'/auth/login', '/dashboard-login.js', '/workspace-portal.css',
@@ -22,7 +22,7 @@ class LocalDashboardAuth:
 
     def portal(self, handler, mutation=False):
         path=handler.path.split('?',1)[0]
-        if path not in {'/accounts','/user-master'} and not path.startswith('/api/workspaces/'):
+        if path not in {'/accounts','/accounts/','/user-master'} and not path.startswith('/api/workspaces/'):
             return False
         if not mutation and path == '/user-master':
             try:
@@ -35,7 +35,7 @@ class LocalDashboardAuth:
             self.runtime=WorkspaceRuntime(self.store,self.root,self.port)
             self.portal_handler=handler_factory(self.store,self.runtime,self.port)
         proxy=object.__new__(self.portal_handler);proxy.__dict__.update(handler.__dict__)
-        if path in {'/accounts','/user-master'}:proxy.path='/'
+        if path in {'/accounts','/accounts/','/user-master'}:proxy.path='/'
         (proxy.do_POST if mutation else proxy.do_GET)()
         return True
 
@@ -74,9 +74,13 @@ class LocalDashboardAuth:
 
     def post(self, handler):
         path=handler.path.split('?',1)[0]
-        if path not in {'/api/dashboard-auth/login','/api/dashboard-auth/setup','/api/dashboard-auth/logout'}:return False
+        if path not in {'/api/dashboard-auth/login','/api/dashboard-auth/setup','/api/dashboard-auth/logout','/api/dashboard-auth/renew'}:return False
         try:
             self.local(handler.headers,True);payload=handler.read_json()
+            if path.endswith('/renew'):
+                token=self.token(handler.headers)
+                user=self.store.renew_session(token)
+                self.json(handler,200,{'authenticated':True,'username':user['username']},token);return True
             if path.endswith('/logout'):
                 self.authorize(handler.headers,True);self.store.logout(self.token(handler.headers));self.json(handler,200,{'signed_out':True},'');return True
             if path.endswith('/setup'):
@@ -87,6 +91,11 @@ class LocalDashboardAuth:
         except (ValueError,PermissionError) as e:self.json(handler,403,{'error':str(e)})
         return True
 
+    def context(self, headers):
+        user=self.authorize(headers)
+        return dict(workspace=None,admin=bool(user['admin']),username=user['username'],
+                    allowed_features=user.get('features',[]),sidebar_visibility=self.store.sidebar_visibility(),renko_visibility=self.store.renko_visibility())
+
     def check(self, handler, mutation=False):
         path=handler.path.split('?',1)[0]
         if not mutation and path in PUBLIC:
@@ -94,8 +103,23 @@ class LocalDashboardAuth:
             except PermissionError:pass
         try:
             user=self.authorize(handler.headers,mutation)
+            if not mutation and not path.startswith('/api/'):
+                candidate=(self.root/path.lstrip('/')).resolve()
+                relative=candidate.relative_to(self.root.resolve()) if candidate.is_relative_to(self.root.resolve()) else None
+                if relative and all(not part.startswith('.') for part in relative.parts) and candidate.is_file() and candidate.suffix in ('.js','.css','.svg','.png','.woff','.woff2','.ico'):
+                    return True
             if not user['admin']:
+                if path in {'/dhan-orders.html','/dhan-orders.js','/dhan-strategies.html','/dhan-strategies.js','/workspace-bootstrap.js','/api/workspace-context'} or path.startswith(('/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+                    from .section_permissions import allowed
+                    if path=='/api/workspace-context' or not path.startswith('/api/') or allowed(user,path):return True
                 if not mutation and path in {'/','/index.html','/workspace-entry'}:
+                    query=parse_qs(urlparse(handler.path).query)
+                    kind=(query.get('brokerForm') or ['renko' if query.get('renkoBroker') else ''])[0]
+                    if kind in ('renko','band','rsi','kama'):
+                        account=self.store.account(user,(query.get('brokerAccount') or [''])[0])
+                        from .section_permissions import allowed
+                        feature_path={'renko':'/api/renko-supertrend/runner','band':'/api/ema-band/runner','rsi':'/api/ema-crossover/runner','kama':'/api/kama/runner'}[kind]
+                        if (kind=='renko' or account['broker'] in ('FYERS','DHAN')) and allowed(user,feature_path):return True
                     handler.send_response(303);handler.send_header('Location','/accounts');handler.send_header('Content-Length','0');handler.end_headers();return False
                 self.json(handler,403,{'error':'Open your own broker account workspace.'});return False
             return True

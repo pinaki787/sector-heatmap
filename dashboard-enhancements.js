@@ -40,9 +40,9 @@
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
   const initialStraddleMarket = storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
+  const initialView = ({sector:'sectors',rsi:'ema-cross',band:'ema-band',kama:'kama',renko:'renko-supertrend'})[new URLSearchParams(location.search).get('brokerForm')] || (new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'renko-engine', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
-    : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors'
+    : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors')
   let straddleRunnerState = { available: false, running: false }
   let niftyStraddleRunnerState = { available: false, running: false }
   const straddleSquareoffPreviews = { sensex: null, nifty: null }
@@ -66,13 +66,13 @@
   <main class="desk">
     <aside class="side">
       <div class="brand"><b>◈ Sector Pulse</b><small>Analytical prioritization workspace</small></div>
-      <nav class="nav" aria-label="Dashboard views"><button type="button" class="${initialView === 'sectors' ? 'active' : ''}" data-view="sectors" aria-pressed="${initialView === 'sectors'}">Sector rotation</button><button type="button" class="${initialView === 'handoff' ? 'active' : ''}" data-view="handoff" aria-pressed="${initialView === 'handoff'}">Analysis handoff</button><button type="button" class="${initialView === 'straddles' ? 'active' : ''}" data-view="straddles" aria-pressed="${initialView === 'straddles'}">Long Straddles</button><button type="button" class="${initialView === 'broker' ? 'active' : ''}" data-view="broker" aria-pressed="${initialView === 'broker'}">Live feed & positions</button></nav>
+      <a href="/accounts" class="broker-management-link" style="display:block;padding:10px 12px;color:inherit;text-decoration:none;border:1px solid var(--border);border-radius:8px">Brokers</a><nav class="nav" aria-label="Dashboard views"><button type="button" class="${initialView === 'sectors' ? 'active' : ''}" data-view="sectors" aria-pressed="${initialView === 'sectors'}">Sector rotation</button><button type="button" class="${initialView === 'handoff' ? 'active' : ''}" data-view="handoff" aria-pressed="${initialView === 'handoff'}">Analysis handoff</button><button type="button" class="${initialView === 'straddles' ? 'active' : ''}" data-view="straddles" aria-pressed="${initialView === 'straddles'}">Long Straddles</button><button type="button" class="${initialView === 'broker' ? 'active' : ''}" data-view="broker" aria-pressed="${initialView === 'broker'}">Live feed & positions</button></nav>
       <div class="broker-card"><span class="label">BROKER CONNECTION</span><b role="status" aria-live="polite"><i id="broker-dot" class="dot" aria-hidden="true"></i><span id="broker-state">Checking FYERS</span></b><button type="button" class="button" id="reauth" aria-describedby="reauth-help">Refresh authentication</button><span id="reauth-help" class="screen-reader-only">Authentication status is still being checked. Manual refresh remains available.</span></div>
     </aside>
     <section class="work">
       <section id="sectors" class="view ${initialView === 'sectors' ? 'active' : ''}">
         <header class="head"><div><span class="label">MULTI-TIMEFRAME SECTOR ANALYSIS</span><h1>Rotation, relative strength & ranking</h1><small class="muted">Analysis only — sector strength is not a buy or sell signal.</small><small id="weight-source" class="muted">Official constituent weight source loading…</small></div><div id="analysis-status" class="status" role="status">Loading completed-bar analysis</div></header>
-        <section id="refresh-pipeline" class="refresh-pipeline loading" role="status" aria-live="polite" aria-label="Sector refresh progress"><div class="pipeline-head"><i class="refresh-beacon" aria-hidden="true"></i><div class="pipeline-copy"><small id="pipeline-kicker" class="pipeline-kicker">REFRESH IN PROGRESS</small><p id="pipeline-message" class="pipeline-message"><b>Connecting to FYERS history</b><span>Preparing the first completed-bar snapshot.</span></p></div></div><div id="pipeline-track" class="pipeline-track"></div><div class="refresh-meter" aria-hidden="true"><span></span></div></section>
+        <section id="refresh-pipeline" class="refresh-pipeline loading" role="status" aria-live="polite" aria-label="Sector refresh progress"><div class="pipeline-head"><i class="refresh-beacon" aria-hidden="true"></i><div class="pipeline-copy"><small id="pipeline-kicker" class="pipeline-kicker">REFRESH IN PROGRESS</small><p id="pipeline-message" class="pipeline-message"><b>Connecting to selected broker history</b><span>Preparing the first completed-bar snapshot.</span></p></div></div><div id="pipeline-track" class="pipeline-track"></div><div class="refresh-meter" aria-hidden="true"><span></span></div></section>
         <div class="toolbar">
           <div class="mode-tabs" aria-label="Analysis mode"><button type="button" class="active" data-mode="intraday" aria-pressed="true">Intraday</button><button type="button" data-mode="swing" aria-pressed="false">Swing</button></div>
           <label>Filter<select id="sector-filter"><option value="all">All sectors</option><option value="top3">Top 3</option><option value="top5">Top 5</option><option value="bottom3">Bottom 3</option><option value="bottom5">Bottom 5</option><option value="leading">Leading</option><option value="improving">Improving</option><option value="neutral">Neutral</option><option value="weakening">Weakening</option><option value="lagging">Lagging</option><option value="bullish">Bullish MTF alignment</option><option value="bearish">Bearish MTF alignment</option><option value="strong-outperformer">Strong outperformers</option><option value="strong-underperformer">Strong underperformers</option></select></label>
@@ -111,12 +111,12 @@
           <section class="panel"><span class="label">2 · OPTIONAL PLANNING PREFERENCES</span><h2>Your sizing and reward preferences</h2><label class="field" style="margin-top:12px"><input id="enforce-risk-controls" type="checkbox"> Apply these capital limits to analysis and ticket sizing</label><div class="field-grid" style="margin-top:12px"><label class="field">Planning capital (₹)<input id="planning-capital" type="number" min="1" step="1000" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="daily-loss-limit" type="number" min="1" step="100" value="5000"></label><label class="field">Per-idea risk allocation (₹)<input id="idea-risk-limit" type="number" min="1" step="100" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="risk-reserve" type="number" min="0" step="100" value="1000"></label><label class="field">Maximum simultaneous positions<input id="max-positions" type="number" min="1" step="1" value="3"></label><label class="field">Optional minimum reward:risk (0 = no gate)<input id="minimum-rr" type="number" min="0" step="0.1" value="0"></label><label class="field">Stop / invalidation basis<select id="stop-basis"><option value="price">Exact price level</option><option value="percent">Percent from entry / spot</option></select></label><label class="field">Order-type preference<select id="order-type"><option value="LIMIT">Limit (default, live eligible)</option><option value="MARKET">Market (preview only)</option></select></label></div><div id="policy-impact" class="risk-strip" aria-live="polite"></div><div id="policy-validation" class="handoff-status" role="status"></div><p class="muted">Capital values are used only if you enable capital controls. A reward:risk value is considered only when you enter one above zero. Bought stock options default to one lot and cash ideas to one share; choose a larger quantity in the ticket. Fresh FYERS contract, quote, liquidity, funds/margin and confirmation checks always apply.</p>
           <span class="label" style="margin-top:14px">RECIPIENT — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="recipient" value="chatgpt"> ChatGPT</label><label class="choice"><input type="radio" name="recipient" value="codex" checked> Codex</label></div>
           <span class="label" style="margin-top:14px">LOCAL ACTION — REQUIRED</span><div class="choice-row"><label class="choice"><input type="radio" name="handoff-action" value="preview"> Preview only</label><label class="choice"><input type="radio" name="handoff-action" value="export"> Prepare export</label></div>
-          <div class="privacy-gate"><label class="choice"><input id="include-funds" type="checkbox"> Include freshly read FYERS available funds</label><label class="choice"><input id="confirm-funds" type="checkbox" disabled> I confirm funds may be included in this local packet</label></div>
+          <div class="privacy-gate"><label class="choice"><input id="include-funds" type="checkbox"> Include freshly read selected-broker available funds</label><label class="choice"><input id="confirm-funds" type="checkbox" disabled> I confirm funds may be included in this local packet</label></div>
           <button type="button" class="button" id="prepare-packet" style="margin-top:12px">Prepare local preview</button><div id="packet-status" class="handoff-status" role="status" aria-live="polite"></div></section>
         </div>
         <section id="analysis-panel" class="panel analysis-panel" hidden><div class="step-title"><div><span class="label">3 · REVIEW PROPOSALS</span><h2>Evidence-backed opportunity plans</h2><small id="ai-review-state" class="muted"></small></div><div class="status">Decision support only</div></div><div id="analysis-board" class="analysis-board"></div><div id="analysis-exclusions" class="excluded-list"></div></section>
         <section id="packet-panel" class="panel packet-panel" hidden><div class="step-title"><div><span class="label">3 · REVIEW</span><h2>Analysis packet</h2><small class="muted">No transmission has occurred.</small></div><div class="packet-actions"><button type="button" class="button secondary" id="copy-packet">Copy JSON</button><button type="button" class="button" id="download-packet" hidden>Download JSON</button></div></div><pre id="packet-preview" class="packet-preview"></pre></section>
-        <section id="ticket-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">OPTIONAL · SEPARATE BROKER ACTION</span><h2>Exact FYERS trade ticket</h2><small class="muted">A packet never authorizes this workflow.</small></div><div id="ticket-capability" class="status">Checking FYERS capability</div></div><p class="ticket-warning">FYERS is the user-selected route. Preparing a ticket refreshes token/profile, exact master contract, chain and Greeks, bid/ask, lot/tick, funds, margin coverage, positions and order state. Stock-option entries buy one ATM Call for bullish or one ATM Put for bearish. Full premium funding is required; no short option leg is submitted. Submission still requires an explicitly enabled runtime and your Submit order click.</p><div class="field-grid" style="margin-top:12px"><label class="field">Broker<input id="ticket-broker" value="fyers" readonly></label><label class="field">Defined-risk proposal<select id="ticket-proposal"><option value="">Choose a packet proposal</option></select></label><label class="field">Quantity / lots<input id="ticket-lots" type="number" min="1" step="1" value="1"></label><label class="field">Declared external open risk (₹)<input id="external-open-risk" type="number" min="0" step="100" placeholder="Required if FYERS has other open positions"></label></div><button type="button" class="button" id="prepare-ticket" style="margin-top:12px">Refresh FYERS and prepare exact preview</button><div id="ticket-status" class="handoff-status" role="status" aria-live="polite"></div><div id="ticket-review" hidden><div id="risk-strip" class="risk-strip"></div><pre id="ticket-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="ticket-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-ticket" disabled style="margin-top:10px">Submit order</button></div></section>
+        <section id="ticket-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">OPTIONAL · SEPARATE BROKER ACTION</span><h2>Exact broker trade ticket</h2><small class="muted">A packet never authorizes this workflow.</small></div><div id="ticket-capability" class="status">Checking FYERS capability</div></div><p class="ticket-warning">FYERS is the user-selected route. Preparing a ticket refreshes token/profile, exact master contract, chain and Greeks, bid/ask, lot/tick, funds, margin coverage, positions and order state. Stock-option entries buy one ATM Call for bullish or one ATM Put for bearish. Full premium funding is required; no short option leg is submitted. Submission still requires an explicitly enabled runtime and your Submit order click.</p><div class="field-grid" style="margin-top:12px"><label class="field">Broker<select id="ticket-broker" class="order-account"><option value="fyers">FYERS · existing account</option></select></label><label class="field">Defined-risk proposal<select id="ticket-proposal"><option value="">Choose a packet proposal</option></select></label><label class="field">Quantity / lots<input id="ticket-lots" type="number" min="1" step="1" value="1"></label><label class="field">Declared external open risk (₹)<input id="external-open-risk" type="number" min="0" step="100" placeholder="Required if FYERS has other open positions"></label></div><button type="button" class="button" id="prepare-ticket" style="margin-top:12px">Refresh broker and prepare exact preview</button><div id="ticket-status" class="handoff-status" role="status" aria-live="polite"></div><div id="ticket-review" hidden><div id="risk-strip" class="risk-strip"></div><pre id="ticket-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="ticket-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-ticket" disabled style="margin-top:10px">Submit order</button></div></section>
         <section class="panel automation-panel"><details><summary>Optional unattended FYERS policy · disabled by default</summary><p class="ticket-warning">This is separate from per-order approval. It authors a bounded FYERS policy only; this dashboard contains no automatic signal runner. PAPER is the default. A LIVE profile also requires a separate runtime gate, a released kill switch, fresh FYERS preflight for every order, and all policy checks.</p><div class="choice-row"><label class="choice"><input id="auto-enabled" type="checkbox"> Enable policy after acknowledgement</label><label class="choice"><input id="auto-kill" type="checkbox" checked> Kill switch engaged</label><label class="choice"><input id="auto-uncertain" type="checkbox" checked disabled> Halt on uncertain order status</label><label class="choice"><input id="auto-completed" type="checkbox" checked disabled> Completed candles required</label><label class="choice"><input id="auto-option-evidence" type="checkbox" checked disabled> Full option chain/master/liquidity/Greeks/lot/tick evidence required</label><label class="choice"><input id="auto-risk-defined" type="checkbox" checked disabled> Stop or defined-risk spread required</label><label class="choice"><input id="auto-target" type="checkbox" checked disabled> Target required</label></div><div class="field-grid" style="margin-top:12px"><label class="field">Execution mode<select id="auto-mode"><option value="PAPER">Paper / dry-run</option><option value="LIVE">Live (extra runtime gate)</option></select></label><label class="field">Universe<select id="auto-universe"><option value="ALIGNED_EQUITIES_AND_OPTIONS">Aligned equities + index and stock options</option><option value="ALIGNED_EQUITIES">Aligned equities only</option><option value="ALIGNED_OPTIONS">Aligned options only</option></select></label><label class="field">Exact allowed FYERS underlyings, comma-separated<input id="auto-symbols" value="NSE:RELIANCE-EQ,NSE:NIFTY50-INDEX"></label><label class="field">Supported index underlyings<input id="auto-index-underlyings" value="NSE:NIFTY50-INDEX"></label><label class="field">Allowed segments, comma-separated<input id="auto-segments" value="NSE_CM,NSE_FO"></label><label class="field">Allowed strategies, comma-separated<input id="auto-strategies" value="EQUITY_LONG,EQUITY_SHORT,BULL_CALL_DEBIT,BEAR_PUT_DEBIT"></label><label class="field" style="grid-column:1/-1">Completed-candle signal conditions, one per line<textarea id="auto-signals">15m, 1h, Daily and Weekly completed candles must all be fresh
 Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGNMENT</textarea></label><label class="field">Planning capital (₹)<input id="auto-planning-capital" type="number" min="1" value="100000"></label><label class="field">Maximum daily loss (₹)<input id="auto-daily-loss" type="number" min="1" max="5000" value="5000"></label><label class="field">Per-idea risk (₹)<input id="auto-idea-risk" type="number" min="1" value="2000"></label><label class="field">Reserved risk buffer (₹)<input id="auto-risk-reserve" type="number" min="0" value="1000"></label><label class="field">Maximum concurrent positions<input id="auto-max-positions" type="number" min="1" max="20" value="3"></label><label class="field">Maximum concurrent orders<input id="auto-max-orders" type="number" min="1" max="20" value="2"></label><label class="field">Minimum reward:risk<input id="auto-min-rr" type="number" min="1" max="10" step="0.1" value="1.5"></label><label class="field">Order type<select id="auto-order-type"><option value="LIMIT">Limit only</option></select></label><label class="field">Maximum limit buffer (%)<input id="auto-limit-buffer" type="number" min="0" max="5" step="0.1" value="0.5"></label><label class="field">Maximum bid/ask spread (%)<input id="auto-max-spread" type="number" min="0.1" max="20" step="0.1" value="8"></label><label class="field">Trading start (IST)<input id="auto-start" type="time" value="09:30"></label><label class="field">Trading end (IST)<input id="auto-end" type="time" value="15:00"></label><label class="field">Minimum DTE<input id="auto-min-dte" type="number" min="0" max="365" value="1"></label><label class="field">Maximum DTE<input id="auto-max-dte" type="number" min="0" max="365" value="14"></label><label class="field">Cooldown (minutes)<input id="auto-cooldown" type="number" min="1" max="1440" value="30"></label><label class="field">Stale-data veto (seconds)<input id="auto-stale" type="number" min="1" max="300" value="15"></label></div><div class="packet-actions" style="margin-top:12px"><button type="button" class="button secondary" id="save-auto-draft">Save disabled PAPER draft</button><button type="button" class="button secondary" id="preview-auto-policy">Preview complete policy</button></div><div id="auto-status" class="handoff-status" role="status" aria-live="polite"></div><div id="auto-review" hidden><pre id="auto-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact policy acknowledgement<input id="auto-ack" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button" id="save-auto-policy" disabled style="margin-top:10px">Save acknowledged policy</button></div></details></section>
       </section>
@@ -139,7 +139,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   let handoffBatchPreview = null
   let ticketCapabilities = null
   let automationPreview = null
-  $('ticket-panel').insertAdjacentHTML('afterend', '<section id="handoff-batch-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN PREVIEW · FYERS</span><h2>Selected recommendation batch</h2><small class="muted">Every selected symbol is revalidated together; an invalid item blocks the whole batch.</small></div><div class="status">No partial submission</div></div><label class="field">Declared external open risk (₹)<input id="handoff-batch-external-risk" type="number" min="0" step="100" placeholder="Required when other FYERS positions are open"></label><div id="handoff-batch-status" class="handoff-status" role="status" aria-live="polite"></div><div id="handoff-batch-review" hidden><pre id="handoff-batch-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="handoff-batch-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-handoff-batch" disabled style="margin-top:10px">Submit all selected</button></div></section>')
+  $('ticket-panel').insertAdjacentHTML('afterend', '<section id="handoff-batch-panel" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN BROKER PREVIEW</span><h2>Selected recommendation batch</h2><label class="field">Broker account<select id="handoff-batch-broker" class="order-account"><option value="fyers">FYERS · existing account</option></select></label><small class="muted">Every selected symbol is revalidated together; an invalid item blocks the whole batch.</small></div><div class="status">Review every order; reconcile any partial result</div></div><label class="field">Declared external open risk (₹)<input id="handoff-batch-external-risk" type="number" min="0" step="100" placeholder="Required when the selected broker has existing exposure"></label><div id="handoff-batch-status" class="handoff-status" role="status" aria-live="polite"></div><div id="handoff-batch-review" hidden><pre id="handoff-batch-preview" class="packet-preview"></pre><label hidden> <input type="hidden" id="handoff-batch-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-handoff-batch" disabled style="margin-top:10px">Submit all selected</button></div></section>')
   $('minimum-rr').value = '1'
   document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'screener' ? 'active' : ''}" data-view="screener" aria-pressed="${initialView === 'screener'}">Screener</button>`)
   document.querySelector('.nav').insertAdjacentHTML('beforeend', `<button type="button" class="${initialView === 'settings' ? 'active' : ''}" data-view="settings" aria-pressed="${initialView === 'settings'}">Risk Guardrails</button>`)
@@ -169,7 +169,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('#screener .status').textContent = '1 source configured'
 
   document.querySelector('#screener .panel').innerHTML = `<span class="label">MANAGED SOURCES · LOCAL ONLY</span><h2>Chartink screeners</h2><div class="field-grid"><label class="field">Friendly label (optional)<input id="screener-label" placeholder="My daily scan"></label><label class="field">Chartink screener URL<input id="screener-url" type="url" placeholder="https://chartink.com/screener/..."></label></div><div class="packet-actions" style="margin-top:10px"><button type="button" class="button" id="add-screener">Add source</button><button type="button" class="button secondary" id="refresh-screeners">Refresh all</button><button type="button" class="button secondary" id="analyze-screeners" disabled>Analyze selected symbols (0)</button></div><div id="screener-status" class="handoff-status"></div><div id="screener-sources" class="candidate-list"></div><section id="screener-analysis" class="analysis-panel" hidden><div class="step-title"><div><span class="label">READ-ONLY ADVISORY</span><h2>Screener candidate analysis</h2></div></div><div id="screener-analysis-status" class="handoff-status"></div><div id="screener-bulk-selection" class="packet-actions" style="margin:12px 0"><button type="button" class="button secondary" id="screener-select-all">Select all high-conviction equities</button><button type="button" class="button secondary" id="screener-clear-selection">Clear selection</button><span id="screener-selected-count" class="status" aria-live="polite">0 selected</span></div><div id="screener-analysis-results" class="analysis-board"></div><div class="packet-actions"><button type="button" class="button secondary" id="screener-analysis-next" hidden>Analyze next 12</button></div></section><div class="ticket-warning">Source auto-refresh can only update Chartink membership and read-only quote fields; it never analyzes, selects, prepares, or submits an order. Select source candidates first: analysis uses only those selected symbols.</div>`
-  document.querySelector('#screener .panel').insertAdjacentHTML('beforeend', `<section id="screener-order" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN PREVIEW · FYERS</span><h2>Consolidated FYERS batch preview</h2><small class="muted">Selected High-Conviction plans and the aggregate batch must pass fresh validation.</small></div><div class="status">FYERS is the default broker</div></div><div class="field-grid" style="margin-top:12px"><label class="field">Broker<input value="FYERS" readonly></label><label class="field">Cash product<select id="screener-order-product"><option value="INTRADAY">Intraday</option><option value="CNC">Delivery (CNC)</option></select></label><label class="field">Declared external open risk (₹)<input id="screener-order-external-risk" type="number" min="0" step="100" placeholder="Required when FYERS has open positions"></label></div><div id="screener-batch-selection" class="handoff-status" style="margin-top:12px">No High-Conviction plans selected.</div><button type="button" class="button" id="prepare-screener-order" style="margin-top:12px">Prepare FYERS batch preview</button><div id="screener-order-status" class="handoff-status" role="status" aria-live="polite">No plans selected. No broker action has occurred.</div><div id="screener-order-review" hidden><pre id="screener-order-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact fresh confirmation phrase<input id="screener-order-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-screener-order" disabled style="margin-top:10px">Submit confirmed FYERS batch</button></div></section>`)
+  document.querySelector('#screener .panel').insertAdjacentHTML('beforeend', `<section id="screener-order" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN BROKER PREVIEW</span><h2>Consolidated FYERS batch preview</h2><small class="muted">Selected High-Conviction plans and the aggregate batch must pass fresh validation.</small></div><div class="status">FYERS is the default broker</div></div><div class="field-grid" style="margin-top:12px"><label class="field">Broker account<select id="screener-order-broker" class="order-account"><option value="fyers">FYERS · existing account</option></select></label><label class="field">Cash product<select id="screener-order-product"><option value="INTRADAY">Intraday</option><option value="CNC">Delivery (CNC)</option></select></label><label class="field">Declared external open risk (₹)<input id="screener-order-external-risk" type="number" min="0" step="100" placeholder="Required when the selected broker has existing exposure"></label></div><div id="screener-batch-selection" class="handoff-status" style="margin-top:12px">No High-Conviction plans selected.</div><button type="button" class="button" id="prepare-screener-order" style="margin-top:12px">Prepare broker batch preview</button><div id="screener-order-status" class="handoff-status" role="status" aria-live="polite">No plans selected. No broker action has occurred.</div><div id="screener-order-review" hidden><pre id="screener-order-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact fresh confirmation phrase<input id="screener-order-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-screener-order" disabled style="margin-top:10px">Submit confirmed FYERS batch</button></div></section>`)
   $('stop-straddle').insertAdjacentHTML('afterend', '<button type="button" class="button danger" id="squareoff-straddle">Stop &amp; square off</button>')
   $('straddle-action-status').insertAdjacentHTML('afterend', '<section id="straddle-squareoff-review" class="automation-panel" hidden><pre id="straddle-squareoff-preview" class="packet-preview"></pre><label class="field">Exact exit confirmation<input id="straddle-squareoff-confirmation" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="confirm-straddle-squareoff" disabled>Confirm stop &amp; square off</button></section>')
   $('stop-nifty-straddle').insertAdjacentHTML('afterend', '<button type="button" class="button danger" id="squareoff-nifty-straddle">Stop &amp; square off</button>')
@@ -212,7 +212,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('#handoff .handoff-banner span').textContent = 'Place order refreshes the quote, contract, product, quantity, funds or margin, risk limits and ticket state. Nothing is submitted until you review the exact preview and click Submit order.'
 
   const fetchJson = async url => {
-    const response = await fetch(url, { cache: 'no-store' })
+    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { cache: 'no-store' })
     const contentType = response.headers.get('content-type') || ''
     let data
     if (contentType.includes('application/json')) {
@@ -224,20 +224,48 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`)
     return data
   }
+  const orderAccount = id => {
+    const savedId=$(id)?.selectedOptions?.[0]?.dataset.savedBrokerAccount
+    const saved=window.BrokerForms?.accounts().find(account=>account.id===savedId)
+    if(saved)return {broker:saved.broker,account_id:saved.id}
+    const value = $(id)?.value || 'fyers'
+    if(value.startsWith('dhan:'))return {broker:'DHAN',account_id:value.slice(5)}
+    if(value.startsWith('account:'))return {broker:'fyers',account_id:value.slice(8)}
+    if(value.toLowerCase()!=='fyers')throw Error('Selected broker account is unavailable for this form.')
+    return {broker:'fyers'}
+  }
+  // Select the data and execution account before collecting any handoff evidence.
+  const handoffBrokerField=$('ticket-broker')?.closest('label');
+  const handoffCollectionPanel=document.querySelector('#handoff .panel');
+  if(handoffBrokerField&&handoffCollectionPanel){
+    handoffBrokerField.style.cssText='margin:12px 0;max-width:420px';
+    handoffCollectionPanel.prepend(handoffBrokerField);
+  }
+  const previewAccounts = new Map()
   const postJson = async (url, payload) => {
-    if(url.includes("/start"))await window.PaperCapital?.ensure(payload.mode)
-    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    if (url.startsWith('/api/trade-ticket/') && payload.preview_id?.startsWith('DHAN-')) {
+      const accountId=previewAccounts.get(payload.preview_id)
+      if (!accountId) throw Error('Dhan account context is missing; prepare a fresh account-bound preview.')
+      payload={...payload,broker:'DHAN',account_id:accountId}
+    }
+
+    if(url.includes("/start")&&!window.BrokerForms.account(window.BrokerForms.kind(url)))await window.PaperCapital?.ensure(payload.mode)
+    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     const contentType = response.headers.get('content-type') || ''
     const data = contentType.includes('application/json')
       ? await response.json().catch(() => ({ error: `The server returned invalid JSON (HTTP ${response.status}).` }))
       : { error: response.status === 501 ? 'The running dashboard does not support policy POST requests yet. Restart it from this checkout and retry.' : `The server returned a non-JSON response (HTTP ${response.status}).` }
     if (!response.ok) {
+      if (data.replacement_preview?.broker === 'DHAN') previewAccounts.set(data.replacement_preview.preview_id,data.replacement_preview.account_id)
       const error = new Error(data.error || `Request failed (${response.status})`)
       error.payload = data
       throw error
     }
+    if (data.preview_id && data.broker === 'DHAN' && data.account_id) previewAccounts.set(data.preview_id,data.account_id)
+    if (data.replacement_preview?.broker === 'DHAN') previewAccounts.set(data.replacement_preview.preview_id,data.replacement_preview.account_id)
     return data
   }
+  // broker-account-options.js supplies the shared, owner-scoped account list.
   // KAMA has no ticket/confirmation controls: its completed-candle runner owns
   // every paper lifecycle transition.  This UI intentionally never invokes a
   // broker order endpoint.
@@ -283,7 +311,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const priceLegend = kamaChartType === 'CANDLES'
       ? '<span class="positive">Bull candle</span><span class="negative">Bear candle</span>'
       : '<span style="color:#72c7ff">Price close</span>'
-    el.innerHTML = `<div class="premium-chart-stats"><div><b>${number(candles.at(-1).close)}</b><small>Latest completed close</small></div><div><b>${number(candles.at(-1).kama)}</b><small>KAMA</small></div><div><b>${escapeHtml(signal.action || 'WAIT')}</b><small>Efficiency ${signal.efficiency ?? '—'}</small></div><div><b>${escapeHtml(chart.squareoff_at || (String(chart.symbol || '').startsWith('MCX:') ? '23:30 IST' : '15:15 IST'))}</b><small>Scheduled square-off</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${kamaChartType === 'CANDLES' ? 'FYERS candlestick' : 'Completed close line'} chart with Kaufman Adaptive Moving Average"><line x1="${left}" x2="${left}" y1="${top}" y2="${height-bottom}" stroke="#294766"/><line x1="${left}" x2="${width-right}" y1="${height-bottom}" y2="${height-bottom}" stroke="#294766"/>${[0,.25,.5,.75,1].map(step => { const value = low + (high-low)*step; return `<line x1="${left}" x2="${width-right}" y1="${y(value)}" y2="${y(value)}" stroke="#203750"/><text x="8" y="${y(value)+4}" fill="#91a7c4" font-size="10">${value.toFixed(1)}</text>` }).join('')}${priceLayer}<path d="${path('kama')}" fill="none" stroke="#f2d16c" stroke-width="2.8" stroke-linejoin="round"/>${markers}<text x="${left}" y="${height-10}" fill="#91a7c4" font-size="10">Completed ${kamaChartType === 'CANDLES' ? 'OHLC candles' : 'closes'}</text><text x="${width-right}" y="${height-10}" text-anchor="end" fill="#edf4ff" font-size="10">${escapeHtml(chart.timeframe || '')}</text></svg><div class="legend">${priceLegend}<span style="color:#f2d16c">KAMA</span><span class="positive">Entry</span><span class="negative">Exit</span></div>`
+    el.innerHTML = `<div class="premium-chart-stats"><div><b>${number(candles.at(-1).close)}</b><small>Latest completed close</small></div><div><b>${number(candles.at(-1).kama)}</b><small>KAMA</small></div><div><b>${escapeHtml(signal.action || 'WAIT')}</b><small>Efficiency ${signal.efficiency ?? '—'}</small></div><div><b>${escapeHtml(chart.squareoff_at || (String(chart.symbol || '').startsWith('MCX:') ? '23:30 IST' : '15:15 IST'))}</b><small>Scheduled square-off</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${kamaChartType === 'CANDLES' ? (chart.broker==='DHAN'?'Dhan candlestick':'FYERS candlestick') : 'Completed close line'} chart with Kaufman Adaptive Moving Average"><line x1="${left}" x2="${left}" y1="${top}" y2="${height-bottom}" stroke="#294766"/><line x1="${left}" x2="${width-right}" y1="${height-bottom}" y2="${height-bottom}" stroke="#294766"/>${[0,.25,.5,.75,1].map(step => { const value = low + (high-low)*step; return `<line x1="${left}" x2="${width-right}" y1="${y(value)}" y2="${y(value)}" stroke="#203750"/><text x="8" y="${y(value)+4}" fill="#91a7c4" font-size="10">${value.toFixed(1)}</text>` }).join('')}${priceLayer}<path d="${path('kama')}" fill="none" stroke="#f2d16c" stroke-width="2.8" stroke-linejoin="round"/>${markers}<text x="${left}" y="${height-10}" fill="#91a7c4" font-size="10">Completed ${kamaChartType === 'CANDLES' ? 'OHLC candles' : 'closes'}</text><text x="${width-right}" y="${height-10}" text-anchor="end" fill="#edf4ff" font-size="10">${escapeHtml(chart.timeframe || '')}</text></svg><div class="legend">${priceLegend}<span style="color:#f2d16c">KAMA</span><span class="positive">Entry</span><span class="negative">Exit</span></div>`
   }
   $('kama-chart-type').addEventListener('change', () => {
     kamaChartType = $('kama-chart-type').value === 'LINE' ? 'LINE' : 'CANDLES'
@@ -386,7 +414,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   }
   const updateKamaMode = () => {
     const live = $('kama-mode').value === 'LIVE'
-    document.querySelectorAll('.kama-live-setting').forEach(field => { field.hidden = !live })
+    document.querySelectorAll('.kama-live-setting').forEach(field => { field.hidden = !live });if(window.BrokerForms.account('kama')?.broker==='DHAN')$('kama-quantity').closest('label').hidden=false
     if (!$('kama-runner-toggle').disabled) $('kama-runner-toggle').textContent = `Start ${live ? 'live' : 'paper'} runner`
   }
   let kamaUnderlyingSearchGeneration = 0
@@ -1034,14 +1062,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     try {
       if (!screenerSelectedPlans.size) throw new Error('Select at least one High-Conviction plan before requesting a FYERS batch preview.')
       const policy = riskPolicyInputs()
-      button.disabled = true; button.textContent = 'Refreshing FYERS preflight…'
+      button.disabled = true; button.textContent = 'Refreshing selected broker preflight…'
       $('screener-order-status').className = 'handoff-status'
       $('screener-order-status').textContent = 'Validating FYERS auth, security master, live two-sided quote, market state, product, side, quantity, funds, positions, orders and risk ledger.'
       const external = $('screener-order-external-risk').value
       const items = [...screenerSelectedPlans.values()].map(plan => {
         const quantity = Math.max(1, Math.floor(Number(plan.suggested_quantity || 1)))
         return {
-        broker: 'fyers', underlying: `NSE:${plan.symbol}-EQ`, proposal: { kind: 'EQUITY', label: `Screener ${plan.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: plan.direction, quantity, entry: plan.entry, target: plan.target },
+        ...orderAccount('screener-order-broker'), underlying: `NSE:${plan.symbol}-EQ`, proposal: { kind: 'EQUITY', label: `Screener ${plan.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: plan.direction, quantity, entry: plan.entry, target: plan.target },
         invalidation: Number(plan.stop), quantity, cash_product: $('screener-order-product').value,
         daily_loss_limit: policy.dailyLossLimit, idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
         max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
@@ -1054,9 +1082,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('screener-order-review').hidden = false
       $('screener-order-confirmation').value = ''
       $('submit-screener-order').disabled = true
-      $('screener-order-status').textContent = `Exact FYERS batch preview ${preview.preview_id} prepared · ${preview.aggregate.order_count} orders · ${money(preview.aggregate.total_worst_case_risk)} total risk · ${money(preview.aggregate.cash_reserved)} cash reserved. Review every item and exclusion.`
+      $('screener-order-status').textContent = `Exact ${preview.broker || "broker"} batch preview ${preview.preview_id} prepared · ${preview.aggregate.order_count} orders · ${money(preview.aggregate.total_worst_case_risk)} total risk · ${money(preview.aggregate.cash_reserved)} cash reserved. Review every item and exclusion.`
     } catch (error) { $('screener-order-status').className = 'handoff-status error'; $('screener-order-status').textContent = error.message }
-    finally { button.disabled = false; button.textContent = 'Prepare FYERS batch preview' }
+    finally { button.disabled = false; button.textContent = 'Prepare broker batch preview' }
   }
   const submitScreenerOrder = async () => {
     if (!screenerOrderPreview) return
@@ -1177,30 +1205,39 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       <div class="mode-tabs" aria-label="Detail timeframe" style="margin-top:12px">${timeframeOrder.map(tf => `<button type="button" data-detail-timeframe="${tf}" class="${selectedTimeframe === tf ? 'active' : ''}" aria-pressed="${selectedTimeframe === tf}">${tf}</button>`).join('')}</div>
       <div class="detail-grid"><div><article class="chart-card"><h3>${escapeHtml(sector.name)} ${escapeHtml(selectedTimeframe)} · Price and EMA structure</h3>${priceChart(state)}</article><div class="explanation"><b>${escapeHtml(state.label || 'Unavailable')} · Trend ${number(state.score)}/100</b><ul>${(state.reasons || []).map(reason => `<li>${escapeHtml(reason)}</li>`).join('') || '<li>No explanation is available because candle data is missing.</li>'}</ul></div><div class="chart-grid" style="margin-top:12px">${lineChart('Sector score history', history, 'overall_score')}${lineChart('Rank history', history, 'rank', true)}${lineChart('Relative strength history', history, 'relative_strength_score')}${lineChart('Momentum history', history, 'momentum_score')}${lineChart('Breadth history', history, 'breadth_score')}</div></div>
       <aside><article class="chart-card"><h3>Multi-timeframe summary</h3>${timeframeOrder.map(tf => { const item = sector.timeframe_states?.[tf] || {}; return `<div class="row" style="grid-template-columns:70px 1fr 70px"><b>${tf}</b><span class="${stateClass(item.state)}" title="${escapeHtml(qualityText(item.data_quality || 'Unavailable'))}">${escapeHtml(item.label || 'Unavailable')}</span><strong>${number(item.score)}</strong></div>` }).join('')}</article><article class="chart-card" style="margin-top:12px"><h3>Rotation history</h3><div class="rotation-list">${history.length ? history.slice().reverse().map(point => `<div><span>${time(point.timestamp)}</span><b>${escapeHtml(point.rotation_state || 'NEUTRAL')}</b><span>${point.rank ? `#${point.rank}` : '—'} · ${number(point.overall_score)}</span></div>`).join('') : '<div class="chart-empty">Waiting for persisted snapshots.</div>'}</div></article><article class="chart-card" style="margin-top:12px"><h3>Data quality</h3><p>${escapeHtml(qualityText(sector.data_quality))}</p><p class="muted">Latest completed bar: ${time(sector.last_updated)}</p><p class="muted">Missing: ${escapeHtml((sector.missing_components || []).join(', ') || 'none')}</p><p class="muted">Weights: ${escapeHtml(Object.entries(sector.component_weights || {}).map(([key, value]) => `${key} ${value}%`).join(' · '))}</p></article></aside></div>
-      <section id="constituent-workflow" class="chart-card" style="margin-top:12px"><h3>Sector → stock prioritization</h3><p class="muted">Contributions use unrounded FYERS stock moves multiplied by the official published weight. They are analytical only and do not place orders. ${escapeHtml(attributionScope)}.</p><div class="movers"><div><b>Strongest current contributors</b><ul class="mover-list">${strongest.length ? strongest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div><div><b>Weakest current contributors</b><ul class="mover-list">${weakest.length ? weakest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div></div></section>`
+      <section id="constituent-workflow" class="chart-card" style="margin-top:12px"><h3>Sector → stock prioritization</h3><p class="muted">Contributions use unrounded ${escapeHtml(analysis?.provider === 'DHAN' ? 'Dhan' : 'FYERS')} stock moves multiplied by the official published weight. They are analytical only and do not place orders. ${escapeHtml(attributionScope)}.</p><div class="movers"><div><b>Strongest current contributors</b><ul class="mover-list">${strongest.length ? strongest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div><div><b>Weakest current contributors</b><ul class="mover-list">${weakest.length ? weakest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div></div></section>`
     document.querySelectorAll('[data-detail-timeframe]').forEach(button => button.addEventListener('click', () => loadDetail(sector.sector_id, button.dataset.detailTimeframe)))
     $('strongest-stocks').addEventListener('click', () => $('constituent-workflow').scrollIntoView({ behavior: scrollBehavior, block: 'start' }))
   }
-  const loadDetail = async (sectorId, timeframe = 'daily') => {
+  const preserveSectorViewport = task => {
+    const nodes=[document.scrollingElement,...document.querySelectorAll('main,#sectors,#sector-detail')].filter(Boolean);
+    const positions=nodes.map(node=>[node,node.scrollLeft,node.scrollTop]);
+    const x=window.scrollX,y=window.scrollY;
+    task();
+    for(const [node,left,top] of positions){node.scrollLeft=left;node.scrollTop=top;}
+    window.scrollTo({left:x,top:y,behavior:'instant'});
+  };
+  const loadDetail = async (sectorId, timeframe = 'daily', scroll = true) => {
     selectedSector = sectorId
     selectedTimeframe = timeframe
     $('sector-detail').hidden = false
-    $('sector-detail').innerHTML = '<div class="empty">Loading explainable sector detail…</div>'
+    if(scroll)$('sector-detail').innerHTML = '<div class="empty">Loading explainable sector detail…</div>'
     try {
       const data = await fetchJson(`/api/sector-analysis/detail?mode=${encodeURIComponent(mode)}&sector=${encodeURIComponent(sectorId)}`)
-      renderDetail(data.sector)
-      $('sector-detail').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
+      if(scroll)renderDetail(data.sector);else preserveSectorViewport(()=>renderDetail(data.sector));
+      if(scroll)$('sector-detail').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
     } catch (error) {
       $('sector-detail').innerHTML = `<div class="empty error">${escapeHtml(error.message)}</div>`
     }
   }
+  window.addEventListener('broker-account-change',event=>{if(event.detail.kind==='sector'){analysis=null;selectedSector=null;$('sector-detail').hidden=true;refreshAnalysis();}});
   const refreshAnalysis = async () => {
     try {
       analysis = await fetchJson(`/api/sector-analysis?mode=${encodeURIComponent(mode)}`)
       $('analysis-status').textContent = analysisStatusText(analysis, time)
-      $('weight-source').textContent = `Official NSE constituent weights as of ${sourceDate(analysis.weight_source?.source_as_of)} · ${analysis.weight_source?.complete_indices ?? 0} complete, ${analysis.weight_source?.partial_indices ?? 0} partial indices`
-      renderTable()
-      if (selectedSector && analysis.sectors?.some(item => item.sector_id === selectedSector)) loadDetail(selectedSector, selectedTimeframe)
+      $('weight-source').textContent = `${analysis.provider === 'DHAN' ? 'Dhan' : 'FYERS'} market data · Official NSE constituent weights as of ${sourceDate(analysis.weight_source?.source_as_of)} · ${analysis.weight_source?.complete_indices ?? 0} complete, ${analysis.weight_source?.partial_indices ?? 0} partial indices`
+      preserveSectorViewport(()=>renderTable())
+      if (selectedSector && analysis.sectors?.some(item => item.sector_id === selectedSector)) loadDetail(selectedSector, selectedTimeframe, false)
     } catch (error) {
       const retained = analysis?.sectors?.length ? analysis : null
       analysis = retained
@@ -1215,6 +1252,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
   }
   const refreshAccount = async () => {
+    // The separate connection badge checks auth; hidden P&L needs no REST polling.
+    if (document.hidden || !document.querySelector("#broker.active")) return
     const setAuthenticationControl = connected => {
       const button = $('reauth')
       const help = $('reauth-help')
@@ -1228,27 +1267,40 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     try {
       const data = await fetchJson('/api/account')
       const positions = (data.positions || []).filter(item => Number(item.netQty ?? item.net_qty ?? 0) !== 0)
-      const charges = data.estimated_charges || {}; const chargeTotal = Number(charges.total)
-      const estimatedNet = Number(data.estimated_net_pnl)
+      const charges = data.estimated_charges || {}; const chargeTotal = charges.total == null ? NaN : Number(charges.total)
+      const estimatedNet = data.estimated_net_pnl == null ? NaN : Number(data.estimated_net_pnl)
       $('live-pnl').textContent = data.connected ? money(data.pnl) : '—'; $('live-pnl').className = data.connected ? stateClass(data.pnl) : 'neutral'
       $('estimated-charges').textContent = data.connected && Number.isFinite(chargeTotal) ? `−${money(chargeTotal)}` : '—'; $('estimated-charges').className = data.connected && Number.isFinite(chargeTotal) ? 'negative' : 'neutral'
       $('estimated-charges-note').textContent = charges.available ? `Estimate · ${charges.orders || 0} executed orders` : (charges.disclaimer || 'Awaiting FYERS tradebook')
       $('estimated-net-pnl').textContent = data.connected && Number.isFinite(estimatedNet) ? money(estimatedNet) : '—'; $('estimated-net-pnl').className = data.connected && Number.isFinite(estimatedNet) ? stateClass(estimatedNet) : 'neutral'
       $('open-count').textContent = data.connected ? String(positions.length) : '—'; $('funds').textContent = data.connected ? money(data.available_funds) : '—'
       $('open-positions').innerHTML = !data.connected ? `<p class="empty error">${escapeHtml(data.error || 'Connect FYERS to load positions.')}</p>` : positions.length ? positions.map(item => { const quantity = item.netQty ?? item.net_qty ?? 0; const pnl = item.pl ?? item.pnl ?? 0; return `<div class="row"><b>${escapeHtml(item.symbol || item.symbol_name || '—')}</b><span>${quantity}</span><span>${money(item.netAvg ?? item.net_avg)}</span><strong class="${stateClass(pnl)}">${money(pnl)}</strong></div>` }).join('') : '<p class="empty">No open broker positions.</p>'
-      $('broker-dot').classList.toggle('ok', data.connected === true); $('broker-state').textContent = data.connected === true ? 'FYERS connected' : (data.error || 'FYERS disconnected'); $('account-state').textContent = data.connected === true ? 'Broker feed connected' : (data.error || 'Broker feed unavailable'); setAuthenticationControl(data.connected === true)
+      $('broker-dot').classList.toggle('ok', data.connected === true); $('broker-state').textContent = data.connected === true ? (data.broker === 'DHAN' ? 'Dhan connected' : 'FYERS connected') : (data.error || 'Selected broker disconnected'); $('account-state').textContent = data.connected === true ? (data.broker==='DHAN'?'Dhan account API connected':'Broker feed connected') : (data.error || 'Broker feed unavailable'); setAuthenticationControl(data.connected === true)
     } catch (error) { $('account-state').textContent = error.message; $('broker-state').textContent = 'FYERS status delayed'; $('broker-dot').classList.remove('ok'); setAuthenticationControl(false); $('reauth-help').textContent = 'Broker status request failed. Authentication expiry is not confirmed; retrying the status check.' }
   }
   const refreshClosed = async () => {
+    if(document.hidden || !document.querySelector('#broker.active'))return;
     try {
       const data = await fetchJson(`/api/realized-pnl?period=${period}`)
       const summary = data.summary || {}; const records = data.records || []; const reportedTotal = Number(summary.net_pnl); const total = Number.isFinite(reportedTotal) ? reportedTotal : records.reduce((sum, item) => sum + Number(item.pnl || 0), 0)
       $('closed-pnl').textContent = data.supported === false ? '—' : money(total); $('closed-pnl').className = data.supported === false ? 'neutral' : stateClass(total)
-      const periodName = `${period[0].toUpperCase() + period.slice(1)}`; $('closed-pnl-label').textContent = `${periodName} net P&L`
-      $('closed-summary').innerHTML = data.supported === false ? `<span class="muted">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</span>` : `<b>${periodName} net P&L</b><span aria-hidden="true"></span><span aria-hidden="true"></span><strong class="${stateClass(total)}">${money(total)}</strong>`
+      const periodName = `${period[0].toUpperCase() + period.slice(1)}`; const pnlBasis=data.broker==='DHAN'?'gross P&L':'net P&L'; $('closed-pnl-label').textContent = `${periodName} ${pnlBasis}`
+      $('closed-summary').innerHTML = data.supported === false ? `<span class="muted">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</span>` : `<b>${periodName} ${pnlBasis}</b><span aria-hidden="true"></span><span aria-hidden="true"></span><strong class="${stateClass(total)}">${money(total)}</strong>`
       $('closed-positions').innerHTML = data.supported === false ? `<p class="empty">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</p>` : records.length ? records.map(item => `<div class="row"><b>${escapeHtml(item.symbol)}</b><span>${escapeHtml(item.buy_rate)} / ${escapeHtml(item.sell_rate)}</span><span>${escapeHtml(item.buy_qty)} / ${escapeHtml(item.sell_qty)}</span><strong class="${stateClass(item.pnl)}">${money(item.pnl)}</strong></div>`).join('') : '<p class="empty">No closed positions in this period.</p>'
     } catch (error) { $('closed-pnl-label').textContent = 'Closed P&L'; $('closed-summary').textContent = 'Closed-position summary unavailable.'; $('closed-positions').innerHTML = `<p class="empty error">${escapeHtml(error.message)}</p>` }
   }
+
+  document.addEventListener('click',event=>{if(event.target.closest('[data-view="broker"]'))queueMicrotask(()=>{refreshAccount();refreshClosed();});});
+
+  window.addEventListener('broker-account-change',event=>{
+    if(event.detail.kind!=='account')return;
+    for(const id of ['live-pnl','estimated-charges','estimated-net-pnl','open-count','funds','closed-pnl'])$(id).textContent='—';
+    $('open-positions').textContent='Loading selected broker positions…';
+    $('closed-positions').textContent='Loading selected broker history…';
+    $('closed-summary').textContent='';
+    $('account-state').textContent='Checking selected broker account…';
+    refreshAccount();refreshClosed();
+  });
 
   const renderPremiumChart = (chart, chartId = 'premium-chart', updatedId = 'premium-chart-updated') => {
     if (!chart) {
@@ -1579,6 +1631,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('candidate-list').innerHTML = candidates.length ? candidates.map(candidate => {
       const derived = candidate.derived_invalidation || {}
       const derivedReady = derived.status === 'READY' && Number(derived.price) > 0
+      const optionRequired=selectedInstrumentRoute()==='stock_options';
+      const hasOption=!optionRequired||!!analysisRun?.cards?.some(card=>card.candidate_key===candidate.key&&card.analysis?.proposal?.kind==='LONG_OPTION');
+      const eligible=derivedReady&&hasOption;
+
       const detail = candidate.kind === 'stock'
         ? `${candidate.parent_sector} · ${percent(candidate.market_change_pct)} · ${money(candidate.price)}`
         : `Sector rank ${candidate.rank ? `#${candidate.rank}` : '—'} · score ${number(candidate.overall_score)}`
@@ -1586,10 +1642,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         ? `Auto · ${escapeHtml(derived.basis || 'completed-candle structure')}`
         : `Blocked · ${escapeHtml(derived.reason || 'no completed-candle structural stop')}`
       const suggestedQuantity = Number(candidate.allocation?.suggested_quantity)
-      const allocationCopy = Number.isInteger(suggestedQuantity) && suggestedQuantity > 0
+      const allocationCopy = !hasOption ? (analysisRun?.exclusions?.find(item=>item.candidate_key===candidate.key)?.reason || 'No validated option contract for this broker.') : Number.isInteger(suggestedQuantity) && suggestedQuantity > 0
         ? `Funds-weighted suggestion: ${suggestedQuantity} ${candidate.kind === 'stock' ? 'shares' : 'lots'} · ₹${number(candidate.allocation.estimated_notional)}`
-        : candidate.allocation?.reason || 'Quantity is set when you rank selected candidates by FYERS funds.'
-      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${derivedReady ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small><small>${escapeHtml(allocationCopy)}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
+        : candidate.allocation?.reason || 'Quantity is set when you rank selected candidates by selected-broker funds.'
+      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${eligible ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small><small>${escapeHtml(allocationCopy)}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
     }).join('') : '<div class="empty">No sectors or scanned stocks currently meet exact full alignment.</div>'
     document.querySelectorAll('.candidate-select').forEach(input => {
       input.addEventListener('change', () => {
@@ -1613,8 +1669,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const selectedInstrumentRoute = () => document.querySelector('input[name="instrument-route"]:checked')?.value || ''
   const rankCandidatesForSelection = async () => {
     if (!candidateCollection || !analysisRun) throw new Error('Collect fresh candidates before ranking them.')
-    const account = await fetchJson('/api/account')
-    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'FYERS available funds are unavailable for ranking.')
+    const fundingAccount=orderAccount('ticket-broker'); const account = await fetchJson(fundingAccount.broker === 'DHAN' ? '/api/dhan/account?account_id='+encodeURIComponent(fundingAccount.account_id) : '/broker-workspace/'+encodeURIComponent(fundingAccount.account_id)+'/api/account')
+    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'Selected broker funds are unavailable for ranking.')
     const availableFunds = Number(account.available_funds)
     const byKey = new Map((analysisRun.cards || []).map(card => [card.candidate_key, card]))
     const route = selectedInstrumentRoute()
@@ -1640,7 +1696,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         const price = Number(candidate.price)
         candidate.allocation = remaining >= price
           ? { suggested_quantity: 1, estimated_notional: price, conviction_weight: Number(byKey.get(candidate.key)?.analysis?.conviction?.score || 1) }
-          : { suggested_quantity: 0, estimated_notional: 0, reason: 'No available FYERS funds remain after higher-conviction allocations.' }
+          : { suggested_quantity: 0, estimated_notional: 0, reason: 'No selected-broker funds remain after higher-conviction allocations.' }
         if (candidate.allocation.suggested_quantity) remaining -= price
       }
       const allocated = fundable.filter(candidate => candidate.allocation?.suggested_quantity > 0)
@@ -1663,14 +1719,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       input.checked = route !== 'cash_equity' || Number(candidate?.allocation?.suggested_quantity) > 0
     })
     document.querySelector('.candidate-select:not(:disabled)')?.dispatchEvent(new Event('change'))
-    const top = ranked.filter(candidate => candidate.derived_invalidation?.status === 'READY').slice(0, 3).map((candidate, index) => {
+    const top = ranked.filter(candidate => candidate.derived_invalidation?.status === 'READY' && (route!=='stock_options'||byKey.get(candidate.key)?.analysis?.proposal?.kind==='LONG_OPTION')).slice(0, 3).map((candidate, index) => {
       const card = byKey.get(candidate.key); const score = card?.analysis?.conviction?.score ?? 0
       return `#${index + 1} ${candidate.name} (conviction ${score})`
     })
     const allocatedTotal = route === 'cash_equity' ? ranked.reduce((sum, candidate) => sum + Number(candidate.allocation?.estimated_notional || 0), 0) : 0
-    $('candidate-status').textContent = `Ranked using fresh FYERS available funds of ${money(availableFunds)} and conviction. Take first: ${top.join(' · ')}. ${route === 'cash_equity' ? `Suggested allocation totals ${money(allocatedTotal)} and remains editable.` : 'Each validated long option starts at one editable lot.'} All selections still require their own fresh ticket preview.`
+    $('candidate-status').textContent = `Ranked using fresh selected-broker available funds of ${money(availableFunds)} and conviction. Take first: ${top.join(' · ')}. ${route === 'cash_equity' ? `Suggested allocation totals ${money(allocatedTotal)} and remains editable.` : 'Each validated long option starts at one editable lot.'} All selections still require their own fresh ticket preview.`
   }
-  const handoffResultsKey='sector-pulse:handoff-results-v1'
+  const handoffResultsKey='sector-pulse:handoff-results-v2'
   let handoffCurrentRoute='cash_equity'
   const handoffInputIds=['planning-capital','daily-loss-limit','idea-risk-limit','risk-reserve','max-positions','minimum-rr','enforce-risk-controls','stop-basis','order-type','handoff-allocation-budget','handoff-option-lots']
   const saveHandoffResults=()=>{
@@ -1679,7 +1735,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const stored=JSON.parse(sessionStorage.getItem(handoffResultsKey)||'{}')
       const display=JSON.parse(JSON.stringify(analysisRun))
       for(const card of display.cards||[])card.analysis.active_invalidation=null
-      stored[handoffCurrentRoute]={savedAt:Date.now(),route:handoffCurrentRoute,analysisRun:display,candidateCollection,
+      stored[orderAccount('ticket-broker').account_id+':'+handoffCurrentRoute]={account_id:orderAccount('ticket-broker').account_id,broker:orderAccount('ticket-broker').broker,savedAt:Date.now(),route:handoffCurrentRoute,analysisRun:display,candidateCollection,
         selected:[...document.querySelectorAll('.candidate-select:checked')].map(input=>input.value),
         inputs:Object.fromEntries(handoffInputIds.map(id=>[id,$(id)?.type==='checkbox'?$(id).checked:$(id)?.value]))}
       sessionStorage.setItem(handoffResultsKey,JSON.stringify(stored))
@@ -1688,7 +1744,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const restoreHandoffResults=route=>{
     try{
       const stored=JSON.parse(sessionStorage.getItem(handoffResultsKey)||'{}')
-      const saved=stored[route]||(!route?Object.values(stored).sort((a,b)=>b.savedAt-a.savedAt)[0]:null)
+      const current=orderAccount('ticket-broker'); const saved=stored[current.account_id+':'+route]||(!route?Object.values(stored).filter(item=>item.account_id===current.account_id&&item.broker===current.broker).sort((a,b)=>b.savedAt-a.savedAt)[0]:null)
       if(!saved?.analysisRun||!saved.candidateCollection)return
       handoffCurrentRoute=saved.route
       document.querySelector(`input[name="instrument-route"][value="${saved.route}"]`).checked=true
@@ -1745,7 +1801,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('analysis-board').innerHTML = (analysisRun.cards || []).map(card => {
       const a = card.analysis; const c = card.candidate; const p = a.proposal; const proposed = a.proposed_sizing || p?.sizing || {}
       const legs = p?.legs?.length ? `<table class="leg-table"><thead><tr><th>Action</th><th>Contract</th><th>Strike</th><th>Bid / ask</th><th>OI · volume</th><th>Lot · tick</th><th>Delta · IV</th></tr></thead><tbody>${p.legs.map(leg => `<tr><td>${escapeHtml(leg.action)}</td><td>${escapeHtml(leg.symbol)}</td><td>${number(leg.strike)}</td><td>${number(leg.bid)} / ${number(leg.ask)}</td><td>${number(leg.open_interest)} · ${number(leg.volume)}</td><td>${number(leg.lot_size)} · ${number(leg.tick_size)}</td><td>${number(leg.greeks?.delta)} · ${number(leg.greeks?.iv)}</td></tr>`).join('')}</tbody></table>` : ''
-      const optionGate = p ? '<p class="proposal-copy"><b>Option gates passed:</b> exact FYERS contract and expiry, master lot/tick, two-sided quote, spread, OI, volume, complete Greeks and defined maximum loss.</p>' : ''
+      const optionGate = p ? '<p class="proposal-copy"><b>Option gates passed:</b> exact selected-broker contract and expiry, master lot/tick, two-sided quote, spread, OI, volume, complete Greeks and defined maximum loss.</p>' : ''
       const target = p ? p.target_exit_points : proposed.target || a.target
       const quantity = p ? `${proposed.lots || '—'} lot · ${proposed.quantity || '—'}` : proposed.quantity || '—'
       const maxLoss = p ? proposed.estimated_max_loss || p.max_loss_per_lot : proposed.estimated_max_loss
@@ -1807,14 +1863,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const value = element.querySelector(`[data-stop-value="${method}"]`)?.value
     const button = element.querySelector('.accept-analysis'); const status = element.querySelector('.card-status')
     try {
-      button.disabled = true; status.textContent = 'Refreshing FYERS quote, tick and dependent risk values…'
+      button.disabled = true; status.textContent = 'Refreshing selected-broker quote, tick and dependent risk values…'
       const policy = riskPolicyInputs()
       const result = await postJson('/api/analysis-handoff/size', { analysis_id: analysisRun.analysis_id, card_id: card.card_id, selection: { method, value: value === '' || value == null ? null : Number(value) }, risk_policy: policyPayload(policy) })
       card.analysis.active_invalidation = result.active_invalidation
       if (card.analysis.proposal) card.analysis.proposal.sizing = { status: 'SIZED', lots: result.active_invalidation.lots, quantity: result.active_invalidation.quantity, estimated_max_loss: result.active_invalidation.estimated_max_loss, underlying_invalidation: result.active_invalidation.price }
       status.textContent = `Accepted · fresh ₹${number(result.fresh_quote.price)} · stop ₹${number(result.active_invalidation.price)} · target ${number(result.active_invalidation.target)} · size ${result.active_invalidation.quantity}. Review the quantity before submitting.`
       element.querySelector('.prepare-analysis-ticket').disabled = false
-      invalidateTicketPreview('Accepted values are fresh; prepare a separate exact FYERS preview to continue.')
+      invalidateTicketPreview('Accepted values are fresh; prepare a separate exact selected-broker preview to continue.')
       prepareAnalysisTicket(card, element)
       await prepareTicket()
     } catch (error) { status.className = 'handoff-status card-status error'; status.textContent = error.message }
@@ -1828,7 +1884,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       entry: card.analysis.active_invalidation.entry, target: card.analysis.active_invalidation.target,
       exit_plan_mode: selectedCashExitPlan(),
     }
-    const ticket = { candidate: { ...card.candidate, risk_input: { invalidation: card.analysis.active_invalidation.price } }, options: { expiry: proposal.expiry, expiry_iso: proposal.expiry_iso }, proposal }
+    const ticket = { underlying_exit_plan: { entry: card.analysis.active_invalidation.entry, stop: card.analysis.active_invalidation.price, target: card.analysis.active_invalidation.target }, candidate: { ...card.candidate, risk_input: { invalidation: card.analysis.active_invalidation.price } }, options: { expiry: proposal.expiry, expiry_iso: proposal.expiry_iso }, proposal }
     const ticketKey = `${ticket.candidate.symbol}|${ticket.proposal.label}|${ticket.options.expiry_iso || ''}`
     let index = ticketProposals.findIndex(item => `${item.candidate.symbol}|${item.proposal.label}|${item.options.expiry_iso || ''}` === ticketKey)
     if (index < 0) index = ticketProposals.push(ticket) - 1
@@ -1840,6 +1896,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   }
   const collectCandidates = async () => {
     const button = $('collect-candidates')
+    analysisRun=null;candidateCollection=null;ticketProposals=[];
+    $('candidate-list').replaceChildren();$('analysis-board').replaceChildren();
+    invalidateTicketPreview('Collecting fresh selected-broker evidence.');
     button.disabled = true; button.textContent = 'Scanning completed bars…'
     $('candidate-status').className = 'handoff-status'; $('candidate-status').textContent = 'Scanning fully aligned sectors and their direction-matching official-weight contributors.'
     try {
@@ -1899,6 +1958,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('handoff-allocation-budget').placeholder=options?'Blank = one lot per stock':'Enter batch budget'
   }
   const prepareHandoffBatch = async () => {
+    handoffBatchPreview = null
+    $('submit-handoff-batch').disabled = true
+    $('handoff-batch-review').hidden = true
     const button = $('prepare-handoff-batch')
     $('handoff-batch-panel').hidden = false
     try {
@@ -1910,17 +1972,26 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       if(optionBatch&&(!Number.isInteger(optionLots)||optionLots<1))throw new Error('Lots per stock must be a positive whole number.')
       const cards = selected.map(key => analysisRun?.cards?.find(card => card.candidate_key === key)).filter(Boolean)
       if (cards.length !== selected.length) throw new Error(optionBatch ? 'Some selected stocks have no validated long option. Review the excluded opportunities; fresh contracts and expiry are required.' : 'Refresh the recommendations before preparing the batch.')
-      button.disabled = true; button.textContent = 'Refreshing FYERS batch preflight…'
+      button.disabled = true; button.textContent = 'Refreshing selected broker batch preflight…'
       $('handoff-batch-status').className = 'handoff-status'
       $('handoff-batch-status').textContent = 'Refreshing every symbol, quote, stop, funds, positions, orders and aggregate risk. Any failed item blocks the full batch.'
       const external = $('handoff-batch-external-risk').value
+      if (optionBatch && orderAccount('handoff-batch-broker').broker === 'DHAN') {
+        for (const card of cards) {
+          const invalidation = Number(riskInputs[card.candidate.key]?.invalidation)
+          const sized = await postJson('/api/analysis-handoff/size', { analysis_id: analysisRun.analysis_id, card_id: card.card_id, selection: { method: 'custom', value: invalidation }, risk_policy: policyPayload(policy) })
+          card.analysis.active_invalidation = sized.active_invalidation
+        }
+      }
       const items = cards.map(card => {
         const candidate = card.candidate; const plan = card.analysis
         const invalidation = Number(riskInputs[candidate.key]?.invalidation)
         const optionProposal = plan.proposal
         if (optionBatch && (!optionProposal?.legs?.length || !optionProposal.expiry_iso)) throw new Error(`${candidate.name}: no validated long option and expiry are available.`)
         return {
-          broker: 'fyers', underlying: candidate.symbol,
+          ...orderAccount('handoff-batch-broker'), underlying: candidate.symbol,
+          underlying_exit_plan: plan.active_invalidation ? { entry: plan.active_invalidation.entry, stop: plan.active_invalidation.price, target: plan.active_invalidation.target } : undefined,
+          analysis_evidence: { captured_at: new Date().toISOString(), source: 'ANALYSIS_HANDOFF', candidate, recommendation: plan, conviction: plan.conviction || null, collection: candidateCollection, analysis_created_at: analysisRun?.created_at || analysisRun?.as_of || null },
           proposal: optionBatch ? { ...optionProposal, kind: 'LONG_OPTION', source: 'ANALYSIS_HANDOFF' } : { kind: 'EQUITY', label: `Analysis Handoff ${candidate.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: candidate.direction, quantity: 1, entry: plan.entry, target: plan.target },
           expiry: optionBatch ? optionProposal.expiry_iso : undefined,
           lots: optionBatch ? optionLots : undefined,
@@ -1953,7 +2024,18 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('handoff-batch-preview').textContent = JSON.stringify(result, null, 2)
       $('handoff-batch-status').textContent = `${result.status}: ${result.message}`
       handoffBatchPreview = null
-    } catch (error) { $('handoff-batch-status').className = 'handoff-status error'; $('handoff-batch-status').textContent = error.message }
+    } catch (error) {
+      const replacement = error.payload?.replacement_preview
+      if (replacement) {
+        handoffBatchPreview = replacement
+        $('handoff-batch-preview').textContent = JSON.stringify(replacement, null, 2)
+        $('handoff-batch-review').hidden = false
+        $('handoff-batch-confirmation').value = ''
+        button.disabled = !replacement.live_submission_enabled || !replacement.submission_eligible
+      }
+      $('handoff-batch-status').className = 'handoff-status error'
+      $('handoff-batch-status').textContent = replacement ? `${error.message} The updated preview is displayed below; review it before submitting again.` : error.message
+    }
   }
   const renderPacket = packet => {
     handoffPacket = packet
@@ -2010,12 +2092,40 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `sector-pulse-${handoffPacket.recipient}-${new Date().toISOString().replaceAll(':', '-')}.json`; link.click(); URL.revokeObjectURL(link.href)
     $('packet-status').textContent = 'Packet downloaded locally. Nothing was transmitted.'
   }
+  let ticketCapabilityRevision = 0
   const refreshTicketCapabilities = async () => {
+    const revision = ++ticketCapabilityRevision
+    $('ticket-capability').textContent = 'Checking selected broker capability'
     try {
-      ticketCapabilities = await fetchJson('/api/trade-ticket/capabilities')
-      $('ticket-capability').textContent = ticketCapabilities.live_submission_enabled ? 'FYERS live path enabled · Submit order enabled' : ticketCapabilities.fyers_configured ? 'FYERS preview ready · live path disabled' : 'FYERS setup required'
-    } catch (error) { $('ticket-capability').textContent = error.message }
+      const selected = orderAccount('ticket-broker')
+      const query = new URLSearchParams(selected)
+      const capability = await fetchJson('/api/trade-ticket/capabilities?' + query)
+      if (revision !== ticketCapabilityRevision) return
+      ticketCapabilities = capability
+      const broker = String(capability.selected_broker || selected.broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
+      const configured = broker === 'Dhan' ? capability.dhan_configured : capability.fyers_configured
+      $('ticket-capability').textContent = capability.live_submission_enabled ? `${broker} live path enabled · Review required before submission` : configured ? `${broker} preview ready · live path disabled` : `${broker} setup required`
+    } catch (error) { if (revision === ticketCapabilityRevision) $('ticket-capability').textContent = error.message }
   }
+  const updateManualBrokerPresentation = account => {
+    const broker = (account?.broker || orderAccount('ticket-broker').broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
+    const heading = document.querySelector('#handoff header .status')
+    if (heading) heading.textContent = `${broker} data · ${broker} execution selected`
+    const warning = document.querySelector('#ticket-panel > .ticket-warning')
+    if (warning) warning.textContent = broker === 'Dhan' ? 'Dhan execution uses the selected saved account. Bought options use a Super Order with estimated premium stop-loss and target mapped from the analysis underlying levels. Review all entry and exit prices before submitting. Broker acknowledgement alone does not confirm a fill or active protection.' : 'FYERS execution uses the selected saved account. The exact ticket refreshes contracts, quotes, funds, risk and order state. Review all terms before submitting.'
+  }
+  window.addEventListener('broker-accounts-ready', () => { updateManualBrokerPresentation(); restoreHandoffResults(''); refreshTicketCapabilities() })
+  window.addEventListener('broker-account-change', event => {
+    if (event.detail.kind !== 'manual') return
+    updateManualBrokerPresentation(event.detail.account)
+    analysisRun = null; candidateCollection = null; ticketProposals = []; handoffPacket = null;
+    $('candidate-list').replaceChildren();
+    $('candidate-status').textContent='Broker account changed. Collect fresh evidence from the selected broker.';
+    $('analysis-board')?.replaceChildren();
+    ticketPreview = null; handoffBatchPreview = null; screenerOrderPreview = null
+    for (const id of ['submit-ticket','submit-handoff-batch','submit-screener-order']) if ($(id)) $(id).disabled = true
+    refreshTicketCapabilities()
+  })
   const selectedTicketProposal = () => {
     const index = Number($('ticket-proposal').value)
     return Number.isInteger(index) && ticketProposals[index] ? ticketProposals[index] : null
@@ -2024,12 +2134,20 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     ticketPreview = preview
     $('ticket-review').hidden = false
     $('ticket-preview').textContent = JSON.stringify(preview, null, 2)
+    let protectionSummary = $('ticket-protection-summary')
+    if (!protectionSummary) {
+      protectionSummary = document.createElement('p'); protectionSummary.id = 'ticket-protection-summary'; protectionSummary.className = 'ticket-warning'
+      $('ticket-preview').before(protectionSummary)
+    }
+    const protection = preview.protection
+    protectionSummary.textContent = protection ? `Dhan Super Order · premium entry ${money(protection.premium_entry)} · stop-loss ${money(protection.stop_loss_price)} · target ${money(protection.target_price)}. Derived from fresh underlying ${money(protection.underlying_entry)}, stop ${money(protection.underlying_stop)}, target ${money(protection.underlying_target)}. Estimated at unchanged time and volatility. Linked exit legs are requested with entry; broker acceptance and fill remain unconfirmed.` : (preview.warnings || []).join(' ')
+
     const ledger = preview.daily_risk_ledger || {}
     $('risk-strip').innerHTML = [
-      ['Daily limit', money(ledger.hard_daily_loss_limit)],
+      ['Daily limit', ledger.controls_enforced === false ? 'Not applied' : money(ledger.hard_daily_loss_limit)],
       ['Used risk', money((ledger.realized_loss || 0) + (ledger.app_open_worst_case_risk || 0) + (ledger.declared_external_open_risk || 0))],
       ['Protected buffer', money(ledger.protected_reserve)],
-      ['After proposal', money(ledger.remaining_after_proposal)],
+      ['After proposal', ledger.controls_enforced === false ? 'User controlled' : money(ledger.remaining_after_proposal)],
     ].map(([label, value]) => `<div><b>${escapeHtml(value)}</b><small>${escapeHtml(label)}</small></div>`).join('')
     $('ticket-confirmation').value = ''
     $('submit-ticket').disabled = !preview.live_submission_enabled || !preview.submission_eligible
@@ -2037,6 +2155,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('ticket-review').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
   }
   const prepareTicket = async () => {
+    ticketPreview = null
+    $('submit-ticket').disabled = true
+    $('ticket-review').hidden = true
     const selected = selectedTicketProposal()
     const button = $('prepare-ticket')
     try {
@@ -2045,12 +2166,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const invalidation = selected.proposal.sizing?.underlying_invalidation ?? selected.candidate.risk_input?.invalidation
       if (!(Number(invalidation) > 0)) throw new Error('The selected candidate needs an explicit invalidation in the packet inputs.')
       const externalValue = $('external-open-risk').value
-      button.disabled = true; button.textContent = 'Refreshing FYERS preflight…'
-      $('ticket-status').className = 'handoff-status'; $('ticket-status').textContent = 'Refreshing FYERS profile, exact contracts, chain, quotes, lot/tick, funds, margin coverage, positions and orders.'
+      button.disabled = true; button.textContent = 'Refreshing selected broker preflight…'
+      $('ticket-status').className = 'handoff-status'; $('ticket-status').textContent = 'Refreshing selected broker account, exact contract, quotes, lot/tick, funds, margin, positions and order protection.'
       const preview = await postJson('/api/trade-ticket/prepare', {
-        broker: $('ticket-broker').value,
+        ...orderAccount('ticket-broker'),
+        underlying_exit_plan: selected.underlying_exit_plan,
         require_market_open: selected.proposal.kind === 'EQUITY',
         underlying: selected.candidate.symbol,
+        analysis_evidence: { captured_at: new Date().toISOString(), source: 'ANALYSIS_HANDOFF', candidate: selected.candidate, recommendation: selected.proposal, conviction: selected.proposal.conviction || selected.options?.conviction || null, collection: candidateCollection, packet_created_at: handoffPacket?.created_at || null },
         expiry: selected.options?.expiry_iso,
         proposal: selected.proposal,
         invalidation: Number(invalidation),
@@ -2072,7 +2195,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('ticket-status').textContent = `Exact preview ${preview.preview_id} prepared. Review the refreshed ledger and every leg. ${(preview.warnings || []).join(' ')}`
     } catch (error) {
       $('ticket-status').className = 'handoff-status error'; $('ticket-status').textContent = error.message
-    } finally { button.disabled = false; button.textContent = 'Refresh FYERS and prepare exact preview' }
+    } finally { button.disabled = false; button.textContent = 'Refresh broker and prepare exact preview' }
   }
   const submitTicket = async () => {
     const selected = selectedTicketProposal()
@@ -2230,6 +2353,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const underlying = JSON.parse(picker.selectedOptions[0]?.dataset.underlying || 'null')
     if (!underlying) { clearEmaAtmContract(); return }
     const mode = $('ema-band-mode').value
+    if(window.BrokerForms.account('band')?.broker==='DHAN'){
+      $('ema-band-contract').textContent='Dhan resolves the nearest-expiry ATM Call or Put at entry using a fresh executable quote. No contract or order has been confirmed yet.';
+      $('ema-band-strategy-direction').textContent='Bullish buys Call · bearish buys Put · awaiting an eligible fresh signal';return;
+    }
     $('ema-band-contract').textContent = 'Resolving the nearest valid ATM contract from FYERS…'
     try {
       const data = await fetchJson(`/api/ema-band/atm-option?underlying=${encodeURIComponent(underlying.symbol)}&timeframe=${encodeURIComponent($('ema-band-timeframe').value)}&ema_length=${encodeURIComponent($('ema-band-length').value)}&slope_lookback=${encodeURIComponent($('ema-band-slope-lookback').value)}&minimum_slope_atr=${encodeURIComponent($('ema-band-minimum-slope-atr').value)}&mode=${encodeURIComponent(mode)}`)
@@ -2249,7 +2376,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     try {
       const data = await fetchJson(`/api/ema-band/underlying-search?q=${encodeURIComponent(query)}`)
       if (generation !== emaUnderlyingSearchGeneration) return
-      picker.innerHTML = '<option value="">Choose an underlying</option>' + data.matches.map(item => `<option data-underlying="${escapeHtml(JSON.stringify(item))}">${escapeHtml(item.underlying)} · ${escapeHtml(item.description)} · ${escapeHtml(item.market_kind === 'COMMODITY_FUTURE' ? 'MCX commodity future' : 'cash/index')}</option>`).join('')
+      picker.innerHTML = '<option value="">Choose an underlying</option>' + data.matches.map(item => `<option value="${escapeHtml(item.symbol)}" data-underlying="${escapeHtml(JSON.stringify(item))}">${escapeHtml(item.underlying)} · ${escapeHtml(item.description)} · ${escapeHtml(item.market_kind === 'COMMODITY_FUTURE' ? 'MCX commodity future' : 'cash/index')}</option>`).join('')
       picker.disabled = !data.status?.usable || !data.matches.length
       if (!data.matches.length) clearEmaAtmContract('No current FYERS option-eligible underlying matched that search.')
     } catch (error) { picker.innerHTML = '<option value="">Underlying search unavailable</option>'; picker.disabled = true; clearEmaAtmContract(`Underlying search blocked: ${error.message}`) }
@@ -2258,7 +2385,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const syncEmaEntrySession = () => {
     const selected = JSON.parse($('ema-band-underlying-picker').selectedOptions[0]?.dataset.underlying || 'null')
     const isMcx = selected?.market_kind === 'COMMODITY_FUTURE' || String(selected?.symbol || '').startsWith('MCX:')
-    $('ema-band-session').value = isMcx ? '0915-2330' : '0915-1515'
+    $('ema-band-session').value = window.BrokerForms.account('band')?.broker==='DHAN' ? '0915-1510' : isMcx ? '0915-2330' : '0915-1515'
     $('ema-band-session').readOnly = true
     $('ema-band-session').closest('label').querySelector('small').textContent = isMcx ? 'MCX entries: 09:15–23:30 IST. Exits remain active after the entry window.' : 'Non-MCX entries: 09:15–15:15 IST. Exits remain active after the entry window.'
   }
@@ -2303,7 +2430,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const el = $('ema-band-position-cards')
     if (!el) return
     const positions = snapshot?.positions || []
-    if (!positions.length) { el.innerHTML = '<div class="empty">No retained paper or open FYERS positions.</div>'; return }
+    if (!positions.length) { el.innerHTML = '<div class="empty">No runner-confirmed position for the selected account.</div>'; return }
     el.innerHTML = positions.map(position => {
       const pnl = Number(position.pnl)
       const hasPnl = Number.isFinite(pnl)
@@ -2432,7 +2559,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }).join('') : `<text x="${left+10}" y="${oiDetailTop+20}" fill="#91a7c4" font-size="12">FYERS did not return historical open interest for this contract.</text>`
     const oiMomentumLegend = oiStateKeys.map((state, index) => `<text x="${520 + (index % 2) * 300}" y="${index < 2 ? '25' : '43'}" fill="${oiStateColors[state]}" font-size="10" font-weight="700">${oiStateLabels[state]}: ${oiStateMomentum[state].direction}</text>`).join('')
     const oiDetailPanel = `<svg viewBox="0 0 ${width} ${oiDetailHeight}" role="img" aria-label="Expanded open interest profile by price zone"><rect x="${left}" y="8" width="${width-left-right}" height="${oiDetailHeight-18}" rx="5" fill="#081524" stroke="#4a7296" stroke-width="1.2"/><text x="${left+10}" y="25" fill="#e5c68b" font-size="14" font-weight="700">EXPANDED OPEN INTEREST PROFILE</text><text x="${left+10}" y="43" fill="#91a7c4" font-size="9">Latest ${oiTrendWindow || 0} updates vs prior ${oiTrendWindow || 0}</text>${oiMomentumLegend}${oiDetailRows}</svg>`
-    el.innerHTML = `<div class="premium-chart-stats"><div><b>${escapeHtml(snapshot.symbol)}</b><small>FYERS fixed contract · ${escapeHtml(snapshot.timeframe)}</small></div><div><b>EMA ${snapshot.ema_length} High / Low</b><small>Signals use completed candles only</small></div><div><b>${number(snapshot.live_price ?? candles.at(-1).close)}</b><small>${forming ? 'Live quote · refreshed each second' : 'Last completed close'}</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="FYERS candlestick chart with EMA high and low bands, volume, and classified price-anchored open interest profile">${grid}${sessionSeparators('price-volume', top, volumeBase)}${levelLines}<path d="${path('ema_high')}" fill="none" stroke="#ef6b73" stroke-width="2"/><path d="${path('ema_low')}" fill="none" stroke="#48c78e" stroke-width="2"/>${sticks}${markers}<line x1="${left}" x2="${priceRight}" y1="${volumeBase}" y2="${volumeBase}" stroke="#294766"/><text x="4" y="${volumeTop+9}" fill="#91a7c4" font-size="10">VOL</text><text x="${left}" y="${volumeTop+9}" fill="#91a7c4" font-size="10">${Math.round(maxVolume)}</text>${volumeBars}<rect x="${priceRight+4}" y="${top-46}" width="${oiProfileWidth-7}" height="${plotH+46}" rx="5" fill="#091625" stroke="#4a7296" stroke-width="1.2"/><text x="${priceRight+11}" y="${top-31}" fill="#e5c68b" font-size="13" font-weight="700">OPEN INTEREST PROFILE</text><text x="${priceRight+11}" y="${top-18}" fill="#48c78e" font-size="9" font-weight="700">LB long build</text><text x="${priceRight+98}" y="${top-18}" fill="#ef6b73" font-size="9" font-weight="700">SB short build</text><text x="${priceRight+11}" y="${top-6}" fill="#72c7ff" font-size="9" font-weight="700">SC short cover</text><text x="${priceRight+98}" y="${top-6}" fill="#f0b44d" font-size="9" font-weight="700">LU long unwind</text>${oiProfileBars}<text x="${left}" y="${height-9}" fill="#91a7c4" font-size="10">${first}</text><text x="${priceRight}" y="${height-9}" text-anchor="end" fill="#91a7c4" font-size="10">${last}</text></svg>${rsiPanel}${oiDetailPanel}<small class="muted">RSI ${rsiLength} uses the same FYERS fixed-contract closes and is display-only; EMA signals still use completed candles. Volume remains time-based below the candles. The OI Profile at right groups historical OI change by price zone: green long buildup, red short buildup, blue short covering, and amber long unwinding. It is unavailable when FYERS does not provide historical OI.</small>`
+    el.innerHTML = `<div class="premium-chart-stats"><div><b>${escapeHtml(snapshot.symbol)}</b><small>${snapshot.broker==='DHAN'?'Dhan account candles':'FYERS fixed contract'} · ${escapeHtml(snapshot.timeframe)}</small></div><div><b>EMA ${snapshot.ema_length} High / Low</b><small>Signals use completed candles only</small></div><div><b>${number(snapshot.live_price ?? candles.at(-1).close)}</b><small>${forming ? 'Live quote · refreshed each second' : 'Last completed close'}</small></div></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="FYERS candlestick chart with EMA high and low bands, volume, and classified price-anchored open interest profile">${grid}${sessionSeparators('price-volume', top, volumeBase)}${levelLines}<path d="${path('ema_high')}" fill="none" stroke="#ef6b73" stroke-width="2"/><path d="${path('ema_low')}" fill="none" stroke="#48c78e" stroke-width="2"/>${sticks}${markers}<line x1="${left}" x2="${priceRight}" y1="${volumeBase}" y2="${volumeBase}" stroke="#294766"/><text x="4" y="${volumeTop+9}" fill="#91a7c4" font-size="10">VOL</text><text x="${left}" y="${volumeTop+9}" fill="#91a7c4" font-size="10">${Math.round(maxVolume)}</text>${volumeBars}<rect x="${priceRight+4}" y="${top-46}" width="${oiProfileWidth-7}" height="${plotH+46}" rx="5" fill="#091625" stroke="#4a7296" stroke-width="1.2"/><text x="${priceRight+11}" y="${top-31}" fill="#e5c68b" font-size="13" font-weight="700">OPEN INTEREST PROFILE</text><text x="${priceRight+11}" y="${top-18}" fill="#48c78e" font-size="9" font-weight="700">LB long build</text><text x="${priceRight+98}" y="${top-18}" fill="#ef6b73" font-size="9" font-weight="700">SB short build</text><text x="${priceRight+11}" y="${top-6}" fill="#72c7ff" font-size="9" font-weight="700">SC short cover</text><text x="${priceRight+98}" y="${top-6}" fill="#f0b44d" font-size="9" font-weight="700">LU long unwind</text>${oiProfileBars}<text x="${left}" y="${height-9}" fill="#91a7c4" font-size="10">${first}</text><text x="${priceRight}" y="${height-9}" text-anchor="end" fill="#91a7c4" font-size="10">${last}</text></svg>${rsiPanel}${oiDetailPanel}<small class="muted">RSI ${rsiLength} uses the same FYERS fixed-contract closes and is display-only; EMA signals still use completed candles. Volume remains time-based below the candles. The OI Profile at right groups historical OI change by price zone: green long buildup, red short buildup, blue short covering, and amber long unwinding. It is unavailable when FYERS does not provide historical OI.</small>`
     const fullscreenButton = document.createElement('button')
     fullscreenButton.type = 'button'
     fullscreenButton.className = 'button secondary'
@@ -2585,7 +2712,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       })
     }
   }
+  const emaViewVisible = () => !document.hidden && Boolean(document.querySelector("#ema-band.active"))
   const loadEmaBrokerChart = async state => {
+    if (!emaViewVisible()) return
     const config = state?.config
     const chartTimeframe = $('ema-band-chart-timeframe')?.value || config?.timeframe || '5 minutes'
     const chartBars = $('ema-band-chart-bars')?.value || '320'
@@ -2631,6 +2760,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   }
   const loadEmaRunner = async () => { try { renderEmaRunner(await fetchJson('/api/ema-band/runner')) } catch (error) { $('ema-band-runner-status').textContent = `Runner status unavailable: ${error.message}` } }
   const loadEmaTrackedPositions = async () => {
+    if (!emaViewVisible()) return
     try { renderEmaTrackedPositions(await fetchJson('/api/ema-band/tracked-positions')) }
     catch (error) { const el = $('ema-band-position-cards'); if (el) el.innerHTML = `<div class="empty error">Tracked positions unavailable: ${escapeHtml(error.message)}</div>` }
   }
@@ -2661,7 +2791,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     const selected = JSON.parse(picker.selectedOptions[0]?.dataset.underlying || 'null')
     const startingLive = $('ema-band-mode').value === 'LIVE'
     const alreadyRunning = (await fetchJson('/api/ema-band/runner')).running
-    if (!alreadyRunning && startingLive && !window.confirm('Start the LIVE EMA Band runner? This automatically places real FYERS orders with real money on every completed-candle signal, with no per-order confirmation.')) return
+    if (!alreadyRunning && startingLive && !window.confirm('Start the LIVE EMA Band runner with the selected broker account? This automatically places real orders on completed-candle signals.')) return
     const button = $('ema-band-runner-toggle'); button.disabled = true
     try {
       const current = await fetchJson('/api/ema-band/runner')
@@ -2669,7 +2799,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         ? await postJson('/api/ema-band/runner/stop', {})
         : await postJson('/api/ema-band/runner/start', (() => {
             const mode = $('ema-band-mode').value
-            const body = { paper_capital_inr:Number($('ema-band-paper-capital').value),underlying: selected?.symbol, timeframe: $('ema-band-timeframe').value, ema_length: $('ema-band-length').value, slope_lookback: $('ema-band-slope-lookback').value, minimum_slope_atr: $('ema-band-minimum-slope-atr').value, resistance_volume_exit: $('ema-band-resistance-volume-exit').checked, resistance_volume_multiple: $('ema-band-resistance-volume-multiple').value, resistance_volume_lookback: $('ema-band-resistance-volume-lookback').value, entry_session: $('ema-band-session').value, mode }
+            const body = { ...(window.BrokerForms.account('band')?.broker==='DHAN'?{max_trades:$('ema-band-max-trades').value}:{}),paper_capital_inr:Number($('ema-band-paper-capital').value),underlying: selected?.symbol, timeframe: $('ema-band-timeframe').value, ema_length: $('ema-band-length').value, slope_lookback: $('ema-band-slope-lookback').value, minimum_slope_atr: $('ema-band-minimum-slope-atr').value, resistance_volume_exit: $('ema-band-resistance-volume-exit').checked, resistance_volume_multiple: $('ema-band-resistance-volume-multiple').value, resistance_volume_lookback: $('ema-band-resistance-volume-lookback').value, entry_session: $('ema-band-session').value, mode }
             const protectionPct = $('ema-band-profit-protection-pct').value.trim()
             Object.assign(body, { lots: $('ema-band-lots').value })
             if (protectionPct !== '') body.profit_protection_pct = protectionPct
@@ -2684,6 +2814,27 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       renderEmaRunner(state)
     } catch (error) { $('ema-band-runner-status').textContent = `Runner action blocked: ${error.message}` } finally { button.disabled = false }
   })
+  window.addEventListener('broker-account-change',event=>{
+    const {kind,account}=event.detail;
+    if(kind==='band'){
+      currentEmaRunnerState=null;
+      $('ema-band-execution-log')?.replaceChildren();
+      for(const id of ['ema-band-underlying-picker','ema-band-underlying'])$(id).replaceChildren(new Option('Search the selected broker master',''));
+      if(account?.broker==='DHAN'){
+        $('ema-band-session').value='0915-1510';
+      }
+      loadEmaMasterStatus();loadEmaModeCapability();loadEmaRunner();loadEmaTrackedPositions();loadEmaExecutionLog();
+      $('ema-band-broker-chart').textContent='Select an underlying from this broker to display its chart.';
+    }
+    if(kind==='kama'){
+      currentKamaState=null;currentKamaTrades=[];kamaChartGeneration++;kamaUnderlyingSearchGeneration++;
+      $('kama-trade-rows').textContent='Loading selected account history…';$('kama-trade-summary').textContent='Loading selected account totals…';$('kama-capability').textContent='Checking selected account';
+      $('kama-underlying').replaceChildren(new Option('Search the selected broker master',''));
+      if(account?.broker==='DHAN'){$('kama-mode').value='PAPER';$('kama-execution-mode').value='OPTIONS';}
+      loadKamaCapability();loadKamaRunner();loadKamaTrades();updateKamaMode();
+      $('kama-chart').textContent='Select an underlying from this broker to display its chart.';
+    }
+  });
   loadEmaMasterStatus()
   loadEmaModeCapability()
   loadEmaRunner()
@@ -2693,10 +2844,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   setInterval(loadEmaRunner, 5000)
   setInterval(() => { if (!document.hidden) loadEmaTrackedPositions() }, 15000)
   setInterval(loadEmaExecutionLog, 15000)
-  setInterval(() => { if (!document.hidden) loadEmaBrokerChart(currentEmaRunnerState) }, 1000)
+  setInterval(() => { if (emaViewVisible()) loadEmaBrokerChart(currentEmaRunnerState) }, 1000)
   window.EmaCrossover.mount(initialView)
   window.EmaCrossoverLive.mount()
   window.RenkoSupertrend.mount(initialView)
+  window.RenkoEngine.mount(initialView)
   window.DeltaIndiaWorkspace.mount(initialView)
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)) }); document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view)); try { localStorage.setItem(viewStorageKey, button.dataset.view) } catch {} }))
   document.querySelectorAll('[data-straddle-market]').forEach(button => button.addEventListener('click', () => {
@@ -2726,7 +2878,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('select-all-candidates').addEventListener('click', async () => {
     const button = $('select-all-candidates')
     try {
-      button.disabled = true; button.textContent = 'Ranking with FYERS funds…'
+      button.disabled = true; button.textContent = 'Ranking with selected broker funds…'
       await rankCandidatesForSelection()
     } catch (error) {
       $('candidate-status').className = 'handoff-status error'; $('candidate-status').textContent = error.message
@@ -2933,7 +3085,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   window.addEventListener('pagehide',saveHandoffResults)
   document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',saveHandoffResults))
   $('handoff').addEventListener('change',saveHandoffResults)
-  restoreHandoffResults('');updateHandoffBatchDefaults()
+  updateHandoffBatchDefaults()
   syncStraddleOptions(); syncNiftyStraddleOptions(); renderPolicyImpact(); loadAutomationPolicy(); refreshAnalysis(); refreshAccount(); refreshClosed(); refreshTicketCapabilities(); loadKamaRunner(); refreshStraddle(); refreshNiftyStraddle(); runScreenerScheduler()
   setInterval(refreshAccount, accountRefreshMs)
   setInterval(refreshStraddle, straddleRefreshMs)
@@ -2943,9 +3095,13 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
 ;(() => {
   const apply=()=>{
     const context=window.SectorPulseWorkspace;
-    if(!context||context.admin||!Array.isArray(context.allowed_features))return;
-    const allowed=new Set(context.allowed_features);
+    if(!context||!Array.isArray(context.allowed_features))return;
+    const allowed=new Set(context.admin?[...context.allowed_features,...Array.from(document.querySelectorAll('.nav [data-view]'),button=>button.dataset.view)]:context.allowed_features);
     if(allowed.has('rsi-sma'))allowed.add('ema-cross');
+    const visibility=context.sidebar_visibility||{};
+    for(const key of [...allowed])if(visibility[key]===false)allowed.delete(key);
+    const brokerCard=document.querySelector('.broker-card');if(brokerCard){brokerCard.hidden=!allowed.has('broker-connection');brokerCard.style.display=brokerCard.hidden?'none':'';}
+
     for(const button of document.querySelectorAll('.nav [data-view]')){
       const denied=!allowed.has(button.dataset.view);button.hidden=denied;if(denied)button.style.display='none';
     }
@@ -2954,7 +3110,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
     if(!document.querySelector('.work > .view.active')){
       const button=Array.from(document.querySelectorAll('.nav [data-view]')).find(b=>allowed.has(b.dataset.view));
-      if(button)button.click();else if(!document.getElementById('user-sections-empty')){const note=document.createElement('p');note.id='user-sections-empty';note.textContent='No dashboard sections are assigned. Ask your administrator to enable your sections in User Master.';document.querySelector('.work')?.prepend(note);}
+      if(button)button.click();else if(!document.getElementById('user-sections-empty')){const note=document.createElement('p');note.id='user-sections-empty';note.textContent='No dashboard sections are visible. Enable sections in User Master or ask your administrator.';document.querySelector('.work')?.prepend(note);}
     }
   };
   let pending=false;

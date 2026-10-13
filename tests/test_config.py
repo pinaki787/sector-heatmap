@@ -31,7 +31,7 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(values['FYERS_APP_ID'], 'OWN-100')
                 self.assertEqual(values['FYERS_SECRET_KEY'], 'own-secret')
                 self.assertNotIn('FYERS_ACCESS_TOKEN', values)
-                self.assertEqual(values['FYERS_REDIRECT_URI'], f"http://127.0.0.1:{account['port']}/callback")
+                self.assertEqual(values['FYERS_REDIRECT_URI'], f"https://utrading.pinakicloud.com/broker-workspace/{account['id']}/callback")
                 token.write_text(json.dumps({'app_id': 'OWN-100', 'access_token': 'own-token'}))
                 self.assertEqual(config.load_config()['FYERS_ACCESS_TOKEN'], 'OWN-100:own-token')
                 (store.folder(account) / 'credentials.json').unlink()

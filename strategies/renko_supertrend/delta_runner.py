@@ -126,7 +126,7 @@ class DeltaRunner(Runner):
         if (result.get('config') or {}).get('execution_route')==FUTURES_ROUTE:
             result['cost_pnl']=dict(realized_net=None,unrealized_net=None,total_net=None,
                 basis='Gross fill P&L and trading fee estimates only; funding/liquidation evidence unavailable, all-in net unknown.')
-        result['sideways_status']['loss_basis']='UNAVAILABLE_FUNDING' if (result.get('config') or {}).get('execution_route')==FUTURES_ROUTE else 'AFTER_VERIFIED_NATIVE_COSTS'
+        result['sideways_status']['loss_basis']='UNKNOWN_FUNDING_PROTECTIVE_LOCK' if (result.get('config') or {}).get('execution_route')==FUTURES_ROUTE else 'AFTER_NATIVE_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK'
         for trade in result.get('trade_history',[]): trade['quote_currency']=currency
         if isinstance(result.get('message'),str):
             result['message']=result['message'].replace('FYERS','Delta India').replace('as MARKET (Delta India MPP)','as a marketable IOC limit')

@@ -17,10 +17,10 @@ import threading
 import time
 
 COOKIE = 'sector_pulse_session'
-BROKERS = {'FYERS', 'DELTA_INDIA'}
+BROKERS = {'FYERS', 'DELTA_INDIA', 'DHAN'}
 LIVE_KEYS = ('SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS',
              'SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_PARSER_PROTECTION',
-             'DELTA_INDIA_ENABLE_LIVE_ORDERS')
+             'DELTA_INDIA_ENABLE_LIVE_ORDERS', 'DHAN_ENABLE_LIVE_ORDERS')
 
 
 def password_hash(password, salt):
@@ -49,11 +49,52 @@ class WorkspaceStore:
                 broker TEXT NOT NULL, label TEXT NOT NULL, account_ref TEXT NOT NULL,
                 port INTEGER UNIQUE NOT NULL, live_enabled INTEGER NOT NULL DEFAULT 0,
                 credential_identity TEXT UNIQUE, UNIQUE(broker, account_ref));
+            CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS user_features(user_id TEXT NOT NULL,feature TEXT NOT NULL,PRIMARY KEY(user_id,feature));
             CREATE TABLE IF NOT EXISTS attempts(username TEXT PRIMARY KEY, failures INTEGER NOT NULL,
                 until REAL NOT NULL);
             ''')
         self.path.chmod(0o600)
+
+    def sidebar_visibility(self):
+        from .section_permissions import FEATURES
+        defaults={**{key:True for key in FEATURES},'renko-engine':True,'broker-connection':True}
+        with self.db() as db:
+            row=db.execute("SELECT value FROM app_settings WHERE key='sidebar_visibility'").fetchone()
+        if row:
+            try:
+                saved=json.loads(row['value'])
+                defaults.update({k:saved[k] for k in defaults if type(saved.get(k)) is bool})
+            except (ValueError,TypeError):pass
+        return defaults
+
+    def set_sidebar_visibility(self,actor,settings):
+        if not actor.get('admin'):raise PermissionError('Administrator access required.')
+        if not isinstance(settings,dict) or set(settings)!=set(self.sidebar_visibility()) or any(type(v) is not bool for v in settings.values()):
+            raise ValueError('Choose visibility for every sidebar section.')
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings(key,value) VALUES('sidebar_visibility',?)",(json.dumps(settings),))
+        return self.sidebar_visibility()
+
+    def renko_visibility(self):
+        defaults={'entry_rules':False,'exit_rules':False,'settings':False}
+        with self.db() as db:
+            row=db.execute("SELECT value FROM app_settings WHERE key='renko_visibility'").fetchone()
+        if row:
+            try:
+                saved=json.loads(row['value'])
+                defaults.update({key:saved[key] for key in defaults if type(saved.get(key)) is bool})
+            except (ValueError,TypeError):pass
+        return defaults
+
+    def set_renko_visibility(self,actor,settings):
+        if not actor.get('admin'):raise PermissionError('Administrator access required.')
+        keys={'entry_rules','exit_rules','settings'}
+        if not isinstance(settings,dict) or set(settings)!=keys or any(type(v) is not bool for v in settings.values()):
+            raise ValueError('Choose visibility for entry rules, exit rules and settings.')
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings(key,value) VALUES('renko_visibility',?)",(json.dumps(settings),))
+        return self.renko_visibility()
 
     @contextmanager
     def db(self):
@@ -127,6 +168,15 @@ class WorkspaceStore:
         with self.db() as db:user['features']=list(FEATURES) if user['admin'] else [r[0] for r in db.execute('SELECT feature FROM user_features WHERE user_id=? ORDER BY feature',(user['id'],))]
         return user
 
+    def renew_session(self, token):
+        user = self.session(token)
+        with self.db() as db:
+            changed = db.execute('UPDATE sessions SET expires=? WHERE digest=? AND expires>?',
+                (self.clock()+8*3600, hashlib.sha256(token.encode()).hexdigest(), self.clock())).rowcount
+        if changed != 1:
+            raise PermissionError('Session expired. Sign in again.')
+        return user
+
     def logout(self, token):
         with self.db() as db:
             db.execute('DELETE FROM sessions WHERE digest=?', (hashlib.sha256(token.encode()).hexdigest(),))
@@ -178,9 +228,20 @@ class WorkspaceStore:
             raise PermissionError('Broker workspace is unavailable for this user.')
         return dict(row)
 
+    def rename_account(self, user, aid, label):
+        self.account(user, aid)
+        if not isinstance(label, str):
+            raise ValueError('Enter a display name.')
+        label = label.strip()
+        if not 1 <= len(label) <= 80 or any(ord(c) < 32 for c in label):
+            raise ValueError('Use a display name of 1 to 80 characters.')
+        with self.db() as db:
+            db.execute('UPDATE accounts SET label=? WHERE id=? AND user_id=?', (label, aid, user['id']))
+        return self.account(user, aid)
+
     def create_account(self, user, broker, label, account_ref):
         if broker not in BROKERS:
-            raise ValueError('Choose FYERS or Delta India.')
+            raise ValueError('Choose FYERS, Dhan or Delta India.')
         label, account_ref = str(label).strip(), str(account_ref).strip().upper()
         if not 1 <= len(label) <= 80 or not re.fullmatch(r'[A-Z0-9_.-]{2,80}', account_ref):
             raise ValueError('Enter a label and broker account reference (2–80 letters/digits).')
@@ -207,7 +268,7 @@ class WorkspaceStore:
         account = self.account(user, aid)
         if not isinstance(live_enabled, bool) or not isinstance(fields, dict):
             raise ValueError('Invalid credential settings.')
-        allowed = {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'} if account['broker']=='FYERS' else {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}
+        allowed = {'FYERS': {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'}, 'DHAN': {'DHAN_CLIENT_ID','DHAN_ACCESS_TOKEN','DHAN_API_KEY','DHAN_API_SECRET'}, 'DELTA_INDIA': {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}}[account['broker']]
         if set(fields)-allowed:
             raise ValueError('Unsupported credential field.')
         if any(not isinstance(v,str) or len(v)>4096 or any(c in v for c in '\r\n\x00') for v in fields.values()):
@@ -216,17 +277,30 @@ class WorkspaceStore:
         path = folder/'credentials.json'
         prior = json.loads(path.read_text()) if path.exists() else {}
         credentials = {**prior, **{k:v.strip() for k,v in fields.items() if v.strip()}}
-        identity_key = 'FYERS_APP_ID' if account['broker']=='FYERS' else 'DELTA_INDIA_API_KEY'
+        identity_key = {'FYERS':'FYERS_APP_ID','DHAN':'DHAN_CLIENT_ID','DELTA_INDIA':'DELTA_INDIA_API_KEY'}[account['broker']]
         required = allowed-{'FYERS_REDIRECT_URI'}
+        if account['broker']=='DHAN':
+            required={'DHAN_CLIENT_ID'}
+            if not credentials.get('DHAN_ACCESS_TOKEN') and not (credentials.get('DHAN_API_KEY') and credentials.get('DHAN_API_SECRET')):
+                raise ValueError('Enter an access token or both Dhan API key and API secret.')
+            if bool(credentials.get('DHAN_API_KEY')) != bool(credentials.get('DHAN_API_SECRET')):
+                raise ValueError('Enter both Dhan API key and API secret.')
         if not all(credentials.get(k) for k in required):
             raise ValueError('Complete both broker credential fields.')
         if prior.get(identity_key) and credentials[identity_key] != prior[identity_key]:
             raise ValueError('Use a new workspace for a different broker application/key.')
+        if account['broker']=='DHAN':
+            if not credentials['DHAN_CLIENT_ID'].isdigit() or credentials['DHAN_CLIENT_ID'] != account['account_ref']:
+                raise ValueError('Dhan client ID must match this account reference.')
         if account['broker']=='FYERS':
-            expected = f"http://127.0.0.1:{account['port']}/callback"
-            if credentials.get('FYERS_REDIRECT_URI',expected) != expected:
-                raise ValueError('Register this workspace callback with FYERS: '+expected)
-            credentials['FYERS_REDIRECT_URI'] = expected
+            from .config import public_origin
+            origin = public_origin()
+            expected = origin + f"/broker-workspace/{account['id']}/callback" if origin else f"http://127.0.0.1:{account['port']}/callback"
+            selected = credentials.get('FYERS_REDIRECT_URI') or expected
+            local = f"http://127.0.0.1:{account['port']}/callback"
+            if selected not in {expected,local,origin+'/callback' if origin else local}:
+                raise ValueError('Use this account callback '+expected+' or its SSH-tunnel callback '+local+'. Register the same URL with FYERS.')
+            credentials['FYERS_REDIRECT_URI'] = selected
         digest = hashlib.sha256((account['broker']+'|'+credentials[identity_key]).encode()).hexdigest()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -258,7 +332,7 @@ def isolated_environment(account, folder, registry, portal_port):
                SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
     env.update({k:'0' for k in LIVE_KEYS})
     if account['live_enabled']:
-        env['SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS' if account['broker']=='FYERS' else 'DELTA_INDIA_ENABLE_LIVE_ORDERS']='1'
+        env[{'FYERS':'SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS','DHAN':'DHAN_ENABLE_LIVE_ORDERS','DELTA_INDIA':'DELTA_INDIA_ENABLE_LIVE_ORDERS'}[account['broker']]]='1'
     source = folder/'source'
     for name, script in [('NIFTY','nifty_straddle.py'),('SENSEX','sensex_straddle.py')]:
         env['SECTOR_PULSE_'+name+'_STRADDLE_SCRIPT']=str(source/'strategies/long_straddle'/script)
@@ -287,10 +361,35 @@ class WorkspaceRuntime:
 
     def configure(self,user,aid,fields,live_enabled):
         with self.lock:
-            self.store.account(user,aid)
+            account=self.store.account(user,aid)
             if self.running(aid):
-                raise ValueError('Credentials/capabilities are locked while the workspace dashboard is running. Stop and reconcile its strategies before an operator shuts down that dashboard.')
+                callback_only=account['broker']=='FYERS' and isinstance(fields,dict) and all(not value.strip() for key,value in fields.items() if key!='FYERS_REDIRECT_URI') and bool(live_enabled)==bool(account['live_enabled'])
+                if not callback_only:
+                    raise ValueError('Credentials/capabilities are locked while the workspace dashboard is running. Only the FYERS Redirect URL may be edited; existing strategies remain unchanged.')
             return self.store.configure(user,aid,fields,live_enabled)
+
+    def disconnect(self, user, aid):
+        with self.lock:
+            account = self.store.account(user, aid)
+            if self.running(aid):
+                raise ValueError('Disconnect blocked: this account dashboard is still running. Stop its dashboard after checking strategies, positions and pending orders. No connection was changed.')
+            folder = self.store.folder(account)
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            private_write(folder/'disconnected.json', json.dumps({'disconnected': True}))
+            path = folder/'credentials.json'
+            if account['broker']=='DHAN' and path.exists():
+                values=json.loads(path.read_text())
+                values.pop('DHAN_ACCESS_TOKEN', None)
+                private_write(path,json.dumps(values))
+            for path in (folder/'dhan-consent.json', folder/'home/.fyers/token.json', folder/'source/.fyers/token.json'):
+                path.unlink(missing_ok=True)
+            return {'disconnected': True, 'account_id': aid}
+
+    def reconnect(self, user, aid):
+        with self.lock:
+            account = self.store.account(user, aid)
+            (self.store.folder(account)/'disconnected.json').unlink(missing_ok=True)
+            return {'disconnected': False, 'account_id': aid}
 
     def provision(self, account):
         folder=self.store.folder(account)
@@ -339,7 +438,7 @@ class WorkspaceRuntime:
         # Refresh only reviewed public source; account credentials and journals stay local.
         if (self.source/'.git').exists():
             inventory=subprocess.check_output(['git','ls-files','-z'],cwd=self.source).decode().split('\0')
-            inventory += ['strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js']
+            inventory += ['sector_heatmap/dhan_account_login.py','sector_heatmap/network_policy.py','sitecustomize.py','sector_heatmap/premium_exit_mapping.py','strategies/renko_supertrend/dhan_costs.py','sector_heatmap/dhan_handoff.py','sector_heatmap/dhan_sector_analysis.py','strategies/renko_supertrend/manual_brick.py','sector_heatmap/fyers_transport.py','sector_heatmap/fyers_oauth_routing.py','renko-engine.js','broker-connection-status.js','strategies/renko_engine/__init__.py','strategies/renko_engine/rules.py','strategies/renko_engine/runner.py','strategies/renko_engine/service.py','strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py', 'strategies/renko_supertrend/indicator_families.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js','sector_heatmap/dhan_execution.py','dhan-orders.html','dhan-orders.js','broker-account-options.js', 'broker-form-routing.js', 'sector_heatmap/dhan_form_routes.py', 'sector_heatmap/dhan_indicator_runners.py', 'sector_heatmap/workspace_proxy.py', 'sector_heatmap/dhan_strategy_broker.py', 'sector_heatmap/dhan_strategy_service.py', 'dhan-strategies.html', 'dhan-strategies.js','strategies/renko_supertrend/rsi_level.py']
             public=[]
             for name in sorted(set(inventory)):
                 path=Path(name)
@@ -359,13 +458,15 @@ class WorkspaceRuntime:
                 # FYERS loads the registered private profile directly.
                 # Remove legacy generated duplicates on the next stopped-workspace launch.
                 (source/".fyers.env").unlink(missing_ok=True)
-            else:
+            elif account['broker']=='DELTA_INDIA':
                 private_write(source/'.private/delta-india-credentials.json',json.dumps(values))
         return folder
 
     def start(self,user,aid):
         with self.lock:
             account=self.store.account(user,aid)
+            if (self.store.folder(account)/'disconnected.json').exists():
+                raise ValueError('This broker account is disconnected. Use Reconnect in Accounts first.')
             if not self.running(aid):
                 import socket
                 with socket.socket() as sock:

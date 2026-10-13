@@ -44,6 +44,21 @@ class WorkspaceTests(unittest.TestCase):
         t,_=self.store.login('alice','a-new-private-password');self.now+=8*3600
         with self.assertRaises(PermissionError):self.store.session(t)
 
+    def test_active_session_renewal_and_revocation(self):
+        token,user=self.store.login('alice','alice-private-password')
+        self.now+=7*3600
+        self.assertEqual(self.store.renew_session(token)['id'],self.alice['id'])
+        self.now+=2*3600
+        self.assertEqual(self.store.session(token)['id'],self.alice['id'])
+        self.store.logout(token)
+        with self.assertRaises(PermissionError):self.store.renew_session(token)
+
+    def test_renewal_cannot_resurrect_expired_session(self):
+        token,_=self.store.login('alice','alice-private-password')
+        self.now+=8*3600
+        with self.assertRaises(PermissionError):self.store.renew_session(token)
+        with self.assertRaises(PermissionError):self.store.session(token)
+
     def test_wrong_password_and_rate_limit(self):
         for _ in range(5):
             with self.assertRaises(PermissionError):self.store.login('alice','wrong')

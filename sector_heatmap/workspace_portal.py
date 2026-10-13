@@ -39,8 +39,12 @@ def handler_factory(store,runtime,port):
                 self.response(200,(ROOT/name).read_bytes(),mime);return
             try:
                 user=store.session(cookie_token(self.headers))
+                if path=='/api/workspaces/sidebar-visibility':
+                    self.response(200,store.sidebar_visibility());return
+                if path=='/api/workspaces/renko-visibility':
+                    self.response(200,store.renko_visibility());return
                 if path=='/api/workspaces/me':
-                    self.response(200,user);return
+                    self.response(200,{**user,'dhan_api_login':True,'account_rename':True,'account_disconnect':True});return
                 if path=='/api/workspaces/users':
                     from .section_permissions import FEATURES
                     self.response(200,{'users':store.users(user),'sections':FEATURES});return
@@ -48,6 +52,21 @@ def handler_factory(store,runtime,port):
                     rows=store.accounts(user)
                     for a in rows:
                         a.update(running=runtime.running(a['id']),configured=(store.folder(a)/'credentials.json').exists(),url=f"http://127.0.0.1:{a['port']}/")
+                    for a in rows:
+                        credential_path=store.folder(a)/'credentials.json'
+                        saved=json.loads(credential_path.read_text()) if credential_path.exists() else {}
+                        key_name={'FYERS':'FYERS_APP_ID','DHAN':'DHAN_CLIENT_ID','DELTA_INDIA':'DELTA_INDIA_API_KEY'}[a['broker']]
+                        secret_name={'FYERS':'FYERS_SECRET_KEY','DHAN':'DHAN_ACCESS_TOKEN','DELTA_INDIA':'DELTA_INDIA_API_SECRET'}[a['broker']]
+                        a['disconnected']=(store.folder(a)/'disconnected.json').exists()
+                        a['credential_key']=saved.get(key_name,'')
+                        a['secret_saved']=bool(saved.get(secret_name))
+                        a['dhan_api_key']=saved.get('DHAN_API_KEY','') if a['broker']=='DHAN' else ''
+                        a['dhan_api_secret_saved']=bool(saved.get('DHAN_API_SECRET')) if a['broker']=='DHAN' else False
+                    for a in rows:
+                        if a['broker']=='FYERS':
+                            credentials=store.folder(a)/'credentials.json'
+                            values=json.loads(credentials.read_text()) if credentials.exists() else {}
+                            a['redirect_uri']=values.get('FYERS_REDIRECT_URI','')
                     for a in rows:
                         if a['running']:
                             owner=store.folder(a)/'dashboard-owner.lock'
@@ -81,6 +100,10 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/password':
                     store.change_password(user,payload.get('current_password'),payload.get('new_password'))
                     self.response(200,{'signed_out':True},cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return
+                if path=='/api/workspaces/sidebar-visibility':
+                    self.response(200,store.set_sidebar_visibility(user,payload.get('settings')));return
+                if path=='/api/workspaces/renko-visibility':
+                    self.response(200,store.set_renko_visibility(user,payload.get('settings')));return
                 if path=='/api/workspaces/user-sections':
                     self.response(200,store.set_features(user,payload.get('username'),payload.get('features')));return
                 if path=='/api/workspaces/users':
@@ -88,6 +111,16 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/accounts':
                     a=store.create_account(user,payload.get('broker'),payload.get('label',''),payload.get('account_ref',''))
                     self.response(201,{k:v for k,v in a.items() if k not in ('credential_identity','user_id')});return
+                if path in {'/api/workspaces/dhan-login-start','/api/workspaces/dhan-login-complete'}:
+                    from .dhan_account_login import login
+                    result=login(store,runtime,user,payload.get('account_id'),payload.get('token_id') if path.endswith('complete') else None)
+                    self.response(200,result);return
+                if path in {'/api/workspaces/disconnect','/api/workspaces/reconnect'}:
+                    operation=runtime.disconnect if path.endswith('/disconnect') else runtime.reconnect
+                    self.response(200,operation(user,payload.get('account_id')));return
+                if path=='/api/workspaces/rename':
+                    a=store.rename_account(user,payload.get('account_id'),payload.get('label'))
+                    self.response(200,{'id':a['id'],'label':a['label']});return
                 if path=='/api/workspaces/configure':
                     a=runtime.configure(user,payload.get('account_id'),payload.get('credentials',{}),payload.get('live_enabled',False))
                     self.response(200,{'id':a['id'],'configured':True,'live_enabled':bool(a['live_enabled'])});return

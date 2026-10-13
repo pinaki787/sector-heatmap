@@ -31,10 +31,22 @@ def quotes(client, data):
             headers={'Authorization': client.header, 'Content-Type': client.service.content, 'version': '3'},
             timeout=(3, 10),
         )
+        if response.status_code == 429:
+            raise RuntimeError('FYERS quote requests are rate-limited. Wait a few minutes before preparing a fresh preview.')
+        if response.status_code in (401, 403):
+            raise RuntimeError('FYERS quote authentication or access was rejected. Check this account connection before preparing a preview.')
         response.raise_for_status()
-        return response.json()
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise RuntimeError('FYERS returned an unreadable quote response. A fresh preview is required; no order was submitted.') from error
+        if isinstance(result, dict) and result.get('code') in (-429, 429):
+            raise RuntimeError('FYERS quote requests are rate-limited. Wait a few minutes before preparing a fresh preview.')
+        return result
+    except requests.Timeout as error:
+        raise RuntimeError('FYERS quote request timed out. Prepare a fresh preview when connectivity recovers.') from error
     except requests.RequestException as error:
-        raise RuntimeError('FYERS quote fallback unavailable; automatic retry pending.') from error
+        raise RuntimeError('FYERS quote request failed. A fresh successful quote is required before order review.') from error
 
 
 def account_read(client, method):

@@ -60,6 +60,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 from fyers_apiv3 import fyersModel
+from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -217,7 +218,7 @@ def _load_fyers_credentials():
 
 
 APP_ID, ACCESS_TOKEN = _load_fyers_credentials()
-fyers = fyersModel.FyersModel(
+fyers = ipv4_fyers_client(
     client_id=APP_ID, token=ACCESS_TOKEN, is_async=False,
     log_path=RUNTIME_DIR + os.sep,
 )

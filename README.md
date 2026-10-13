@@ -206,12 +206,21 @@ Open the [Renko Support and Strategy user guide](docs/user-functional-guide.md) 
 
 ## Multi-timeframe sector analysis
 
-The Sector Rotation view analyzes the configured FYERS sector indices on 15m,
-1H, Daily, and Weekly completed candles against `NSE:NIFTY50-INDEX`. It supports
+The Sector Rotation view analyzes the configured NSE sector indices using FYERS
+or Dhan market data on 15m, 1H, Daily, and Weekly completed candles against NIFTY 50. It supports
 Intraday and Swing weighting, explainable trend and relative-strength states,
 ranking and rank change, persisted rotation history, multi-timeframe alignment,
 filters, sorting, and a sector detail workflow. It is an analytical prioritization
 system, not an automatic signal or order-entry feature.
+
+Sector Rotation also supports Dhan: select a configured Dhan account in the sector
+broker selector. An active Dhan Data API subscription is required. Summary and
+detail use that account’s historical candles (15m, 1h, daily and derived weekly)
+and batch constituent OHLC quotes, with separate per-account analysis history.
+Security IDs are resolved from Dhan’s current master; missing indices or quotes
+remain unavailable rather than falling back to FYERS. Delta India sector data
+is not supported. See https://dhanhq.co/docs/v2/historical-data/ and
+https://dhanhq.co/docs/v2/market-quote/.
 
 ## Analysis handoff and gated FYERS tickets
 
@@ -405,3 +414,11 @@ then run `.venv/bin/python -m sector_heatmap.workspace_portal` and open
 `http://127.0.0.1:8079/`. Each account owns its credentials, dashboard process,
 settings, Paper capital and journals. The existing single-user dashboard remains
 independent; the portal does not migrate or restart it.
+
+
+Dhan accounts can be configured per application user in **Broker accounts** using
+their client ID and access token. Manual single/batch LIMIT tickets can select
+those saved Dhan accounts; the dedicated **Dhan orders** page provides native
+security-ID entry and read-only reconciliation. See
+[the multi-user setup guide](docs/multi-user-broker-setup.md#dhan-broker-accounts)
+for supported routes, IP/data prerequisites and execution boundaries.

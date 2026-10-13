@@ -1,4 +1,6 @@
 """Independent entry indicators; defaults preserve the existing combined setup."""
+from .rsi_level import matches as rsi_matches
+
 DEFAULTS = dict(supertrend_enabled=True, ema_fast_enabled=True, ema_slow_enabled=True,
                 ema_widening_enabled=True, ema_fast_length=10, ema_slow_length=30, rsi_slope_length=14)
 
@@ -22,10 +24,13 @@ def qualify(c, close, fast, slow, direction, allowed, widening, reversal, rsi):
             direction=-1 if all(close>v for v in selected) else 1 if all(close<v for v in selected) else 0
         elif c['ema_widening_enabled']:
             direction=-1 if fast>slow else 1 if fast<slow else 0
+        elif c.get('rsi_level_enabled'):
+            value=(rsi or {}).get('rsi14')
+            direction=-1 if rsi_matches(value,'BULLISH',c) else 1 if rsi_matches(value,'BEARISH',c) else 0
         else:
             slope=(rsi or {}).get('rsi14_slope')
             direction=-1 if slope is not None and slope>0 else 1 if slope is not None and slope<0 else 0
-    if not any(c[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','rsi_slope_enabled')):return 0,False,'NO_DIRECTIONAL_INDICATOR'
+    if not any(c[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','rsi_slope_enabled','rsi_level_enabled')):return 0,False,'NO_DIRECTIONAL_INDICATOR'
     if not allowed:return direction,False,'WAITING_ADX'
     if direction==0:return direction,False,'WAITING_SELECTED_ALIGNMENT'
     bullish=direction<0

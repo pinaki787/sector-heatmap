@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 import threading
+import os
 import webbrowser
 from fyers_apiv3 import fyersModel
 from .config import load_config, save_access_token, public_origin
@@ -17,7 +18,9 @@ def validated_config(expected_port=None):
         raise RuntimeError("Missing " + ", ".join(missing) + "; open User and broker setup, add your FYERS account, and save its client ID and secret key")
     redirect = urlparse(cfg["FYERS_REDIRECT_URI"])
     public = public_origin()
-    is_public = bool(public and cfg["FYERS_REDIRECT_URI"] == public + '/callback')
+    aid = os.getenv('SECTOR_PULSE_WORKSPACE_ID')
+    expected_public = public + (f'/broker-workspace/{aid}/callback' if aid else '/callback')
+    is_public = bool(public and cfg["FYERS_REDIRECT_URI"] in {expected_public,public + '/callback'})
     if not is_public:
         if redirect.scheme != "http" or redirect.hostname not in ("127.0.0.1", "localhost") or not redirect.port:
             raise RuntimeError("FYERS_REDIRECT_URI must be a registered local HTTP callback URL or the configured public HTTPS callback")
