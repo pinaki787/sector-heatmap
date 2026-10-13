@@ -25,7 +25,12 @@
     button.title='Sign out of the dashboard. Background strategies continue.';
     button.onclick=async()=>{button.disabled=true;try{const r=await fetch(api+'logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error('Sign-out failed.');location.assign('/auth/login');}catch(e){button.disabled=false;button.textContent=e.message;}};
     const side=document.querySelector('.side')||document.body;actions.append(button);side.append(dock);
-    fetch(api+'status').then(r=>r.json()).then(user=>{identity.textContent=user.username||'Your account';identity.title=user.admin?'Administrator':'User';if(user.admin){const link=document.createElement('a');link.href='/user-master';link.className='account-action';link.textContent='User Master';actions.prepend(link);}});return;
+    const configuration=document.createElement('section');configuration.setAttribute('aria-label','Configuration');configuration.style.cssText='margin:16px 0;padding:12px;border:1px solid var(--border);border-radius:8px';
+    const heading=document.createElement('h3');heading.textContent='Configuration';heading.style.cssText='font-size:12px;margin:0 0 10px;color:inherit';
+    const configActions=document.createElement('div');configActions.style.cssText='display:flex;flex-direction:column;gap:8px';
+    const brokers=document.createElement('a');brokers.href='/accounts';brokers.className='account-action broker-management-link';brokers.textContent='Brokers';
+    configActions.append(brokers);configuration.append(heading,configActions);dock.before(configuration);
+    fetch(api+'status').then(r=>r.json()).then(user=>{identity.textContent=user.username||'Your account';identity.title=user.admin?'Administrator':'User';if(user.admin){const link=document.createElement('a');link.href='/user-master';link.className='account-action';link.textContent='User Master';configActions.prepend(link);}});return;
   }
   const message=document.querySelector('#message'),submit=document.querySelector('#submit');let setup=false;
   fetch(api+'status').then(r=>{if(!r.ok)throw Error('Sign-in status unavailable.');return r.json();}).then(s=>{

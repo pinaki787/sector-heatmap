@@ -1439,6 +1439,69 @@ el('higher-timeframe-enabled').disabled=lastRunner?.mtf_supertrend_revision!=='o
     async function restore(){try{const remote=await request('settings');preservePreviousDraft(remote.settings,remote.saved_at,'server draft');const local=JSON.parse(localStorage.getItem(storage)||'null');if(version===0&&remote.saved_at&&(!local||remote.saved_at>Number(local.__saved_at||0))){const saved=migrateDestinations(remote.settings);if(saved.symbol&&!Array.from(el('symbol').options).some(o=>o.value===saved.symbol))el('symbol').add(new Option(saved.symbol,saved.symbol));for(const id of allIds)if(Object.hasOwn(saved,id)){if((el(id).type==='checkbox'))el(id).checked=saved[id];else el(id).value=saved[id];}localStorage.setItem(storage,JSON.stringify({...saved,__saved_at:remote.saved_at}));}else if(version===0&&local&&!remote.saved_at){const adopted=await request('settings',{settings:values()});localStorage.setItem(storage,JSON.stringify({...values(),__saved_at:adopted.saved_at}));}if(remote.saved_at){if(allIds.every(id=>Object.hasOwn(remote.settings,id)&&remote.settings[id]===values()[id]))savedDraft=JSON.stringify(values());confirmedSavedAt=remote.saved_at;}if(JSON.stringify(values())===initialConfigurationSignature)matchInstrumentConfiguration();configurationState();}catch(e){el('runner-message').textContent='Preference restore: '+e.message;}const chartSymbol=pageParams.get('renkoSymbol');if(!isDelta&&chartSymbol&&/^(?:NSE:)?[A-Z0-9&_-]+(?:-EQ)?$/.test(chartSymbol)){const exact=chartSymbol.startsWith('NSE:')?chartSymbol:'NSE:'+chartSymbol+'-EQ';el('market').value='NSE_EQUITY';el('search').value=chartSymbol.replace(/^NSE:/,'').replace(/-EQ$/,'');if(!Array.from(el('symbol').options).some(o=>o.value===exact))el('symbol').add(new Option(exact,exact));el('symbol').value=exact;}controls();if(!isDelta)searchInstruments();connectStream();await status();if(instanceId!=='default'&&(lastRunner?.config?.underlying||lastRunner?.instrument)){const c=lastRunner.config||{underlying:lastRunner.instrument,timeframe:el('timeframe').value,mode:el('mode').value};if(!Array.from(el('symbol').options).some(o=>o.value===c.underlying))el('symbol').add(new Option(c.underlying,c.underlying));el('symbol').value=c.underlying;if(isDhan&&c.underlying.startsWith('MCX:'))el('market').value='MCX';el('timeframe').value=c.timeframe;el('mode').value=c.mode;controls();connectStream();}syncDisplayedChartSelection();await refreshBroker();el('start-selected').textContent='Start selected · '+el('mode').value;if(isDelta&&!el('symbol').value){el('symbol').add(new Option('ETHUSD · Delta perpetual','ETHUSD'));el('symbol').value='ETHUSD';}el('higher-timeframe-enabled').checked=true;el('higher-timeframe-enabled-indicator').checked=true;el('supertrend-timeframe').value='5 minutes';el('brick-mode').value='Manual';el('sideways-enabled').checked=true;el('sideways-max-candles').value='2';indicatorControls();controls();configurationState();if(el('brick-mode').value==='Manual')await deriveManualBrick();if(active&&el('symbol').value)load();}if(isBatchChartView){const compact=document.createElement('style');compact.textContent='body .side{display:none!important}body .desk{display:block!important}body .work{padding:8px!important}#renko-supertrend>*,#renko-supertrend>.panel:has(#renko-chart-stack)>*{display:none!important}#renko-supertrend>.panel:has(#renko-chart-stack),#renko-supertrend>.panel:has(#renko-chart-stack)>#renko-chart-stack{display:block!important}#renko-supertrend>.panel:has(#renko-chart-stack){margin:0!important;padding:0!important}#renko-chart-stack{margin:0!important}';document.head.append(compact);}restore();if(isDelta)root.DeltaINR.load().then(()=>{if(lastRunner)applyStatus(lastRunner);if(el('symbol').value)load();});
     for(const id of ['supertrend-exit-enabled','ema-slow-exit-enabled','rsi-exit-enabled','ema-widening-exit-enabled','adx-exit-enabled','market-structure-exit-enabled','volume-enabled','rsi-sma-enabled','rsi-length','ema-exit-length','supertrend-enabled','ema-fast-enabled','ema-slow-enabled','ema-widening-enabled','ema-fast-length','ema-slow-length','rsi-slope-enabled','use-adx','market-structure-enabled','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','higher-timeframe-enabled','zone-target-enabled','ema-exit-enabled','sideways-enabled','trailing-enabled'])el(id).addEventListener('change',()=>{indicatorControls(id);paintSelectedIndicators();});
     DESTINATION_RULES.forEach(id=>el(id+'-indicator').addEventListener('change',()=>{indicatorControls(id+'-indicator');paintSelectedIndicators();connectStream();load();}));
+    const settingHelp={
+      'higher-timeframe-enabled':'Requires completed host and higher-timeframe Renko Supertrend directions to agree before normal entry.',
+      'supertrend-timeframe':'Timeframe used by the confirming Renko Supertrend and dashed chart line. Must be higher than the host timeframe for strategy entry.',
+      'sideways-enabled':'After a quick losing close, blocks new entries until fresh underlying price breaks the high or low recorded during that position. Unknown net costs can also trigger protective locking.',
+      'sideways-max-candles':'Maximum host-candle intervals touched from first fill to exit for the quick-loss lock to apply. Two includes the entry candle and the next interval.',
+      'brick-mode':'Manual keeps a fixed brick size across chart timeframes. Auto derives the brick size from ATR.',
+      'manual-brick':'Fixed synthetic Renko brick size in underlying price points. The market-specific reference calculation supplies the initial value.',
+      'atr-length':'ATR smoothing length used by the Renko Supertrend calculation.',
+      'factor':'Multiplier controlling Supertrend band distance. Larger values generally place the bands farther away.',
+      'supertrend-enabled':'Uses synthetic Renko Supertrend direction to qualify bullish or bearish entries.',
+      'ema-fast-enabled':'Uses the first EMA as an entry-direction condition.',
+      'ema-slow-enabled':'Uses the second EMA as an entry-direction condition.',
+      'ema-fast-length':'Number of host periods used by the first EMA.',
+      'ema-slow-length':'Number of host periods used by the second EMA.',
+      'ema-widening-enabled':'Requires the fast/slow EMA gap to widen for this entry path.',
+      'widening-window':'Number of observations used to evaluate EMA gap widening.',
+      'rsi-level-enabled':'Allows entries only when RSI satisfies the selected bullish or bearish level rule.',
+      'rsi-level-mode':'Between includes both range endpoints; Threshold uses strict above/below comparisons.',
+      'rsi-slope-enabled':'Requires rising RSI for bullish entries and falling RSI for bearish entries.',
+      'rsi-length':'Lookback period for Wilder RSI on host candle closes.',
+      'rsi-bullish-min':'Inclusive lower RSI boundary for bullish entries in Between mode.',
+      'rsi-bullish-max':'Inclusive upper RSI boundary for bullish entries in Between mode.',
+      'rsi-bearish-min':'Inclusive lower RSI boundary for bearish entries in Between mode.',
+      'rsi-bearish-max':'Inclusive upper RSI boundary for bearish entries in Between mode.',
+      'retest-enabled':'Adds an EMA10 pullback-and-confirmation entry opportunity within the existing trend. Selected patterns confirm the bounce; other enabled entry filters still apply.',
+      'retest-engulfing':'Allows a matching engulfing candle pattern to confirm an EMA10 retest.',
+      'retest-harami':'Allows a matching harami candle pattern to confirm an EMA10 retest.',
+      'retest-star':'Allows a morning/evening-star pattern to confirm an EMA10 retest; intraday gaps are optional.',
+      'use-adx':'Filters entries using ADX trend strength and the configured threshold.',
+      'adx-threshold':'Minimum trend-strength threshold used by the ADX entry filter.',
+      'adx-length':'Directional-movement lookback length used to calculate ADX.',
+      'adx-smoothing':'Smoothing length applied to the ADX calculation.',
+      'ema-exit-enabled':'Enables the EMA breach exit using the configured exit period.',
+      'ema-exit-length':'EMA period used for the breach exit; independent of the entry EMA periods.',
+      'ema-widening-exit-enabled':'Exits when the absolute fast/slow EMA gap contracts on a completed candle; even a small contraction can qualify.',
+      'supertrend-exit-enabled':'Allows an opposite confirmed Supertrend direction to trigger an exit.',
+      'volume-enabled':'Shows volume on the chart only; does not create an entry or exit rule.',
+      'rsi-sma-enabled':'Shows a moving average of RSI on the chart only.',
+      'rsi-sma-period':'Number of RSI observations averaged for the chart-only RSI moving-average line.',
+      'market-structure-enabled':'Checks confirmed host-candle swing structure for directional entry agreement.',
+      'zone-target-enabled':'Uses confirmed supply/demand zones for the configured target exit.',
+      'intrabar-entries':'OFF evaluates completed candles. ON permits supported live-price entry and EMA-exit evaluation.',
+      'timeframe':'Host candle interval for the chart and runner. Active-runner changes follow the controlled timeframe transition.',
+      'mode':'Paper simulates orders; Live can submit real orders when the runner is started.',
+      'max-trades':'Maximum counted entries for one runner run; reaching the limit prevents further entries.',
+      'paper-capital':'Virtual capital used for Paper trading; does not deposit broker funds.',
+      'additional-slippage-points':'Extra premium points per side included in estimated trading costs.',
+      'config-name':'Name used to save and restore this instrument configuration.'
+    };
+    for(const control of section.querySelectorAll('input,select')){
+      const id=control.id.replace(/^renko-/,'');
+      const base=id.replace(/-indicator$/,'');
+      const label=control.closest('label');
+      const existing=control.title||label?.querySelector('small')?.textContent||'';
+      const name=control.getAttribute('aria-label')||label?.childNodes[0]?.textContent?.trim()||base.replaceAll('-',' ');
+      let help=settingHelp[base]||existing;
+      if(base.endsWith('-family-enabled'))help='Master switch for this indicator family’s strategy entry and exit rules. OFF preserves individual choices; chart-only selections remain independent.';
+      if(!help)help='Configures '+name+'. Review the selected value before starting the runner.';
+      if(id.endsWith('-indicator'))help+=' Chart only: controls display and historical analysis, not live order eligibility.';
+      else if(control.type==='checkbox'&&DESTINATION_RULES.includes(id))help+=' Strategy setting: applies on the next Start.';
+      control.title=help;
+      if(label)label.title=help;
+    }
     signalIds.forEach(id=>el(id).addEventListener('change',connectStream));
     document.addEventListener('visibilitychange',()=>{if(!document.hidden){connectStream();if(el('symbol').value)load();}});
     window.addEventListener('pagehide',()=>stream?.close());
