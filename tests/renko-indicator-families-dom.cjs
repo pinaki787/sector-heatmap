@@ -9,7 +9,7 @@ w.BrokerForms={ready:Promise.resolve(),accounts:()=>[],account:()=>null,route:(s
 w.eval(fs.readFileSync('renko-supertrend.js','utf8'));
 await w.RenkoSupertrend.mount('renko-supertrend');
 const names=['supertrend','ema','rsi','adx','structure','zones'];
-for(const name of names){const input=w.document.getElementById('renko-'+name+'-family-enabled');assert.ok(input,name);assert.equal(input.checked,true);}
+for(const name of names){const input=w.document.getElementById('renko-'+name+'-family-enabled');assert.ok(input,name);assert.equal(input.checked,!['structure','zones'].includes(name));}
 assert.equal(w.document.querySelectorAll('.renko-family-master').length,6);
 assert.ok(w.document.body.textContent.includes('Chart only'));
 setTimeout(()=>{for(const name of names)assert.equal(w.document.getElementById('renko-'+name+'-family-enabled').disabled,false,'loaded backend capability');
