@@ -37,8 +37,8 @@ Specifications and source links: dhan-mcx-specifications.md.
 - Missing expiry evidence now blocks entries and requests a protective exit.
 
 ## Remaining before completion
-1. Finish the full goal completion audit across broker-native surfaces and snapshot dependencies.
-2. GitHub push remains blocked: HTTPS authentication unavailable; SSH host trust is not configured.
+1. Completion audit finished: 79 reviewed files match the deployed worker; 113 final focused checks pass. See dhan-order-routing-validation.md.
+2. GitHub push remains blocked: HTTPS authentication unavailable; SSH host identity verified using GitHub metadata, but no accepted public key is available.
 3. No real-order execution or real fills have been tested; simulated Live routing and broker read-only checks are separate evidence.
 
 No claim of real fill validation is made. No order was submitted during these checks.
