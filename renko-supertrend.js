@@ -860,14 +860,15 @@
     assessmentDetails.classList.add('renko-chart-fold');
     function adjustableStudyHeight(host,key,label){
       const storage='sector-pulse:study-panel-height:'+key;
-      let height=key==='rsi'?170:120;
-      try{const saved=Number(localStorage.getItem(storage));if(Number.isFinite(saved)&&saved>=70&&saved<=500)height=saved;}catch{}
+      const minimum=key==='candles'?180:70,maximum=key==='candles'?900:500;
+      let height=key==='candles'?380:key==='rsi'?170:120;
+      try{const saved=Number(localStorage.getItem(storage));if(Number.isFinite(saved)&&saved>=minimum&&saved<=maximum)height=saved;}catch{}
       const control=document.createElement('label');control.style.cssText='display:flex;align-items:center;gap:8px;color:#9eb3cd;font-size:11px;margin:4px 0';
-      const slider=document.createElement('input');slider.type='range';slider.min='70';slider.max='500';slider.step='10';slider.setAttribute('aria-label',label+' panel height');slider.style.width='130px';
+      const slider=document.createElement('input');slider.type='range';slider.min=String(minimum);slider.max=String(maximum);slider.step='10';slider.setAttribute('aria-label',label+' panel height');slider.style.width='130px';
       const readout=document.createElement('span');control.append(document.createTextNode('Panel height'),slider,readout);host.before(control);
-      const grip=document.createElement('div');grip.setAttribute('role','separator');grip.tabIndex=0;grip.setAttribute('aria-label','Resize '+label+' panel');grip.setAttribute('aria-orientation','horizontal');grip.setAttribute('aria-valuemin','70');grip.setAttribute('aria-valuemax','500');grip.style.cssText='height:12px;cursor:row-resize;touch-action:none;display:flex;justify-content:center;align-items:center;color:#7197ba;font-size:12px;user-select:none;border-bottom:1px solid #334154';grip.textContent='━━';host.after(grip);
+      const grip=document.createElement('div');grip.setAttribute('role','separator');grip.tabIndex=0;grip.setAttribute('aria-label','Resize '+label+' panel');grip.setAttribute('aria-orientation','horizontal');grip.setAttribute('aria-valuemin',String(minimum));grip.setAttribute('aria-valuemax',String(maximum));grip.style.cssText='height:12px;cursor:row-resize;touch-action:none;display:flex;justify-content:center;align-items:center;color:#7197ba;font-size:12px;user-select:none;border-bottom:1px solid #334154';grip.textContent='━━';host.after(grip);
       function apply(value,save=true){
-        height=Math.max(70,Math.min(500,Math.round(value)));host.style.setProperty('height',height+'px','important');host.style.setProperty('flex','none');
+        height=Math.max(minimum,Math.min(maximum,Math.round(value)));host.style.setProperty('height',height+'px','important');host.style.setProperty('flex','none','important');host.style.setProperty('min-height',minimum+'px','important');
         slider.value=String(height);readout.textContent=height+' px';grip.setAttribute('aria-valuenow',String(height));
         if(save)try{localStorage.setItem(storage,String(height));}catch{}
       }
@@ -876,9 +877,10 @@
       grip.addEventListener('pointerdown',event=>{if(event.button!==0)return;drag={y:event.clientY,height};grip.setPointerCapture(event.pointerId);event.preventDefault();});
       grip.addEventListener('pointermove',event=>{if(drag)apply(drag.height+event.clientY-drag.y);});
       for(const event of ['pointerup','pointercancel','lostpointercapture'])grip.addEventListener(event,()=>{drag=null;});
-      grip.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){event.preventDefault();apply(event.key==='Home'?70:event.key==='End'?500:height+(event.key==='ArrowDown'?10:-10));}});
+      grip.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){event.preventDefault();apply(event.key==='Home'?minimum:event.key==='End'?maximum:height+(event.key==='ArrowDown'?10:-10));}});
       apply(height,false);
     }
+    adjustableStudyHeight(el('chart'),'candles','Candlestick');
     const rsiSection=el('rsi-chart').closest('section'),rsiBody=document.createElement('div');rsiBody.className='renko-study-body';
     while(rsiSection.firstChild)rsiBody.append(rsiSection.firstChild);
     const rsiFold=chartFold('rsi','RSI',rsiBody,rsiSection,null,true);
@@ -911,7 +913,11 @@
       #renko-chart-stack .renko-study-canvas{height:120px;margin:0}
       /* Keep chart controls visible while the chart and studies scroll below. */
       #renko-chart-stack{position:relative;isolation:isolate;display:flex!important;flex-direction:column;height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);overflow:hidden!important}
-      #renko-chart-scroll-body{flex:1 1 auto;min-height:0;overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain}
+      #renko-chart-scroll-body{flex:1 1 auto;min-height:0;overflow-x:auto;overflow-y:scroll;scrollbar-gutter:stable;scrollbar-width:auto;scrollbar-color:#91aaca #172230;overscroll-behavior:contain}
+      #renko-chart-scroll-body::-webkit-scrollbar{width:14px;height:14px}
+      #renko-chart-scroll-body::-webkit-scrollbar-track{background:#172230;border-left:1px solid #42546c}
+      #renko-chart-scroll-body::-webkit-scrollbar-thumb{background:#91aaca;border:3px solid #172230;border-radius:8px}
+      #renko-chart-scroll-body::-webkit-scrollbar-thumb:hover{background:#c4d8f0}
       #renko-chart-stack #renko-chart-toolbar{position:relative;flex:0 0 auto;z-index:20;margin-top:0;padding:8px;background:#131722;border-bottom:1px solid #334154;box-shadow:0 3px 8px #0004;box-sizing:border-box}
       #renko-chart-stack:fullscreen{max-height:100dvh;height:100dvh;overflow:hidden!important}
       @media(max-width:650px){#renko-chart-stack .renko-chart-fold>summary{flex-wrap:wrap;gap:5px}#renko-chart-stack:fullscreen #renko-chart{min-height:45vh!important;flex-basis:45vh!important}}
