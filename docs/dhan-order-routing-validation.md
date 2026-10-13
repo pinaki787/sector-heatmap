@@ -29,18 +29,13 @@ routes remain explicit rather than silently substituting another broker.
 Account-wide historical after-fee P&L is not fabricated where execution evidence
 is unavailable. Broker outages and rate limits remain reported as errors.
 
-A final read-only check found a retained Live runner position and unresolved exit
-in local state while Dhan reported no open positions or pending orders. That
-historical record remains blocked for reconciliation; it is not proof of current
-broker exposure or executable P&L. No replacement order or state deletion is
-authorized by the absence of a broker position alone. This recovery discrepancy
-must be resolved from broker execution evidence before reactivation.
-
 ## Final recovery and account-selection validation — 2026-10-13
 
 - Renko initializes from the selected owned account record, including older URLs without a broker hint. Positions selection preserves the independent Renko account, broker and instance. Navigation registration waits for the asynchronous Renko mount.
 - External-close reconciliation requires a stopped runner, exclusive state lock, unchanged recovery context, flat broker position, no pending broker order, exact owned entry fills and an unambiguous terminal external exit. Uncertain durable submission intents remain blocked. It archives evidence and stays stopped; it never sends an order.
 - Browser validation reconciled the existing Dhan external closure and displayed STOPPED, no retained position/pending order, and 487.50 gross realized P&L. A zero-filled rejected row with no price no longer crashes position history.
-- Final Python suite: 715 tests, one skipped, no failures. Node suite: 265 passed. The separate optional jsdom harness could not run because jsdom is not installed in the remote environment.
+- Final Python suite: 715 tests, one skipped, no failures. Node suite: 266 passed, including the DOM harness using the existing isolated jsdom installation. The harness now awaits account-bound mounting.
 - FYERS and Delta worker processes were preserved. No real order was submitted or strategy rearmed during validation.
 - GitHub publishing remains blocked by unavailable Git write credentials and connector write permission; local remote-repository commits are not a successful push.
+
+- Final deployment parity: all 17 reviewed Dhan backend, shared UI and history files match the private worker snapshot.
