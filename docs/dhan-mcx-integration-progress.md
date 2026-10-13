@@ -1,4 +1,4 @@
-# Dhan MCX integration — source validated, deployment pending
+# Dhan MCX integration — deployed MCX Renko validation
 
 ## Scope
 Native MCX Renko discovery, exact futures-host history, bought-option execution,
@@ -15,8 +15,8 @@ No real orders or runner activation are authorized by these checks.
 Specifications and source links: dhan-mcx-specifications.md.
 
 ## Validation on 2026-10-13
-- 145 focused Dhan tests passed.
-- Full Python regression: 739 tests, one skipped, no failures.
+- 76 focused MCX/execution/adapter checks passed after browser corrections.
+- Full Python regression: 742 tests, one skipped, no failures.
 - All 266 Node tests passed.
 - Read-only current Dhan master search resolved exact CRUDEOIL futures.
 - October CRUDEOIL five-minute history returned 276 candles.
@@ -26,12 +26,19 @@ Specifications and source links: dhan-mcx-specifications.md.
 - Dhan broker exposure check found zero nonzero positions and zero pending orders.
 - Saved Dhan Renko instance was stopped, without position or pending intent.
 
+## Deployment evidence
+
+- Portal and private Dhan worker now run under systemd, preserving their prior environment.
+- FYERS PID 887285 and Delta PID 1101372 were retained without restart.
+- Browser verified MCX search, saved exact contract restoration, candles, indicators and fresh Dhan ticks.
+- Stopped Paper instance 3654182b413310c1b6819193 was created for CRUDEOIL October chart validation; never started.
+- Browser-discovered month casing and saved-contract search restoration defects were corrected.
+- MCX Paper entry/exit test verifies contract multiplier, Dhan costs and quick-loss lock.
+- Missing expiry evidence now blocks entries and requests a protective exit.
+
 ## Remaining before completion
-1. Complete MCX Paper lifecycle/expiry evidence and review other strategy session boundaries.
-2. Deploy source into the account worker and verify the served UI/API.
-3. Resolve deployment ownership: current 8080/8100 processes are outside systemd;
-   do not reuse the old orphan-process deployment helper.
-4. Recheck exposure immediately before any restart; preserve FYERS/Delta processes.
-5. Source-only commit and push. Prior GitHub authentication failure remains unresolved.
+1. Finish the full goal completion audit across broker-native surfaces and snapshot dependencies.
+2. GitHub push remains blocked: HTTPS authentication unavailable; SSH host trust is not configured.
+3. No real-order execution or real fills have been tested; simulated Live routing and broker read-only checks are separate evidence.
 
 No claim of real fill validation is made. No order was submitted during these checks.

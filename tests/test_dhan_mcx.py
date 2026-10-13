@@ -15,12 +15,15 @@ class McxDiscovery(unittest.TestCase):
             row('oc','OPTFUT','2026-10-15','CE'),row('op','OPTFUT','2026-10-15','PE'),
             row('nc','OPTFUT','2026-11-16','CE'),row('np','OPTFUT','2026-11-16','PE')]
     def test_discovery_uses_native_exact_expiry_hosts(self):
-        self.assertEqual([r['symbol'] for r in mcx.search(self.rows,self.now)],['MCX:CRUDEOIL-oct','MCX:CRUDEOIL-nov'])
+        self.assertEqual([r['symbol'] for r in mcx.search(self.rows,self.now)],['MCX:CRUDEOIL-OCT','MCX:CRUDEOIL-NOV'])
+    def test_host_matches_form_normalized_case_without_changing_expiry(self):
+        self.assertEqual(mcx.host(self.rows,'MCX:CRUDEOIL-OCT',self.now)['SEM_SMST_SECURITY_ID'],'oct')
+
     def test_option_series_does_not_cross_future_month(self):
         self.assertEqual({r['SEM_SMST_SECURITY_ID'] for r in mcx.option_series(self.rows,self.rows[0],self.now)},{'oc','op'})
     def test_missing_or_expired_host_never_rolls(self):
         with self.assertRaises(ValueError):mcx.host(self.rows,'MCX:CRUDEOIL-missing',self.now)
-        with self.assertRaises(ValueError):mcx.host(self.rows,'MCX:CRUDEOIL-oct',datetime(2026,10,20,tzinfo=IST).timestamp())
+        with self.assertRaises(ValueError):mcx.host(self.rows,'MCX:CRUDEOIL-OCT',datetime(2026,10,20,tzinfo=IST).timestamp())
     def test_no_call_put_pair_is_excluded(self):
         self.assertEqual(mcx.search(self.rows[:3],self.now),[])
     def test_cross_exchange_rows_are_excluded(self):
@@ -29,7 +32,7 @@ class McxDiscovery(unittest.TestCase):
 
     def test_different_strikes_are_not_a_pair(self):
         self.rows[3]['SEM_STRIKE_PRICE']='7800'
-        self.assertEqual([r['symbol'] for r in mcx.search(self.rows,self.now)],['MCX:CRUDEOIL-nov'])
+        self.assertEqual([r['symbol'] for r in mcx.search(self.rows,self.now)],['MCX:CRUDEOIL-NOV'])
     def test_invalid_strike_is_excluded(self):
         for value in ('NaN','Infinity','0','bad'):
             with self.subTest(value=value):

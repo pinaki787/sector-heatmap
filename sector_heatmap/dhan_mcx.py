@@ -30,7 +30,7 @@ def futures(rows, now, text=''):
     return sorted(result,key=lambda r:(commodity(r),r['SEM_EXPIRY_DATE'],r['SEM_SMST_SECURITY_ID']))
 
 def host(rows,symbol,now):
-    matches=[r for r in futures(rows,now) if 'MCX:'+r['SEM_TRADING_SYMBOL']==symbol]
+    matches=[r for r in futures(rows,now) if ('MCX:'+r['SEM_TRADING_SYMBOL']).upper()==symbol.upper()]
     if len(matches)!=1:raise ValueError('Exact unexpired Dhan MCX futures host is missing or ambiguous.')
     return matches[0]
 
@@ -66,7 +66,7 @@ def search(rows,now,text=''):
     for row in futures(rows,now,text):
         options=option_series(rows,row,now)
         if paired_options(options):
-            result.append(dict(symbol='MCX:'+row['SEM_TRADING_SYMBOL'],
+            result.append(dict(symbol=('MCX:'+row['SEM_TRADING_SYMBOL']).upper(),
                 underlying=row['SEM_CUSTOM_SYMBOL'],description=row['SEM_CUSTOM_SYMBOL'],
                 security_id=row['SEM_SMST_SECURITY_ID'],exchange_segment='MCX_COMM'))
     return result[:50]
