@@ -20,6 +20,7 @@ from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
 from .config import _atomic_private_write, load_config
 from .equity_exit_plan import build_equity_exit_plan
+from .premium_exit_mapping import premium_exits, cash_exits
 from .handoff import FyersCmMaster, FyersFoMaster, MIN_REWARD_TO_RISK, MAX_SPREAD_PCT, fetch_fyers_chain, build_long_option_proposals
 
 
@@ -90,7 +91,8 @@ def _review_terms(preview):
     return {"underlying": preview.get("underlying"), "direction": preview.get("direction"),
             "underlying_invalidation": preview.get("underlying_invalidation"),
             "instrument": instrument, "order_policy": preview.get("order_policy"),
-            "daily_risk_ledger": preview.get("daily_risk_ledger")}
+            "daily_risk_ledger": preview.get("daily_risk_ledger"),
+            "protection": {k: v for k, v in (preview.get("protection") or {}).items() if k not in {"calculated_at", "implied_volatility"}}}
 
 
 class PreviewChanged(RuntimeError):
@@ -638,6 +640,23 @@ class FyersExecutionService:
             "submission_eligible": instrument["submission_eligible"],
             "live_submission_enabled": self._live_submission_enabled(),
         }
+        if kind in {'EQUITY', 'LONG_OPTION'}:
+            leg = instrument['contracts'][0]
+            if kind == 'EQUITY':
+                protection = cash_exits(entry=leg['limit_price'], stop=invalidation, target=instrument['target'], action=leg['action'], tick=leg['tick_size'])
+                instrument['exit_plan']['live_execution'] = 'BROKER_LINKED_EXITS_REQUESTED'
+            else:
+                plan = payload.get('underlying_exit_plan') or {}
+                if not plan.get('stop') or not plan.get('target'):
+                    raise ValueError('Underlying stop and target are required for protected FYERS option entry.')
+                symbol = str(payload.get('underlying') or '')
+                spot = (_fresh_depth_quote(client, symbol, self.now()) if payload.get('require_market_open') is True else _quotes(client.quotes({'symbols':symbol})).get(symbol))
+                if not spot:
+                    raise FyersExecutionUnavailable('Fresh FYERS underlying quote is required for premium protection.')
+                protection = premium_exits(spot=(spot['bid']+spot['ask'])/2, stop=plan['stop'], target=plan['target'], premium=leg['limit_price'], strike=leg['strike'], expiry=instrument['expiry'], option_type=leg['option_type'], tick=leg['tick_size'], now=self.now())
+            preview['protection'] = protection
+            preview['order_policy']['mapping_note'] = 'FYERS native linked stop-loss and target offsets in points; broker confirmation remains required.'
+            preview['warnings'].append(protection['assumptions'])
         preview["state_digest"] = hashlib.sha256(json.dumps(preview, sort_keys=True, default=str).encode()).hexdigest()
         return preview
 
@@ -835,6 +854,19 @@ class FyersExecutionService:
             self.previews[preview_id] = {"payload": deepcopy(payload), "preview": preview, "batch": True}
         return preview
 
+    @staticmethod
+    def _linked_exit_fields(preview, leg):
+        if preview['instrument']['kind'] not in {'EQUITY', 'LONG_OPTION'}:
+            return {}
+        protection = preview.get('protection')
+        if not protection:
+            raise ValueError('Linked stop-loss and target are missing; entry was not submitted.')
+        entry = float(leg['limit_price'])
+        stop, target = protection['stop_loss_price'], protection['target_price']
+        if not (stop < entry < target if leg['action'] == 'BUY' else target < entry < stop):
+            raise ValueError('Linked exits no longer bracket the entry.')
+        return {'stopLoss': round(abs(entry-stop), 10), 'takeProfit': round(abs(target-entry), 10), 'legType': 1}
+
     def submit_batch(self, preview_id, confirmation):
         if not self._live_submission_enabled():
             raise PermissionError(f"Live FYERS submission is disabled. Enable {self.live_gate_name}=1 intentionally before submitting a reviewed batch.")
@@ -860,7 +892,7 @@ class FyersExecutionService:
             leg = item["instrument"]["contracts"][0]
             orders.append({"symbol": leg["symbol"], "qty": leg["quantity"], "type": 1, "side": 1 if leg["action"] == "BUY" else -1,
                            "productType": item["order_policy"]["product_type"], "limitPrice": leg["limit_price"], "stopPrice": 0,
-                           "validity": "DAY", "disclosedQty": 0, "offlineOrder": False})
+                           "validity": "DAY", "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(item, leg)})
         response = client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         status = "PENDING" if len(order_ids) == len(orders) else "EXECUTION_STATUS_UNCERTAIN"
@@ -891,7 +923,7 @@ class FyersExecutionService:
                     order = {"symbol": leg["symbol"], "qty": leg["quantity"], "type": 1,
                              "side": 1 if leg["action"] == "BUY" else -1,
                              "productType": item["order_policy"]["product_type"], "limitPrice": leg["limit_price"],
-                             "stopPrice": 0, "validity": "DAY", "disclosedQty": 0, "offlineOrder": False}
+                             "stopPrice": 0, "validity": "DAY", "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(item, leg)}
                     response = client.place_order(order)
                     ids = _order_ids(response)
                     order_ids.extend(ids)
@@ -934,7 +966,7 @@ class FyersExecutionService:
             "symbol": leg["symbol"], "qty": leg["quantity"], "type": 1,
             "side": 1 if leg["action"] == "BUY" else -1, "productType": refreshed["order_policy"]["product_type"],
             "limitPrice": leg["limit_price"], "stopPrice": 0, "validity": "DAY",
-            "disclosedQty": 0, "offlineOrder": False,
+            "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(refreshed, leg),
         } for leg in refreshed["instrument"]["contracts"]]
         response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] in {"EQUITY", "LONG_OPTION"} else client.place_basket_orders(orders)
         order_ids = _order_ids(response)
@@ -965,5 +997,6 @@ class FyersExecutionService:
             self.previews.pop(preview_id, None)
         return self._archive_entry_result({
             "preview_id": preview_id, "status": status, "order_ids": order_ids, "orders": reconciled,
-            "message": "Order status is uncertain; reconcile FYERS orders and do not retry automatically." if status == "EXECUTION_STATUS_UNCERTAIN" else "FYERS rejected or terminated at least one leg; the policy is halted and no retry will occur." if status == "REJECTED" else "All order legs reconciled as filled." if status == "OPEN" else "Order accepted but not fully filled; monitor FYERS orders before further action.",
+            "protection_requested": bool(refreshed.get("protection")), "protection_confirmed": False,
+            "message": "Order status is uncertain; reconcile FYERS orders and do not retry automatically." if status == "EXECUTION_STATUS_UNCERTAIN" else "FYERS rejected or terminated at least one leg; the policy is halted and no retry will occur." if status == "REJECTED" else "Entry fills reconciled; linked stop-loss and target still require broker confirmation." if status == "OPEN" else "Order accepted but not fully filled; monitor FYERS orders before further action.",
         })

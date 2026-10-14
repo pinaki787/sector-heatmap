@@ -32,11 +32,16 @@ class FakeClient:
         if path=='/fundlimit':return dict(dhanClientId='10001',availabelBalance=self.cash)
         if path=='/positions':return deepcopy(self.positions)
         if path=='/orders' and method=='GET':return deepcopy(self.orders)
+        if path=='/super/orders' and method=='GET':
+            if self.external is not None:
+                sent=next(c for c in reversed(self.calls) if c[0]=='POST' and c[1]=='/super/orders')
+                return [{**self.external,'correlationId':sent[2]['correlationId']}]
+            return deepcopy(self.orders)
         if path=='/margincalculator':return dict(totalMargin=self.margin,insufficientBalance=0)
         if path.startswith('/orders/external/'):
             if self.external is None:raise RuntimeError('No matching order')
             return {**self.external,'correlationId':path.split('/')[-1]}
-        if path=='/orders' and method=='POST':
+        if path in ('/orders','/super/orders') and method=='POST':
             if self.unknown:raise RuntimeError('Timed out')
             result=dict(orderId=str(len(self.orders)+1),orderStatus=self.ack)
             self.orders.append({**payload,**result});return result
@@ -52,6 +57,26 @@ class DhanExecutionTests(unittest.TestCase):
         self.client=FakeClient(lambda:self.clock)
         self.service=DhanExecutionService(self.account,self.root,client_factory=lambda _:self.client,master=FakeMaster(),now=lambda:self.clock,egress=lambda:'187.126.123.18')
         self.payload=dict(broker='DHAN',account_id=self.account['id'],security_id='2885',exchange_segment='NSE_EQ',transaction_type='BUY',quantity=10,invalidation=95,target_price=110)
+    def test_cash_entry_sends_native_linked_protection(self):
+        self.live()
+        preview=self.service.prepare(self.payload)
+        self.assertEqual(preview['order_route'],'SUPER')
+        self.assertEqual(preview['ticket']['stopLossPrice'],95)
+        self.assertEqual(preview['ticket']['targetPrice'],110)
+        result=self.service.submit(preview['preview_id'],preview['confirmation_phrase'])
+        sent=self.sent()
+        self.assertEqual(sent[0][1],'/super/orders')
+        self.assertEqual(sent[0][2]['stopLossPrice'],95)
+        self.assertEqual(sent[0][2]['targetPrice'],110)
+        self.assertFalse(result['protection_confirmed'])
+
+    def test_cash_short_protection_and_missing_target(self):
+        p=self.service.prepare({**self.payload,'transaction_type':'SELL','invalidation':105,'target_price':90})
+        self.assertEqual(p['ticket']['stopLossPrice'],105)
+        self.assertEqual(p['ticket']['targetPrice'],90)
+        with self.assertRaises(ValueError):self.service.prepare({**self.payload,'target_price':None})
+        self.assertEqual(self.sent(),[])
+
     def test_token_rotation_reloads_existing_service_without_order(self):
         from sector_heatmap.dhan_execution import DhanClient
         self.service.client_factory=DhanClient
@@ -74,7 +99,7 @@ class DhanExecutionTests(unittest.TestCase):
             with self.assertRaises(DhanAPIError):self.service.status()
 
     def tearDown(self):self.tmp.cleanup()
-    def sent(self):return [c for c in self.client.calls if c[:2]==('POST','/orders')]
+    def sent(self):return [c for c in self.client.calls if c[0]=='POST' and c[1] in ('/orders','/super/orders')]
     def live(self):self.service.account['live_enabled']=True
     def test_preview_is_read_only_and_private(self):
         preview=self.service.prepare(self.payload)
@@ -236,7 +261,7 @@ class SubmissionFreshnessTests(unittest.TestCase):
         self.client.price=102
         with self.assertRaisesRegex(ValueError,'reviewed limit'):
             self.service._send('TEST-NO-ORDER',preview)
-        self.assertFalse(any(method=='POST' and path=='/orders' for method,path,*_ in self.client.calls))
+        self.assertFalse(any(method=='POST' and path in ('/orders','/super/orders') for method,path,*_ in self.client.calls))
         self.assertFalse((self.root/'dhan-orders'/'TEST-NO-ORDER.json').exists())
     def test_fyers_analysis_cannot_be_submitted_as_dhan(self):
         with self.assertRaisesRegex(PermissionError,'Proposal broker'):
@@ -312,7 +337,7 @@ class DefiniteRejectionTests(unittest.TestCase):
         from sector_heatmap.dhan_execution import DhanAPIError
         request=self.client.request
         def reject(method,path,payload=None):
-            if method=='POST' and path=='/orders':
+            if method=='POST' and path in ('/orders','/super/orders'):
                 self.client.calls.append((method,path,payload))
                 raise DhanAPIError('Dhan explicitly rejected the request.',True)
             return request(method,path,payload)
@@ -324,7 +349,7 @@ class DefiniteRejectionTests(unittest.TestCase):
         self.assertEqual(result['account_id'],self.account['id'])
         self.assertEqual(self.service.reconcile()['unresolved'],0)
         self.assertTrue(self.service.prepare(self.payload)['preview_id'])
-        self.assertEqual(len([c for c in self.client.calls if c[:2]==('POST','/orders')]),1)
+        self.assertEqual(len([c for c in self.client.calls if c[0]=='POST' and c[1] in ('/orders','/super/orders')]),1)
 
 class McxManualTests(unittest.TestCase):
     setUp=DhanExecutionTests.setUp

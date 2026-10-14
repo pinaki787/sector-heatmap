@@ -18,7 +18,7 @@ import fcntl
 import tempfile
 from .config import _atomic_private_write
 from .fyers_execution import PreviewChanged
-from .premium_exit_mapping import premium_exits
+from .premium_exit_mapping import premium_exits, cash_exits
 
 IST = ZoneInfo('Asia/Kolkata')
 MASTER_URL = 'https://images.dhan.co/api-data/api-scrip-master.csv'
@@ -367,7 +367,13 @@ class DhanExecutionService:
                                     strike=contract.get('strike'),expiry=contract['expiry'],option_type=contract['option_type'],tick=tick,now=self.now())
             ticket={k:v for k,v in ticket.items() if k not in ('validity','triggerPrice','disclosedQuantity','afterMarketOrder')}
             ticket.update(stopLossPrice=protection['stop_loss_price'],targetPrice=protection['target_price'],trailingJump=0)
-        warnings=([protection['assumptions'],'Dhan Super Order requests linked premium stop-loss and target legs. Broker acknowledgement is not fill or exit-leg confirmation.'] if protection else ['Stop and target are planning levels; this normal LIMIT entry does not place protective exit orders.'])
+        if not option:
+            if payload.get("exit_plan_mode",proposal.get("exit_plan_mode","FIXED_TARGET")) != "FIXED_TARGET":
+                raise ValueError("Dhan linked exits currently require a fixed full-quantity target.")
+            protection=cash_exits(entry=price,stop=stop,target=target_value,action=action,tick=tick)
+            ticket={k:v for k,v in ticket.items() if k not in ('validity','triggerPrice','disclosedQuantity','afterMarketOrder')}
+            ticket.update(stopLossPrice=protection['stop_loss_price'],targetPrice=protection['target_price'],trailingJump=0)
+        warnings=([protection['assumptions'],'Dhan Super Order requests linked stop-loss and target legs. Broker acknowledgement is not fill or exit-leg confirmation.'] if protection else ['Stop and target are planning levels; this normal LIMIT entry does not place protective exit orders.'])
         if price*quantity*multiplier>50000:warnings.append('Order notional exceeds ₹50,000.')
         if target_value is not None:
             target=number(target_value,'Target',True)

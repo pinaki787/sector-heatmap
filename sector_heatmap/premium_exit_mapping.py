@@ -38,3 +38,17 @@ def premium_exits(*, spot, stop, target, premium, strike, expiry, option_type, t
                 implied_volatility=iv,model='BLACK_SCHOLES_ZERO_RATE_CALIBRATED_TO_ENTRY',
                 assumptions='Instantaneous move at unchanged time and implied volatility; mapped prices are estimates, not guaranteed underlying-level exits.',
                 calculated_at=now.isoformat(),expiry=expiry)
+
+
+def cash_exits(*, entry, stop, target, action, tick):
+    """Tick-aligned absolute exits; never widen the requested stop."""
+    values = [entry, stop, target, tick]
+    if action not in ('BUY', 'SELL') or any(v is None or not math.isfinite(float(v)) or float(v) <= 0 for v in values):
+        raise ValueError('Protected entry requires a valid side and positive entry, stop, target and tick.')
+    entry, stop, target, tick = map(lambda v: Decimal(str(v)), values)
+    stop = (stop/tick).to_integral_value(rounding=ROUND_CEILING if action == 'BUY' else ROUND_FLOOR)*tick
+    target = (target/tick).to_integral_value(rounding=ROUND_FLOOR if action == 'BUY' else ROUND_CEILING)*tick
+    if not (stop < entry < target if action == 'BUY' else target < entry < stop):
+        raise ValueError('Stop and target must bracket the fresh entry after tick rounding.')
+    return dict(basis='DIRECT_PRICE_LEVELS', entry_price=float(entry), stop_loss_price=float(stop), target_price=float(target),
+                assumptions='Linked exit triggers are requested with entry; execution prices are not guaranteed.')

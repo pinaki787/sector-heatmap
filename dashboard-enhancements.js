@@ -2164,7 +2164,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('ticket-preview').before(protectionSummary)
     }
     const protection = preview.protection
-    protectionSummary.textContent = protection ? `Dhan Super Order · premium entry ${money(protection.premium_entry)} · stop-loss ${money(protection.stop_loss_price)} · target ${money(protection.target_price)}. Derived from fresh underlying ${money(protection.underlying_entry)}, stop ${money(protection.underlying_stop)}, target ${money(protection.underlying_target)}. Estimated at unchanged time and volatility. Linked exit legs are requested with entry; broker acceptance and fill remain unconfirmed.` : (preview.warnings || []).join(' ')
+    protectionSummary.textContent = protection ? `${preview.broker === 'FYERS' ? 'FYERS linked exits' : 'Dhan Super Order'} · entry ${money(protection.premium_entry ?? protection.entry_price)} · stop-loss ${money(protection.stop_loss_price)} · target ${money(protection.target_price)}. ${protection.assumptions || ''} Linked exit legs are requested with entry; broker acceptance and fill remain unconfirmed.` : (preview.warnings || []).join(' ')
 
     const ledger = preview.daily_risk_ledger || {}
     $('risk-strip').innerHTML = [
