@@ -622,10 +622,11 @@
     const sessionHoursInput=document.createElement('input');sessionHoursInput.id='renko-trading-session-hours';sessionHoursInput.type='number';sessionHoursInput.step='any';sessionHoursInput.readOnly=true;sessionHoursInput.title='The trading session interval for a day';sessionHoursInput.setAttribute('aria-label','Trading session hours');sessionHoursInput.placeholder='Awaiting verified session';sessionHoursRow.append(sessionHoursInput);
     const sessionHoursHelp=document.createElement('small');sessionHoursHelp.textContent='Hours per day from the verified broker session.';sessionHoursRow.append(sessionHoursHelp);entryFilterGrid.append(sessionHoursRow);settingRow(sessionHoursRow);
     function paintTradingSessionHours(policy,symbol=el('symbol').value){
-      const exchange=String(symbol||'').split(':')[0].toUpperCase();
-      const hours=['NSE','BSE','NFO','BFO'].includes(exchange)?6:exchange==='MCX'?14:isDelta?23:null;
-      sessionHoursInput.value=hours===null?'':String(hours);sessionHoursInput.dataset.symbol=symbol;
-      sessionHoursHelp.textContent=hours===null?'Select a supported instrument category.':'Strategy reference hours per day · '+(hours===6?'NSE/BSE equities, indices and derivatives':hours===14?'commodities':'crypto')+'.';
+      const match=/^(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(policy?.master_regular_session||'');
+      if(match){const start=Number(match[1])*60+Number(match[2]),end=Number(match[3])*60+Number(match[4]);if(start>=0&&start<1440&&end>=0&&end<=1440&&start!==end){const minutes=end>start?end-start:1440-start+end;sessionHoursInput.value=String(minutes/60);sessionHoursInput.dataset.symbol=symbol;sessionHoursHelp.textContent=match[1]+':'+match[2]+'–'+match[3]+':'+match[4]+' IST · broker regular session';return;}}
+      if(policy?.seven_day_session&&policy?.session_source==='CONTINUOUS_CRYPTO'){sessionHoursInput.value='24';sessionHoursInput.dataset.symbol=symbol;sessionHoursHelp.textContent='Continuous broker market · 24 hours per day';return;}
+      if(sessionHoursInput.dataset.symbol!==symbol){sessionHoursInput.value='';sessionHoursInput.dataset.symbol=symbol;sessionHoursHelp.textContent='Awaiting selected segment’s broker session start and end.';}
+
     }
     root.addEventListener('message',event=>{
       if(isBatchChartView||event.origin!==location.origin||event.data?.type!=='sector-pulse:renko-session-policy')return;
