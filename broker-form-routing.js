@@ -7,7 +7,7 @@ let accounts=[],resolveReady,rejectReady,manualRevision=0;
 const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
 function initial(kind){
  const p=new URLSearchParams(location.search);
- return p.get(kind+'Account')||(p.get('brokerForm')===kind||kind==='renko'&&p.has('renkoBroker')?p.get('brokerAccount'):null);
+ return p.get(kind+'Account')||(p.get('brokerForm')===kind||kind==='renko'?p.get('brokerAccount'):null);
 }
 function account(kind){
  const control=['manual','handoff'].includes(kind)?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);

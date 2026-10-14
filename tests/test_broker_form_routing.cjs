@@ -123,3 +123,11 @@ test('FYERS parser scopes every endpoint to the selected account and rejects abs
  assert.throws(()=>router.route('parser','/api/trade-recommendation/quote',accounts[0]),/FYERS account/);
  assert.equal(calls.length,6);
 });
+
+test('Renko initialization binds the same account as a sector-origin page',()=>{
+ const {router,location}=setup();
+ location.search='?brokerForm=sector&brokerAccount=dhan-owner&renkoInstance=owned';
+ assert.equal(router.initial('renko'),'dhan-owner');
+ location.search+='&renkoAccount=fyers-owner';
+ assert.equal(router.initial('renko'),'fyers-owner');
+});
