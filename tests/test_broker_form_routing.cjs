@@ -107,3 +107,19 @@ test('positions selection preserves the independently selected Renko broker and 
  assert.equal(p.get('renkoInstance'),'retained');
  assert.equal(p.get('accountAccount'),'fyers-owner');
 });
+
+test('FYERS parser scopes every endpoint to the selected account and rejects absent or unsupported accounts',async()=>{
+ const {router,controls,window,accounts}=setup();
+ const calls=[];window.fetch=async url=>{calls.push(url);return {ok:true}};
+ controls.set('parser-broker-account',{value:'account:fyers-owner'});
+ for(const action of ['parse','quote','ai-analysis','prepare-order','submit-direct','lifecycle']){
+  const url='/api/trade-recommendation/'+action;
+  assert.equal(router.kind(url),'parser');
+  await router.fetch('parser',url);
+  assert.equal(calls.at(-1),'https://portal.example/broker-workspace/fyers-owner'+url);
+ }
+ controls.set('parser-broker-account',{value:''});
+ await assert.rejects(router.fetch('parser','/api/trade-recommendation/submit-direct'),/configured broker account/);
+ assert.throws(()=>router.route('parser','/api/trade-recommendation/quote',accounts[0]),/FYERS account/);
+ assert.equal(calls.length,6);
+});

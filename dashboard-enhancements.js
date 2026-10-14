@@ -514,7 +514,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   })
   syncKamaExecutionMode(); updateKamaMode(); loadKamaCapability(); loadKamaRunner(); loadKamaTrades(); startKamaRefreshTimer()
   $('trade-parser-order').insertAdjacentHTML('afterbegin', '<div style="margin-bottom:12px;padding:12px;border:1px solid #4a7296;border-radius:8px;background:#0b1a2b"><div id="trade-parser-ltp" role="status" aria-live="polite">FYERS LTP unavailable — parse an exact contract first.</div><button type="button" id="trade-parser-refresh-ltp" class="button secondary" style="margin-top:8px">Refresh LTP</button></div>')
-  const parserQuote = window.SectorPulseParserQuote?.create($('trade-parser-ltp'), $('trade-parser-refresh-ltp'))
+  const parserFetch = (url,options) => window.BrokerForms.fetch('parser',url,options)
+  const parserQuote = window.SectorPulseParserQuote?.create($('trade-parser-ltp'), $('trade-parser-refresh-ltp'), parserFetch)
   $('trade-parser-input').addEventListener('input', () => parserQuote?.clear())
   $('trade-parser-clear').addEventListener('click', () => parserQuote?.clear())
   $('trade-parser-run').addEventListener('click', () => parserQuote?.clear())
@@ -587,7 +588,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('trade-parser-clear').addEventListener('click', () => {
     $('trade-parser-input').value = ''; $('trade-parser-result').hidden = true; $('trade-parser-result').textContent = ''; $('trade-parser-ai-result').hidden = true; $('trade-parser-ai-result').textContent = ''; $('trade-parser-order').hidden = true; $('trade-parser-status').textContent = 'Paste a recommendation to begin.'
   })
-  const parserAdvisory = window.SectorPulseTradeAdvisory?.create($('trade-parser-ai-result'))
+  const parserAdvisory = window.SectorPulseTradeAdvisory?.create($('trade-parser-ai-result'), parserFetch)
   // Editing or clearing a ticket invalidates pending feedback from its older snapshot.
   for (const id of ['trade-parser-input', 'trade-parser-entry-mode', 'trade-parser-trigger-price', 'trade-parser-limit-price', 'trade-parser-lots']) {
     $(id).addEventListener('input', () => parserAdvisory?.clear())
@@ -600,7 +601,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('trade-parser-submit-order').hidden = false
   const refreshParserLifecycle = async () => {
     try {
-      const response = await fetch('/api/trade-recommendation/lifecycle')
+      const response = await parserFetch('/api/trade-recommendation/lifecycle')
       if (!response.ok) throw new Error('Lifecycle backend update pending.')
       const data = await response.json()
       $('parser-lifecycle-status').style.whiteSpace = 'pre-wrap'
@@ -609,6 +610,16 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   }
   $('parser-lifecycle-refresh').addEventListener('click', refreshParserLifecycle)
   let parserParsedTicket = null, parserSubmissionAttempted = false
+  window.addEventListener('broker-account-change', event => {
+    if(event.detail.kind!=='parser')return
+    parserParsedTicket=null;parserSubmissionAttempted=false
+    parserQuote?.clear();parserAdvisory?.clear()
+    $('trade-parser-submit-order').disabled=true
+    $('trade-parser-result').hidden=true
+    $('trade-parser-order-status').textContent='Broker account changed. Parse the recommendation again before submitting.'
+    $('parser-lifecycle-status').textContent=''
+  })
+
   $('trade-parser-clear').addEventListener('click', () => { parserParsedTicket = null; $('trade-parser-submit-order').disabled = true })
   $('trade-parser-input').addEventListener('input', () => { parserParsedTicket = null; $('trade-parser-submit-order').disabled = true })
   $('trade-parser-run').addEventListener('click', () => { parserParsedTicket = null; $('trade-parser-submit-order').disabled = true })

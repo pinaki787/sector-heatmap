@@ -1,7 +1,7 @@
 /* Shared strategy forms; account routing never changes or starts a runner. */
 (function(root){
 'use strict';
-const IDS={account:'live-feed-broker-account',sector:'sector-broker-account',band:'ema-band-broker-account',rsi:'cross-broker-account',kama:'kama-broker-account',renko:'renko-broker'};
+const IDS={parser:'parser-broker-account',account:'live-feed-broker-account',sector:'sector-broker-account',band:'ema-band-broker-account',rsi:'cross-broker-account',kama:'kama-broker-account',renko:'renko-broker'};
 const ROUTES={band:'band',rsi:'ema',kama:'kama',renko:'renko'};
 let accounts=[],resolveReady,rejectReady,manualRevision=0;
 const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
@@ -17,10 +17,10 @@ function account(kind){
  return accounts.find(a=>a.id===id)||null;
 }
 function kind(url){const p=new URL(url,location.href).pathname;
- return (['/api/account','/api/realized-pnl','/api/live-pnl','/api/auth/status','/api/auth/start','/api/chartink/analyze','/api/chartink/analyze-options'].includes(p) )?'account':p.startsWith('/api/analysis-handoff/')?'handoff':p.startsWith('/api/sector-analysis')?'sector':p.startsWith('/api/trade-ticket/')?'manual':p.startsWith('/api/kama/')?'kama':p.startsWith('/api/ema-crossover/')?'rsi':p.startsWith('/api/ema-band/')?'band':p.startsWith('/api/renko-')?'renko':null;
+ return p.startsWith('/api/trade-recommendation/')?'parser':(['/api/account','/api/realized-pnl','/api/live-pnl','/api/auth/status','/api/auth/start','/api/chartink/analyze','/api/chartink/analyze-options'].includes(p) )?'account':p.startsWith('/api/analysis-handoff/')?'handoff':p.startsWith('/api/sector-analysis')?'sector':p.startsWith('/api/trade-ticket/')?'manual':p.startsWith('/api/kama/')?'kama':p.startsWith('/api/ema-crossover/')?'rsi':p.startsWith('/api/ema-band/')?'band':p.startsWith('/api/renko-')?'renko':null;
 }
 function route(kind,url,selected){
- const u=new URL(url,location.href);if(!selected||u.origin!==location.origin||!u.pathname.startsWith('/api/'))return u.href;
+ const u=new URL(url,location.href);if(kind==='parser'&&selected?.broker!=='FYERS')throw Error('Select a configured FYERS account for this parser.');if(!selected||u.origin!==location.origin||!u.pathname.startsWith('/api/'))return u.href;
  if(u.pathname.startsWith('/api/dhan/')||Object.values(ROUTES).some(k=>u.pathname.startsWith('/api/'+k+'-dhan/')))return u.href;
  if(kind==='handoff'&&selected.broker==='DHAN'){
   u.pathname=u.pathname.replace('/api/analysis-handoff/','/api/dhan/analysis-handoff/');

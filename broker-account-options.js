@@ -5,7 +5,7 @@
   function choices(accounts,{kind='strategy',currentBroker='FYERS',workspaceId=null}={}){
     return accounts.map(account=>{
       const same=!!workspaceId&&account.id===workspaceId;
-      const supported=kind==='sector'?Object.prototype.hasOwnProperty.call(NAMES,account.broker):kind==='account'?['FYERS','DHAN'].includes(account.broker):['strategy','delta-manual'].includes(kind)?same&&account.broker===currentBroker:(kind==='manual'||['renko','rsi','band','kama'].includes(kind)&&(account.strategy_routes||[]).includes(kind))&&account.broker==='DHAN'||['FYERS','DELTA_INDIA'].includes(account.broker)&&(account.broker===currentBroker||kind==='renko')||same&&account.broker===currentBroker;
+      const supported=kind==='parser'?account.broker==='FYERS':kind==='sector'?Object.prototype.hasOwnProperty.call(NAMES,account.broker):kind==='account'?['FYERS','DHAN'].includes(account.broker):['strategy','delta-manual'].includes(kind)?same&&account.broker===currentBroker:(kind==='manual'||['renko','rsi','band','kama'].includes(kind)&&(account.strategy_routes||[]).includes(kind))&&account.broker==='DHAN'||['FYERS','DELTA_INDIA'].includes(account.broker)&&(account.broker===currentBroker||kind==='renko')||same&&account.broker===currentBroker;
       const reason=!account.configured?'connection settings incomplete':supported?'':account.broker==='DHAN'&&kind!=='manual'?'manual orders only; strategy routing unavailable':account.broker!==currentBroker?'not supported by this form':'open this account workspace to use its credentials';
       return {id:account.id,broker:account.broker,value:kind==='manual'&&account.broker==='DHAN'?'dhan:'+account.id:'account:'+account.id,
         label:(NAMES[account.broker]||account.broker)+' · '+account.label+(reason?' — '+reason:''),disabled:!!reason,same};
@@ -42,10 +42,10 @@
       select.dataset.accountsBound='true';
       select.addEventListener('change',event=>{
         const saved=accounts.find(a=>select.selectedOptions[0]?.dataset.savedBrokerAccount===a.id);
-        if(saved&&['account','sector','renko','rsi','band','kama','manual'].includes(kind)){
+        if(saved&&['account','sector','renko','rsi','band','kama','manual','parser'].includes(kind)){
           event.stopImmediatePropagation();
           root.BrokerForms.onChange(kind,saved);
-        }else if(['account','sector','rsi','band','kama','manual'].includes(kind)){
+        }else if(['account','sector','rsi','band','kama','manual','parser'].includes(kind)){
           root.BrokerForms.onChange(kind,null);
         }
         if(kind==='manual'){
@@ -63,7 +63,7 @@
     ['#ema-band-mode','ema-band-broker-account','FYERS','band'],
     ['#cross-mode','cross-broker-account','FYERS','rsi'],
     ['#kama-mode','kama-broker-account','FYERS','kama'],
-    ['#trade-parser-entry-mode','parser-broker-account','FYERS','strategy'],
+    ['#trade-parser-entry-mode','parser-broker-account','FYERS','parser'],
     ['#delta-ticket-mode','delta-ticket-broker-account','DELTA_INDIA','delta-manual'],
     ['#delta-strategy-mode','delta-strategy-broker-account','DELTA_INDIA','strategy']
   ];

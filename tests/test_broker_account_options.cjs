@@ -59,3 +59,8 @@ test('Live feed enables configured Dhan accounts without enabling Delta',()=>{
  const rows=choices([{id:'d',broker:'DHAN',label:'D',configured:true},{id:'x',broker:'DELTA_INDIA',label:'X',configured:true}],{kind:'account'});
  assert.equal(rows[0].disabled,false);assert.equal(rows[1].disabled,true);
 });
+
+test('parser enables configured FYERS from main portal without enabling other brokers',()=>{
+ const rows=choices([{id:'f',broker:'FYERS',label:'Algo',configured:true},{id:'d',broker:'DHAN',label:'Dhan',configured:true},{id:'x',broker:'DELTA_INDIA',label:'Crypto',configured:true},{id:'bad',broker:'FYERS',configured:false}],{kind:'parser'});
+ assert.deepEqual(rows.map(r=>r.disabled),[false,true,true,true]);
+});
