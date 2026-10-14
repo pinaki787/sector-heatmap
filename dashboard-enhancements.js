@@ -39,8 +39,8 @@
   const storedStraddleMarket = (() => {
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
-  const initialStraddleMarket = storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = ({sector:'sectors',rsi:'ema-cross',band:'ema-band',kama:'kama',renko:'renko-supertrend'})[new URLSearchParams(location.search).get('brokerForm')] || (new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'renko-engine', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
+  const initialStraddleMarket = new URLSearchParams(location.search).get('straddleMarket') === 'nifty' ? 'nifty' : storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
+  const initialView = ({straddle:'straddles',delta:'delta-india',sector:'sectors',rsi:'ema-cross',band:'ema-band',kama:'kama',renko:'renko-supertrend'})[new URLSearchParams(location.search).get('brokerForm')] || (new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'renko-engine', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
     : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors')
   let straddleRunnerState = { available: false, running: false }

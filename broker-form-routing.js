@@ -44,6 +44,8 @@ function route(kind,url,selected){
   if(!u.pathname.startsWith(base))throw Error('Selected account cannot handle this strategy request.');
   const action=u.pathname.slice(base.length).replaceAll('/','-');
   u.pathname='/api/'+ROUTES[kind]+'-dhan/'+selected.id+'/form-'+action;
+  const job=new URLSearchParams(location.search);
+  if(job.get(kind+'Account')===selected.id&&job.get(kind+'Instance'))u.searchParams.set('instance',job.get(kind+'Instance'));
  }else u.pathname='/broker-workspace/'+selected.id+u.pathname;
  return u.href;
 }
