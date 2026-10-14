@@ -636,11 +636,36 @@
       ['Market structure exit',['market-structure-exit-enabled']],
       ['Supply / demand targets',['zone-target-enabled']]
     ];
+    const exitChoiceIds=[];
+    const exitSectionSync=[];
     const exitAnchor=grid.firstChild;
     for(const [title,ids] of exitGroups){
       const group=document.createElement('fieldset');group.className='renko-setting-group renko-exit-group';
       const legend=document.createElement('legend');legend.textContent=title;group.append(legend);
-      const note=document.createElement('p');note.textContent='Controlled by its indicator-family master in Signal settings. Edits apply on the next Start.';group.append(note);
+      const ruleIds=ids.filter(id=>id.endsWith('-enabled'));
+      const sectionKey=ruleIds[0]+'-section-choices';
+      const savedChoices=document.createElement('input');savedChoices.type='hidden';savedChoices.id='renko-'+sectionKey;savedChoices.value='{}';group.append(savedChoices);exitChoiceIds.push(sectionKey);
+      const masterLabel=document.createElement('label');masterLabel.className='field renko-exit-section-master';
+      masterLabel.append(document.createTextNode('Enable '+title.toLowerCase()));
+      const master=document.createElement('input');master.type='checkbox';master.id='renko-'+ruleIds[0]+'-section-toggle';master.setAttribute('aria-label','Enable '+title.toLowerCase());
+      master.title='Switch this section’s strategy exits off together, or restore their previous selections. Entry rules and chart visibility are unchanged. Applies on the next Start.';
+      masterLabel.append(master);group.append(masterLabel);
+      const sync=()=>{const count=ruleIds.filter(id=>el(id).checked).length;master.checked=count>0;master.indeterminate=count>0&&count<ruleIds.length;master.disabled=ruleIds.every(id=>el(id).disabled);};
+      exitSectionSync.push(sync);
+      master.addEventListener('change',()=>{
+        if(!master.checked){
+          savedChoices.value=JSON.stringify(Object.fromEntries(ruleIds.map(id=>[id,el(id).checked])));
+          ruleIds.forEach(id=>{el(id).checked=false;});
+        }else{
+          let saved={};try{saved=JSON.parse(savedChoices.value||'{}');}catch{}
+          const hasSelection=ruleIds.some(id=>saved[id]===true);
+          ruleIds.forEach(id=>{el(id).checked=hasSelection?saved[id]===true:true;});
+        }
+        el(ruleIds[0]).dispatchEvent(new Event('change',{bubbles:true}));sync();
+      });
+      ruleIds.forEach(id=>el(id).addEventListener('change',sync));
+      sync();
+      const note=document.createElement('p');note.textContent='Section switch controls strategy exits only and restores your selections when re-enabled. The indicator-family master must also be on. Edits apply on the next Start.';group.append(note);
       const headings=document.createElement('div');headings.className='renko-destination-headings';headings.innerHTML='<span>Exit rule</span><span>Strategy</span><span>Chart only</span>';group.append(headings);
       for(const id of ids)group.append(el(id).closest('label'));
       grid.insertBefore(group,exitAnchor);
@@ -678,13 +703,14 @@
         for(const id of ids)if(!enabled){el(id).dataset.familyDisabled=String(el(id).disabled);el(id).disabled=true;}
       }
       if(!el('ema-family-enabled').checked||!el('supertrend-family-enabled').checked){if(!Object.hasOwn(el('retest-enabled').dataset,'familyDisabled'))el('retest-enabled').dataset.familyDisabled=String(el('retest-enabled').disabled);el('retest-enabled').disabled=true;}
+      exitSectionSync.forEach(sync=>sync());
       const selected=Object.values(familySettings(values())).some(v=>!v);
       if(!ready&&selected&&!lastRunner?.running){el('toggle').disabled=true;el('start-selected').disabled=true;}
     }
     const manualReferenceInput=document.createElement('input');
     manualReferenceInput.type='hidden';manualReferenceInput.id='renko-manual-brick-reference';
     section.append(manualReferenceInput);
-    const allIds=[...new Set(['manual-brick-reference',...DESTINATION_RULES.map(id=>id+'-indicator'),'supertrend-exit-enabled','ema-slow-exit-enabled','rsi-exit-enabled','ema-widening-exit-enabled','adx-exit-enabled','market-structure-exit-enabled','volume-enabled','rsi-sma-enabled','higher-timeframe-enabled','supertrend-timeframe','market','cash-product','commodity-holding','delta-execution-route',...signalIds,...historyIds,'zone-target-enabled','market-structure-enabled','mode','lots','paper-capital','max-trades','max-premium','daily-budget','spot-target','spot-stop','ema-exit-enabled','ema-exit-length','sideways-enabled','sideways-max-candles','additional-slippage-points','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','trailing-enabled','trailing-basis','trailing-distance','chart-view'])];
+    const allIds=[...new Set([...exitChoiceIds,'manual-brick-reference',...DESTINATION_RULES.map(id=>id+'-indicator'),'supertrend-exit-enabled','ema-slow-exit-enabled','rsi-exit-enabled','ema-widening-exit-enabled','adx-exit-enabled','market-structure-exit-enabled','volume-enabled','rsi-sma-enabled','higher-timeframe-enabled','supertrend-timeframe','market','cash-product','commodity-holding','delta-execution-route',...signalIds,...historyIds,'zone-target-enabled','market-structure-enabled','mode','lots','paper-capital','max-trades','max-premium','daily-budget','spot-target','spot-stop','ema-exit-enabled','ema-exit-length','sideways-enabled','sideways-max-candles','additional-slippage-points','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','trailing-enabled','trailing-basis','trailing-distance','chart-view'])];
     function indicatorControls(changed=null){
       const both=(el('ema-fast-enabled').checked||el('ema-fast-enabled-indicator').checked)&&(el('ema-slow-enabled').checked||el('ema-slow-enabled-indicator').checked);
       if(changed==='ema-fast-enabled'&&!el('ema-fast-enabled').checked)el('retest-enabled').checked=false;
