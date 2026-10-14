@@ -66,7 +66,7 @@ class NiftyStraddleService(SensexStraddleService):
                 "mode": self.active_mode or "STOPPED",
                 "live_control_available": True,
                 "pid": self.process.pid if running else None,
-                "started_at": self.started_at,
+                "started_at": self.started_at, "job_history": self._job_history(),
                 "last_exit_code": self.last_exit_code,
                 "script_path": str(self.script_path),
                 "interpreter": str(self._interpreter()),

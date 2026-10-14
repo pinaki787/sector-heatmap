@@ -80,3 +80,16 @@ class JobControlTests(TestCase):
             history.wait_request_slot()
             history.wait_request_slot()
         self.assertEqual([call.args[0] for call in sleep.call_args_list],[0,.5])
+
+    def test_legacy_history_retains_iso_timestamp_and_settings_after_stop(self):
+        from sector_heatmap.runner_job_history import record_legacy
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/"legacy.json"
+            state={"run_started_at":"2026-10-14T09:30:00+05:30","running":True,"config":{"symbol":"ABC"}}
+            record_legacy(path,state)
+            record_legacy(path,{**state,"running":False,"status":"STOPPED"})
+            rows=read(path)
+            self.assertEqual(len(rows),1)
+            self.assertFalse(rows[0]["running"])
+            self.assertIsInstance(rows[0]["started_at"],float)
+            self.assertEqual(rows[0]["config"]["symbol"],"ABC")

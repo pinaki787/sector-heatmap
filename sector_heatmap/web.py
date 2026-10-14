@@ -1823,9 +1823,15 @@ def run_server():
                     item["pnl"] = item["broker_pnl"]
         return {"positions": tracked, "as_of": datetime.now().astimezone().isoformat()}
 
+    from .runner_job_history import record_legacy, read as read_job_history
+    ema_job_path = ROOT / ".private" / "ema-band-submissions.json"
+    kama_job_path = ROOT / ".private" / "kama-submissions.json"
+
     def ema_runner_snapshot():
         with ema_runner_lock:
+            record_legacy(ema_job_path,ema_runner)
             snapshot = {key: value for key, value in ema_runner.items() if key != "thread"}
+            snapshot["job_history"] = read_job_history(ema_job_path)
             # A stopping monitor can be unwinding an API call. Never expose any
             # context it may race to write after stop was requested.
             if not snapshot["running"]:
@@ -2218,6 +2224,7 @@ def run_server():
 
     def stop_ema_runner():
         with ema_runner_lock:
+            record_legacy(ema_job_path,{**ema_runner,"running":False,"status":"STOPPED","message":"Monitoring stopped; execution journal retains position evidence."})
             # The execution journals are durable history.  The runner snapshot is
             # only current monitoring context, so never expose an old ticket,
             # closed chart, or prior entry/exit as though it belongs to a stopped
@@ -2313,7 +2320,9 @@ def run_server():
 
     def kama_runner_snapshot():
         with kama_runner_lock:
+            record_legacy(kama_job_path,kama_runner)
             result = {key: value for key, value in kama_runner.items() if key != "thread"}
+            result["job_history"] = read_job_history(kama_job_path)
             if not result["running"]:
                 # A stopped context is not an open trade.  Events remain in the
                 # dedicated journal and are exposed as history only.
@@ -2831,6 +2840,7 @@ def run_server():
 
     def stop_kama_runner():
         with kama_runner_lock:
+            record_legacy(kama_job_path,{**kama_runner,"running":False,"status":"STOPPED","message":"Monitoring stopped; execution journal retains position evidence."})
             kama_runner.update({"running": False, "status": "STOPPED", "config": None, "position": None,
                                 "last_event": None, "run_started_at": None, "thread": None})
         return kama_runner_snapshot()

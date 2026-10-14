@@ -33,3 +33,12 @@ def read(state_path):
     folder = Path(state_path).with_suffix(".jobs")
     rows = [json.loads(p.read_text()) for p in folder.glob("*.json")]
     return sorted(rows, key=lambda r:r.get("started_at") or 0, reverse=True)
+
+def record_legacy(state_path, state):
+    """Normalize legacy timestamps without changing its execution state."""
+    from datetime import datetime
+    started=state.get("started_at") or state.get("run_started_at")
+    if not started:return
+    if isinstance(started,str):
+        started=datetime.fromisoformat(started.replace("Z","+00:00")).timestamp()
+    record(state_path,{**state,"started_at":started,"updated_at":__import__("time").time()})
