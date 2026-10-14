@@ -119,3 +119,31 @@ class JobControlTests(TestCase):
             saved=json.loads(runner.path.read_text())
             self.assertEqual(saved["pending"]["order_id"],"accepted")
             self.assertEqual(saved["position"]["quantity"],3)
+
+
+class StraddleHistoryTests(TestCase):
+    def test_both_straddle_services_retain_submissions_after_reload(self):
+        from sector_heatmap.sensex_straddle import SensexStraddleService
+        from sector_heatmap.nifty_straddle import NiftyStraddleService
+        for cls in (SensexStraddleService,NiftyStraddleService):
+            with self.subTest(service=cls.__name__), tempfile.TemporaryDirectory() as d:
+                service=cls(runtime_dir=d)
+                process=Mock();process.poll.return_value=None
+                service.process=process
+                service.started_at="2026-10-14T09:30:00+05:30"
+                service.active_mode="PAPER"
+                service.active_lots=2
+                first=service.snapshot_unlocked()["job_history"][0]["job_id"]
+                process.poll.return_value=0
+                stopped=service.snapshot_unlocked()["job_history"][0]
+                self.assertFalse(stopped["running"])
+                service.started_at="2026-10-14T10:30:00+05:30"
+                process.poll.return_value=None
+                rows=service.snapshot_unlocked()["job_history"]
+                self.assertEqual(len(rows),2)
+                self.assertNotEqual(rows[0]["job_id"],first)
+                restored=cls(runtime_dir=d)
+                retained=restored.snapshot_unlocked()["job_history"]
+                self.assertEqual(retained,rows)
+                self.assertIsNone(restored.process)
+                process.terminate.assert_not_called()
