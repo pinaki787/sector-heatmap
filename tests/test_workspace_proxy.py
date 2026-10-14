@@ -150,3 +150,15 @@ window.fetch('https://other.example/api/read');assert.equal(seen.pop(),'https://
         self.assertFalse(proxy(self.auth,h));self.assertEqual(Backend.seen,[])
 
 if __name__=='__main__':unittest.main()
+
+class TransportFailureTests(ProxyTests):
+    def test_timeout_is_not_reported_as_authentication_failure(self):
+        from unittest.mock import patch
+        h=Handler('/broker-workspace/'+self.aid+'/api/chartink/analyze','POST',b'{}')
+        with patch('sector_heatmap.workspace_proxy.http.client.HTTPConnection') as connection:
+            connection.return_value.getresponse.side_effect=TimeoutError()
+            proxy(self.auth,h,True)
+        self.assertEqual(h.status,504)
+        self.assertEqual(json.loads(h.wfile.getvalue())['code'],'WORKSPACE_TIMEOUT')
+        connection.return_value.request.assert_called_once()
+        connection.return_value.close.assert_called_once()

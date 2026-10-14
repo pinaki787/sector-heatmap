@@ -951,7 +951,20 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('screener-analysis-next').hidden = false
     try {
       const prices = Object.fromEntries(readySources.flatMap(source => Object.entries(source.result.market_data || {})).map(([symbol, quote]) => [symbol, quote.last_price]))
-      const data = await postJson('/api/chartink/analyze', { symbols: screenerAnalysisSymbols, prices, offset: screenerAnalysisOffset, limit: 12 })
+      const analysisAccount = window.BrokerForms.account(window.BrokerForms.kind('/api/chartink/analyze'))
+      let data = await postJson('/api/chartink/analyze', { symbols: screenerAnalysisSymbols, prices, offset: screenerAnalysisOffset, limit: 12, async_analysis: true })
+      while (data.status === 'ANALYZING') {
+        $('screener-analysis-status').textContent = `Analyzing completed candles · ${screenerAnalysisOffset}/${screenerAnalysisSymbols.length} complete · current batch is still running…`
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        if (screenerAnalysisCancelled) {
+          screenerAnalysisRunning = false
+          syncScreenerCandidateSelectionUi()
+          $('screener-analysis-status').textContent = 'Analysis display cancelled. The current read-only batch may finish on the server; no order is created.'
+          return
+        }
+        if (window.BrokerForms.account(window.BrokerForms.kind('/api/chartink/analyze')) !== analysisAccount) throw Error('Broker account changed. Start a new analysis for the selected account.')
+        data = await postJson('/api/chartink/analyze', { analysis_job: data.analysis_job })
+      }
       const qualified = data.results.filter(item => item.decision === 'PASS' && item.conviction?.rating === 'High')
       const watchlist = data.results.filter(item => item.decision === 'WATCHLIST')
       screenerAnalysisResults = reset ? qualified : screenerAnalysisResults.concat(qualified)
@@ -3107,14 +3120,14 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const apply=()=>{
     const context=window.SectorPulseWorkspace;
     if(!context||!Array.isArray(context.allowed_features))return;
-    const allowed=new Set(context.admin?[...context.allowed_features,...Array.from(document.querySelectorAll('.nav [data-view]'),button=>button.dataset.view)]:context.allowed_features);
+    const allowed=new Set(context.allowed_features);
     if(allowed.has('rsi-sma'))allowed.add('ema-cross');
     const visibility=context.sidebar_visibility||{};
     for(const key of [...allowed])if(visibility[key]===false)allowed.delete(key);
     const brokerCard=document.querySelector('.broker-card');if(brokerCard){brokerCard.hidden=!allowed.has('broker-connection');brokerCard.style.display=brokerCard.hidden?'none':'';}
 
-    for(const button of document.querySelectorAll('.nav [data-view]')){
-      const denied=!allowed.has(button.dataset.view);button.hidden=denied;if(denied)button.style.display='none';
+    for(const button of document.querySelectorAll('.nav [data-view],.nav [data-feature]')){
+      const denied=!allowed.has(button.dataset.feature||button.dataset.view);button.hidden=denied;button.style.display=denied?'none':'';
     }
     for(const section of document.querySelectorAll('.work > .view')){
       if(!allowed.has(section.id)){section.hidden=true;section.style.display='none';section.classList.remove('active');}

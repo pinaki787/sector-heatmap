@@ -143,7 +143,7 @@ class Service:
         if (handler.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'): raise PermissionError('Local dashboard required.')
         origin=handler.headers.get('Origin')
         if origin and urlparse(origin).netloc!=handler.headers.get('Host'): raise PermissionError('Cross-origin actions forbidden.')
-        actions=dict(**{'resume-position':self.runner.resume_position},settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.stop(),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode,'chart-timeframe':self.runner.chart_timeframe})
+        actions=dict(**{'resume-position':self.runner.resume_position},settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.request_stop(p),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode,'chart-timeframe':self.runner.chart_timeframe})
         action=path[len(PREFIX):]
         if action not in actions: raise ValueError('Unknown Delta Renko action.')
         if self.instrument and action in ('preview','start','adopt','override-entry') and payload.get('underlying')!=self.instrument:raise ValueError('Action instrument differs from selected instance.')

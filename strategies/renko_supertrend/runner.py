@@ -666,9 +666,11 @@ class Runner(BaseRunner):
             raise ValueError('Chart runner context changed; refresh before using controls.')
 
     def chart_stop(self, payload):
-        with self.lock:
-            self._chart_identity(payload)
-            return self.stop()  # Existing ownership/reconciliation/close pathway.
+        current=json.loads(self.path.read_text()) if self.path.exists() else self.state
+        c=current.get('config') or {}
+        if payload.get('controls_revision')!='stopped-flat-chart-controls-v1' or payload.get('run_id')!=current.get('run_id') or payload.get('mode')!=c.get('mode'):
+            raise ValueError('Chart runner context changed; refresh before using controls.')
+        return self.request_stop(payload)
 
     def chart_timeframe(self, payload):
         """Change one owned runner; defer while any exposure/order remains."""

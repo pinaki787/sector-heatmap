@@ -57,12 +57,12 @@ def fetch_parser_quote(symbol, token, get=requests.get, now=None):
                 stamp = datetime.fromtimestamp(raw / 1000 if raw > 1e12 else raw, IST)
         except (ValueError, TypeError, OverflowError, OSError):
             pass
-        age = (fetched - stamp).total_seconds() if stamp else None
-        freshness = 'FRESH' if age is not None and -5 <= age <= 30 else 'UNCONFIRMED'
+        # FYERS tt is the trading-day start, not the last price update.
         return {'status': 'READY', 'symbol': symbol, 'ltp': ltp,
-                'fetched_at': fetched.isoformat(), 'provider_timestamp': stamp.isoformat() if stamp else None,
-                'provider_age_seconds': max(0, round(age)) if age is not None else None,
-                'freshness': freshness,
-                'message': 'FYERS timestamp is within 30 seconds.' if freshness == 'FRESH' else 'Freshness unconfirmed: FYERS timestamp is old, missing or in the future.'}
+                'fetched_at': fetched.isoformat(), 'provider_timestamp': None,
+                'trading_day_start': stamp.isoformat() if stamp else None,
+                'provider_age_seconds': None, 'freshness': 'UNCONFIRMED',
+                'timestamp_basis': 'FYERS tt is trading-day start; last price update time is not supplied.',
+                'message': 'Quote received from FYERS. Last price update time is not supplied by this endpoint.'}
     except (requests.RequestException, ValueError, TypeError, AttributeError):
         return unavailable

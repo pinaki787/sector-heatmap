@@ -108,6 +108,9 @@ class Runner:
     def __init__(self, adapter, state_path, clock=time.time):
         self.adapter, self.path, self.clock = adapter, Path(state_path), clock
         self.lock, self.wake, self.thread, self.file_lock = threading.RLock(), threading.Event(), None, None
+        self.stop_requested = threading.Event()
+        self.stop_request_lock = threading.Lock()
+        self.stop_thread = None
         self.preview_value = None
         self.state = dict(status='STOPPED', running=False, accepting_entries=False, config=None,
                           position=None, pending=None, last_signal=None, seen=[], events=[], losses={}, updated_at=None)
@@ -134,6 +137,8 @@ class Runner:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, self.path)
+        from sector_heatmap.runner_job_history import record
+        record(self.path, self.state)
 
     def event(self, status, message):
         self.state.update(status=status, message=message)
@@ -144,7 +149,18 @@ class Runner:
         return self.adapter.quote(symbol)
 
     def snapshot(self):
-        with self.lock:
+        if not self.lock.acquire(timeout=0.1):
+            # State files are atomically replaced. Never block chart heartbeat
+            # behind network work held by the execution lock.
+            saved=json.loads(self.path.read_text()) if self.path.exists() else {}
+            return {**saved, 'status_read_delayed':True,
+                    'pnl':dict(available=False,unrealized=None,realized=saved.get('realized_pnl'),basis='Runner busy; fresh valuation pending'),
+                    'paper_capital':None,'position_history':[],
+                    'runtime_revision':self.runtime_revision,'strategy':self.strategy_id,
+                    'scan_interval_seconds':1,'signal_policy':self.signal_policy,
+                    'live_available':self.adapter.live_enabled(),
+                    'stream':None}
+        try:
             pnl = dict(unrealized=None, realized=self.state.get('realized_pnl', 0), basis='Executable bid; before fees', available=False)
             if self.state['position']:
                 try:
@@ -164,7 +180,10 @@ class Runner:
             if (self.state.get('config') or {}).get('mode')=='PAPER':
                 try:funds=self.paper_funds()
                 except (ValueError,AttributeError,KeyError) as error:funds=dict(available=False,error=str(error))
-            return {**deepcopy(self.state), 'paper_capital':funds, 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': self.runtime_revision, 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': self.strategy_id, 'scan_interval_seconds': 1, 'signal_policy':self.signal_policy, 'live_available': self.adapter.live_enabled()}
+            from sector_heatmap.runner_job_history import read as read_jobs
+            return {**deepcopy(self.state), 'job_history':read_jobs(self.path), 'paper_capital':funds, 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': self.runtime_revision, 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': self.strategy_id, 'scan_interval_seconds': 1, 'signal_policy':self.signal_policy, 'live_available': self.adapter.live_enabled()}
+        finally:
+            self.lock.release()
 
     def preview(self, payload):
         config = self.configure(payload)
@@ -188,6 +207,8 @@ class Runner:
 
     def start(self, payload, background=True):
         with self.lock:
+            if self.stop_thread and self.stop_thread.is_alive():
+                raise ValueError('Stop is still being processed; wait for confirmation before Start.')
             p = self.preview_value
             if not p or payload.get('preview_id') != p['id'] or payload.get('confirmation') != p['confirmation'] or self.clock() > p['expires_at']:
                 raise ValueError('Review a fresh activation preview and type its exact confirmation phrase.')
@@ -214,6 +235,7 @@ class Runner:
                     self.release()
                     raise ValueError('Runner state changed in another process. Reload the server before activation.')
             try:
+                self.stop_requested.clear()
                 self.adapter.start()
                 self.preview_value = None
                 if not self.state['position'] and not self.state['pending']:
@@ -237,6 +259,35 @@ class Runner:
             fcntl.flock(self.file_lock, fcntl.LOCK_UN)
             self.file_lock.close()
             self.file_lock = None
+
+    def request_stop(self, payload=None):
+        """Acknowledge promptly; existing stop/reconciliation owns all closing work."""
+        payload = payload or {}
+        with self.stop_request_lock:
+            # Atomic state-file replacement gives a coherent read without waiting
+            # for the trading lock held during broker IO.
+            try:
+                current = json.loads(self.path.read_text())
+            except FileNotFoundError:
+                current = dict(running=False, position=None, pending=None)
+            expected = payload.get('run_id')
+            if expected and expected != current.get('run_id'):
+                raise ValueError('Run changed. Refresh before stopping.')
+            if not (current.get('running') or current.get('position') or current.get('pending')):
+                return current
+            self.stop_requested.set()
+            self.wake.set()
+            if not self.stop_thread or not self.stop_thread.is_alive():
+                def finish():
+                    try:
+                        self.stop()
+                    except Exception as error:
+                        with self.lock:
+                            self.event('STOP_FAILED', str(error))
+                self.stop_thread = threading.Thread(target=finish, name='runner-stop-request', daemon=True)
+                self.stop_thread.start()
+            return {**current, 'accepting_entries':False, 'shutdown_pending':True,
+                    'status':'STOP_REQUESTED', 'message':'Stop accepted; awaiting runner and broker confirmation.'}
 
     def stop(self):
         with self.lock:
@@ -326,7 +377,7 @@ class Runner:
     def validate_entry_authorization(self, position):
         c = self.state['config']
         last = self.state['last_signal']
-        if not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
+        if self.stop_requested.is_set() or not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
             raise ValueError('Entry authorization or signal expired during preflight.')
 
     def submit(self, order, position, reason):
@@ -345,6 +396,8 @@ class Runner:
                 raise ValueError('Maximum entry trades reached.')
             if not getattr(self.adapter, 'count_confirmed_entries', False):
                 self.state['trades_used'] = self.state.get('trades_used', 0) + 1
+        if self.is_entry_order(order, position) and self.stop_requested.is_set():
+            raise ValueError('Stop requested; new entry blocked before submission.')
         self.state['pending'] = dict(order=order, tag=tag, id=None, position=position, reason=reason,
                                      submitted_at=self.clock(), cancel_requested=False,
                                      count_on_fill=bool(getattr(self.adapter, 'count_confirmed_entries', False)))

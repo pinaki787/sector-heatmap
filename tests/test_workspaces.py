@@ -26,6 +26,18 @@ class WorkspaceTests(unittest.TestCase):
         self.b=self.store.create_account(self.bob,'DELTA_INDIA','Bob crypto','BOB-ID')
     def tearDown(self):self.tmp.cleanup()
 
+    def test_new_navigation_registry_drives_global_and_user_controls(self):
+        from sector_heatmap.section_permissions import FEATURES
+        for key in ('runner-jobs','user-guide'):
+            self.assertIn(key,FEATURES)
+            self.assertTrue(self.store.sidebar_visibility()[key])
+        choices=self.store.sidebar_visibility()
+        choices['runner-jobs']=False
+        self.store.set_sidebar_visibility(self.admin,choices)
+        self.assertFalse(self.store.sidebar_visibility()['runner-jobs'])
+        with self.assertRaises(PermissionError):
+            self.store.set_sidebar_visibility(self.alice,choices)
+
     def test_password_hash_and_session_are_not_plaintext(self):
         token,user=self.store.login('alice','alice-private-password')
         self.assertEqual(self.store.session(token)['id'],self.alice['id'])

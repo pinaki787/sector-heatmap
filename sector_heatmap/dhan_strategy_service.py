@@ -188,7 +188,7 @@ class Service(ChartService):
             from .dhan_form_routes import write
             handler.send_json(200,write(self,action[5:],payload));return
         actions=dict(preview=self.runner.preview,start=self.runner.activate if self.strategy=='renko' else self.runner.start,
-                     stop=lambda p:self.runner.stop(),**{'reconcile-external-close':lambda p:self.runner.reconcile_external_close(p)})
+                     stop=lambda p:self.runner.request_stop(p),**{'reconcile-external-close':lambda p:self.runner.reconcile_external_close(p)})
         if self.strategy=='renko':
             actions.update(settings=self.runner.save_preferences,**{'chart-timeframe':self.runner.chart_timeframe,
                 'chart-mode':self.runner.chart_mode,'chart-stop':self.runner.chart_stop,

@@ -84,7 +84,7 @@ def read(service,action,query):
     raise ValueError('This operation is unavailable for the selected Dhan strategy.')
 
 def write(service,action,payload):
-    if action=='runner-stop' or action=='stop':return service.runner.stop()
+    if action=='runner-stop' or action=='stop':return service.runner.request_stop(payload)
     if action=='preview':return service.runner.preview(config(service,payload))
     if action=='start':return service.runner.start(payload)
     if action=='runner-start':

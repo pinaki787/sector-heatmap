@@ -1,5 +1,6 @@
 """Same-origin transport to an authenticated user's loopback-only workspace."""
 import http.client
+import logging
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit,unquote
 import re
@@ -23,6 +24,7 @@ window.EventSource=class extends OriginalSource{constructor(url,options){super(s
 def proxy(auth,handler,mutation=False):
     parsed=urlsplit(handler.path)
     if not parsed.path.startswith(PREFIX):return False
+    response_started=False
     try:
         user=auth.authorize(handler.headers,mutation)
         rest=parsed.path[len(PREFIX):]
@@ -71,6 +73,7 @@ def proxy(auth,handler,mutation=False):
                 import json
                 value=json.loads(content);value['portal_url']='/accounts'
                 content=json.dumps(value).encode()
+            response_started=True
             handler.send_response(response.status)
             for key,value in response.getheaders():
                 lower=key.lower()
@@ -108,5 +111,13 @@ def proxy(auth,handler,mutation=False):
         finally:connection.close()
     except PermissionError as error:auth.json(handler,403,dict(error=str(error)))
     except (BrokenPipeError,ConnectionResetError):pass
-    except Exception:auth.json(handler,502,dict(error='Broker workspace unavailable. Return to Broker accounts and check its connection.'))
+    except TimeoutError:
+        logging.getLogger(__name__).warning('Workspace request timed out: %s %s',handler.command,parsed.path)
+        if not response_started:
+            auth.json(handler,504,dict(error='Broker workspace request timed out. Analysis or market data is taking too long; this does not establish a login failure.',code='WORKSPACE_TIMEOUT'))
+        else:handler.close_connection=True
+    except Exception:
+        logging.getLogger(__name__).exception('Workspace transport failed: %s %s',handler.command,parsed.path)
+        if not response_started:auth.json(handler,502,dict(error='Broker workspace could not complete this request. Check workspace status; authentication failure has not been established.',code='WORKSPACE_UNAVAILABLE'))
+        else:handler.close_connection=True
     return True

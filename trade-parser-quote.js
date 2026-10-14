@@ -8,7 +8,7 @@
     const age = data.provider_timestamp ? (Date.now() - new Date(data.provider_timestamp).getTime()) / 1000 : NaN
     const fresh = valid && data.freshness === 'FRESH' && age >= -5 && age <= 30
     output.textContent = valid
-      ? `FYERS LTP: ₹${data.ltp.toFixed(2)} · ${data.symbol}\n${fresh ? 'FRESH — provider timestamp within 30 seconds' : 'FRESHNESS UNCONFIRMED — do not treat as a verified live price'}\nFYERS timestamp: ${formatTime(data.provider_timestamp)} · Fetched: ${formatTime(data.fetched_at)}`
+      ? `FYERS LTP: ₹${data.ltp.toFixed(2)} · ${data.symbol}\n${fresh ? 'FRESH — provider timestamp within 30 seconds' : 'QUOTE RECEIVED — last price update time is not supplied by FYERS'}\nPrice update: ${formatTime(data.provider_timestamp)} · Received: ${formatTime(data.fetched_at)}`
       : `${data.message || 'FYERS LTP unavailable.'}${data.symbol ? '\n' + data.symbol : ''}`
     output.style.whiteSpace = 'pre-line'
     output.style.color = fresh ? '#b9f4d2' : valid ? '#f1d598' : '#b8c7da'

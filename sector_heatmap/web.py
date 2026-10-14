@@ -2864,6 +2864,8 @@ def run_server():
 
     analysis_runs = {}
     screener_analysis_cache = {}
+    from .advisory_jobs import AdvisoryJobs
+    screener_advisory_jobs = AdvisoryJobs()
 
     def replace_feed(token):
         previous_feed = state.get("feed")
@@ -4362,7 +4364,7 @@ def run_server():
                         raise PermissionError("Cross-origin runner mutations are forbidden.")
                     actions = {"/api/ema-crossover/preview": ema_crossover.preview,
                                "/api/ema-crossover/start": ema_crossover.start,
-                               "/api/ema-crossover/stop": lambda _: ema_crossover.stop()}
+                               "/api/ema-crossover/stop": lambda p: ema_crossover.request_stop(p)}
                     if path not in actions:
                         raise ValueError("Unknown crossover action.")
                     self.send_json(200, actions[path](payload))
@@ -4380,7 +4382,7 @@ def run_server():
                                '/api/renko-supertrend/start': renko_supertrend.activate,
                                '/api/renko-supertrend/resume-position': renko_supertrend.resume_position,
                                '/api/renko-supertrend/override-entry': renko_supertrend.override_entry,
-                               '/api/renko-supertrend/stop': lambda _: renko_supertrend.stop(),
+                               '/api/renko-supertrend/stop': lambda p: renko_supertrend.request_stop(p),
                                '/api/renko-supertrend/chart-stop': renko_supertrend.chart_stop,
                                '/api/renko-supertrend/chart-mode': renko_supertrend.chart_mode,
                                '/api/renko-supertrend/chart-timeframe': renko_supertrend.chart_timeframe}
@@ -4467,7 +4469,7 @@ def run_server():
                     self.send_json(200, result)
                     return
                 if path == "/api/chartink/analyze":
-                    self.send_json(200, analyze_screener_candidates(payload))
+                    self.send_json(200, screener_advisory_jobs.request(payload, analyze_screener_candidates) if payload.get("async_analysis") or payload.get("analysis_job") else analyze_screener_candidates(payload))
                     return
                 if path == "/api/chartink/analyze-options":
                     self.send_json(200, analyze_screener_options(payload))

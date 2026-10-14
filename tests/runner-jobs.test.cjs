@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {sources,normalize,link,stopJob}=require('../runner-jobs.js');
+const {sources,normalize,link,stopJob,netPnl}=require('../runner-jobs.js');
 for(const broker of ['FYERS','DHAN','DELTA_INDIA'])test(broker+' jobs stay bound to the selected account',()=>{
  const a={id:'owned',broker,label:'Mine'},source=sources(a)[0],state={broker,instance_key:'job1',run_id:'run1',running:true,config:{underlying:'instrument',mode:'PAPER'}};
  const j=normalize(a,source,state);assert(j.read.includes('owned'));assert(j.stop.includes('owned'));assert.equal(j.status,'Watching');
@@ -51,8 +51,19 @@ test('rendered inventory reports server status and selection sends only one scop
  await new Promise(r=>setImmediate(r));
  w.document.querySelector('nav button').click();await new Promise(r=>setImmediate(r));
  assert.match(w.document.querySelector('[data-count]').textContent,/1 running/);assert.equal(calls.filter(c=>c[1]==='POST').length,0);
- const checkbox=w.document.querySelector('tbody input');checkbox.checked=true;checkbox.dispatchEvent(new w.Event('change'));
+ w.document.querySelector('[data-select-all]').click();
+ assert.equal(w.document.querySelector('tbody input').checked,true);
  w.document.querySelector('[data-stop]').click();await new Promise(r=>setImmediate(r));
  assert.equal(calls.filter(c=>c[1]==='POST').length,1);assert.equal(calls.find(c=>c[1]==='POST')[0],'/api/renko-dhan/mine/stop?instance=x');
- assert.match(w.document.querySelector('[data-count]').textContent,/0 running/);dom.window.close();
+ assert.match(w.document.querySelector('[data-count]').textContent,/0 running/);
+ assert.equal(w.document.querySelector('tbody input'),null);
+ const history=w.document.querySelector('[data-history]');history.checked=true;history.dispatchEvent(new w.Event('change'));
+ assert.equal(w.document.querySelector('tbody input').disabled,true);dom.window.close();
+});
+
+test('net P&L uses after-cost native currency only, never gross or missing as zero',()=>{
+ assert.equal(netPnl({account:{broker:'DHAN'},state:{cost_pnl:{total_net:-12.3}}}).text,'INR -12.30');
+ assert.equal(netPnl({account:{broker:'DELTA_INDIA'},state:{pnl_currency:'USD',cost_pnl:{total_net:4}}}).text,'USD 4.00');
+ assert.equal(netPnl({account:{broker:'DHAN'},state:{pnl:{unrealized:100},cost_pnl:{total_net:null}}}).text,'Net unavailable');
+ assert.equal(netPnl({account:{broker:'DELTA_INDIA'},state:{cost_pnl:{total_net:4}}}).text,'Net unavailable');
 });
