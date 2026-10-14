@@ -3,6 +3,18 @@
 'use strict';
 let key='',version=0,last=0;
 let dhanPending='';
+const reauthShown=new Set();
+function offerDhanReauthentication(account){
+ if(reauthShown.has(account.id)||document.visibilityState==='hidden')return;
+ reauthShown.add(account.id);
+ const dialog=document.createElement('dialog');
+ const heading=document.createElement('h3');heading.textContent='Dhan sign-in required';
+ const text=document.createElement('p');text.textContent='Dhan authorization expired or is invalid for '+account.label+'. Sign in again to restore broker access. This does not start a runner or retry an order.';
+ const link=document.createElement('a');link.className='button';link.textContent='Reauthenticate Dhan';link.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);
+ const later=document.createElement('button');later.textContent='Later';later.onclick=()=>{dialog.close();dialog.remove();};
+ dialog.append(heading,text,link,later);document.body.append(dialog);dialog.showModal();
+}
+
 function selection(){
  const view=document.querySelector('.view.active')?.id;
  const kind={ sectors:'sector', handoff:'handoff',broker:'account', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
@@ -56,7 +68,9 @@ async function update(){
    const timeout=setTimeout(()=>controller.abort(),12000);
    try{
     const response=await fetch('/api/dhan/status?account_id='+encodeURIComponent(account.id),{signal:controller.signal});if(!response.ok)throw Error();
-    const data=await response.json();message=data.authenticated?'Connected':'Not connected';
+    const data=await response.json();message=data.authenticated?'Connected':data.reauthentication_required?'Sign-in required':'Not connected';
+    if(generation===version&&data.reauthentication_required){connect.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);connect.textContent='Reauthenticate Dhan';offerDhanReauthentication(account);}
+    if(data.authenticated)reauthShown.delete(account.id);
    }finally{clearTimeout(timeout);if(dhanPending===next)dhanPending='';}
   }else if(broker==='DELTA_INDIA'){
    const response=await fetch((account?'/broker-workspace/'+account.id:'')+'/api/delta-india/status');if(!response.ok)throw Error();

@@ -23,10 +23,9 @@ def login(store,runtime,user,aid,token_id=None):
     account=store.account(user,aid)
     if account["broker"]!="DHAN":
         raise ValueError("Select a saved Dhan account.")
-    # Credentials must not change under an active worker.
+    # Same-account token renewal is supported by DhanExecutionService._client.
+    # API keys, account identity and Live capabilities remain unchanged.
     with runtime.lock:
-        if runtime.running(aid):
-            raise ValueError("Dhan account is in use. Stop its dashboard safely before renewing credentials.")
         folder=store.folder(account)
         path=folder/"credentials.json"
         credentials=json.loads(path.read_text()) if path.exists() else {}

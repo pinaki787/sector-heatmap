@@ -136,7 +136,7 @@ function edit(account) {
   $('dhan-api-key').value=account.dhan_api_key||'';$('dhan-api-secret').value='';
   $('dhan-api-secret').placeholder=account.dhan_api_secret_saved?'Saved securely · leave blank to keep':'Enter API secret';
   $('dhan-redirect-hint').textContent='Dhan client ID must be '+account.account_ref+'. Register this Redirect URL in your Dhan API application: '+location.origin+'/accounts';
-  $('dhan-connect').disabled=!!account.running||!account.configured;
+  $('dhan-connect').disabled=!account.configured;
   $('dhan-api-key').disabled=!!account.running;$('dhan-api-secret').disabled=!!account.running;
   $('configuration-title').textContent = 'Connect ' + account.label;
   $('callback').textContent = account.broker === 'FYERS' ? `Register the exact FYERS Redirect URL shown below in your FYERS application. Complete browser login inside this account’s dashboard after saving.` : account.broker === 'DHAN' ? 'Enter your Dhan client ID and API key/secret for browser login, or use a manually generated access token. The client ID must match this account. Whitelist this server IP before live execution.' : 'Use your Delta India application key and secret. Configure its allowed IP and permissions in Delta.';
@@ -194,7 +194,7 @@ $('dhan-connect').onclick=async()=>{
  const button=$('dhan-connect');button.disabled=true;
  try{
   if($('credential-key').value.trim()!==currentAccount.account_ref)throw Error('Dhan client ID must match this saved account: '+currentAccount.account_ref+'. Correct the client ID before connecting.');
-  await saveAccountCredentials();
+  if(!currentAccount.running)await saveAccountCredentials();
   const result=await api('dhan-login-start',{account_id:currentAccount.id});
   sessionStorage.setItem('dhan-login-account',currentAccount.id);
   location.assign(result.url);
@@ -211,7 +211,7 @@ async function completeDhanLogin(){
  message('Dhan authentication completed. Token saved privately for your account'+(result.expiry?' · expires '+result.expiry:'')+'. Use Test Connection to verify API access.');
  await refresh();
 }
-refresh().then(()=>completeDhanLogin().catch(e=>message(e.message))).catch(() => { currentUser = null; $('signin').hidden = false; $('workspace').hidden = true; });
+refresh().then(async()=>{await completeDhanLogin().catch(e=>message(e.message));const aid=new URLSearchParams(location.search).get('reauth_dhan');if(aid){const {accounts}=await api('accounts');const account=accounts.find(a=>a.id===aid&&a.broker==='DHAN');if(!account)throw Error('Select your own saved Dhan account.');edit(account);$('dhan-connect').click();}}).catch(() => { currentUser = null; $('signin').hidden = false; $('workspace').hidden = true; });
 
 $('save-connection-name').onclick=async()=>{
  const button=$('save-connection-name');button.disabled=true;

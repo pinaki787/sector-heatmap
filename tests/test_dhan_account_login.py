@@ -38,10 +38,13 @@ class DhanAccountLoginTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"another session"):login(store,runtime,{"csrf":"other"},"a","callback")
         store.configure.assert_not_called()
 
-    def test_active_worker_rejected(self):
+    def test_active_worker_allows_same_account_renewal(self):
         store,runtime,user,_=self.setup
         runtime.running.return_value=True
-        with self.assertRaisesRegex(ValueError,"in use"):login(store,runtime,user,"a")
+        with patch("sector_heatmap.dhan_account_login.request_json",side_effect=[{"status":"success","consentAppId":"consent"},{"dhanClientId":"123","accessToken":"new-token"}]):
+            login(store,runtime,user,"a")
+            self.assertTrue(login(store,runtime,user,"a","callback")["connected"])
+        store.configure.assert_called_once_with(user,"a",{"DHAN_ACCESS_TOKEN":"new-token"},False)
 
     def test_owner_check_precedes_broker_call(self):
         store,runtime,user,_=self.setup

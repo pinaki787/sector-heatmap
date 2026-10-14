@@ -16,3 +16,18 @@ test('Dhan status ignores unrelated edits, bounds pending requests, and reports 
  dom.window.close();
 });
 
+
+test('confirmed Dhan expiry opens one account-bound reauthentication prompt',async()=>{
+ const dom=new JSDOM('<div class="view active" id="renko-supertrend"></div><select id="renko-broker"><option>DHAN</option></select><div class="broker-card"><span class="label"></span></div>',{url:'https://example.test',pretendToBeVisual:true});
+ const w=dom.window;w.BrokerForms={account:()=>({id:'owned',broker:'DHAN',label:'My Dhan'})};
+ w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
+ let interval;w.setInterval=f=>{interval=f};
+ w.fetch=async()=>({ok:true,json:async()=>({authenticated:false,reauthentication_required:true})});
+ vm.runInNewContext(fs.readFileSync('broker-connection-status.js','utf8'),{window:w,document:w.document,fetch:w.fetch,AbortController,setTimeout,clearTimeout,setInterval:w.setInterval,queueMicrotask,Date});
+ await interval();
+ assert.equal(w.document.querySelectorAll('dialog').length,1);
+ assert.match(w.document.querySelector('dialog a').href,/reauth_dhan=owned/);
+ assert.match(w.document.querySelector('#selected-broker-connection').textContent,/Sign-in required/);
+ await interval();assert.equal(w.document.querySelectorAll('dialog').length,1);
+ w.close();
+});

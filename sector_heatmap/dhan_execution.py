@@ -35,9 +35,10 @@ def number(value, label, positive=False):
 
 
 class DhanAPIError(RuntimeError):
-    def __init__(self, message, definitive_rejection=False):
+    def __init__(self, message, definitive_rejection=False, reauthentication_required=False):
         super().__init__(message)
         self.definitive_rejection = definitive_rejection
+        self.reauthentication_required = reauthentication_required
 
 
 def contract_underlying(row):
@@ -123,7 +124,9 @@ class DhanClient:
         try:
             requested_at=time.monotonic()
             response = requests.request(method, 'https://api.dhan.co/v2'+path, headers=self.headers, json=payload, timeout=20)
-            if response.status_code in (401,403):
+            if response.status_code == 401:
+                raise DhanAPIError('Dhan session expired or invalid. Reauthenticate this saved account; no order was retried.', True, True)
+            if response.status_code == 403:
                 raise DhanAPIError('Dhan rejected account authorization or API permission. Test the selected account connection before retrying.', True)
             if response.status_code == 429:
                 raise DhanAPIError('Dhan API rate limit reached. Wait briefly before a new read or preview. Order submissions are never retried automatically.', True)
@@ -238,7 +241,11 @@ class DhanExecutionService:
                 'message':'Dhan account credentials are saved; broker validation occurs on preview.' if configured else 'Save your Dhan client ID and access token in Broker accounts.'}
 
     def status(self):
-        client=self._client();profile=client.request('GET','/profile')
+        client=self._client()
+        try:profile=client.request('GET','/profile')
+        except DhanAPIError as error:
+            if not error.reauthentication_required:raise
+            return {**self.capabilities(),'authenticated':False,'reauthentication_required':True,'message':str(error)}
         if str(profile.get('dhanClientId'))!=client.client_id:raise PermissionError('Dhan token belongs to a different client ID.')
         return {**self.capabilities(),'authenticated':True,'token_validity':profile.get('tokenValidity'),'data_plan':profile.get('dataPlan'),
                 'static_ips':client.request('GET','/ip/getIP')}

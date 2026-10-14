@@ -52,6 +52,27 @@ class DhanExecutionTests(unittest.TestCase):
         self.client=FakeClient(lambda:self.clock)
         self.service=DhanExecutionService(self.account,self.root,client_factory=lambda _:self.client,master=FakeMaster(),now=lambda:self.clock,egress=lambda:'187.126.123.18')
         self.payload=dict(broker='DHAN',account_id=self.account['id'],security_id='2885',exchange_segment='NSE_EQ',transaction_type='BUY',quantity=10,invalidation=95,target_price=110)
+    def test_token_rotation_reloads_existing_service_without_order(self):
+        from sector_heatmap.dhan_execution import DhanClient
+        self.service.client_factory=DhanClient
+        before=self.service._client()
+        (self.root/'credentials.json').write_text(json.dumps(dict(DHAN_CLIENT_ID='10001',DHAN_ACCESS_TOKEN='renewed-token')))
+        after=self.service._client()
+        self.assertIsNot(before,after)
+        self.assertEqual(after.headers['access-token'],'renewed-token')
+        self.assertEqual(before.headers['access-token'],'fake-test-token')
+        self.assertEqual(self.client.orders,[])
+
+    def test_status_requests_reauthentication_only_for_auth_failure(self):
+        from unittest.mock import patch
+        from sector_heatmap.dhan_execution import DhanAPIError
+        with patch.object(self.client,'request',side_effect=DhanAPIError('Sign in',True,True)):
+            result=self.service.status()
+            self.assertFalse(result['authenticated'])
+            self.assertTrue(result['reauthentication_required'])
+        with patch.object(self.client,'request',side_effect=DhanAPIError('Permission denied',True)):
+            with self.assertRaises(DhanAPIError):self.service.status()
+
     def tearDown(self):self.tmp.cleanup()
     def sent(self):return [c for c in self.client.calls if c[:2]==('POST','/orders')]
     def live(self):self.service.account['live_enabled']=True
