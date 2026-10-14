@@ -93,3 +93,29 @@ class JobControlTests(TestCase):
             self.assertFalse(rows[0]["running"])
             self.assertIsInstance(rows[0]["started_at"],float)
             self.assertEqual(rows[0]["config"]["symbol"],"ABC")
+
+
+    def test_async_stop_preserves_owned_position_and_pending_until_reconciled(self):
+        with tempfile.TemporaryDirectory() as d:
+            adapter=Mock()
+            runner=Runner(adapter,Path(d)/"state.json")
+            runner.state.update(run_id="owned",running=True,started_at=1,
+                config={"mode":"LIVE"},position={"symbol":"ABC","quantity":3},
+                pending={"order_id":"accepted","quantity":5})
+            runner.save()
+            runner.snapshot=Mock(return_value={})
+            result=runner.request_stop({"run_id":"owned"})
+            runner.stop_thread.join(2)
+            self.assertTrue(result["shutdown_pending"])
+            self.assertFalse(runner.stop_thread.is_alive())
+            self.assertTrue(runner.state["running"])
+            self.assertFalse(runner.state["accepting_entries"])
+            self.assertTrue(runner.state["squareoff_requested"])
+            self.assertEqual(runner.state["position"]["quantity"],3)
+            self.assertTrue(runner.state["position"]["exit_requested"])
+            self.assertEqual(runner.state["pending"]["order_id"],"accepted")
+            adapter.stop.assert_not_called()
+            adapter.submit.assert_not_called()
+            saved=json.loads(runner.path.read_text())
+            self.assertEqual(saved["pending"]["order_id"],"accepted")
+            self.assertEqual(saved["position"]["quantity"],3)
