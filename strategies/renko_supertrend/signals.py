@@ -1,4 +1,4 @@
-from . import exit_indicators, market_structure, indicator_families
+from . import exit_indicators, market_structure, indicator_families, manual_trend
 """Sequential port of source.pine, including Pine-style missing-value warm-up."""
 from copy import deepcopy
 from .retest import evaluate as retest_evaluate
@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .indicator_selection import DEFAULTS as INDICATOR_DEFAULTS, validate as validate_indicators, qualify as qualify_indicators
 
-DEFAULTS = dict(**indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
+DEFAULTS = dict(**manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
                 use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, rsi_level_enabled=False, rsi_level_mode='THRESHOLD', rsi_bullish_min=60.0, rsi_bullish_max=80.0, rsi_bearish_min=35.0, rsi_bearish_max=40.0, rsi_bullish_above=50.0, rsi_bearish_below=40.0, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
 
 
@@ -51,6 +51,7 @@ def settings(payload):
     if c['rsi_level_mode'] not in ('THRESHOLD','BETWEEN'):raise ValueError('Choose RSI Threshold or Between mode.')
     if not c['rsi_bearish_min']<c['rsi_bearish_max']<c['rsi_bullish_min']<c['rsi_bullish_max']:
         raise ValueError('RSI bands must have increasing bounds with bearish band below bullish band.')
+    c.update(manual_trend.settings(c))
     validate_indicators(c)
     return c
 
@@ -274,6 +275,9 @@ class Engine:
             s['chart_qualified']=selected_direction if qualified else None
             if blocked:s['ema_qualified']=None
             entry.update(entry_qualified=qualified,entry_diagnostic=blocked or entry['entry_diagnostic'],entry_direction=entry_direction,entry_buy_signal=entry_direction=='BULLISH',entry_sell_signal=entry_direction=='BEARISH')
+        if cfg['manual_trend_enabled']:
+            s['manual_trend_rows']=(s.get('manual_trend_rows',[])+[{'timestamp':c['timestamp'],'close':c['close']}])[-cfg['manual_trend_closes']:]
+            manual_trend.apply(entry,manual_trend.check(s['manual_trend_rows'],cfg,selected_direction,self.host_seconds))
         if any(key in raw for key in exit_indicators.DEFAULTS):
             held=s.get('projected_position')
             exit_signal={**c,**entry,**rsi_observation,'adx':adx,'exit_previous_ema_gap':prior_gap,'supertrend_cross_direction':'BULLISH' if direction<0 and pd>0 else 'BEARISH' if direction>0 and pd<0 else None}

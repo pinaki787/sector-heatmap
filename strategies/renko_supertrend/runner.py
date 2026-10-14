@@ -16,7 +16,7 @@ from strategies.ema_crossover.valuation import amount, multiplier
 from strategies.ema_crossover.runner import TIMEFRAMES
 from strategies.ema_crossover.runner import Runner as BaseRunner, configuration as rsi_configuration
 from strategies.ema_crossover.broker import FyersBroker as BaseBroker
-from . import sideways,costs,zone_target,market_structure,mtf_supertrend
+from . import sideways,costs,zone_target,market_structure,mtf_supertrend,manual_trend
 from .ema_exit import settings as ema_exit_settings, confirmed_values
 from .risk import levels, hard_exit, validate_spot_levels
 from .recovery import Recovery
@@ -857,6 +857,7 @@ class Runner(BaseRunner):
         result['cost_pnl']=dict(realized_net=net_realized,unrealized_net=net_open,total_net=net_realized+net_open if net_realized is not None and net_open is not None else None,basis='After estimated charges and configured additional slippage; open value assumes liquidation at fresh option bid.',brokerage_per_executed_order=20,additional_slippage_points=(self.state.get('config') or {}).get('additional_slippage_points',0),model=costs.MODEL)
         if (self.state.get('config') or {}).get('execution_route') == 'CASH_EQUITY':
             result['cost_pnl'].update(model={'id':'CASH_EQUITY_FEES_UNVERIFIED'},basis='Cash gross P&L only; verified cash charge model unavailable. After-cost values unavailable.',realized_net=None,unrealized_net=None,total_net=None)
+        result['manual_trend_revision']=manual_trend.REVISION
         result['sideways_status']=dict(revision='quick-close-cost-fallback-v2',enabled=(self.state.get('config') or {}).get('sideways_enabled',False),max_candles=(self.state.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK',lock=deepcopy(self.state.get('sideways_lock')),events=deepcopy(self.state.get('sideways_events',[])))
         signals=deepcopy([event for event in self.state.get('execution_signals',[]) if event.get('run_id')==self.state.get('run_id')])
         for event in signals:
@@ -1194,7 +1195,18 @@ class Runner(BaseRunner):
             self.save()
             return self.snapshot()
 
+    def manual_trend_entry_gate(self,direction):
+        c=self.state['config']
+        if not c.get('manual_trend_enabled'):return
+        rows=self.history_rows(self.adapter.candles(c))
+        gate=manual_trend.check(completed(rows),c,direction,TIMEFRAMES[c['timeframe']])
+        if not gate['allowed']:raise ValueError(gate['reason'])
+        price,stamp=self.adapter.live_price(c,self.clock())
+        if not math.isfinite(price) or not math.isfinite(stamp) or not 0<=self.clock()-stamp<=15:raise ValueError('Fresh underlying price required for manual trend filter.')
+        if not (price>c['manual_trend_bullish'] if direction=='BULLISH' else price<c['manual_trend_bearish']):raise ValueError('Price no longer retains the confirmed manual trend zone.')
+
     def validate_entry_authorization(self, position):
+        self.manual_trend_entry_gate(position.get('direction'))
         if position.get('entry_mode')!='MANUAL_OVERRIDE' and self.state['config'].get('higher_timeframe_enabled',False):
             gate=self.supertrend_agreement(position.get('direction'),self.clock())
             if not gate['allowed']:raise ValueError(gate['reason'])
@@ -1212,6 +1224,7 @@ class Runner(BaseRunner):
         proximity=None
         manual=position.get('entry_mode')=='MANUAL_OVERRIDE' and reason=='MANUAL_OVERRIDE_ENTRY'
         if self.is_entry_order(order,position):
+            self.manual_trend_entry_gate(position.get('direction'))
             c=self.state['config']
             if not self.sideways_entry_gate():raise ValueError('Sideways position range lock blocks new entries.')
             if any(c.get(k) is not None for k in ('spot_target','spot_stop')):
@@ -1259,6 +1272,7 @@ class Runner(BaseRunner):
         elif not manual and self.is_entry_order(order,position) and self.state['config'].get('ema_proximity_enabled'):
             raise ValueError('Fresh underlying observation required for EMA proximity preflight.')
         if self.is_entry_order(order,position):
+            self.manual_trend_entry_gate(position.get('direction'))
             if not manual and self.state['last_signal'].get('retest_signal'):reason='EMA10_RETEST_BOUNCE'
             self.state['rearm_after_exit']=False
             metadata=getattr(self.adapter,'resolved_contracts',{}).get(order['symbol'],{})
@@ -1282,7 +1296,7 @@ class Runner(BaseRunner):
                 'entry_direction','entry_diagnostic','cross_direction','signal_allowed','adx',
                 'rsi14','rsi14_slope','rsi_slope_pass','retest_signal','retest_ready',
                 'retest_touched','retest_touch_evidence','retest_patterns','retest_bounce',
-                'retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend')
+                'retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend','manual_trend')
         record=dict(run_id=self.state.get('run_id'),underlying=c['underlying'],timeframe=c['timeframe'],
                     timestamp=sig['timestamp'],event_at=sig.get('market_event_at') if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']],
                     observed_at=now,eligible=bool(eligible),code=code,reason=reason,
@@ -1476,6 +1490,9 @@ class Runner(BaseRunner):
         if c.get('higher_timeframe_enabled',False) and not self.state.get('position'):
             event_at=sig.get('market_event_at',self.clock()) if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']]
             sig['mtf_supertrend']=self.supertrend_agreement(sig.get('cross_direction') or sig.get('direction'),event_at,rows)
+        if c.get('manual_trend_enabled'):
+            manual_trend.apply(sig,manual_trend.check(completed(rows),c,sig.get('cross_direction') or sig.get('direction'),TIMEFRAMES[c['timeframe']]))
+            if not sig['manual_trend']['allowed']:sig['cross_direction']=None
         sig.update(ema_exit=self.exit_ema(rows,c) if c.get('ema_exit_length',10)!=c.get('ema_fast_length',10) else sig['ema10'],ema_exit_length=c.get('ema_exit_length',10),ema_exit_enabled=c.get('ema_exit_enabled',True))
         if not c.get('ema_exit_enabled',True):sig['ema_exit_enabled']=False
         if c.get('ema_widening_exit_enabled'):

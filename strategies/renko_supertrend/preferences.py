@@ -1,4 +1,4 @@
-from . import destinations, indicator_families
+from . import destinations, indicator_families, manual_trend
 """Versioned UI preferences, kept separate from armed runner configuration."""
 import json
 import os
@@ -15,6 +15,9 @@ KEYS=KEYS+tuple(key.replace('_','-') for key in indicator_families.DEFAULTS)
 MAP.update({key.replace('_','-'):key for key in indicator_families.DEFAULTS})
 
 KEYS=KEYS+tuple(key.replace('_','-')+'-indicator' for key in destinations.RULES)
+
+KEYS=KEYS+tuple(k.replace('_','-') for k in manual_trend.DEFAULTS)
+MAP.update({k.replace('_','-'):k for k in manual_trend.DEFAULTS})
 
 def read(path):
     p=Path(path)

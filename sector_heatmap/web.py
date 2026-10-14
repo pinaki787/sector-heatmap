@@ -3924,7 +3924,7 @@ def run_server():
                     from strategies.renko_supertrend.indicator_families import DEFAULTS as family_defaults
                     raw.update({key:str((query.get(key) or ['true'])[0]).lower()=='true' for key in family_defaults})
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower()=='true'
-                    for flag,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
                     from strategies.renko_supertrend.ema_exit import settings as exit_settings
                     from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults
@@ -4005,7 +4005,7 @@ def run_server():
                     timeframe = str((query.get('timeframe') or ['5 minutes'])[0])
                     raw = {key: query[key][0] for key in renko_supertrend_settings({}) if key in query}
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower() == 'true'
-                    for flag,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
                     from strategies.renko_supertrend.ema_exit import settings as exit_settings
                     from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults

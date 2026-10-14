@@ -49,7 +49,7 @@ class Service:
 
     def chart_config(self, query):
         raw={k:query[k][0] for k in settings({}) if k in query}
-        for key,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        for key,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
         carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
         if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
         deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
