@@ -46,6 +46,11 @@ function link(job,origin){
  if(job.source.kind==='straddle')u.searchParams.set('straddleMarket',job.source.market);
  return u.href;
 }
+async function readSources(tasks,request,onResult){
+ await Promise.all(tasks.map(async task=>{
+  try{onResult(task,await request(task.source.url),null);}catch(error){onResult(task,null,error);}
+ }));
+}
 async function stopJob(job,request){
  const current=unwrap(job.source,await request(job.read));
  if((current.run_id||current.started_at||null)!==(job.state.run_id||job.state.started_at||null))throw Error('Run changed. Refresh the job list before stopping.');
@@ -53,7 +58,7 @@ async function stopJob(job,request){
  const result=unwrap(job.source,await request(job.stop,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:current.run_id})}));
  return result.running||result.position||result.pending?'Stopping / reconciliation pending':'Stopped';
 }
-if(typeof module!=='undefined'&&module.exports){module.exports={sources,normalize,link,stopJob,netPnl};return;}
+if(typeof module!=='undefined'&&module.exports){module.exports={sources,normalize,link,stopJob,netPnl,readSources};return;}
 async function mount(){
  if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
  await root.BrokerForms.ready;
@@ -70,10 +75,10 @@ async function mount(){
  function render(){
   body.replaceChildren();count.textContent=jobs.filter(j=>j.state.running).length+' running · '+jobs.filter(j=>j.active).length+' active jobs';
   const visible=jobs.filter(j=>j.active||dialog.querySelector('[data-history]').checked);
-  if(!visible.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=8;cell.textContent='No active runner jobs.';row.append(cell);body.append(row);}
+  if(!visible.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=8;cell.textContent=loading?'Waiting for responding job sources…':'No active runner jobs.';row.append(cell);body.append(row);}
   for(const job of visible){
    const tr=document.createElement('tr'),cell=()=>{const td=document.createElement('td');tr.append(td);return td;};
-   const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+job.title+' '+job.account.label);check.disabled=busy||!job.active;check.checked=selected.has(job.key);check.onchange=()=>{check.checked?selected.add(job.key):selected.delete(job.key);stop.disabled=busy||selected.size===0;};cell().append(check);
+   const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+job.title+' '+job.account.label);check.disabled=busy||loading||!job.active;check.checked=selected.has(job.key);check.onchange=()=>{check.checked?selected.add(job.key):selected.delete(job.key);stop.disabled=busy||loading||selected.size===0;};cell().append(check);
    cell().textContent=(names[job.account.broker]||job.account.broker)+' · '+job.account.label+' / '+job.source.label;cell().textContent=job.title;
    cell().textContent=(job.state.config?.mode||job.state.mode||'—')+' · '+(job.state.config?.timeframe||'—');
    const status=cell();status.textContent=job.status;const note=document.createElement('small');note.textContent=(job.state.status_read_delayed?'Runner busy · showing last saved status. ':'')+(job.state.message||job.state.last_event?.message||'');status.append(note);
@@ -86,15 +91,24 @@ async function mount(){
    cell().textContent=job.state.started_at?new Date(typeof job.state.started_at==='number'?job.state.started_at*1000:job.state.started_at).toLocaleString(): 'Not recorded';
    const a=document.createElement('a');a.textContent='Open settings & chart';a.href=link(job,location.origin);cell().append(a);body.append(tr);
   }
-  stop.disabled=busy||selected.size===0;
+  stop.disabled=busy||loading||selected.size===0;
  }
  async function refresh(){
   if(loading||busy)return;loading=true;const ticket=++revision;message.textContent='Reading server jobs…';
   const next=[],errors=[];
-  await Promise.all(root.BrokerForms.accounts().filter(a=>a.configured).map(async a=>{
-   await Promise.all(sources(a).filter(source=>!root.SectorPulseWorkspace||root.SectorPulseWorkspace.allowed_features?.includes(featureKeys[source.kind])).map(async source=>{try{const data=await request(source.url);for(const state of source.many?data.instances||[]:[data]){const job=normalize(a,source,state);if(job)next.push(job);}}catch(e){errors.push(a.label+' / '+source.label+': '+e.message);}}));
-  }));
-  if(ticket!==revision)return;loading=false;jobs=next;selected=new Set([...selected].filter(k=>jobs.some(j=>j.key===k&&j.active)));render();message.textContent='Updated '+new Date().toLocaleTimeString()+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):' · All listed sources responded.');
+  const tasks=root.BrokerForms.accounts().filter(a=>a.configured).flatMap(account=>sources(account).filter(source=>!root.SectorPulseWorkspace||root.SectorPulseWorkspace.allowed_features?.includes(featureKeys[source.kind])).map(source=>({account,source})));
+  let completed=0;
+  jobs=[];render();
+  await readSources(tasks,request,({account,source},data,error)=>{
+   if(ticket!==revision)return;
+   completed++;
+   if(error)errors.push(account.label+' / '+source.label+': '+error.message);
+   else for(const state of source.many?data.instances||[]:[data]){const job=normalize(account,source,state);if(job)next.push(job);}
+   jobs=[...next];render();
+   message.textContent='Received '+completed+'/'+tasks.length+' job sources'+(completed<tasks.length?' · remaining sources are still responding…':'')+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):'');
+  });
+  if(ticket!==revision)return;
+  loading=false;jobs=next;selected=new Set([...selected].filter(k=>jobs.some(j=>j.key===k&&j.active)));render();message.textContent='Updated '+new Date().toLocaleTimeString()+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):' · All listed sources responded.');
  }
  dialog.querySelector('[data-select-all]').onclick=()=>{if(busy||loading)return;selected=new Set(jobs.filter(j=>j.active).map(j=>j.key));render();};
  dialog.querySelector('[data-clear]').onclick=()=>{if(busy)return;selected.clear();render();};
