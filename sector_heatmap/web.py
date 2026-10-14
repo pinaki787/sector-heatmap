@@ -3003,16 +3003,11 @@ def run_server():
 
     def analyze_screener_candidates(payload):
         """Bounded advisory analysis of explicit Chartink members; never creates order authority."""
-        raw_symbols = payload.get("symbols") if isinstance(payload.get("symbols"), list) else []
-        symbols = list(dict.fromkeys(str(value or "").strip().upper() for value in raw_symbols if value))[:61]
-        offset = max(0, int(payload.get("offset") or 0))
-        limit = min(12, max(1, int(payload.get("limit") or 12)))
-        page = symbols[offset:offset + limit]
-        prices = payload.get("prices") if isinstance(payload.get("prices"), dict) else {}
+        from .screener_paging import page_request, MAX_SYMBOLS
+        symbols, offset, limit, page, prices, cache_key = page_request(payload)
         service = state["sector_analysis"]
         if not service.provider:
             raise RuntimeError("FYERS authentication is required for completed-candle screener analysis.")
-        cache_key = tuple(page)
         cached = screener_analysis_cache.get(cache_key)
         import time as time_module
         if cached and time_module.monotonic() - cached[0] < 300:
@@ -3050,7 +3045,7 @@ def run_server():
         rank = {"PASS": 0, "WATCHLIST": 1, "REJECT": 2}
         rows.sort(key=lambda row: (rank[row["decision"]], -(row.get("conviction") or {}).get("score", 0), row["symbol"]))
         result = {"status": "READY", "offset": offset, "limit": limit, "total": len(symbols), "analyzed": len(page), "has_more": offset + len(page) < len(symbols), "results": rows,
-                  "operational_limits": {"maximum_symbols": 61, "batch_size": 12, "cache_seconds": 300, "background_polling": False},
+                  "operational_limits": {"maximum_symbols": MAX_SYMBOLS, "batch_size": 12, "cache_seconds": 300, "background_polling": True},
                   "safeguards": "Decision support only. No candidate selection, packet, ticket, order, or broker mutation is created."}
         screener_analysis_cache[cache_key] = (time_module.monotonic(), result)
         return result
