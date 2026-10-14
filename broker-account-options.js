@@ -11,7 +11,15 @@
         label:(NAMES[account.broker]||account.broker)+' · '+account.label+(reason?' — '+reason:''),disabled:!!reason,same};
     });
   }
-  if(typeof module!=='undefined'&&module.exports){module.exports={choices};return;}
+  function retryInventory(load,onError,schedule=setTimeout){
+    let failures=0;
+    async function attempt(){
+      try{await load();}
+      catch(error){onError(error);schedule(attempt,Math.min(30000,1000*2**Math.min(failures++,5)));}
+    }
+    return attempt();
+  }
+  if(typeof module!=='undefined'&&module.exports){module.exports={choices,retryInventory};return;}
   let accounts=[],context=null,ready=false;
   const registry=new WeakMap();
   function fill(select,kind,currentBroker){
@@ -106,20 +114,21 @@
     }
   }
   async function load(){
-    try{
-      const response=await fetch('/api/workspace-context');context=response.ok?await response.json():root.SectorPulseWorkspace;
-      const inventory=await fetch('/api/workspaces/accounts');
+      const response=await fetch('/api/workspace-context',{signal:AbortSignal.timeout(15000),cache:'no-store'});context=response.ok?await response.json():root.SectorPulseWorkspace;
+      const inventory=await fetch('/api/workspaces/accounts',{signal:AbortSignal.timeout(15000),cache:'no-store'});
       if(inventory.ok)accounts=(await inventory.json()).accounts||[];
       else if(context?.workspace)accounts=[{...context.workspace,configured:true}];
       else throw Error('Saved broker account list unavailable');
       await Promise.all(accounts.filter(a=>a.broker==='DHAN').map(async account=>{
-        try{const response=await fetch('/api/dhan/capabilities?account_id='+encodeURIComponent(account.id));
+        try{const response=await fetch('/api/dhan/capabilities?account_id='+encodeURIComponent(account.id),{signal:AbortSignal.timeout(15000),cache:'no-store'});
           if(response.ok)account.strategy_routes=(await response.json()).strategy_routes||[];
         }catch(error){account.strategy_routes=[];}
       }));
       root.BrokerForms?.setAccounts(accounts);ready=true;apply();root.dispatchEvent(new CustomEvent('broker-accounts-ready'));
-    }catch(error){root.BrokerForms?.fail(error);console.warn('Broker account options: '+error.message);}
   }
   new MutationObserver(()=>apply()).observe(document.body,{childList:true,subtree:true});
-  load();
+  retryInventory(load,error=>{
+    console.warn('Broker account options temporarily unavailable; retrying: '+error.message);
+    root.dispatchEvent(new CustomEvent('broker-accounts-retrying',{detail:{message:'Broker account list unavailable; reconnecting automatically.'}}));
+  });
 })(typeof window!=='undefined'?window:globalThis);
