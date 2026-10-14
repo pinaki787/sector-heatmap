@@ -43,11 +43,6 @@ def calculate(rows, specification, source_seconds, now):
         stamp = int(row["timestamp"])
         if row.get("is_forming") or stamp+source_seconds > now:
             continue
-        values = [float(row[k]) for k in ("open","high","low","close")]
-        if not all(math.isfinite(v) and v > 0 for v in values):
-            raise ValueError("Invalid source OHLC.")
-        if values[1] < max(values[0],values[2],values[3]) or values[2] > min(values[0],values[1],values[3]):
-            raise ValueError("Inconsistent source OHLC.")
         if specification["anchor_zone"] == "UTC":
             opening = stamp//span*span
         else:
@@ -56,6 +51,15 @@ def calculate(rows, specification, source_seconds, now):
             opening = midnight+specification["anchor_minutes"]*60
             if not opening <= stamp < opening+span:
                 continue
+        # Ignore unfinished reference windows before validating their source.
+        # They cannot contribute to the completed-reference ATR.
+        if opening+span > now:
+            continue
+        values = [float(row[k]) for k in ("open","high","low","close")]
+        if not all(math.isfinite(v) and v > 0 for v in values):
+            raise ValueError("Invalid source OHLC.")
+        if values[1] < max(values[0],values[2],values[3]) or values[2] > min(values[0],values[1],values[3]):
+            raise ValueError("Inconsistent source OHLC.")
         source=groups.setdefault(opening,{})
         if stamp in source and source[stamp]!=values:
             raise ValueError("Conflicting source OHLC revisions.")

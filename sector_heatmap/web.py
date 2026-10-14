@@ -879,6 +879,9 @@ def run_server():
     sector_analysis = SectorAnalysisService(token)
     sector_analysis.start()
     state = {"feed": feed, "sector_analysis": sector_analysis, "renewing": False, "auth_error": None, "next_auth_attempt": 0.0}
+    from .holdings_analysis import HoldingsAnalysis, FyersHoldings, DeltaHoldings
+    holdings_analysis = HoldingsAnalysis()
+
     fyers_fo_master = FyersFoMaster()
     fyers_cm_master = FyersCmMaster()
     ema_master_dir = ROOT / ".private" / "ema-band-masters"
@@ -3787,6 +3790,7 @@ def run_server():
                 self.send_response(303);self.send_header('Location','/dhan-orders.html');self.send_header('Content-Length','0');self.end_headers();return
             if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
                 context = workspace_guard.context(*self.workspace_identity) if workspace_guard else (local_auth.context(self.headers) if local_auth else {'workspace':None})
+                context['holdings_review_available'] = True
                 body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';' + ('document.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src="/dashboard-login.js";document.head.append(s);});' if local_auth else '')).encode()
                 self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path.split('?', 1)[0] == '/api/workspace-context':
@@ -4147,6 +4151,25 @@ def run_server():
                     self.send_json(200, realized_pnl(period))
                 except Exception as error:
                     self.send_json(502, {"error": str(error), "supported": False})
+                return
+            if path == "/api/holdings-analysis":
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    broker = (query.get('broker') or ['FYERS'])[0]
+                    if workspace_guard and broker != self.workspace_identity[1]['broker']:
+                        raise PermissionError('Choose the broker assigned to this account workspace.')
+                    if broker == 'FYERS': adapter = FyersHoldings(ema_readonly_client())
+                    elif broker == 'DELTA_INDIA': adapter = DeltaHoldings(delta_india)
+                    else: raise ValueError('Holdings analysis supports FYERS and Delta India in this workspace.')
+                    result = holdings_analysis.batch(adapter, (query.get('capture_id') or [None])[0],
+                                                     int((query.get('offset') or ['0'])[0]), int((query.get('limit') or ['1'])[0]), (query.get('inventory_only') or ['0'])[0] == '1')
+                    self.send_json(200, result)
+                except PermissionError as error:
+                    self.send_json(403, {'error': str(error)})
+                except (ValueError, TypeError) as error:
+                    self.send_json(409, {'error': str(error)})
+                except Exception:
+                    self.send_json(502, {'error': 'Broker holdings analysis unavailable. Check authentication and try again.'})
                 return
             if path == "/api/account":
                 try:

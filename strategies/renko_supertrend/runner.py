@@ -30,6 +30,29 @@ from .signals import Engine, completed, settings
 STRATEGY = 'RENKO_SUPERTREND_V1'
 
 
+def start_history(rows, config):
+    """Select a validated, warmed-up new-run anchor; never used to reseed ownership."""
+    invalid=[]
+    for row in rows:
+        if row.get('is_forming'):continue
+        try:completed([row])
+        except ValueError as exc:invalid.append(dict(timestamp=row.get('timestamp'),reason=str(exc)))
+    if not invalid:
+        completed(rows)
+        return rows,None
+    if any(not isinstance(r['timestamp'],(int,float)) or isinstance(r['timestamp'],bool) or not math.isfinite(r['timestamp']) for r in invalid):
+        raise ValueError('Cannot recover history with an unknown invalid-candle timestamp.')
+    gap=max(r['timestamp'] for r in invalid)
+    tail=[r for r in rows if r.get('timestamp',0)>gap]
+    confirmed=completed(tail)
+    warmup=max(int(config.get(k,default)) for k,default in
+               (('atr_length',5),('ema_fast_length',10),('ema_slow_length',30),('ema_exit_length',10),('rsi_length',14),('adx_length',14)))
+    if len(confirmed)<=warmup:
+        raise ValueError('Invalid broker OHLC: waiting for sufficient valid completed candles after the gap before Start.')
+    return tail,dict(anchor=confirmed[0]['timestamp'],last_invalid_at=gap,invalid_candles=invalid,
+                     warmup_bars=warmup,completed_bars=len(confirmed),revision='flat-start-valid-anchor-v1')
+
+
 def price_fingerprint(row):
     return hashlib.sha256(json.dumps({'timestamp':int(row['timestamp']),**{key:float(row[key]) for key in ('open','high','low','close')}},sort_keys=True).encode()).hexdigest()
 
@@ -591,7 +614,15 @@ class Runner(BaseRunner):
             if after_cutoff(self.clock(),p['config']):
                 raise ValueError('Optional saved crypto daily strategy cutoff '+str(p['config'].get('session_deadline'))+' IST has passed; crypto trades 24/7. Select Continuous trading to remove the daily cutoff, or retain this daily risk policy.' if p['config'].get('broker')=='DELTA_INDIA' else 'Selected segment entry cutoff has passed.')
             tick=self.adapter.host_tick_size(p['config']['underlying'])
-            analysis(self.adapter.candles(p['config']),p['config'],tick)
+            source_rows=self.adapter.candles(p['config'])
+            # A new, flat activation may choose a different validated anchor.
+            # Explicit resume paths must preserve their existing recurrence.
+            if payload.get('resume_run_id'):
+                analysis(self.history_rows(source_rows),p['config'],tick)
+                recovery=self.state.get('source_history_recovery')
+            else:
+                source_rows,recovery=start_history(source_rows,p['config'])
+                analysis(source_rows,p['config'],tick)
             if payload.get('resume_run_id'):
                 old=deepcopy(self.state)
                 expected=self.configure(old['config'])
@@ -611,7 +642,15 @@ class Runner(BaseRunner):
             # Format the response message before activating a runner.
             armed_message='Renko armed in '+p['config']['mode']+'; '+('fresh intrabar candidates' if p['config'].get('intrabar_entries') else 'completed-candle qualifications')+('; segment cutoff '+p['config']['session_deadline']+' IST' if p['config'].get('session_deadline') else '; continuous crypto; held contract expiry applies')+'. No historical signal replay.'
             self.state['run_id']='RENKO-RUN-'+secrets.token_hex(10)
-            result=super().start(dict(preview_id=p['id'],confirmation=p['confirmation']),background)
+            previous_engine=self.state.pop('renko_engine',None)
+            previous_recovery=self.state.get('source_history_recovery')
+            self.state['source_history_recovery']=recovery
+            try:result=super().start(dict(preview_id=p['id'],confirmation=p['confirmation']),background)
+            except Exception:
+                self.state['source_history_recovery']=previous_recovery
+                if previous_engine is not None:self.state['renko_engine']=previous_engine
+                raise
+            if recovery:armed_message+=' Source OHLC gap excluded; new validated warmup anchor retained. Fresh post-Start signals only.'
             self.event('WATCHING',armed_message)
             return self.snapshot()
 
@@ -702,7 +741,7 @@ class Runner(BaseRunner):
             return False
         c=self.configure({**self.state['config'],'timeframe':request['timeframe'],'supertrend_timeframe':request.get('supertrend_timeframe',self.state['config'].get('supertrend_timeframe','5 minutes'))})
         # Build the replacement before changing any live analysis/configuration.
-        rebuilt=analysis(self.adapter.candles(c),c,self.adapter.host_tick_size(c['underlying']))
+        rebuilt=analysis(self.history_rows(self.adapter.candles(c)),c,self.adapter.host_tick_size(c['underlying']))
         now=self.clock()
         interval=TIMEFRAMES[c['timeframe']]
         self.state.update(config=c,renko_engine=rebuilt,last_signal=None,last_processed_bar=rebuilt['last']['timestamp'],
@@ -1348,11 +1387,16 @@ class Runner(BaseRunner):
         return not sig.get('is_forming') and (ema_adverse(sig,direction) or bool(exit_indicators.reason(config,sig,direction)))
 
     def exit_ema(self,rows,c):
-        rows=completed(rows)
+        rows=completed(self.history_rows(rows))
         anchor=(self.state.get('renko_engine') or {}).get('anchor')
         if not rows or anchor is not None and rows[0]['timestamp']!=anchor:
             raise ValueError('Configured EMA exit requires full original host history; no reseed.')
         return confirmed_values(rows,c.get('ema_exit_length',10))[-1]['ema_exit']
+
+    def history_rows(self, rows):
+        recovery=self.state.get('source_history_recovery') or {}
+        anchor=recovery.get('anchor')
+        return [r for r in rows if r.get('timestamp',0)>=anchor] if anchor is not None else rows
 
     def current_analysis(self, rows, c, tick):
         """Recover a revised history atomically, never replay an entry/order.
@@ -1364,6 +1408,7 @@ class Runner(BaseRunner):
         consumed; the newest fresh candle goes through the normal entry gates.
         Missing history, malformed OHLC and identity failures still block.
         """
+        rows=self.history_rows(rows)
         saved = self.state.get('renko_engine')
         try:
             return analysis(rows, c, tick, saved)
@@ -1406,7 +1451,8 @@ class Runner(BaseRunner):
         if not c.get('higher_timeframe_enabled',False):return dict(allowed=True,enabled=False,reason='Higher timeframe check OFF.')
         try:
             one=host_rows if host_rows is not None else self.adapter.candles(c)
-            five=self.adapter.candles({**c,'timeframe':c['supertrend_timeframe']})
+            one=self.history_rows(one)
+            five=self.history_rows(self.adapter.candles({**c,'timeframe':c['supertrend_timeframe']}))
             return mtf_supertrend.check(one,five,c,self.adapter.host_tick_size(c['underlying']),direction,at)
         except Exception as error:
             return dict(revision=mtf_supertrend.REVISION,allowed=False,reason='Supertrend agreement source unavailable; entry blocked: '+str(error))
@@ -1414,7 +1460,7 @@ class Runner(BaseRunner):
     def signal(self):
         c = self.state['config']
         tick = self.adapter.host_tick_size(c['underlying'])
-        rows = self.adapter.candles(c)
+        rows = self.history_rows(self.adapter.candles(c))
         result = self.current_analysis(rows, c, tick)
         self.state['renko_engine'] = result
         sig = {**result['last'], 'supertrend_cross_direction': result['last'].get('raw_supertrend_cross_direction',result['last']['cross_direction']), 'cross_direction': result['last']['entry_direction']}

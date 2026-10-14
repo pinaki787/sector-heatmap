@@ -16,9 +16,9 @@ setTimeout(()=>{for(const name of names)assert.equal(w.document.getElementById('
 const master=w.document.getElementById('renko-ema-family-enabled'),rule=w.document.getElementById('renko-ema-fast-enabled'),chart=w.document.getElementById('renko-ema-fast-enabled-indicator');
 const prior=rule.checked,chartPrior=chart.checked;
 master.checked=false;master.dispatchEvent(new w.Event('change',{bubbles:true}));
-assert.equal(rule.disabled,true);assert.equal(rule.checked,prior);assert.equal(chart.disabled,false);assert.equal(chart.checked,chartPrior);
+assert.equal(rule.disabled,true);assert.equal(rule.checked,prior);assert.equal(chart.disabled,true);assert.equal(chart.checked,chartPrior);
 master.checked=true;master.dispatchEvent(new w.Event('change',{bubbles:true}));
 assert.equal(rule.disabled,false);assert.equal(rule.checked,prior);
-assert.deepEqual(errors,[]);console.log('DOM loaded-backend PASS: six groups; OFF/ON preserves subordinate choices; chart controls remain enabled; zero uncaught errors');w.close();},100);
+assert.deepEqual(errors,[]);console.log('DOM loaded-backend PASS: six groups; OFF/ON preserves subordinate choices; all section controls are disabled; zero uncaught errors');w.close();},100);
 
 })().catch(error=>{console.error(error);process.exitCode=1;});
