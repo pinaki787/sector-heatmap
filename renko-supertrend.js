@@ -844,8 +844,17 @@
       const reply={type:'sector-pulse:renko-start-settings-response',id:event.data.id};
       if(expected!==el('symbol').value||event.data.symbol!==expected){reply.error='Select this chart instrument in Trade setup before Start; displayed settings were not applied.';}
       else if(!Array.from(el('timeframe').options).some(option=>option.value===event.data.timeframe)){reply.error='Chart timeframe is unavailable for this instrument; Start blocked.';}
-      else{reply.settings={...values(),timeframe:event.data.timeframe};reply.payload={...payload(),timeframe:event.data.timeframe};}
+      else{const higher=el('timeframe').value!==event.data.timeframe?({'1 minute':'5 minutes','5 minutes':'15 minutes'}[event.data.timeframe]||el('supertrend-timeframe').value):el('supertrend-timeframe').value;reply.settings={...values(),timeframe:event.data.timeframe,'supertrend-timeframe':higher};reply.payload={...payload(),timeframe:event.data.timeframe,supertrend_timeframe:higher};}
       event.source.postMessage(reply,location.origin);
+    });
+    root.addEventListener('message',event=>{
+      if(isBatchChartView||event.origin!==location.origin||event.data?.type!=='sector-pulse:renko-timeframe-selection')return;
+      const card=[...batchChartFrames.values()].find(card=>card.querySelector('iframe')?.contentWindow===event.source);if(!card)return;
+      const expected=new URL(card.querySelector('iframe').src).searchParams.get('renkoChartSymbol');
+      if(expected!==el('symbol').value||event.data.symbol!==expected||!Array.from(el('timeframe').options).some(option=>option.value===event.data.timeframe))return;
+      el('timeframe').value=event.data.timeframe;
+      const higher={'1 minute':'5 minutes','5 minutes':'15 minutes'}[event.data.timeframe];if(higher)el('supertrend-timeframe').value=higher;
+      controls();configurationState();void persistDraft({syncFrames:false}).catch(error=>{el('action-error').textContent='Timeframe draft save failed: '+error.message;el('action-error').hidden=false;});
     });
     async function selectedStartPayload(){
       if(!isBatchChartView||root.parent===root)return payload();
@@ -1494,7 +1503,7 @@ el('higher-timeframe-enabled').disabled=lastRunner?.mtf_supertrend_revision!=='o
     try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key?.startsWith('sector-pulse:renko-supertrend-settings-v'))continue;if(key.includes(':DELTA_INDIA')!==isDelta)continue;const prior=JSON.parse(localStorage.getItem(key));preservePreviousDraft(prior,prior?.__saved_at,key.split(':').at(-1));}}catch(e){namedConfigNote.textContent='Legacy draft scan incomplete: '+e.message;}
 
     function configurationState(){const saved=savedDraft===JSON.stringify(values());el('config-state').textContent=(saved?'Draft saved '+stamp(confirmedSavedAt)+' IST':'Draft edited · save pending or unconfirmed')+' · Selected instance '+instanceId+' · '+(lastRunner?.running?'Active '+(lastRunner.config?.mode||'')+' '+(lastRunner.config?.underlying||'')+' · Runner active with its Start settings; edits apply on next Start.':lastRunner?'Runner '+lastRunner.status+' · Start applies visible settings.':'Runner state loading.');}
-    async function persistDraft(){const draft=values(),signature=JSON.stringify(draft);const result=await request('settings',{settings:draft});savedDraft=signature;confirmedSavedAt=result.saved_at;try{localStorage.setItem(storage,JSON.stringify({...draft,__saved_at:result.saved_at}));}catch{}configurationState();syncManualBrickFrames(draft);return result;}
+    async function persistDraft({syncFrames=true}={}){const draft=values(),signature=JSON.stringify(draft);const result=await request('settings',{settings:draft});savedDraft=signature;confirmedSavedAt=result.saved_at;try{localStorage.setItem(storage,JSON.stringify({...draft,__saved_at:result.saved_at}));}catch{}configurationState();if(syncFrames)syncManualBrickFrames(draft);return result;}
     el('save-settings').onclick=async()=>{clearTimeout(prefsTimer);el('save-settings').disabled=true;try{const result=await persistDraft();const name=el('config-name').value.trim();if(name){writeLibrary(storeConfiguration(namedLibrary,name,{...values(),'rsi-sma-period':el('rsi-sma-period').value,'show-one-minute-label':oneMinuteLabelToggle.checked,'show-five-minute-label':fiveMinuteLabelToggle.checked},result.saved_at));selectedConfigurationId=JSON.stringify([el('symbol').value,name]);deleteConfigButton.disabled=false;namedConfigNote.textContent='Saved '+name+' · '+el('symbol').value+' · available in this browser.';closeConfigOptions();}else namedConfigNote.textContent='Draft saved. Enter a name to add it to saved configurations.';}catch(e){el('config-state').textContent='Settings save failed: '+e.message+' · active runner unchanged';}finally{el('save-settings').disabled=false;}};
     el('export-settings').onclick=()=>{const fields=allIds.map(id=>({id,label:(el(id).closest('label')?.firstChild?.textContent||id).split('\n')[0].replace(/\s+/g,' ').trim().slice(0,180),value:values()[id]}));fields.push({id:'rsi-sma-period',label:'Chart-only SMA of RSI period',value:el('rsi-sma-period').value});const out=configurationText({broker:selectedBroker,instance:instanceId,fields,requested:payload(),active:lastRunner?.config,revision:lastRunner?.runtime_revision,savedAt:savedDraft===JSON.stringify(values())?confirmedSavedAt:null});const name=el('config-name').value.trim().replace(/[^A-Za-z0-9_-]/g,'_');const url=URL.createObjectURL(new Blob([out.text],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=name?name+'-'+out.filename:out.filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
     function invalidate(){version++;controls();prefsSavedAt=Date.now()/1000;try{localStorage.setItem(storage,JSON.stringify({...values(),__saved_at:prefsSavedAt}));}catch{}configurationState();clearTimeout(prefsTimer);prefsTimer=setTimeout(()=>persistDraft().catch(e=>{el('config-state').textContent='Preferences could not be saved: '+e.message;}),250);}
@@ -1565,6 +1574,7 @@ el('higher-timeframe-enabled').disabled=lastRunner?.mtf_supertrend_revision!=='o
     el('timeframe').addEventListener('change',()=>{
       const paired={'1 minute':'5 minutes','5 minutes':'15 minutes'}[el('timeframe').value];
       if(paired)el('supertrend-timeframe').value=paired;
+      if(isBatchChartView&&root.parent!==root)root.parent.postMessage({type:'sector-pulse:renko-timeframe-selection',symbol:el('symbol').value,timeframe:el('timeframe').value},location.origin);
     },true);
     allIds.forEach(id=>el(id).addEventListener('change',()=>{if(id==='symbol')matchInstrumentConfiguration();if(id==='delta-execution-route'){el('action-error').hidden=true;el('action-error').textContent='';}invalidate();if(signalIds.includes(id)||historyIds.includes(id)||id==='commodity-holding'||id==='delta-execution-route'||id==='supertrend-timeframe'){clearAnalysis();load();}}));
     el('latest-signal').onclick=()=>{if(chart&&latestSignalIndex!==null)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,latestSignalIndex-20),to:Math.min(plottedCount+2,latestSignalIndex+40)});};
