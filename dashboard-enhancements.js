@@ -3126,7 +3126,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     for(const key of [...allowed])if(visibility[key]===false)allowed.delete(key);
     const brokerCard=document.querySelector('.broker-card');if(brokerCard){brokerCard.hidden=!allowed.has('broker-connection');brokerCard.style.display=brokerCard.hidden?'none':'';}
 
-    for(const button of document.querySelectorAll('.nav [data-view],.nav [data-feature]')){
+    for(const button of document.querySelectorAll('.nav [data-view],[data-feature]')){
       const denied=!allowed.has(button.dataset.feature||button.dataset.view);button.hidden=denied;button.style.display=denied?'none':'';
     }
     for(const section of document.querySelectorAll('.work > .view')){
