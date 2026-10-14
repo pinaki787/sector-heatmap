@@ -121,7 +121,9 @@ class DeltaRunner(Runner):
         from .delta_costs import MODEL
         current=[t for t in result['trade_history'] if t.get('run_id')==self.state.get('run_id') and t.get('entry_filled')]
         realized=sum(t['costs']['realized_net'] for t in current) if all(t['costs'].get('realized_net') is not None for t in current) else None
-        result['cost_pnl']=dict(realized_net=realized,unrealized_net=None,total_net=None,
+        flat = not result.get('position') and not result.get('pending_order') and all(t.get('remaining_quantity') == 0 for t in current)
+        unrealized = 0 if flat else None
+        result['cost_pnl']=dict(realized_net=realized,unrealized_net=unrealized,total_net=realized if flat else None,
             model=MODEL,basis='Delta native commission/product-rate estimates plus estimated GST; open liquidation costs unavailable. No FYERS charges or INR conversion applied.')
         if (result.get('config') or {}).get('execution_route')==FUTURES_ROUTE:
             result['cost_pnl']=dict(realized_net=None,unrealized_net=None,total_net=None,
