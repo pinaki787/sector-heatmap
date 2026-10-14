@@ -41,7 +41,15 @@ async function refresh() {
   $('user').textContent = currentUser.username + (currentUser.admin ? ' · ADMINISTRATOR' : '');
   $('admin').hidden = !currentUser.admin;
   $('user-master-link').hidden = !currentUser.admin;
-  $('owner-dashboard-link').hidden = !currentUser.admin;
+  $('owner-dashboard-link').hidden = false;
+  try {
+    const ref=new URL(document.referrer||location.origin);
+    const valid=u=>u.origin===location.origin&&(u.pathname==='/'||/^\/broker-workspace\/[a-f0-9]{32}\/$/.test(u.pathname));
+    const storageKey='sector-dashboard-return:'+currentUser.username;
+    if(document.referrer&&valid(ref))sessionStorage.setItem(storageKey,ref.pathname+ref.search+ref.hash);
+    const back=new URL(sessionStorage.getItem(storageKey)||'/',location.origin);
+    $('owner-dashboard-link').href=valid(back)?back.pathname+back.search+back.hash:'/';
+  } catch { $('owner-dashboard-link').href='/'; }
   $('user-list').replaceChildren();
   if(currentUser.admin){
     const {users,sections}=await api('users');
