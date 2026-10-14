@@ -848,7 +848,13 @@
       for(const id of allIds)if(Object.hasOwn(result.settings,id)){
         if(el(id).type==='checkbox')el(id).checked=result.settings[id]===true;else el(id).value=result.settings[id];
       }
-      controls();await persistDraft();
+      controls();
+      if(el('brick-mode').value==='Manual'){
+        await deriveManualBrick();
+        if(manualBrickPending||manualBrickError)throw Error(manualBrickError||'Reference brick calculation is still loading.');
+        result.payload.manual_brick=el('manual-brick').value;
+      }
+      await persistDraft();
       return result.payload;
     }
     const stamp=t=>new Date(t*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});
@@ -878,15 +884,15 @@
     const manualBrickNote=document.createElement('small');
     manualBrickNote.style.cssText='display:block;line-height:1.4;white-space:normal;max-width:32em';
     el('manual-brick').closest('label').append(manualBrickNote);
-    function manualBrickKey(){return 'sector-pulse:fixed-reference-brick-v1:'+apiBase+':'+dhanAccount+':'+el('symbol').value;}
+    function manualBrickKey(){return 'sector-pulse:fixed-reference-brick-v1:'+apiBase+':'+dhanAccount+':'+el('symbol').value+':atr='+el('atr-length').value;}
     async function deriveManualBrick(){
       const generation=++manualBrickGeneration,symbol=el('symbol').value;
       manualBrickPending=false;manualBrickError='';
       if(el('brick-mode').value!=='Manual'||!symbol){manualBrickNote.textContent='';return;}
       try{
         const stored=JSON.parse(el('manual-brick-reference').value||'null');
-        const saved=stored?.symbol===symbol?stored:JSON.parse(localStorage.getItem(manualBrickKey())||'null');
-        if(saved?.symbol===symbol&&Number(saved.manual_brick)>0&&(!isDelta||saved.user_override||Number(saved.rule?.divisor)===46)){
+        const saved=stored?.symbol===symbol&&(stored.user_override||Number(stored.rule?.atr_length)===Number(el('atr-length').value))?stored:JSON.parse(localStorage.getItem(manualBrickKey())||'null');
+        if(saved?.symbol===symbol&&(saved.user_override||Number(saved.rule?.atr_length)===Number(el('atr-length').value))&&Number(saved.manual_brick)>0&&(!isDelta||saved.user_override||Number(saved.rule?.divisor)===46)){
           saved.manual_brick=Number(Number(saved.manual_brick).toFixed(2));el('manual-brick').value=saved.manual_brick;el('manual-brick-reference').value=JSON.stringify(saved);
           paintTradingSessionHours(null,symbol);
           manualBrickNote.textContent='Fixed reference brick · preserved across chart timeframes';
@@ -899,8 +905,9 @@
         // Reference history is account-bound, not owned by a strategy instance.
         // Do not wait for runner inventory/status to calculate a read-only brick.
         stream?.close();streamKey='';
-        const result=await request('manual-brick?'+new URLSearchParams({symbol}));
+        const result=await request('manual-brick?'+new URLSearchParams({symbol,atr_length:el('atr-length').value}));
         if(generation!==manualBrickGeneration||symbol!==el('symbol').value||el('brick-mode').value!=='Manual')return;
+        if(Number(result.rule?.atr_length)!==Number(el('atr-length').value))throw Error('Selected ATR length is not supported by the loaded sizing backend; reload pending');
         if(!(Number(result.manual_brick)>0)||result.symbol!==symbol)throw Error('Invalid reference brick response');
         result.manual_brick=Number(Number(result.manual_brick).toFixed(2));el('manual-brick').value=result.manual_brick;el('manual-brick-reference').value=JSON.stringify(result);
         localStorage.setItem(manualBrickKey(),JSON.stringify(result));
@@ -922,6 +929,7 @@
       deriveManualBrick();
     });
     el('brick-mode').addEventListener('change',deriveManualBrick);
+    el('atr-length').addEventListener('change',deriveManualBrick);
     el('symbol').addEventListener('change',deriveManualBrick);
     el('manual-brick').addEventListener('change',()=>{
       if(el('brick-mode').value==='Manual'&&Number(el('manual-brick').value)>0&&!manualBrickPending){

@@ -77,7 +77,7 @@ class Service:
         policy=self.chart_broker.session_policy(config)
         if not symbol.startswith(('NSE:','BSE:','MCX:')):
             policy={**policy,'session_exchange':'CRYPTO'}
-        spec=rule(symbol,policy)
+        spec=rule(symbol,policy,atr_length=(query.get('atr_length') or [None])[0])
         now=time.time()
         rows=self.chart_broker.candles(dict(config,history_start=now-60*86400))
         return dict(calculate(rows,spec,300,now),symbol=symbol,

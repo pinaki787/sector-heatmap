@@ -5,10 +5,16 @@ from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
-def rule(symbol, session=None):
+def rule(symbol, session=None, *, atr_length):
+    try:
+        length = int(atr_length)
+        if isinstance(atr_length, bool) or float(atr_length) != length or not 1 <= length <= 100:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("ATR length must be an integer from 1 to 100.") from None
     exchange = symbol.split(":")[0]
     if exchange in ("NSE", "BSE"):
-        return dict(reference_seconds=21600, atr_length=5, divisor=12.0,
+        return dict(reference_seconds=21600, atr_length=length, divisor=12.0,
                     anchor_zone="Asia/Kolkata", anchor_minutes=555)
     if exchange == "MCX":
         bounds = (session or {}).get("master_regular_session", "")
@@ -21,11 +27,11 @@ def rule(symbol, session=None):
         if not 0 <= start < end <= 1440:
             raise ValueError("Invalid commodity session bounds.")
         duration = (end-start)*60
-        return dict(reference_seconds=duration, atr_length=7,
+        return dict(reference_seconds=duration, atr_length=length,
                     divisor=duration/1800, anchor_zone="Asia/Kolkata",
                     anchor_minutes=start)
     if (session or {}).get("session_exchange") == "CRYPTO":
-        return dict(reference_seconds=82800, atr_length=7, divisor=82800 / 1800,
+        return dict(reference_seconds=82800, atr_length=length, divisor=82800 / 1800,
                     anchor_zone="UTC", anchor_minutes=0)
     raise ValueError("Instrument exchange is not supported for reference brick sizing.")
 

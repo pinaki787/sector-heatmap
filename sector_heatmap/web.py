@@ -3981,7 +3981,7 @@ def run_server():
                     if bound_instrument and symbol!=bound_instrument:
                         raise ValueError('Reference instrument differs from selected instance.')
                     policy=renko_chart_broker.session_policy({'underlying':symbol})
-                    specification=rule(symbol,policy)
+                    specification=rule(symbol,policy,atr_length=(query.get('atr_length') or [None])[0])
                     now=time.time()
                     today=ReferenceDateTime.fromtimestamp(now,ZoneInfo('Asia/Kolkata')).date()
                     cursor=today-ReferenceDelta(days=60)
