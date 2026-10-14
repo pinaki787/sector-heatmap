@@ -69,3 +69,14 @@ class JobControlTests(TestCase):
                 adapter.quote.assert_not_called()
             finally:
                 release.set();worker.join()
+
+    def test_fyers_chart_history_locks_are_per_range_and_rate_slots_are_shared(self):
+        from strategies.renko_supertrend.chart_history import ChartHistory
+        from unittest.mock import patch
+        history=ChartHistory("/tmp/test-history",min_interval=.5)
+        self.assertIs(history.history_lock("a"),history.history_lock("a"))
+        self.assertIsNot(history.history_lock("a"),history.history_lock("b"))
+        with patch("strategies.renko_supertrend.chart_history.time.monotonic",return_value=10), patch("strategies.renko_supertrend.chart_history.time.sleep") as sleep:
+            history.wait_request_slot()
+            history.wait_request_slot()
+        self.assertEqual([call.args[0] for call in sleep.call_args_list],[0,.5])
