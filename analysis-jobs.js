@@ -5,6 +5,7 @@ function eligible(url,method='GET'){
  const path=new URL(url,'https://local.invalid').pathname;
  if(method.toUpperCase()!=='POST'||!path.includes('/api/'))return false;
  if(/trade-ticket|submit|override|squareoff|login|auth\/|diagnostic/.test(path))return false;
+ if(path.endsWith('/analysis-handoff/preview'))return true;
  return /\/(analyze|analyze-options|analyze-market|analysis|ai-review|ai-analysis|backtest|start|runner-start|form-runner-start|start-selected|start-paper)$/.test(path);
 }
 function jobsURL(responseURL,accountID){

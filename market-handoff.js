@@ -2,8 +2,11 @@
 (function(root){
 'use strict';
 if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
-let panel,choices,result,note,active,submissionRevision=0,submitting=false,stopRequested=false,stopSent=false,latestJobCreated=0,submittedSymbols=null;
+let providerSelect,panel,choices,result,note,active,submissionRevision=0,submitting=false,stopRequested=false,stopSent=false,latestJobCreated=0,submittedSymbols=null;
 const account=()=>root.BrokerForms?.account('handoff')?.id;
+const providerKey=()=> 'sector-pulse:handoff-ai-provider:v1:'+String(root.SectorPulseWorkspace?.username||'user')+':'+String(account()||'dashboard');
+function savedProvider(){try{const value=localStorage.getItem(providerKey());return ['RULES_ONLY','CODEX_CHATGPT'].includes(value)?value:'RULES_ONLY';}catch{return 'RULES_ONLY';}}
+root.HandoffAIProvider={selected:()=>providerSelect?.value||savedProvider(),payload:()=>{const ai_provider=providerSelect?.value||savedProvider();return {ai_provider,recipient:'codex'};}};
 function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
 function button(text,action){const n=el('button',text);n.type='button';n.className='button';n.onclick=action;return n;}
 async function request(path,payload){
@@ -11,7 +14,7 @@ async function request(path,payload){
  const data=await response.json();if(!response.ok)throw Error(data.error||data.message||'Broker analysis unavailable.');return data;
 }
 function render(data){
- result.replaceChildren();result.append(el('p',data.ai_review?.summary||'No eligible market recommendation.'));
+ result.replaceChildren();if(data.ai_provider)result.append(el('p','AI path used: '+(data.ai_provider==='RULES_ONLY'?'Broker candles and rule-based analysis — no AI call':'Codex · ChatGPT account')));result.append(el('p',data.ai_review?.summary||'No eligible market recommendation.'));
  for(const row of data.instruments||[]){
   const card=el('article');card.className='panel';card.style.padding='12px';
   const rec=row.recommendation||{};card.append(el('h4',row.symbol+' · '+(rec.decision||'WAIT')+' · '+(rec.confidence||'')),el('p',rec.rationale||''));
@@ -43,10 +46,16 @@ async function run(){
  const symbols=[...choices.selectedOptions].map(n=>n.value);if(!symbols.length||symbols.length>6){note.textContent='Choose one to six instruments.';return;}
  note.textContent='Analysis submitted. It continues if you leave this page; retrieve it from Saved jobs.';
  const revision=++submissionRevision;submitting=true;stopRequested=false;stopSent=false;active=null;submittedSymbols=JSON.stringify(symbols);
- try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision){active=null;submitting=false;}}
+ try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account(),...root.HandoffAIProvider.payload()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision){active=null;submitting=false;}}
 }
 async function mount(){
  await root.BrokerForms?.ready;const section=document.getElementById('handoff');if(!section)return;
+ const providerPanel=el('section');providerPanel.className='panel';providerPanel.style.padding='16px';
+ const label=el('label','AI analysis path');providerSelect=el('select');providerSelect.setAttribute('aria-label','AI analysis path');
+ for(const [value,title] of [['RULES_ONLY','Broker candles and rule-based analysis — no AI call'],['CODEX_CHATGPT','Codex · ChatGPT account']]){const option=el('option',title);option.value=value;providerSelect.append(option);}
+ providerSelect.value=savedProvider();providerSelect.onchange=()=>{try{localStorage.setItem(providerKey(),providerSelect.value);}catch{}};
+ label.append(providerSelect);providerPanel.append(label,el('p','Applies to cash equity, stock options, indices and commodities. Only public market evidence is shared. Each submitted job keeps its chosen path; providers never switch automatically. Rule-based mode makes no AI call. Account mode uses the configured server Codex sign-in and its account limits.'));
+ const brokerField=section.querySelector('#ticket-broker')?.closest('label');if(brokerField)brokerField.after(providerPanel);else section.prepend(providerPanel);
  panel=el('section');panel.className='panel';panel.style.padding='16px';panel.append(el('h3','AI index & commodity analysis'));
  panel.append(el('p','Selected-broker completed candles and ATM option quotes supply premium entry, target and stop. Symbols with existing exposure are excluded.'));
  choices=el('select');choices.multiple=true;choices.size=7;choices.setAttribute('aria-label','Index and commodity instruments');choices.style.cssText='width:100%;max-width:720px';panel.append(choices);
@@ -60,7 +69,7 @@ async function mount(){
   else if(d.job.output?.kind==='MARKET_HANDOFF'&&d.job.status!=='COMPLETED'){render(d.job.output);note.textContent=d.job.message||d.job.status;}
  });
  root.addEventListener('sector-pulse-job-output',event=>{const d=event.detail;if(d.output?.kind==='MARKET_HANDOFF'&&d.job.request.account_id===account())render(d.output);});
- root.addEventListener('broker-account-change',()=>{submissionRevision++;choices.replaceChildren();result.replaceChildren();active=null;submitting=false;stopRequested=false;stopSent=false;latestJobCreated=0;note.textContent='Load instruments for the selected broker.';});
+ root.addEventListener('broker-account-change',()=>{submissionRevision++;providerSelect.value=savedProvider();choices.replaceChildren();result.replaceChildren();active=null;submitting=false;stopRequested=false;stopSent=false;latestJobCreated=0;note.textContent='Load instruments for the selected broker.';});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(window);

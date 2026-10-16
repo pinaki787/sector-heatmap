@@ -17,6 +17,7 @@ def operation(path):
     route=urlsplit(path).path
     if not route.startswith('/api/'):return None
     if any(term in route for term in ('trade-ticket','submit','override','squareoff','login','auth/','diagnostic')):return None
+    if route.endswith('/analysis-handoff/preview'):return ('ANALYSIS','handoff')
     if route.endswith(('/analyze','/analyze-options','/analyze-market','/analysis','/ai-review','/ai-analysis','/backtest')):
         feature=('screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route
                  else 'renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route
@@ -87,13 +88,38 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
             from .market_handoff import analyze
             from .handoff_ai import HandoffAI
             broker,name,aid=market_factory(clone,payload)
-            return analyze(payload,broker,HandoffAI(root),name,aid)
+            return analyze(payload,broker,HandoffAI.from_payload(root,payload),name,aid)
         def send_json(status,value):captured.update(status=status,value=value)
         clone.send_json=send_json
         (original_post if payload is not None and not holdings else original_get)(clone)
         if 'value' not in captured:raise ValueError('Workflow did not return a JSON job result.')
         if captured['status']>=400:raise ValueError(str(captured['value'].get('error','Workflow failed.')))
-        return captured['value']
+        result=captured['value']
+        if path.split('?',1)[0].endswith(('/analysis-handoff/analyze','/analysis-handoff/preview')) and payload.get('ai_provider'):
+            from .handoff_ai import review_stock_handoff
+            def exclude_current_exposure():
+                if not market_factory:return
+                from .exposure_guard import broker_exposures,matches_exposure
+                broker,_,_=market_factory(clone,payload)
+                try:exposures=broker_exposures(broker)
+                finally:broker.stop()
+                removed=[c for c in result.get('candidates',[]) if matches_exposure(c.get('symbol'),exposures)]
+                result['candidates']=[c for c in result.get('candidates',[]) if c not in removed]
+                keys={c['key'] for c in result['candidates']};symbols={c['symbol'] for c in result['candidates']}
+                result['cards']=[c for c in result.get('cards',[]) if c.get('candidate_key') in keys]
+                result.setdefault('ai_review',{})['recommendations']=[r for r in result.get('ai_review',{}).get('recommendations',[]) if r['symbol'] in symbols]
+                if removed:
+                    result['ai_review']['summary']='Exposure changed during AI review; recommendations for those underlyings were removed.'
+                    result.setdefault('exclusions',[]).extend(dict(candidate_key=c['key'],name=c.get('name'),kind='OPEN_POSITION',reason='Exposure appeared during AI review; excluded.') for c in removed)
+                if analysis_runs and result.get('analysis_id') in analysis_runs:
+                    analysis_runs[result['analysis_id']]['cards']={c['card_id']:c for c in result['cards']}
+            exclude_current_exposure()
+            result=review_stock_handoff(result,payload,root)
+            exclude_current_exposure()
+        if path.split('?',1)[0].endswith('/analysis-handoff/preview') and payload.get('ai_provider'):
+            result['ai_provider']=payload['ai_provider']
+            result.setdefault('delivery',{})['statement']='The full packet and account details remain local; only public market evidence is used for the selected AI review.'
+        return result
 
     def restore(owner,payload):
         if analysis_runs is None or not payload.get('analysis_id') or payload['analysis_id'] in analysis_runs:return
@@ -128,6 +154,9 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
             if not selected:return handler.send_json(404,{'error':'Unknown job operation.'})
             if workspace_guard:workspace_guard.validate_action(account,path,payload)
             kind,feature=selected
+            if feature=='handoff' and payload.get('ai_provider'):
+                from .handoff_ai import HandoffAI
+                HandoffAI.from_payload(root,payload)
             key=handler.headers.get('X-Job-Request-ID') or payload.pop('_job_request_id',None)
             if not key:
                 import secrets

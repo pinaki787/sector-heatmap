@@ -70,22 +70,16 @@ class MarketHandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError):indicators(rows,300,NOW)
         rows=Broker().candles({'underlying':'X','timeframe':'5 minutes'})
         with self.assertRaises(ValueError):indicators(rows,300,NOW+1000)
-    def test_ai_request_is_structured_and_cannot_invent_another_symbol(self):
-        class Response:
-            status_code=200
-            def json(self):return {'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':'{"summary":"x","recommendations":[{"symbol":"OTHER","decision":"BULLISH","confidence":"HIGH","rationale":"x","risks":[]}]}'}]}]}
-        calls=[]
-        ai=HandoffAI('.',sender=lambda *args,**kwargs:calls.append(kwargs) or Response(),key_reader=lambda:'fixture-secret')
-        with self.assertRaisesRegex(ValueError,'submitted broker'):ai.review({'instruments':[{'symbol':'NIFTY'}]})
-        self.assertTrue(calls[0]['json']['text']['format']['strict']);self.assertFalse(calls[0]['json']['store'])
+    def test_account_ai_cannot_invent_another_symbol(self):
+        from unittest.mock import patch
+        ai=HandoffAI('.',provider='CODEX_CHATGPT')
+        with patch('sector_heatmap.codex_handoff.review',return_value=({'summary':'x','recommendations':[dict(symbol='OTHER',decision='BULLISH',confidence='HIGH',rationale='x',risks=[])]},{})):
+            with self.assertRaisesRegex(ValueError,'submitted broker'):ai.review({'instruments':[{'symbol':'NIFTY'}]})
 
-    def test_disabling_api_analysis_never_reads_a_key_or_sends_a_request(self):
-        import tempfile
-        from pathlib import Path
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);(root/'.private').mkdir();(root/'.private/openai-api-analysis-disabled').touch()
-            nested=root/'accounts'/'selected'/'source';nested.mkdir(parents=True)
-            calls=[]
-            ai=HandoffAI(nested,sender=lambda *a,**k:calls.append('request'),key_reader=lambda:calls.append('key'))
-            with self.assertRaisesRegex(ValueError,'disabled by your preference'):ai.review({'instruments':[]})
-            self.assertEqual(calls,[])
+    def test_rules_market_analysis_does_not_call_ai_and_uses_completed_trends(self):
+        from unittest.mock import patch
+        with patch('sector_heatmap.codex_handoff.review',side_effect=AssertionError('No AI call')):
+            result=analyze({'symbols':['NSE:NIFTY50-INDEX']},Broker(),HandoffAI('.'),'FYERS','selected',clock=lambda:NOW)
+        self.assertEqual(result['instruments'][0]['recommendation']['decision'],'BULLISH')
+        self.assertEqual(result['ai_provider'],'RULES_ONLY')
+        self.assertIn('No AI call',result['ai_review']['summary'])

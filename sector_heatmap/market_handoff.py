@@ -122,7 +122,7 @@ def analyze(payload,broker,ai,broker_name,account_id,clock=time.time):
     symbols=list(dict.fromkeys(str(s).strip().upper() for s in payload.get('symbols',[]) if str(s).strip()))
     if not 1<=len(symbols)<=6:raise ValueError('Choose one to six exact index/commodity symbols from the selected broker.')
     exposures=broker_exposures(broker)
-    result=dict(kind='MARKET_HANDOFF',broker=broker_name,account_id=account_id,created_at=clock(),instruments=[],exclusions=[],order_authority='NONE')
+    result=dict(kind='MARKET_HANDOFF',ai_provider=getattr(ai,'provider',None),broker=broker_name,account_id=account_id,created_at=clock(),instruments=[],exclusions=[],order_authority='NONE')
     broker.start()
     try:
         for symbol in symbols:
@@ -164,7 +164,7 @@ def analyze(payload,broker,ai,broker_name,account_id,clock=time.time):
                 instrument['recommendation']=recommendation
                 instrument['recommended_plan']=selected
             result['ai_review']={k:v for k,v in review.items() if k!='recommendations'}
-        else:result['ai_review']=dict(provider='OpenAI',state='NO_ELIGIBLE_EVIDENCE',summary='No selected-broker instrument has complete entry evidence; no AI request made.')
+        else:result['ai_review']=dict(provider=getattr(ai,'provider',None),state='NO_ELIGIBLE_EVIDENCE',summary='No selected-broker instrument has complete entry evidence; no AI request made.')
         # Exposure may have changed while history or AI analysis was in flight.
         fresh=broker_exposures(broker)
         eligible=[]

@@ -246,6 +246,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const previewAccounts = new Map()
   const moPreviewAccounts = new Map()
   const postJson = async (url, payload) => {
+    if (/\/analysis-handoff\/(analyze|preview)$/.test(url)) payload={...payload,...(window.HandoffAIProvider?.payload()||{ai_provider:'RULES_ONLY',recipient:'codex'})}
     if(url.startsWith('/api/trade-ticket/')&&payload.preview_id?.startsWith('MO-')){const id=moPreviewAccounts.get(payload.preview_id);if(!id)throw Error('Motilal review account context is missing. Prepare again.');payload={...payload,broker:'MOTILAL_OSWAL',account_id:id};}
 
     if (url.startsWith('/api/trade-ticket/') && payload.preview_id?.startsWith('DHAN-')) {
@@ -1950,6 +1951,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     if (!analysisRun) return
     $('analysis-panel').hidden = false
     $('ai-review-state').textContent = analysisRun.ai_review?.message || 'External AI review is unavailable; local evidence proposals are shown.'
+    if(analysisRun.ai_review?.summary){const summary=document.createElement('p');summary.textContent=analysisRun.ai_review.summary;$('ai-review-state').append(summary)}
+    for(const row of analysisRun.ai_review?.recommendations||[]){const line=document.createElement('p');line.textContent=`${row.symbol}: ${row.decision} · ${row.confidence} · ${row.rationale} ${(row.risks||[]).join(' · ')}`;$('ai-review-state').append(line)}
     $('analysis-board').innerHTML = (analysisRun.cards || []).map(card => {
       const a = card.analysis; const c = card.candidate; const p = a.proposal; const proposed = a.proposed_sizing || p?.sizing || {}
       const legs = p?.legs?.length ? `<table class="leg-table"><thead><tr><th>Action</th><th>Contract</th><th>Strike</th><th>Bid / ask</th><th>OI · volume</th><th>Lot · tick</th><th>Delta · IV</th></tr></thead><tbody>${p.legs.map(leg => `<tr><td>${escapeHtml(leg.action)}</td><td>${escapeHtml(leg.symbol)}</td><td>${number(leg.strike)}</td><td>${number(leg.bid)} / ${number(leg.ask)}</td><td>${number(leg.open_interest)} · ${number(leg.volume)}</td><td>${number(leg.lot_size)} · ${number(leg.tick_size)}</td><td>${number(leg.greeks?.delta)} · ${number(leg.greeks?.iv)}</td></tr>`).join('')}</tbody></table>` : ''
@@ -2228,7 +2231,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         include_funds: includeFunds, funds_confirmed: includeFunds && $('confirm-funds').checked,
       })
       renderPacket(packet)
-      $('packet-status').textContent = `Local ${action} ready · ${packet.candidates.length} candidates · transmitted: no.`
+      $('packet-status').textContent = `Local ${action} ready · ${packet.candidates.length} candidates · full packet transmitted: no. ${packet.ai_review?.message || ''}`
     } catch (error) {
       $('packet-status').className = 'handoff-status error'; $('packet-status').textContent = error.message
     } finally { button.disabled = false; button.textContent = 'Prepare local preview' }

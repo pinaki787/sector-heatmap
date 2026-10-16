@@ -12,7 +12,7 @@ def read(name):return (root/name).read_text()
 def save(name,text):
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
  if p.suffix=='.py':ast.parse(text)
-for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff'):
+for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff'):
  save('sector_heatmap/'+name+'.py',read('sector_heatmap/'+name+'.py'))
 # Add cooperative cancellation at existing broker-read boundaries.
 hooks={
@@ -102,22 +102,22 @@ if not args.account_only:
 if (base/'dhan_handoff.py').exists():
  s=(base/'dhan_handoff.py').read_text();anchor='    def funds(self):'
  insert='''    def orders(self):
-         rows=self.client.request('GET','/orders')
-         if not isinstance(rows,list) or any(str(r.get('dhanClientId',self.client.client_id))!=self.client.client_id for r in rows):
-             raise PermissionError('Dhan orders do not match selected account.')
-         masters=self.execution.master.load(datetime.now(IST))
-         lookup={(r['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM','I':''}.get(r['SEM_SEGMENT'],''),str(r['SEM_SMST_SECURITY_ID'])):r for r in masters}
-         result=[]
-         for row in rows:
-             if row.get('orderStatus') in ('TRADED','CANCELLED','REJECTED','EXPIRED'):continue
-             if row.get('orderStatus') not in ('TRANSIT','PENDING','PART_TRADED'):raise ValueError('Unknown Dhan order status; duplicate entry cannot be excluded.')
-             meta=lookup.get((row.get('exchangeSegment'),str(row.get('securityId'))))
-             if not meta:raise ValueError('Pending Dhan order has no verified native master mapping.')
-             result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+contract_underlying(meta)+'-EQ',status=row['orderStatus']))
-         return result
+        rows=self.client.request('GET','/orders')
+        if not isinstance(rows,list) or any(str(r.get('dhanClientId',self.client.client_id))!=self.client.client_id for r in rows):
+            raise PermissionError('Dhan orders do not match selected account.')
+        masters=self.execution.master.load(datetime.now(IST))
+        lookup={(r['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM','I':''}.get(r['SEM_SEGMENT'],''),str(r['SEM_SMST_SECURITY_ID'])):r for r in masters}
+        result=[]
+        for row in rows:
+            if row.get('orderStatus') in ('TRADED','CANCELLED','REJECTED','EXPIRED'):continue
+            if row.get('orderStatus') not in ('TRANSIT','PENDING','PART_TRADED'):raise ValueError('Unknown Dhan order status; duplicate entry cannot be excluded.')
+            meta=lookup.get((row.get('exchangeSegment'),str(row.get('securityId'))))
+            if not meta:raise ValueError('Pending Dhan order has no verified native master mapping.')
+            result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+contract_underlying(meta)+'-EQ',status=row['orderStatus']))
+        return result
 
  '''
- assert anchor in s;s=s.replace(anchor,insert+anchor,1);save('sector_heatmap/dhan_handoff.py',s)
+ assert anchor in s;s=s.replace(anchor,insert.rstrip()+'\n\n'+anchor,1);save('sector_heatmap/dhan_handoff.py',s)
 s=(base/'section_permissions.py').read_text();anchor=" assigned=set(user.get('features',[]))";s=s.replace(anchor,anchor+"\n if path.startswith('/api/jobs'):return bool(assigned & {'broker','runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})",1);save('sector_heatmap/section_permissions.py',s)
 s=(base/'dashboard-enhancements.js').read_text();local=read('dashboard-enhancements.js')
 a=local.index('  const renderSavedScreenerAnalysis =');b=local.index('  const analyzeScreenerCandidates',a)
@@ -136,12 +136,20 @@ assert old in s;s=s.replace(old,"    $('screener-analysis-status').textContent =
 s=s.replace('  const analyzeScreenerOptionPlans = async () => {\n','  const analyzeScreenerOptionPlans = async () => {\n    screenerAnalysisCancelled = false\n',1)
 
 a=local.index("  window.addEventListener('sector-pulse-job-output'");b=local.index("  window.addEventListener('pagehide',saveHandoffResults)",a);anchor="  window.addEventListener('pagehide',saveHandoffResults)";assert anchor in s;s=s.replace(anchor,local[a:b]+anchor,1)
+# Apply provider selection and AI output additions without replacing broker-specific UI.
+provider_line = next(line for line in local.splitlines(keepends=True) if "payload={...payload,...(window.HandoffAIProvider" in line)
+s=s.replace('  const postJson = async (url, payload) => {\n','  const postJson = async (url, payload) => {\n'+provider_line,1)
+review_anchor = next(line for line in local.splitlines(keepends=True) if "$('ai-review-state').textContent = analysisRun.ai_review" in line)
+review_lines = ''.join(line for line in local.splitlines(keepends=True) if 'analysisRun.ai_review?.summary)' in line or 'for(const row of analysisRun.ai_review?.recommendations' in line)
+assert review_anchor in s
+s=s.replace(review_anchor,review_anchor+review_lines,1)
+s=s.replace(' · transmitted: no.`'," · full packet transmitted: no. ${packet.ai_review?.message || ''}`",1)
 if args.account_only:s=s.replace("BrokerForms?.account('screener')","BrokerForms?.account('account')")
 save('dashboard-enhancements.js',s)
 s=(base/'workspaces.py').read_text()
 anchor="            public=[]"
 assert anchor in s
-s=s.replace(anchor,"            inventory += ['analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff']]\n"+anchor,1)
+s=s.replace(anchor,"            inventory += ['analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff']]\n"+anchor,1)
 save('sector_heatmap/workspaces.py',s)
 s=(base/'broker-form-routing.js').read_text()
 old="const control=['manual','handoff'].includes(kind)?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
