@@ -219,6 +219,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
     def get(handler):
         if getattr(handler,'_persistent_job_internal',False):return original_get(handler)
         parsed=urlsplit(handler.path)
+        if parsed.path.startswith('/broker-workspace/'):return original_get(handler)
         is_catalog=parsed.path.endswith('/analysis-handoff/market-catalog')
         if parsed.path!='/api/jobs' and not is_catalog:return original_get(handler)
         try:

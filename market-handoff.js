@@ -2,7 +2,7 @@
 (function(root){
 'use strict';
 if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
-let panel,choices,result,note,active,submissionRevision=0;
+let panel,choices,result,note,active,submissionRevision=0,submitting=false,stopRequested=false,stopSent=false,latestJobCreated=0,submittedSymbols=null;
 const account=()=>root.BrokerForms?.account('handoff')?.id;
 function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
 function button(text,action){const n=el('button',text);n.type='button';n.className='button';n.onclick=action;return n;}
@@ -32,22 +32,35 @@ async function load(){
  note.textContent='Loading selected-broker index and commodity symbols…';choices.replaceChildren();
  try{const data=await request('/api/analysis-handoff/market-catalog');for(const row of data.instruments||[]){const option=el('option',row.name+' · '+row.symbol);option.value=row.symbol;choices.append(option);}note.textContent=choices.length?'Choose up to six instruments.':'No eligible instruments in this broker master.';}catch(error){note.textContent=error.message;}
 }
+async function stopAnalysis(){
+ stopRequested=true;
+ if(!active){note.textContent=submitting?'Stop requested; waiting for the server to accept this job.':'Open Saved jobs to choose an active analysis.';return;}
+ if(stopSent)return;stopSent=true;
+ try{await root.SectorPulseJobs.client.cancel(active.base,active.job.job_id);note.textContent='Stop requested; partial output will remain saved.';}
+ catch(error){stopSent=false;note.textContent=error.message;}
+}
 async function run(){
  const symbols=[...choices.selectedOptions].map(n=>n.value);if(!symbols.length||symbols.length>6){note.textContent='Choose one to six instruments.';return;}
  note.textContent='Analysis submitted. It continues if you leave this page; retrieve it from Saved jobs.';
- const revision=++submissionRevision;
- try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision)active=null;}
+ const revision=++submissionRevision;submitting=true;stopRequested=false;stopSent=false;active=null;submittedSymbols=JSON.stringify(symbols);
+ try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision){active=null;submitting=false;}}
 }
 async function mount(){
  await root.BrokerForms?.ready;const section=document.getElementById('handoff');if(!section)return;
  panel=el('section');panel.className='panel';panel.style.padding='16px';panel.append(el('h3','AI index & commodity analysis'));
  panel.append(el('p','Selected-broker completed candles and ATM option quotes supply premium entry, target and stop. Symbols with existing exposure are excluded.'));
  choices=el('select');choices.multiple=true;choices.size=7;choices.setAttribute('aria-label','Index and commodity instruments');choices.style.cssText='width:100%;max-width:720px';panel.append(choices);
- panel.append(button('Load broker instruments',load),button('Analyze selected instruments',run),button('Stop analysis',async()=>{try{if(active)await root.SectorPulseJobs.client.cancel(active.base,active.job.job_id);else note.textContent='Open Saved jobs to choose an active analysis.';}catch(error){note.textContent=error.message;}}));
+ panel.append(button('Load broker instruments',load),button('Analyze selected instruments',run),button('Stop analysis',stopAnalysis));
  note=el('p','Load instruments from the selected broker to begin.');note.setAttribute('role','status');result=el('div');panel.append(note,result);section.append(panel);
- root.addEventListener('sector-pulse-job-update',event=>{const d=event.detail;if(d.job.request?.path?.endsWith('/analyze-market')&&d.job.request.account_id===account()&&!d.job.terminal){active=d;note.textContent=d.job.message||d.job.status;}});
+ const owned=d=>d?.job?.request?.path?.endsWith('/analyze-market')&&d.job.request.account_id===account();
+ root.addEventListener('sector-pulse-job-submitted',event=>{const d=event.detail;if(!submitting||!owned(d)||JSON.stringify(d.job.request.payload?.symbols)!==submittedSymbols||d.job.created<latestJobCreated)return;active=d;latestJobCreated=d.job.created;stopSent=false;if(stopRequested)void stopAnalysis();});
+ root.addEventListener('sector-pulse-job-update',event=>{const d=event.detail;if(!owned(d)||d.job.created<latestJobCreated||(submitting&&!active))return;
+  if(active&&active.job.job_id!==d.job.job_id)return;
+  if(!d.job.terminal){active=d;latestJobCreated=d.job.created;note.textContent=d.job.message||d.job.status;if(stopRequested)void stopAnalysis();}
+  else if(d.job.output?.kind==='MARKET_HANDOFF'&&d.job.status!=='COMPLETED'){render(d.job.output);note.textContent=d.job.message||d.job.status;}
+ });
  root.addEventListener('sector-pulse-job-output',event=>{const d=event.detail;if(d.output?.kind==='MARKET_HANDOFF'&&d.job.request.account_id===account())render(d.output);});
- root.addEventListener('broker-account-change',()=>{submissionRevision++;choices.replaceChildren();result.replaceChildren();active=null;note.textContent='Load instruments for the selected broker.';});
+ root.addEventListener('broker-account-change',()=>{submissionRevision++;choices.replaceChildren();result.replaceChildren();active=null;submitting=false;stopRequested=false;stopSent=false;latestJobCreated=0;note.textContent='Load instruments for the selected broker.';});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(window);

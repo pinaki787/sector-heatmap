@@ -150,7 +150,7 @@ s=(base/'index.html').read_text()
 assert '</body>' in s,'Hosted dashboard closing body tag missing.'
 for asset in ('analysis-jobs.js','market-handoff.js'):
     assert asset not in s,'Job assets already installed; refresh baseline before staging.'
-s=s.replace('</body>','    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-1"></script>\n</body>',1)
+s=s.replace('</body>','    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-early-stop-2"></script>\n</body>',1)
 assert s.count('/analysis-jobs.js?')==1 and s.count('/market-handoff.js?')==1
 import re
 for asset in ('holdings-review.js','dashboard-enhancements.js','broker-form-routing.js'):

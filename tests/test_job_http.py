@@ -52,6 +52,10 @@ class JobHTTPTests(unittest.TestCase):
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.stop)
+    def test_workspace_catalog_get_is_proxied_before_native_catalog_dispatch(self):
+        status,value=self.request('GET','/broker-workspace/'+('a'*32)+'/api/analysis-handoff/market-catalog')
+        self.assertEqual(status,200);self.assertEqual(value['run_id'],'one')
+
     def stop(self):
         self.release.set();self.running=False;self.store.close()
         self.server.shutdown();self.server.server_close();self.thread.join(1)
