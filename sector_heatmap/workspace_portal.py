@@ -49,6 +49,11 @@ def handler_factory(store,runtime,port):
                     for a in rows:
                         a.update(running=runtime.running(a['id']),configured=(store.folder(a)/'credentials.json').exists(),url=f"http://127.0.0.1:{a['port']}/")
                     for a in rows:
+                        if a['broker']=='MOTILAL_OSWAL':
+                            path=store.folder(a)/'credentials.json'
+                            saved=json.loads(path.read_text()) if path.exists() else {}
+                            a.update(credential_key=saved.get('MO_API_KEY',''),secret_saved=bool(saved.get('MO_API_SECRET')),server_public_ip=saved.get('MO_PUBLIC_IP',''))
+                    for a in rows:
                         if a['running']:
                             owner=store.folder(a)/'dashboard-owner.lock'
                             try:a['dashboard_pid']=json.loads(owner.read_text())['pid']
@@ -81,6 +86,9 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/password':
                     store.change_password(user,payload.get('current_password'),payload.get('new_password'))
                     self.response(200,{'signed_out':True},cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return
+                if path=='/api/workspaces/reset-password':
+                    result=store.reset_password(user,payload.get('username'),payload.get('new_password'))
+                    self.response(200,result,cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' if result['signed_out'] else None);return
                 if path=='/api/workspaces/user-sections':
                     self.response(200,store.set_features(user,payload.get('username'),payload.get('features')));return
                 if path=='/api/workspaces/users':
@@ -91,6 +99,10 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/configure':
                     a=runtime.configure(user,payload.get('account_id'),payload.get('credentials',{}),payload.get('live_enabled',False))
                     self.response(200,{'id':a['id'],'configured':True,'live_enabled':bool(a['live_enabled'])});return
+                if path in {'/api/workspaces/bounce','/api/workspaces/bounce-status'}:
+                    from .workspace_bounce import begin, status
+                    result = begin(store,runtime,user,payload.get('account_id')) if path.endswith('/bounce') else status(store,user,payload.get('account_id'))
+                    self.response(202 if path.endswith('/bounce') else 200,result);return
                 if path=='/api/workspaces/open':
                     self.response(200,runtime.start(user,payload.get('account_id')));return
                 self.response(404,{'error':'Unknown setup endpoint.'})

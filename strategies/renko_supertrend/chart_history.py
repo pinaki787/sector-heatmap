@@ -41,7 +41,7 @@ def candle_issue(row):
 class ChartHistory:
     def __init__(self,path,min_interval=.35):
         self.path=Path(path);self.lock=threading.RLock();self.memory={}
-        self.min_interval=min_interval;self.next_request_at=0
+        self.analyze=analysis;self.min_interval=min_interval;self.next_request_at=0
 
     def load(self,client,symbol,timeframe,preset='45',start='',end='',config=None,tick=.05,now=None):
         now=time.time() if now is None else now
@@ -131,15 +131,24 @@ class ChartHistory:
             # Key all completed values and settings. Any revision/anchor change
             # replays sequentially from the explicitly displayed oldest candle.
             digest=hashlib.sha256(json.dumps([config,tick,invalid,[r for r in candles if not r['is_forming']]],sort_keys=True).encode()).hexdigest()
-            if invalid:
-                a=dict(anchor=candles[0]['timestamp'],last=None,state={'count':None},rows=[r for r in candles if not r['is_forming']])
-            elif entry.get('analysis_key')!=digest:
-                entry.update(analysis=analysis(candles,config,tick,retain=None),analysis_key=digest)
-            if not invalid:a=entry['analysis']
+            recovery_start=max((r['timestamp'] for r in invalid),default=None)
+            usable=[c for c in candles if recovery_start is None or c['timestamp']>recovery_start]
+            # A gap resets chart research only. Never bridge unknown OHLC or
+            # reseed the execution runner. Keep raw broker evidence in cache.
+            warmup=max(int((config or {}).get(k,default)) for k,default in
+                       (('atr_length',5),('ema_fast_length',10),('ema_slow_length',30),('rsi_length',14),('adx_length',14)))
+            recovering=bool(invalid) and sum(not c['is_forming'] for c in usable)>warmup
+            available=not invalid or recovering
+            if available and entry.get('analysis_key')!=digest:
+                calculated=self.analyze(usable,config,tick,retain=None)
+                if recovering:calculated['rows']=calculated['rows'][warmup:]
+                entry.update(analysis=calculated,analysis_key=digest)
+            if available:a=entry['analysis']
+            else:a=dict(anchor=candles[0]['timestamp'],last=None,state={'count':None},rows=[r for r in candles if not r['is_forming']])
             begin=datetime.combine(first,datetime.min.time(),IST).timestamp()
             finish=datetime.combine(last+timedelta(days=1),datetime.min.time(),IST).timestamp()
             visible=[r for r in a['rows'] if begin<=r['timestamp']<finish]
             if not visible:raise RuntimeError(error or 'No broker candles in the selected review range; select dates when this contract traded.')
             meta=dict(analysis_revision=digest,requested_from=str(first),requested_to=str(last),warmup_requested_from=str(anchor),available_oldest=a['anchor'],display_oldest=visible[0]['timestamp'],display_latest=visible[-1]['timestamp'],display_count=len(visible),initialization_bars=sum(r['timestamp']<begin for r in a['rows']),source='FYERS fixed-contract OHLC · cont_flag=0 · 3-day request chunks · durable local cache',refreshed_at=entry.get('refreshed_at'),history_error=error,anchor_policy='Full sequential replay on older range or completed-data revision; signals can change with initialization anchor.',intrabar_history='Historical OHLC cannot reconstruct actual intrabar tick events or broker fills.')
-            meta['data_quality']=dict(analysis_available=not bool(invalid),invalid_count=len(invalid),gaps=[r for r in invalid if begin<=r['timestamp']<finish],invalid_candles=invalid,message=('Historical OHLC validation failed; invalid candles are gaps. Renko, EMA, RSI and historical signals are unavailable for this history. Runner uses its own independently validated window.' if invalid else None))
+            meta['data_quality']=dict(analysis_available=available,recovery_start=(a['anchor'] if recovering else None),recovered_after_gap=recovering,invalid_count=len(invalid),gaps=[r for r in invalid if begin<=r['timestamp']<finish],invalid_candles=invalid,message=('Chart restarted after invalid broker OHLC; earlier history omitted and indicators warmed up from the new anchor. Runner execution is unchanged.' if recovering else 'Historical OHLC validation failed; invalid candles are gaps. Renko, EMA, RSI and historical signals are unavailable for this history. Runner uses its own independently validated window.' if invalid else None))
             return a,visible,[c for c in candles if c['is_forming'] and begin<=c['timestamp']<finish],meta

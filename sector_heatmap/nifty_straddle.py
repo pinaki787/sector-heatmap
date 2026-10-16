@@ -132,6 +132,9 @@ class NiftyStraddleService(SensexStraddleService):
             if not self.script_path.is_file():
                 raise FileNotFoundError(f"NIFTY runner not found: {self.script_path}")
             env = os.environ.copy()
+            # Standalone/external runners must inherit the same IPv4-only policy.
+            project_root = str(Path(__file__).resolve().parents[1])
+            env["PYTHONPATH"] = os.pathsep.join(filter(None, (project_root, env.get("PYTHONPATH"))))
             self.runtime_dir.mkdir(parents=True, exist_ok=True)
             env["NIFTY_STRADDLE_RUNTIME_DIR"] = str(self.runtime_dir)
             token = str(self.credential_provider() or "")

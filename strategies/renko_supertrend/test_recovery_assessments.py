@@ -150,7 +150,8 @@ class RetestRevisionTests(unittest.TestCase):
         self.b.forming=lambda *args: (_ for _ in ()).throw(ValueError('Broker forming OHLC unavailable'))
         self.b.rows=[{**bar,'timestamp':self.b.now-365+i*60} for i,bar in enumerate(rows()[:-1])]
         p=self.r.preview(self.c);self.r.start(dict(preview_id=p['id'],confirmation=p['confirmation']),background=False)
-        with self.assertRaisesRegex(ValueError,'forming OHLC'):self.r.step()
+        self.r.step()
+        self.assertFalse(self.r.state['intrabar_data_status']['available'])
         self.b.now+=60;self.b.rows.append({**rows()[-1],'timestamp':self.b.now-65})
         self.b.rows[0]['close']-=.1;self.r.step()
         self.assertIsNotNone(self.r.state['position'])

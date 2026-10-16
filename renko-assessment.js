@@ -34,6 +34,12 @@
     result.assessed_at=decision?.observed_at??null;
     result.history_revised_at=decision?.history_revised_at??s.history_revised_at??recovery?.at??null;
     const bullish=q.direction==='BULLISH',bearish=q.direction==='BEARISH';
+    if(c.rsi_level_enabled){
+      const mode=q.rsi_level_mode??c.rsi_level_mode;
+      const bound=k=>q[k]??c[k];
+      const range=mode==='BETWEEN'?`${bound(bullish?'rsi_bullish_min':'rsi_bearish_min')}–${bound(bullish?'rsi_bullish_max':'rsi_bearish_max')} inclusive`:`${bullish?'>':'<'} ${bound(bullish?'rsi_bullish_above':'rsi_bearish_below')}`;
+      result.checks.push(`${q.rsi_level_pass===true?'PASS':q.rsi_level_pass===false?'WAIT':'UNAVAILABLE'} · RSI entry level ${finite(q.rsi14)?q.rsi14.toFixed(2):'warming up'} · ${range}`);
+    }
     if((c.ema_fast_enabled!==false||c.ema_slow_enabled!==false)&&(bullish||bearish)&&finite(q.ema10)&&finite(q.ema30)&&finite(q.close)){
       const fast=c.ema_fast_enabled!==false,slow=c.ema_slow_enabled!==false;const aligned=(!fast||(bullish?q.close>q.ema10:q.close<q.ema10))&&(!slow||(bullish?q.close>q.ema30:q.close<q.ema30))&&(!(fast&&slow)||(bullish?q.ema10>q.ema30:q.ema10<q.ema30));
       result.checks.push(`${aligned?'PASS':'WAIT'} · ${bullish?'Bullish':'Bearish'} close / EMA10 / EMA30`);
@@ -59,7 +65,9 @@
     else if(q.entry_qualified===true&&!q.cross_direction&&!q.entry_direction)result.reason='Setup passes; waiting for a fresh entry event. Qualification alone does not authorize another entry.';
     else if(decision?.eligible||event?.eligible)result.reason='Entry signal eligible; execution preflight / fill not yet confirmed.';
     else result.reason='Latest snapshot available; exact execution decision not recorded yet.';
+    if(decision?.code==='WAITING_RSI_LEVEL'||!decision&&q.entry_diagnostic==='WAITING_RSI_LEVEL')result.reason='No entry: RSI is outside the active entry threshold or range.';
     result.title=provisional?'Latest assessment · provisional':'Latest assessment · completed candle';
+    if(q.entry_data_mode==='COMPLETED_CANDLE_FALLBACK')result.checks.push('WAIT · Intrabar OHLC unavailable; assessing verified completed candle. Fresh execution preflight still required.');
     result.link=result.fresh&&result.timestamp!==null&&result.close!==null;
     return result;
   }

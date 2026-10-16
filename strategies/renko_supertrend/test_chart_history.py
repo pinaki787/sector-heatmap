@@ -82,15 +82,15 @@ class QualityTests(unittest.TestCase):
         client.history=history
         return client
 
-    def test_invalid_history_returns_broker_candles_and_explicit_gap_without_signals(self):
+    def test_invalid_history_recovers_after_gap_and_retries_broker_replacement(self):
         client=self.client()
         with tempfile.TemporaryDirectory() as root:
             history=ChartHistory(root,min_interval=0)
             result,rows,_,meta=history.load(client,'MCX:TEST','1 minute','7',config=self.config,now=self.now)
             quality=meta['data_quality']
-            self.assertFalse(quality['analysis_available']);self.assertEqual(quality['invalid_count'],1)
-            self.assertEqual(len(quality['gaps']),1);self.assertIsNone(result['last'])
-            self.assertTrue(rows);self.assertTrue(all('supertrend' not in row and 'entry_direction' not in row for row in rows))
+            self.assertTrue(quality['analysis_available']);self.assertTrue(quality['recovered_after_gap']);self.assertEqual(quality['invalid_count'],1)
+            self.assertEqual(len(quality['gaps']),1);self.assertIsNotNone(result['last'])
+            self.assertTrue(rows);self.assertTrue(all('supertrend' in row and row['timestamp']>quality['gaps'][0]['timestamp'] for row in rows))
             self.assertNotIn(quality['gaps'][0]['timestamp'],{row['timestamp'] for row in rows})
             calls=len(client.calls)
             history.load(client,'MCX:TEST','1 minute','7',config=self.config,now=self.now+1)
@@ -101,12 +101,12 @@ class QualityTests(unittest.TestCase):
             self.assertIsNotNone(repaired['last']);self.assertNotEqual(quality,meta['data_quality'])
             self.assertTrue(any(q['range_from']==q['range_to']=='2026-10-02' for q in client.calls[calls:]))
 
-    def test_invalid_warmup_also_withholds_all_derived_analysis(self):
+    def test_invalid_warmup_resets_analysis_anchor_before_visible_range(self):
         client=self.client()
         with tempfile.TemporaryDirectory() as root:
             _,rows,_,meta=ChartHistory(root,min_interval=0).load(client,'MCX:TEST','1 minute','custom','2026-10-05','2026-10-06',self.config,now=self.now)
-            self.assertFalse(meta['data_quality']['analysis_available']);self.assertEqual(meta['data_quality']['gaps'],[])
-            self.assertTrue(rows);self.assertTrue(all('ema10' not in row for row in rows))
+            self.assertTrue(meta['data_quality']['analysis_available']);self.assertTrue(meta['data_quality']['recovered_after_gap']);self.assertEqual(meta['data_quality']['gaps'],[])
+            self.assertTrue(rows);self.assertTrue(all('ema10' in row for row in rows))
 
     def test_malformed_revision_cannot_replace_previously_valid_candle(self):
         client=Client();original=client.history

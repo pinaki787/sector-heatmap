@@ -39,7 +39,7 @@ def quotes(client, data):
 
 def account_read(client, method):
     """Only bounded, read-only account endpoints; mutations cannot use this path."""
-    if method not in ('positions', 'orderbook', 'funds', 'get_profile'):
+    if method not in ('positions', 'holdings', 'orderbook', 'funds', 'get_profile'):
         raise ValueError('Unsupported read-only FYERS endpoint.')
     if not isinstance(client, fyersModel.FyersModel):
         return getattr(client, method)()

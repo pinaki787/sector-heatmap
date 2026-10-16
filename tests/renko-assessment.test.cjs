@@ -2,6 +2,11 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {assessment}=require('../renko-assessment.js');
 const now=1805,view={symbol:'BTCUSD',timeframe:'5 minutes'};
 const base=()=>({running:true,run_id:'current',status:'WATCHING_NO_ENTRY',updated_at:1804,eligible_since:1200,stream:{connected:true},config:{underlying:'BTCUSD',timeframe:'5 minutes',mode:'PAPER',use_adx:true,adx_threshold:25,widening_window:2,retest_enabled:true,ema_proximity_enabled:true,ema_proximity_mode:'ATR',ema_proximity_distance:.5},last_signal:{timestamp:1500,close:90,ema10:95,ema30:100,direction:'BEARISH',adx:40,signal_allowed:true,ema_widening:false,entry_diagnostic:'WAITING_WIDENING',entry_qualified:false,retest_signal:false}});
+test('RSI entry range uses recorded active evidence and reports its exact blocker',()=>{
+ const s=base();Object.assign(s.config,{rsi_level_enabled:true,rsi_level_mode:'BETWEEN',rsi_bullish_min:60,rsi_bullish_max:80});
+ Object.assign(s.last_signal,{direction:'BULLISH',rsi14:75,rsi_level_pass:false,rsi_level_mode:'BETWEEN',rsi_bullish_min:60,rsi_bullish_max:70,entry_diagnostic:'WAITING_RSI_LEVEL'});
+ const a=assessment(s,view,now);assert.match(a.reason,/outside the active entry/);assert.ok(a.checks.some(x=>x.includes('WAIT · RSI entry level 75.00 · 60–70 inclusive')));
+});
 test('uses saved runner gate evidence, not passing visible ADX or staged settings',()=>{
  const a=assessment(base(),view,now);assert.match(a.reason,/gap is not strictly widening/);assert.equal(a.link,true);assert.ok(a.checks.includes('PASS · ADX 40.0 > 25'));assert.ok(a.checks.some(x=>x.startsWith('PENDING · Proximity')));assert.doesNotMatch(a.reason,/sideways/i);
 });

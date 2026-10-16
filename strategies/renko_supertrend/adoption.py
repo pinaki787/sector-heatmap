@@ -256,7 +256,7 @@ class Manager:
                 master=next((v for v in r.adapter.rows(segment) if len(v)>16 and v[9]==pos['symbol']),None)
                 if not master or master[13]!=underlying[13]:raise ValueError('Selected position is not an option on the selected underlying.')
                 if pos['quantity']%meta['lot_size']:raise ValueError('Partial-lot exposure requires manual reconciliation.')
-                analyzed=analysis(r.adapter.candles(c),c,r.adapter.host_tick_size(c['underlying']))
+                analyzed=r.analyze(r.adapter.candles(c),c,r.adapter.host_tick_size(c['underlying']))
                 latest=analyzed['rows'][-1]
                 prepared.append((key,r,pos,meta,master,preview,latest))
             # Re-read all selected identities immediately before writing ownership.

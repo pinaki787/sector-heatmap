@@ -867,6 +867,8 @@ def kama_scheduled_squareoff_due(position, now=None):
     return moment.hour * 60 + moment.minute >= cutoff_minutes
 
 def run_server():
+    from .broker_diagnostics import diagnostics, install_http_timing, require_admin
+    install_http_timing()
     from .workspace_guard import WorkspaceGuard
     workspace_guard = WorkspaceGuard.from_environment()
     port = int(os.getenv("HEATMAP_PORT", "8080"))
@@ -878,6 +880,9 @@ def run_server():
     sector_analysis = SectorAnalysisService(token)
     sector_analysis.start()
     state = {"feed": feed, "sector_analysis": sector_analysis, "renewing": False, "auth_error": None, "next_auth_attempt": 0.0}
+    from .holdings_analysis import HoldingsAnalysis, FyersHoldings, DeltaHoldings
+    holdings_analysis = HoldingsAnalysis()
+
     fyers_fo_master = FyersFoMaster()
     fyers_cm_master = FyersCmMaster()
     ema_master_dir = ROOT / ".private" / "ema-band-masters"
@@ -2253,6 +2258,9 @@ def run_server():
         runners={"sensex": sensex_straddle, "nifty": nifty_straddle},
     )
     fyers_execution = FyersExecutionService(execution_halt=automation_policy.halt)
+    from .motilal_shared_routes import Routes as MotilalRoutes
+    motilal_routes=MotilalRoutes(ROOT,allowed=lambda:not (automation_policy.current().get('profile') or {}).get('kill_switch_engaged',False))
+    motilal_batches={}
     # KAMA deliberately owns its state, policy, journal, and runtime gate.  It
     # may reuse FYERS master/candle plumbing as an *eligibility/data* screen,
     # but it never calls an EMA signal or uses EMA eligibility as an entry
@@ -2926,9 +2934,9 @@ def run_server():
             return {"pnl": 0, "positions": [], "available_funds": None, "week_realized_pnl": None, "month_realized_pnl": None, "connected": False, "error": state["auth_error"] or "No reusable Fyers token was found."}
         app_id, access_token = token.split(":", 1)
         client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        response = client.positions()
+        response = diagnostics.call("FYERS", "account.positions", client.positions)
         positions = response.get("netPositions", [])
-        funds = client.funds()
+        funds = diagnostics.call("FYERS", "account.funds", client.funds)
         mark_auth_failure(response, funds)
         connected = response.get("s") == "ok" and funds.get("s") == "ok"
         if not connected:
@@ -2940,7 +2948,7 @@ def run_server():
         state["auth_error"] = None
         gross_pnl = round(sum(float(item.get("pl", 0) or 0) for item in positions), 2)
         try:
-            tradebook = client.tradebook()
+            tradebook = diagnostics.call("FYERS", "account.tradebook", client.tradebook)
             mark_auth_failure(tradebook)
             trades = tradebook.get("tradeBook") or tradebook.get("tradebook") or tradebook.get("data") or []
             charges = estimate_fyers_trade_charges(trades) if tradebook.get("s") == "ok" else {"available": False, "estimated": True, "total": None, "breakdown": {}, "disclaimer": "FYERS tradebook was unavailable, so intraday charges cannot be estimated."}
@@ -2949,7 +2957,7 @@ def run_server():
         estimated_net = round(gross_pnl - charges["total"], 2) if charges.get("total") is not None else None
         account = {"pnl": gross_pnl, "estimated_charges": charges, "estimated_net_pnl": estimated_net,
                    "positions": positions, "available_funds": balance, "week_realized_pnl": None, "month_realized_pnl": None, "connected": True, "error": None}
-        account["live_pnl_snapshot"] = publish_live_pnl_snapshot(account)
+        account["live_pnl_snapshot"] = diagnostics.call("FYERS", "publish_live_pnl_snapshot", publish_live_pnl_snapshot, account)
         return account
     def realized_pnl(period):
         today = datetime.now().date()
@@ -3035,62 +3043,27 @@ def run_server():
         return result
 
     def analyze_screener_options(payload):
-        """Build bounded, defined-risk option spreads for prequalified screener equities."""
-        candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-        candidates = candidates[:12]
-        if not candidates:
-            raise ValueError("Complete the equity analysis before requesting stock-option spreads.")
-        session = market_session()
-        if session.get("status") != "OPEN":
-            return {"status": "MARKET_CLOSED", "plans": [], "excluded": [],
-                    "message": "Fresh stock-option screening is available only during the live NSE session."}
-        token = load_config().get("FYERS_ACCESS_TOKEN", "")
-        if not token or ":" not in token:
-            raise RuntimeError("FYERS authentication is required for fresh stock-option screening.")
-        app_id, access_token = token.split(":", 1)
-        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        plans, excluded = [], []
-        for item in candidates:
-            ticker = str(item.get("symbol") or "").strip().upper()
-            direction = str(item.get("direction") or "").upper()
-            stop = item.get("stop")
-            if not ticker or direction not in {"BULLISH", "BEARISH"} or not isinstance(stop, (int, float)):
-                excluded.append({"symbol": ticker or "Unknown", "reason": "The equity signal lacks a valid direction or structural stop."})
-                continue
-            underlying = f"NSE:{ticker}-EQ"
-            risk = {"planning_capital": 100000, "max_loss_value": 2000, "max_loss_unit": "rupees",
-                    "invalidation": stop, "stop_basis": "price", "max_simultaneous_positions": 3,
-                    "minimum_reward_to_risk": 2.0}
-            try:
-                chain, expiry = fetch_fyers_chain(client, underlying)
-                symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
-                options = build_defined_risk_spreads(chain, expiry, fyers_fo_master.lookup(symbols), direction, risk)
-                ready = []
-                candidate = {"direction": direction, "data_quality": "READY", "timeframe_states": item.get("timeframe_states") or {}}
-                for proposal in options.get("proposals") or []:
-                    sizing = proposal.get("sizing") or {}
-                    grade = evidence_conviction(candidate, item, proposal)
-                    if sizing.get("status") == "SIZED" and sizing.get("lots") and grade.get("rating") == "High":
-                        ready.append((proposal, grade))
-                if not ready:
-                    excluded.append({"symbol": ticker, "reason": join_unique_reasons(options.get("rejected_proposals") or []) or "No defined-risk spread passed sizing, liquidity and evidence gates."})
-                    continue
-                proposal, grade = max(ready, key=lambda pair: (pair[0].get("reward_to_risk") or 0, -(pair[0].get("max_loss_per_lot") or float("inf"))))
-                plans.append({"symbol": ticker, "underlying": underlying, "direction": direction,
-                              "alignment": item.get("alignment"), "timeframe_states": item.get("timeframe_states") or {},
-                              "expiry": options.get("expiry"), "spot": options.get("spot"),
-                              "proposal": proposal, "conviction": grade, "decision_support_only": True})
-            except Exception as error:
-                excluded.append({"symbol": ticker, "reason": str(error)})
-        return {"status": "READY", "plans": plans, "excluded": excluded,
-                "message": f"{len(plans)} defined-risk stock-option spread(s) passed fresh FYERS validation."}
+        """Verify naked-buy and spread choices independently for each stock."""
+        from sector_heatmap.screener_routes import analyze
+        candidates=payload.get('candidates') if isinstance(payload.get('candidates'),list) else []
+        if not 1 <= len(candidates) <= 12:
+            raise ValueError('Analyze between one and twelve selected screener stocks per request.')
+        if market_session().get('status') != 'OPEN':
+            return dict(status='MARKET_CLOSED',plans=[],excluded=[],classifications=[],message='Fresh option choices require the live NSE session.')
+        token=load_config().get('FYERS_ACCESS_TOKEN','')
+        if ':' not in token:raise RuntimeError('FYERS authentication is required for fresh option validation.')
+        app_id,access_token=token.split(':',1)
+        client=fyersModel.FyersModel(client_id=app_id,token=access_token)
+        policy=validate_risk_policy(payload.get('risk_policy'))
+        risk=dict(planning_capital=policy['planning_capital'],max_loss_value=policy['idea_risk_limit'],max_loss_unit='rupees',stop_basis='price',max_simultaneous_positions=policy['max_simultaneous_positions'],minimum_reward_to_risk=policy['minimum_reward_to_risk'],enforce_risk_controls=policy['enforce_risk_controls'],enforce_minimum_reward_to_risk=policy['enforce_minimum_reward_to_risk'])
+        return analyze(candidates,client,fyers_fo_master,fetch_fyers_chain,risk)
 
-    def analysis_packet(payload):
+    def analysis_packet(payload, provider=None):
         recipient, action, selected_keys, include_funds = validate_handoff_request(payload)
         route = instrument_route(payload)
         policy = validate_risk_policy(payload.get("risk_policy"))
         mode = payload.get("mode") if payload.get("mode") in {"intraday", "swing"} else "intraday"
-        collection = alignment_candidates(mode)
+        collection = provider.candidates(mode) if provider else alignment_candidates(mode)
         by_key = {candidate["key"]: candidate for candidate in collection["candidates"]}
         missing = [key for key in selected_keys if key not in by_key]
         if missing:
@@ -3101,13 +3074,13 @@ def run_server():
         account = {"included": False, "reason": "Current funds were not requested and confirmed for this local packet."}
         current_funds = None
         if include_funds:
-            refreshed_account = account_summary()
+            refreshed_account = provider.funds() if provider else account_summary()
             if not refreshed_account.get("connected") or refreshed_account.get("available_funds") is None:
                 raise RuntimeError(refreshed_account.get("error") or "Fresh FYERS funds are unavailable.")
             current_funds = refreshed_account["available_funds"]
             account = {
                 "included": True,
-                "broker": "FYERS (read-only account snapshot)",
+                "broker": provider.broker if provider else "FYERS (read-only account snapshot)",
                 "available_funds": current_funds,
                 "refreshed_at": datetime.now().astimezone().isoformat(),
                 "confirmation": "User explicitly confirmed inclusion for this local packet.",
@@ -3154,15 +3127,18 @@ def run_server():
                 item["options"] = {"status": "REQUESTED", "proposals": []}
             if route == "stock_options":
                 try:
-                    token = load_config().get("FYERS_ACCESS_TOKEN", "")
-                    if not token or ":" not in token:
-                        raise RuntimeError("FYERS authentication is required for current option-chain analysis.")
-                    app_id, access_token = token.split(":", 1)
-                    client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-                    chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
-                    symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
-                    master_records = fyers_fo_master.lookup(symbols)
-                    item["options"] = build_long_option_proposals(chain, expiry, master_records, candidate["direction"], risk)
+                    if provider:
+                        item["options"]=provider.options(candidate["symbol"],candidate["direction"],risk)
+                    else:
+                        token = load_config().get("FYERS_ACCESS_TOKEN", "")
+                        if not token or ":" not in token:
+                            raise RuntimeError("FYERS authentication is required for current option-chain analysis.")
+                        app_id, access_token = token.split(":", 1)
+                        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+                        chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
+                        symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
+                        master_records = fyers_fo_master.lookup(symbols)
+                        item["options"] = build_long_option_proposals(chain, expiry, master_records, candidate["direction"], risk)
                 except Exception as error:
                     item["options"] = {"status": "UNAVAILABLE", "reason": str(error), "proposals": []}
             candidates.append(item)
@@ -3179,7 +3155,7 @@ def run_server():
             },
             "prompt": packet_prompt(recipient),
             "source": {
-                "market_data_broker": "FYERS_READ_ONLY",
+                "market_data_broker": provider.broker+"_READ_ONLY" if provider else "FYERS_READ_ONLY",
                 "analysis_mode": mode,
                 "instrument_route": route,
                 "analysis_updated_at": collection.get("updated_at"),
@@ -3196,7 +3172,7 @@ def run_server():
             "order_authority": "NONE — this packet cannot authorize or trigger an order.",
         }
 
-    def analysis_opportunities(payload):
+    def analysis_opportunities(payload, provider=None):
         """Analyze fresh full-alignment candidates without creating order authority."""
         recipient = str(payload.get("recipient") or "").lower()
         if recipient not in {"chatgpt", "codex"}:
@@ -3204,25 +3180,38 @@ def run_server():
         policy = validate_risk_policy(payload.get("risk_policy"))
         route = instrument_route(payload)
         mode = payload.get("mode") if payload.get("mode") in {"intraday", "swing"} else "intraday"
-        collection = alignment_candidates(mode)
+        collection = provider.candidates(mode) if provider else alignment_candidates(mode)
         candidates = [candidate for candidate in collection.get("candidates", []) if candidate.get("kind") == "stock"]
         cards, exclusions = [], []
-        token = load_config().get("FYERS_ACCESS_TOKEN", "")
-        if not token or ":" not in token:
-            raise RuntimeError("FYERS authentication is required to exclude already-open positions from Analysis Handoff.")
-        app_id, access_token = token.split(":", 1)
-        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        positions_response = client.positions()
-        if not isinstance(positions_response, dict) or positions_response.get("s") != "ok":
-            raise RuntimeError("FYERS positions are unavailable; Analysis Handoff will not show possible duplicate exposure.")
-        position_exposures = open_position_underlyings(
-            positions_response.get("netPositions") or (positions_response.get("data") or {}).get("netPositions") or []
+        broker = provider.broker if provider else 'FYERS'
+        token = 'provider:owned' if provider else load_config().get("FYERS_ACCESS_TOKEN", "")
+        if provider:
+            positions_response = {'netPositions': provider.positions()}
+            client = None
+        else:
+            if not token or ":" not in token:
+                raise RuntimeError("FYERS authentication is required to exclude already-open positions from Analysis Handoff.")
+            app_id, access_token = token.split(":", 1)
+            client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+            positions_response = client.positions()
+            if not isinstance(positions_response, dict) or positions_response.get("s") != "ok":
+                raise RuntimeError("FYERS positions are unavailable; Analysis Handoff will not show possible duplicate exposure.")
+        from .exposure_guard import exclude_exposure
+        if provider:
+            orders = provider.orders()
+        else:
+            orders_response = client.orderbook()
+            if not isinstance(orders_response, dict) or orders_response.get("s") != "ok":
+                raise RuntimeError("Selected-broker orders unavailable; duplicate pending entries cannot be excluded.")
+            orders = orders_response.get("orderBook") or []
+        candidates, duplicate_candidates = exclude_exposure(
+            candidates,
+            positions_response.get("netPositions") or (positions_response.get("data") or {}).get("netPositions") or [],
+            orders,
         )
-        duplicate_candidates = [candidate for candidate in candidates if candidate_has_open_position(candidate, position_exposures)]
-        candidates = [candidate for candidate in candidates if not candidate_has_open_position(candidate, position_exposures)]
         exclusions.extend({
             "candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPEN_POSITION",
-            "reason": "An open FYERS position already exists for this underlying; duplicate exposure is excluded.",
+            "reason": "An open selected-broker position or pending order already exists for this underlying; duplicate exposure is excluded.",
         } for candidate in duplicate_candidates)
         level_plans = {}
         for candidate in candidates:
@@ -3264,7 +3253,7 @@ def run_server():
                 option_candidates.sort(key=lambda item: (item.get("kind") != "sector", -abs(float(item.get("official_contribution_pp") or 0))))
                 option_scan_limit = 12
                 for omitted in option_candidates[option_scan_limit:]:
-                    exclusions.append({"candidate_key": omitted["key"], "name": omitted.get("name"), "kind": "OPTIONS", "reason": "Option refresh deferred by the bounded FYERS request budget; no contract was inferred."})
+                    exclusions.append({"candidate_key": omitted["key"], "name": omitted.get("name"), "kind": "OPTIONS", "reason": "Option refresh deferred by the bounded selected-broker request budget; no contract was inferred."})
                 for candidate in option_candidates[:option_scan_limit]:
                     plan = level_plans.get(candidate["key"], {})
                     invalidation = (plan.get("recommended_invalidation") or {}).get("price")
@@ -3283,9 +3272,12 @@ def run_server():
                         "enforce_minimum_reward_to_risk": policy["enforce_minimum_reward_to_risk"],
                     }
                     try:
-                        chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
-                        symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
-                        options = build_long_option_proposals(chain, expiry, fyers_fo_master.lookup(symbols), candidate["direction"], risk)
+                        if provider:
+                            options = provider.options(candidate["symbol"], candidate["direction"], risk)
+                        else:
+                            chain, expiry = fetch_fyers_chain(client, candidate["symbol"])
+                            symbols = [row.get("symbol") for row in chain.get("data", {}).get("optionsChain", []) if row.get("symbol")]
+                            options = build_long_option_proposals(chain, expiry, fyers_fo_master.lookup(symbols), candidate["direction"], risk)
                         ready = []
                         for proposal in options.get("proposals") or []:
                             sizing = proposal.get("sizing") or {}
@@ -3336,11 +3328,11 @@ def run_server():
                 "message": f"{recipient.title()} is not connected to this local dashboard. The cards below are transparent rule-engine proposals, not {recipient.title()} output.",
                 "recommendation_source": "LOCAL_EVIDENCE_RULE_ENGINE",
             },
-            "risk_policy": policy, "source": {"broker": "FYERS", "mode": mode, "analysis_updated_at": collection.get("updated_at"), "market_session": collection.get("market_session")},
+            "risk_policy": policy, "source": {"broker": broker, "mode": mode, "analysis_updated_at": collection.get("updated_at"), "market_session": collection.get("market_session")},
             "scope": {**(collection.get("scope") or {}), "option_scan_limit": 12},
             "candidates": candidates, "cards": cards, "exclusions": exclusions,
         }
-        analysis_runs[analysis_id] = {"created_at": datetime.now().timestamp(), "cards": {card["card_id"]: card for card in cards}, "policy": policy}
+        analysis_runs[analysis_id] = {"created_at": datetime.now().timestamp(), "cards": {card["card_id"]: card for card in cards}, "policy": policy, "provider": provider, "account_id":provider.execution.account["id"] if provider else None}
         for old_id, run in list(analysis_runs.items()):
             if datetime.now().timestamp() - run["created_at"] > 900:
                 analysis_runs.pop(old_id, None)
@@ -3356,24 +3348,29 @@ def run_server():
             raise ValueError("The selected analysis card is no longer available.")
         candidate, opportunity = card["candidate"], card["analysis"]
         policy = validate_risk_policy(payload.get("risk_policy"))
-        token = load_config().get("FYERS_ACCESS_TOKEN", "")
-        if not token or ":" not in token:
-            raise RuntimeError("FYERS authentication is required to accept a proposal and size it from a fresh quote.")
-        app_id, access_token = token.split(":", 1)
-        client = fyersModel.FyersModel(client_id=app_id, token=access_token)
-        quote_response = client.quotes({"symbols": candidate["symbol"]})
-        if not isinstance(quote_response, dict) or quote_response.get("s") != "ok" or not quote_response.get("d"):
-            raise RuntimeError("FYERS did not return a fresh quote for the selected underlying.")
-        quote_values = (quote_response["d"][0].get("v") or {})
-        fresh_price = quote_values.get("lp")
-        if not isinstance(fresh_price, (int, float)) or fresh_price <= 0:
-            raise RuntimeError("FYERS returned an invalid current price for the selected underlying.")
+        provider = run.get('provider')
+        if provider:
+            fresh_price, received = provider.quote(candidate['symbol'])
+            quote_values = {'tt': received}
+        else:
+            token = load_config().get("FYERS_ACCESS_TOKEN", "")
+            if not token or ":" not in token:
+                raise RuntimeError("FYERS authentication is required to accept a proposal and size it from a fresh quote.")
+            app_id, access_token = token.split(":", 1)
+            client = fyersModel.FyersModel(client_id=app_id, token=access_token)
+            quote_response = client.quotes({"symbols": candidate["symbol"]})
+            if not isinstance(quote_response, dict) or quote_response.get("s") != "ok" or not quote_response.get("d"):
+                raise RuntimeError("FYERS did not return a fresh quote for the selected underlying.")
+            quote_values = (quote_response["d"][0].get("v") or {})
+            fresh_price = quote_values.get("lp")
+            if not isinstance(fresh_price, (int, float)) or fresh_price <= 0:
+                raise RuntimeError("FYERS returned an invalid current price for the selected underlying.")
         refreshed = {**opportunity, "entry": float(fresh_price), "current_price": float(fresh_price)}
         if opportunity.get("kind") in {"OPTION_SPREAD", "LONG_OPTION"}:
             option_proposal = opportunity.get("proposal")
             tick_size = 0.05
         else:
-            master = fyers_cm_master.lookup([candidate["symbol"]]).get(candidate["symbol"])
+            master = {"tick_size":provider.tick(candidate["symbol"])} if provider else fyers_cm_master.lookup([candidate["symbol"]]).get(candidate["symbol"])
             if not master:
                 raise RuntimeError("The exact equity contract is absent from today's FYERS cash-market master.")
             tick_size = master["tick_size"]
@@ -3383,7 +3380,7 @@ def run_server():
             "analysis_id": payload.get("analysis_id"), "card_id": payload.get("card_id"), "status": "ACCEPTED_AND_SIZED",
             "fresh_quote": {"symbol": candidate["symbol"], "price": fresh_price, "provider_timestamp": quote_values.get("tt")},
             "active_invalidation": sizing, "ticket_confirmation_invalidated": True,
-            "message": "Stop selection accepted and recomputed from fresh FYERS evidence. Any earlier ticket preview or confirmation is invalid.",
+            "message": "Stop selection accepted and recomputed from fresh selected-broker evidence. Any earlier ticket preview or confirmation is invalid.",
         }
 
     ema_crossover = EmaCrossoverRunner(EmaCrossoverBroker(ema_master_dir, ema_band_candles, select_ema_atm_option), ROOT / ".private" / "ema-crossover-state.json")
@@ -3446,26 +3443,28 @@ def run_server():
                         if pos:result.add(pos['symbol'])
             result.update(delta_default_service.adoptions.owned_symbols())
         with renko_instances_lock:
-            for key,item in renko_instances.items():
-                if key==exclude or item['broker']!=broker:continue
-                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
-                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
-                if (runner.state.get('config') or {}).get('mode')=='LIVE':
-                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
-                        if pos:result.add(pos['symbol'])
-                result.update(manager.owned_symbols())
+            items=list(renko_instances.items())
+        for key,item in items:
+            if key==exclude or item['broker']!=broker:continue
+            runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+            manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+            if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                    if pos:result.add(pos['symbol'])
+            result.update(manager.owned_symbols())
         return result
     def renko_additional_owners(broker):
         result=set()
         with renko_instances_lock:
-            for item in renko_instances.values():
-                if item['broker']!=broker:continue
-                runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
-                manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
-                if (runner.state.get('config') or {}).get('mode')=='LIVE':
-                    for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
-                        if pos:result.add(pos['symbol'])
-                result.update(manager.owned_symbols())
+            items=list(renko_instances.values())
+        for item in items:
+            if item['broker']!=broker:continue
+            runner=item['component'].runner if broker=='DELTA_INDIA' else item['component'][0]
+            manager=item['component'].adoptions if broker=='DELTA_INDIA' else item['component'][3]
+            if (runner.state.get('config') or {}).get('mode')=='LIVE':
+                for pos in (runner.state.get('position'),(runner.state.get('pending') or {}).get('position')):
+                    if pos:result.add(pos['symbol'])
+            result.update(manager.owned_symbols())
         return result
     renko_default_bundle[3].owners=lambda:set(renko_other_owners())|renko_additional_owners('FYERS')
     delta_default_service.external_owners=lambda:renko_additional_owners('DELTA_INDIA')
@@ -3520,11 +3519,15 @@ def run_server():
     def renko_instance_rows():
         rows=[{'id':'FYERS:default','instance_key':'default','broker':'FYERS',**renko_default_bundle[0].snapshot()},{'id':'DELTA_INDIA:default','instance_key':'default','broker':'DELTA_INDIA',**delta_default_service.runner.snapshot()}]
         with renko_instances_lock:
-            for key,item in renko_instances.items():
-                runner=item['component'].runner if item['broker']=='DELTA_INDIA' else item['component'][0]
-                rows.append({'id':key,'instance_key':key,'broker':item['broker'],'instrument':item['instrument'],**runner.snapshot()})
+            items=list(renko_instances.items())
+        for key,item in items:
+            runner=item['component'].runner if item['broker']=='DELTA_INDIA' else item['component'][0]
+            rows.append({'id':key,'instance_key':key,'broker':item['broker'],'instrument':item['instrument'],**runner.snapshot()})
         return rows
 
+
+    engine_services={}
+    engine_services_lock=threading.RLock()
 
     from .telegram_managed import OptionTickets
     def telegram_option_runner(symbol):
@@ -3565,6 +3568,10 @@ def run_server():
             return super().send_head()
 
         def end_headers(self):
+            if getattr(self, 'diagnostic_request_id', None):
+                broker = getattr(self, 'diagnostic_broker_name', 'FYERS')
+                if diagnostics.active(broker):
+                    self.send_header('X-Broker-Diagnostic-Request', self.diagnostic_request_id)
             if not self.path.split("?", 1)[0].startswith("/api/"):
                 self.send_header("Cache-Control", "no-store")
             super().end_headers()
@@ -3579,7 +3586,149 @@ def run_server():
                 # abandoned, so avoid polluting the dashboard terminal output.
                 return
 
+        def motilal_shared(self,path,payload=None):
+            query=parse_qs(urlparse(self.path).query)
+            if workspace_guard:
+                user,account=self.workspace_identity;store=workspace_guard.store
+            elif local_auth:
+                user=local_auth.authorize(self.headers,self.command=='POST');store=local_auth.store
+            else:raise PermissionError('Authenticated account required.')
+            aid=(payload or {}).get('account_id') or (query.get('account_id') or [None])[0]
+            if path.startswith('/api/renko-motilal/'):
+                parts=path[len('/api/renko-motilal/'):].split('/')
+                if len(parts)!=2:raise ValueError('Motilal account/action required.')
+                if aid and aid!=parts[0]:raise PermissionError('Conflicting native account IDs.')
+                aid,action=parts
+            if workspace_guard and aid!=account['id']:raise PermissionError('Selected account differs from workspace.')
+            execution=motilal_routes.execution(store,user,str(aid or ''))
+            if path.startswith('/api/renko-motilal/'):
+                return motilal_routes.renko(execution,self,action,query,payload)
+            action=path[len('/api/motilal/'):]
+            if action=='status':value=execution.status()
+            elif action in ('sector-analysis','sector-analysis/detail'):
+                value=motilal_routes.sector(execution).snapshot((query.get('mode') or ['intraday'])[0],(query.get('sector') or [None])[0])
+            elif action=='analysis-handoff/candidates':value=motilal_routes.handoff(execution).candidates((query.get('mode') or ['intraday'])[0])
+            elif action in ('analysis-handoff/analyze','analysis-handoff/size','analysis-handoff/preview'):
+                provider=motilal_routes.handoff(execution)
+                if action.endswith('/analyze'):value=analysis_opportunities(payload,provider)
+                elif action.endswith('/preview'):value=analysis_packet(payload,provider)
+                else:
+                    run=analysis_runs.get(str(payload.get('analysis_id') or ''))
+                    if not run or run.get('account_id')!=execution.account['id']:raise PermissionError('Analysis account mismatch or expired.')
+                    run['provider']=provider;value=size_analysis_opportunity(payload)
+            elif action=='chartink/analyze':value=motilal_routes.screener(execution,payload)
+            elif action=='chartink/analyze-options':value=motilal_routes.screener_options(execution,payload)
+            elif action.startswith('trade-ticket/'):
+                from .motilal_shared_tickets import Batches
+                with motilal_routes.lock:
+                    batches=motilal_batches.setdefault(execution.account['id'],Batches(execution))
+                if action.endswith('/capabilities'):value=batches.capabilities()
+                elif action.endswith(('/prepare','/prepare-batch')):value=batches.prepare(user,payload)
+                elif action.endswith(('/submit','/submit-batch')):value=batches.submit(user,payload)
+                else:raise ValueError('Unknown native ticket action.')
+            elif action in ('account','live-pnl','realized-pnl'):
+                from .motilal_strategy_broker import Broker
+                adapter=Broker(execution)
+                value=dict(broker='MOTILAL_OSWAL',connected=True,positions=adapter.positions(),available_funds=adapter.funds('NSE'),pnl=None,realized=None,unrealized=None,estimated_net_pnl=None,
+                           estimated_charges=dict(available=False,total=None,disclaimer='Native account reports require verified price/charge valuation; unavailable values are not zero.'))
+            else:raise ValueError('Unsupported Motilal shared action.')
+            self.send_json(200,value)
+
+        def renko_engine(self,path,payload=None):
+            parts=path[len('/api/renko-engine/'):].split('/')
+            if len(parts)!=2 or not all(parts):raise ValueError('Renko Engine account and action required.')
+            account_id,action=parts
+            if workspace_guard:
+                user,account=self.workspace_identity;store=workspace_guard.store
+                if account_id!=account['id']:raise PermissionError('Renko Engine account differs from workspace.')
+            elif local_auth:
+                user=local_auth.authorize(self.headers,payload is not None);store=local_auth.store;account=store.account(user,account_id)
+            else:raise PermissionError('Sign in and select a private broker account.')
+            from strategies.renko_engine.service import Service
+            from strategies.renko_engine.runner import FyersRunner,DhanRunner,DeltaEngineRunner
+            folder=store.folder(account)/'renko-engine'
+            with engine_services_lock:
+                service=engine_services.get(account_id)
+                if service is None:
+                    broker=account['broker']
+                    if broker=='FYERS':
+                        if not workspace_guard:raise PermissionError('FYERS Renko Engine must use its private account workspace.')
+                        execution=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                        chart=RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option)
+                        runner=FyersRunner(execution,folder/'state.json')
+                    elif broker=='DHAN':
+                        from .dhan_strategy_broker import Broker
+                        execution=Broker(self.dhan_service(account_id));chart=Broker(self.dhan_service(account_id))
+                        runner=DhanRunner(execution,folder/'state.json')
+                    elif broker=='DELTA_INDIA':
+                        from .delta_india import DeltaIndia
+                        from strategies.renko_supertrend.delta_broker import Broker
+                        credential_path=store.folder(account)/'credentials.json'
+                        class PrivateDelta(DeltaIndia):
+                            def _credentials(inner):
+                                credentials=json.loads(credential_path.read_text())
+                                if not credentials.get('DELTA_INDIA_API_KEY') or not credentials.get('DELTA_INDIA_API_SECRET'):raise ValueError('Save this account Delta credentials first.')
+                                current=store.account(user,account_id)
+                                return dict(credentials,DELTA_INDIA_ENABLE_LIVE_ORDERS='1' if current['live_enabled'] else '0')
+                        delta=PrivateDelta(folder/'delta-paper.json')
+                        execution=Broker(delta,folder/'history');chart=Broker(delta,folder/'history')
+                        runner=DeltaEngineRunner(execution,folder/'state.json')
+                    else:raise ValueError('Unsupported Renko Engine broker.')
+                    runner.engine_execution_allowed=lambda:not (automation_policy.current().get('profile') or {}).get('kill_switch_engaged',False)
+                    service=Service(runner,chart,account_id,broker);engine_services[account_id]=service
+            value=service.read(action) if payload is None else service.write(action,payload)
+            self.send_json(200,value)
+
+        def diagnostic_user(self, mutation=False):
+            if workspace_guard:
+                user, account = self.workspace_identity
+            elif local_auth:
+                user = local_auth.authorize(self.headers, mutation)
+            else:
+                user = None
+            require_admin(user)
+            if mutation:
+                host = self.headers.get('Host', '')
+                if self.headers.get('Origin') != 'http://' + host:
+                    raise PermissionError('Diagnostic controls require a same-origin request.')
+            return user
+
+        def diagnostic_broker(self, broker):
+            if workspace_guard and broker != self.workspace_identity[1]['broker']:
+                raise PermissionError('Choose the broker assigned to this workspace.')
+            return broker
+
+        def diagnostic_api(self, mutation=False):
+            try:
+                self.diagnostic_user(mutation)
+                if mutation:
+                    payload = self.read_json()
+                    broker = self.diagnostic_broker(payload.get('broker'))
+                    result = diagnostics.configure(broker, payload.get('enabled'), payload.get('minutes', 15))
+                else:
+                    broker = self.diagnostic_broker((parse_qs(urlparse(self.path).query).get('broker') or ['FYERS'])[0])
+                    result = diagnostics.report(broker)
+                self.send_json(200, result)
+            except PermissionError as error:
+                self.send_json(403, {'error': str(error)})
+            except (ValueError, TypeError) as error:
+                self.send_json(400, {'error': str(error)})
+
         def do_GET(self):
+            self.diagnostic_request_id = None
+            self.diagnostic_broker_name = None
+            path = self.path.split('?', 1)[0]
+            if not path.startswith('/api/') or path.startswith(('/api/admin/', '/api/renko-engine/')):
+                return self.diagnostic_get_dispatch()
+            broker = 'DELTA_INDIA' if path.startswith(('/api/delta-india/', '/api/renko-delta/')) else 'FYERS'
+            if path == '/api/holdings-analysis':
+                broker = (parse_qs(urlparse(self.path).query).get('broker') or ['FYERS'])[0]
+            self.diagnostic_broker_name = broker
+            self.diagnostic_request_id = secrets.token_hex(6)
+            with diagnostics.span(broker, 'GET ' + path, request_id=self.diagnostic_request_id):
+                return self.diagnostic_get_dispatch()
+
+        def diagnostic_get_dispatch(self):
             if local_auth:
                 if local_auth.get(self) or local_auth.portal(self): return
                 if not local_auth.check(self): return
@@ -3589,6 +3738,7 @@ def run_server():
             if workspace_guard and not workspace_guard.check(self): return
             if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
                 context = workspace_guard.context(*self.workspace_identity) if workspace_guard else ({'workspace':None,'admin':True,'allowed_features':None} if local_auth else {'workspace':None})
+                context['holdings_review_available'] = True
                 body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';' + ('document.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src="/dashboard-login.js";document.head.append(s);});' if local_auth else '')).encode()
                 self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path.split('?', 1)[0] == '/api/workspace-context':
@@ -3596,7 +3746,27 @@ def run_server():
             if workspace_guard and self.path.split('?', 1)[0] == '/workspace-entry':
                 self.send_response(302); self.send_header('Location', '/'); self.end_headers(); return
             path = self.path.split("?", 1)[0]
+            if path == "/api/admin/broker-diagnostics":
+                self.diagnostic_api(); return
+            if path.startswith(('/api/motilal/','/api/renko-motilal/')):
+                try:self.motilal_shared(path)
+                except PermissionError as error:self.send_json(403,dict(error=str(error)))
+                except Exception as error:self.send_json(409,dict(error=str(error)))
+                return
+            if path == "/api/resources":
+                try:
+                    user = self.workspace_identity[0] if workspace_guard else local_auth.authorize(self.headers) if local_auth else None
+                    if not user or not (user.get('admin') or 'resources' in user.get('features', [])):
+                        raise PermissionError('Server resources permission required.')
+                    from .resource_monitor import snapshot
+                    self.send_json(200, snapshot())
+                except PermissionError as error:
+                    self.send_json(403, {'error': str(error)})
+                except Exception:
+                    self.send_json(503, {'error': 'Server telemetry unavailable. Check Linux/sysstat availability.'})
+                return
             try:
+                if path.startswith('/api/renko-engine/'):self.renko_engine(path);return
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
                 if bound_instrument and path.endswith(('/chart','/stream')) and (parse_qs(urlparse(self.path).query).get('symbol') or [''])[0]!=bound_instrument:raise ValueError('Chart instrument differs from selected instance.')
@@ -3915,10 +4085,32 @@ def run_server():
                 except Exception as error:
                     self.send_json(502, {"error": str(error), "supported": False})
                 return
+            if path == "/api/holdings-analysis":
+                try:
+                    query = parse_qs(urlparse(self.path).query)
+                    broker = (query.get('broker') or ['FYERS'])[0]
+                    if workspace_guard and broker != self.workspace_identity[1]['broker']:
+                        raise PermissionError('Choose the broker assigned to this account workspace.')
+                    if broker == 'FYERS': adapter = FyersHoldings(ema_readonly_client())
+                    elif broker == 'DELTA_INDIA': adapter = DeltaHoldings(delta_india)
+                    else: raise ValueError('Holdings analysis supports FYERS and Delta India in this workspace.')
+                    result = holdings_analysis.batch(adapter, (query.get('capture_id') or [None])[0],
+                                                     int((query.get('offset') or ['0'])[0]), int((query.get('limit') or ['1'])[0]), (query.get('inventory_only') or ['0'])[0] == '1')
+                    self.send_json(200, result)
+                except PermissionError as error:
+                    self.send_json(403, {'error': str(error)})
+                except (ValueError, TypeError) as error:
+                    self.send_json(409, {'error': str(error)})
+                except Exception:
+                    self.send_json(502, {'error': 'Broker holdings analysis unavailable. Check authentication and try again.'})
+                return
             if path == "/api/account":
                 try:
-                    body = json.dumps(account_summary()).encode()
-                    self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+                    request_id = self.diagnostic_request_id
+                    with diagnostics.span("FYERS", "GET /api/account → response written", request_id=request_id):
+                        body = json.dumps(account_summary()).encode()
+                        self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body)))
+                        self.end_headers(); self.wfile.write(body)
                 except Exception as error:
                     self.send_json(502, {"error": str(error)})
                 return
@@ -4018,9 +4210,14 @@ def run_server():
                 if not local_auth.check(self, mutation=True): return
             if workspace_guard and not workspace_guard.check(self, mutation=True): return
             path = self.path.split("?", 1)[0]
+            if path == "/api/admin/broker-diagnostics":
+                self.diagnostic_api(mutation=True); return
             try:
                 payload = self.read_json()
                 if workspace_guard: workspace_guard.validate_action(self.workspace_identity[1], path, payload)
+                if path.startswith(('/api/motilal/','/api/renko-motilal/')):
+                    self.motilal_shared(path,payload);return
+                if path.startswith('/api/renko-engine/'):self.renko_engine(path,payload);return
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
                 if bound_instrument and path.endswith(('/preview','/start','/adopt','/override-entry')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
@@ -4244,6 +4441,60 @@ def run_server():
                 self.send_json(502, {"error": str(error)})
         def log_message(self, *args): pass
     os.chdir(ROOT)
+    from .job_http import install as install_persistent_jobs
+    def market_job_adapter(handler, payload):
+        from .market_handoff import native_adapter
+        query=parse_qs(urlparse(handler.path).query)
+        aid=payload.get('account_id') or (query.get('account_id') or [None])[0]
+        if handler.path.startswith('/api/dhan/'):
+            from .dhan_strategy_broker import Broker
+            execution=handler.dhan_service(aid)
+            return native_adapter(Broker,execution),'DHAN',execution.account['id']
+        if handler.path.startswith('/api/motilal/'):
+            if workspace_guard:user,account=handler.workspace_identity;store=workspace_guard.store
+            elif local_auth:user=local_auth.authorize(handler.headers);store=local_auth.store
+            else:raise PermissionError('Authenticated Motilal account required.')
+            from .motilal_strategy_broker import Broker
+            execution=motilal_routes.execution(store,user,str(aid or ''))
+            return native_adapter(Broker,execution),'MOTILAL_OSWAL',execution.account['id']
+        if workspace_guard:
+            _,account=handler.workspace_identity
+            if account['broker']!='FYERS':raise PermissionError('Index/commodity analysis requires a matching Indian-market broker.')
+            aid=account['id']
+        elif local_auth:raise PermissionError('Select the configured FYERS account workspace before requesting market analysis.')
+        return RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),'FYERS',aid or 'local'
+    def runner_job_handles(handler, path, payload, result):
+        # Resolve already-activated in-process runners once. Monitoring survives
+        # session expiry; new activation still goes through the original auth.
+        parsed=urlparse(path);route=parsed.path;query=parse_qs(parsed.query)
+        def renko_handle(runner):
+            expected=runner.snapshot().get('run_id')
+            return runner.snapshot,(lambda:runner.request_stop({'run_id':expected})) if hasattr(runner,'request_stop') else runner.stop
+        if route=='/api/renko-instances/start-selected':
+            return [renko_handle(renko_lookup_instance(result['broker'],r['instance_key'])) for r in result.get('results',[]) if r.get('status')=='STARTED']
+        if route.startswith('/api/renko-supertrend/'):
+            return [renko_handle(renko_select(route,path)[0][0])]
+        if route.startswith('/api/renko-delta/'):
+            return [renko_handle(renko_select(route,path)[1].runner)]
+        if route.startswith('/api/ema-crossover/'):return [(ema_crossover.snapshot,ema_crossover.stop)]
+        if route.startswith('/api/ema-band/'):return [(ema_runner_snapshot,stop_ema_runner)]
+        if route.startswith('/api/kama/'):return [(kama_runner_snapshot,stop_kama_runner)]
+        if route.startswith('/api/renko-engine/'):
+            service=engine_services.get(route.split('/')[3])
+            return [(service.snapshot,service.runner.stop)] if service else None
+        if route.startswith(('/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+            parts=route.split('/');strategy={'renko-dhan':'renko','ema-dhan':'rsi','band-dhan':'band','kama-dhan':'kama'}[parts[2]]
+            service=dhan_strategy_services.get((parts[3],strategy,(query.get('instance') or ['default'])[0]))
+            return [renko_handle(service.runner)] if service else None
+        if route.startswith('/api/renko-motilal/'):
+            registry=motilal_routes.strategies.get(route.split('/')[3])
+            return [renko_handle(registry.service((query.get('instance') or ['default'])[0]).runner)] if registry else None
+        if route.startswith('/api/nifty-straddle'):return [(nifty_straddle.snapshot,nifty_straddle.stop)]
+        if route.startswith('/api/sensex-straddle'):return [(sensex_straddle.snapshot,sensex_straddle.stop)]
+        if route.startswith('/api/delta-india/') and route.endswith('/runner-start'):
+            return [(lambda:delta_india.status()['runner'],delta_india.stop_runner)]
+        return None
+    persistent_jobs = install_persistent_jobs(Handler, ROOT, local_auth, workspace_guard, analysis_runs, market_job_adapter, runner_job_handles)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"Sector heat map: http://127.0.0.1:{port}")
     try:
@@ -4251,6 +4502,7 @@ def run_server():
     except KeyboardInterrupt:
         print("\nSector heat map stopped cleanly. Restart with ./setup_and_run.sh when ready.")
     finally:
+        persistent_jobs.close(wait=False)
         delta_india.monitoring_stop.set()
         delta_india.stop_event.set()  # Shutdown is not an intentional persisted monitoring stop.
         telegram_polling.stop()

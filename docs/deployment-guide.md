@@ -80,3 +80,7 @@ Verify with `shasum -a 256 ARCHIVE.tar.gz` on macOS or `sha256sum ARCHIVE.tar.gz
 ## Opt-in user/account deployment
 
 The [multi-user setup guide](multi-user-broker-setup.md) describes administrator bootstrap, portal launch, per-account callback registration and source snapshots. It uses the same runtime dependencies. New source archives include `release-source-files.json`, allowing verified account provisioning from an extracted release without Git. No real users, credentials or account processes are created by installing this feature. The portal and account dashboards bind only to loopback. Existing single-user runtime and legacy credentials are not migrated; existing account snapshots are not auto-updated.
+
+## IPv4-only broker networking
+
+Package initialization forces Python DNS resolution to IPv4 before HTTP or WebSocket SDK imports. IPv6-only destinations fail closed instead of falling back. Standalone straddle children inherit the project startup policy through PYTHONPATH. This covers FYERS, Dhan, Delta, and other Python application requests without changing TLS verification. The actual public IPv4 must still match the broker app whitelist. Apply these files to each existing account source snapshot and restart only after checking active runners and exposure; replacing source does not change already-running processes. Host services, browsers, and unrelated applications are outside this application policy.

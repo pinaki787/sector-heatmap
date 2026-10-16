@@ -44,6 +44,28 @@ class WorkspaceTests(unittest.TestCase):
         t,_=self.store.login('alice','a-new-private-password');self.now+=8*3600
         with self.assertRaises(PermissionError):self.store.session(t)
 
+    def test_admin_reset_is_targeted_and_revokes_sessions_and_lockout(self):
+        admin_token,_=self.store.login('admin','administrator-password')
+        tokens=[self.store.login('alice','alice-private-password')[0] for _ in range(2)]
+        bob_token,_=self.store.login('bob','bob-private-password')
+        for _ in range(5):
+            with self.assertRaises(PermissionError):self.store.login('alice','wrong')
+        for actor in (None,self.alice,{**self.alice,'admin':True}):
+            with self.assertRaises(PermissionError):self.store.reset_password(actor,'alice','replacement-password')
+        for password in ('short',None,'x'*257):
+            with self.assertRaises(ValueError):self.store.reset_password(self.admin,'alice',password)
+        with self.assertRaises(ValueError):self.store.reset_password(self.admin,'missing','replacement-password')
+        result=self.store.reset_password(self.admin,' ALICE ','replacement-password')
+        self.assertEqual(result,{'username':'alice','signed_out':False})
+        for token in tokens:
+            with self.assertRaises(PermissionError):self.store.session(token)
+        self.store.session(admin_token);self.store.session(bob_token)
+        self.store.login('alice','replacement-password')
+        with self.assertRaises(PermissionError):self.store.login('alice','alice-private-password')
+        self.assertEqual(self.store.accounts(self.alice)[0]['id'],self.a['id'])
+        self.assertTrue(self.store.reset_password(self.admin,'admin','replacement-admin-password')['signed_out'])
+        with self.assertRaises(PermissionError):self.store.session(admin_token)
+
     def test_wrong_password_and_rate_limit(self):
         for _ in range(5):
             with self.assertRaises(PermissionError):self.store.login('alice','wrong')
@@ -62,6 +84,8 @@ class WorkspaceTests(unittest.TestCase):
         a2=self.store.create_account(self.alice,'DELTA_INDIA','Alice crypto','ALICE-DELTA')
         self.assertEqual(len(self.store.accounts(self.alice)),2)
         self.assertNotEqual(self.a['port'],a2['port']);self.assertNotEqual(self.a['port'],self.b['port'])
+        with self.assertRaisesRegex(ValueError,'already has an account'):
+            self.store.create_account(self.alice,'FYERS','Second FYERS','ALICE-SECOND')
         with self.assertRaises(ValueError):self.store.create_account(self.bob,'FYERS','Duplicate','alice-id')
         with self.assertRaises(ValueError):self.store.create_account(self.alice,'UNKNOWN','No','ID')
 
@@ -188,6 +212,18 @@ class PortalTests(unittest.TestCase):
         status,h,user=self.request('/api/workspaces/login',{'username':name,'password':password})
         self.assertEqual(status,200)
         self.assertIn('HttpOnly',h['Set-Cookie']);return h['Set-Cookie'].split(';')[0],user['csrf']
+    def test_reset_password_requires_admin_and_csrf(self):
+        alice_cookie,alice_csrf=self.login()
+        payload={'username':'alice','new_password':'replacement-password'}
+        self.assertEqual(self.request('/api/workspaces/reset-password',payload,alice_cookie,alice_csrf)[0],403)
+        cookie,csrf=self.login('admin','administrator-password')
+        self.assertEqual(self.request('/api/workspaces/reset-password',payload,cookie,'bad')[0],403)
+        self.assertEqual(self.request('/api/workspaces/reset-password',payload,cookie,csrf,origin=False)[0],403)
+        self.assertEqual(self.request('/api/workspaces/reset-password',payload,cookie,csrf)[0],200)
+        self.assertEqual(self.request('/api/workspaces/me',cookie=alice_cookie)[0],401)
+        self.assertEqual(self.request('/api/workspaces/me',cookie=cookie)[0],200)
+        self.login('alice','replacement-password')
+
     def test_login_list_create_and_logout(self):
         self.assertEqual(self.request('/api/workspaces/accounts')[0],401)
         cookie,csrf=self.login()

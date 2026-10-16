@@ -118,6 +118,9 @@ def commodity_expiry_exit_at(expiry, session):
     return (day.replace(hour=int(end[:2]),minute=int(end[2:]),second=0,microsecond=0)-timedelta(minutes=30)).timestamp()
 
 def after_cutoff(now, config=None):
+    if (config or {}).get('strategy')=='RENKO_ENGINE_V1':
+        from strategies.renko_engine.runner import cutoff
+        return cutoff(now,config)
     if overnight(config or {}):return False
     if (config or {}).get('broker') == 'DELTA_INDIA' and (config or {}).get('carry_policy') == 'CONTINUOUS':return False
     t = datetime.fromtimestamp(now, IST)
@@ -235,11 +238,16 @@ class Broker(BaseBroker):
         result = super().order(symbol, qty, side, quote)
         if self.contract(symbol).get('execution_route') == 'CASH_EQUITY':
             result['productType'] = getattr(self,'cash_products',{}).get(symbol,'INTRADAY')
+        elif symbol.startswith('MCX:'):
+            result['productType'] = getattr(self,'option_products',{}).get(symbol,'MARGIN')
         return result
 
     def validate_order(self, order):
         if self.contract(order['symbol']).get('execution_route') != 'CASH_EQUITY':
-            return super().validate_order(order)
+            expected = getattr(self,'option_products',{}).get(order['symbol'],'MARGIN')
+            if order['productType'] != expected:
+                raise ValueError('Option order product differs from the selected holding product.')
+            return super().validate_order({**order, 'productType':'MARGIN'})
         if isinstance(order['qty'],bool) or not isinstance(order['qty'],int) or order['qty'] <= 0 or order['side'] not in (1,-1) or order['productType'] not in ('INTRADAY','CNC') or order['type'] != 2:
             raise ValueError('Cash equity requires whole-share INTRADAY or CNC MARKET orders.')
         if order.get('limitPrice') != 0 or order.get('stopPrice') != 0 or order.get('offlineOrder') is not False:
@@ -247,7 +255,12 @@ class Broker(BaseBroker):
 
     def reconcile_position(self, symbol, qty):
         if self.contract(symbol).get('execution_route') != 'CASH_EQUITY':
-            return super().reconcile_position(symbol, qty)
+            product = getattr(self,'option_products',{}).get(symbol,'MARGIN')
+            rows = [r for r in self.positions() if r.get('symbol') == symbol and float(r.get('netQty',0)) != 0]
+            if qty == 0 and not rows:return
+            if len(rows) != 1 or rows[0].get('productType') != product or float(rows[0].get('netQty',0)) != qty:
+                raise ValueError('Broker option position differs from runner product or confirmed quantity; reconciliation required.')
+            return
         rows = [r for r in self.positions() if r.get('symbol') == symbol and float(r.get('netQty',0)) != 0]
         product = getattr(self,'cash_products',{}).get(symbol,'INTRADAY')
         if product == 'CNC':
@@ -393,6 +406,9 @@ class Broker(BaseBroker):
                     'quantity':c['quantity']}
         else:
             result=super().resolve(c,direction)
+            if result['symbol'].startswith('MCX:'):
+                self.option_products=getattr(self,'option_products',{})
+                self.option_products[result['symbol']]='MARGIN' if c.get('commodity_holding') == 'CARRY_FORWARD' else 'INTRADAY'
             if c.get('commodity_holding') == 'CARRY_FORWARD':
                 cutoff=commodity_expiry_exit_at(result.get('expiry_epoch'),self.session_policy(c)['master_regular_session'])
                 if time.time() >= cutoff:raise ValueError('Nearest MCX option is inside the pre-expiry carry protection window; overnight entry blocked.')
@@ -439,7 +455,7 @@ class Broker(BaseBroker):
                       entries='All selected entry indicators must agree. Unchecked indicators do not gate entry. Supertrend alone enters on its reversal; selected EMAs use price/alignment, with widening only when selected. RSI slope, ADX, structure, proximity and higher-timeframe agreement apply only when selected.',
                       risk='Research reconstruction. Provisional candidates can disappear; OHLC replay cannot prove tick fills. EMA10 breach exits independently of ADX; opposite confirmed Supertrend exits honor ADX. Wall-clock 15:10 IST square-off and entry cutoff require a running server; broker fills require fresh execution quotes and reconciliation. Existing FYERS sizing, preflight, durable intent and reconciliation apply.')
         if c.get('underlying','').startswith('MCX:'):
-            result.update(product='MARGIN',holding_policy='Carry forward with pre-expiry protection' if c.get('commodity_holding') == 'CARRY_FORWARD' else 'Intraday strategy square-off; commodity options use MARGIN',squareoff_time='None · overnight carry; exact option pre-expiry protection applies' if c.get('commodity_holding') == 'CARRY_FORWARD' else result['squareoff_time'])
+            result.update(product='MARGIN' if c.get('commodity_holding') == 'CARRY_FORWARD' else 'INTRADAY',holding_policy='Carry forward with pre-expiry protection' if c.get('commodity_holding') == 'CARRY_FORWARD' else 'Intraday broker product with strategy square-off',squareoff_time='None · overnight carry; exact option pre-expiry protection applies' if c.get('commodity_holding') == 'CARRY_FORWARD' else result['squareoff_time'])
         return result
 
 
@@ -451,6 +467,7 @@ class Runner(BaseRunner):
     entry_reason = 'RENKO_EMA_ENTRY'
     exit_reason = 'RENKO_ST_EXIT'
     configure = staticmethod(configuration)
+    analyze = staticmethod(analysis)
 
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
@@ -580,7 +597,7 @@ class Runner(BaseRunner):
             if after_cutoff(self.clock(),p['config']):
                 raise ValueError('Optional saved crypto daily strategy cutoff '+str(p['config'].get('session_deadline'))+' IST has passed; crypto trades 24/7. Select Continuous trading to remove the daily cutoff, or retain this daily risk policy.' if p['config'].get('broker')=='DELTA_INDIA' else 'Selected segment entry cutoff has passed.')
             tick=self.adapter.host_tick_size(p['config']['underlying'])
-            analysis(self.adapter.candles(p['config']),p['config'],tick)
+            self.analyze(self.adapter.candles(p['config']),p['config'],tick)
             if payload.get('resume_run_id'):
                 old=deepcopy(self.state)
                 expected=self.configure(old['config'])
@@ -812,10 +829,20 @@ class Runner(BaseRunner):
                 p['exit_indicator_snapshot']=self.indicator_snapshot(reason=p['exit_reason'])
             self.save()
 
+    def restore_holding_product(self):
+        # Recover the actual entry product, never convert existing exposure.
+        pending=self.state.get('pending') or {}
+        owned=self.state.get('position') or pending.get('position') or {}
+        if owned.get('symbol','').startswith('MCX:') and isinstance(self.adapter, Broker):
+            product=owned.get('broker_product') or (pending.get('order') or {}).get('productType') or 'MARGIN'
+            self.adapter.option_products=getattr(self.adapter,'option_products',{})
+            self.adapter.option_products[owned['symbol']]=product
+
     def step(self):
         self.recovery.beat()
         with self.lock:
             self.drain_position_ticks()
+            self.restore_holding_product()
             c=self.state.get('config') or {}
             if self.state.get('running') and overnight(c):
                 self.deadline()
@@ -1105,6 +1132,7 @@ class Runner(BaseRunner):
             raise ValueError('Fresh underlying tick required for override entry.')
 
     def submit(self, order, position, reason):
+        position={**position, 'broker_product':position.get('broker_product') or order.get('productType')}
         self.drain_position_ticks()
         proximity=None
         manual=position.get('entry_mode')=='MANUAL_OVERRIDE' and reason=='MANUAL_OVERRIDE_ENTRY'
@@ -1177,9 +1205,12 @@ class Runner(BaseRunner):
         c=self.state['config'];now=self.clock()
         fields=('timestamp','close','direction','ema10','ema30','ema_widening','entry_qualified',
                 'entry_direction','entry_diagnostic','cross_direction','signal_allowed','adx',
-                'rsi14','rsi14_slope','rsi_slope_pass','retest_signal','retest_ready',
+                'rsi14','rsi14_slope','rsi_slope_pass','rsi_level_enabled','rsi_level_pass',
+                'rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max',
+                'rsi_bullish_above','rsi_bearish_below','retest_signal','retest_ready',
                 'retest_touched','retest_touch_evidence','retest_patterns','retest_bounce',
-                'retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend')
+                'retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend',
+                'entry_data_mode','intrabar_unavailable')
         record=dict(run_id=self.state.get('run_id'),underlying=c['underlying'],timeframe=c['timeframe'],
                     timestamp=sig['timestamp'],event_at=sig.get('market_event_at') if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']],
                     observed_at=now,eligible=bool(eligible),code=code,reason=reason,
@@ -1358,8 +1389,18 @@ class Runner(BaseRunner):
             sig['cross_direction']=result['last']['direction']
         self.deadline()
         if c.get('intrabar_entries') and not sig.get('retest_signal') and not self.state.get('position') and self.state.get('accepting_entries'):
-            sig = provisional(result,self.adapter.forming(c,rows,self.clock()),c,tick,self.clock())
-            sig = {**sig, 'supertrend_cross_direction':None, 'cross_direction':sig['entry_direction']}
+            try:
+                live = provisional(result,self.adapter.forming(c,rows,self.clock()),c,tick,self.clock())
+            except ValueError as error:
+                # History was validated above. An unavailable provisional bar
+                # must not discard a confirmed event or freeze assessments.
+                # new_signal still enforces freshness, arming and consumption;
+                # submission still requires fresh broker price/quotes.
+                sig.update(entry_data_mode='COMPLETED_CANDLE_FALLBACK',intrabar_unavailable=str(error))
+                self.state['intrabar_data_status']=dict(available=False,observed_at=self.clock(),reason=str(error),fallback='COMPLETED_CANDLE')
+            else:
+                sig = {**live, 'supertrend_cross_direction':None, 'cross_direction':live['entry_direction']}
+                self.state['intrabar_data_status']=dict(available=True,observed_at=self.clock(),fallback=None)
         if c.get('market_structure_enabled') and not self.state.get('position'):
             event_at=sig.get('market_event_at',self.clock()) if sig.get('provisional') else sig['timestamp']+TIMEFRAMES[c['timeframe']]
             sig['market_structure']=market_structure.check(rows,sig.get('cross_direction') or sig.get('direction'),TIMEFRAMES[c['timeframe']],event_at)

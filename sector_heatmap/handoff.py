@@ -353,7 +353,7 @@ def evidence_conviction(candidate, opportunity, option_proposal=None):
     if option_proposal:
         legs = option_proposal.get("legs") or []
         if len(legs) == (1 if option_proposal.get("kind") == "LONG_OPTION" else 2) and all(leg.get("validated") for leg in legs):
-            score += 1; reasons.append("option contract evidence passes quote, spread, Greeks, OI and volume gates")
+            score += 1; reasons.append("option contract evidence passes quote, spread, OI and volume gates" + ("; Greeks are not required for this bought ATM route" if option_proposal.get("greeks_required") is False else ", including Greeks"))
         else:
             reasons.append("option evidence is incomplete or illiquid")
     rating = "High" if score >= (6 if option_proposal else 5) else "Moderate" if score >= 3 else "Low"
@@ -439,7 +439,7 @@ def fetch_fyers_chain(client, underlying_symbol, strike_count=8):
     return chain, expiry
 
 
-def _leg(chain_item, master):
+def _leg(chain_item, master, *, require_greeks=True):
     bid = _positive_number(chain_item.get("bid"))
     ask = _positive_number(chain_item.get("ask"))
     ltp = _positive_number(chain_item.get("ltp"))
@@ -460,7 +460,7 @@ def _leg(chain_item, master):
     if volume < MIN_VOLUME:
         reasons.append("traded volume is unavailable")
     required_greeks = ("delta", "gamma", "theta", "vega", "iv")
-    if any(greeks.get(key) is None for key in required_greeks):
+    if require_greeks and any(greeks.get(key) is None for key in required_greeks):
         reasons.append("complete Delta/Gamma/Theta/Vega/IV data is unavailable")
     return {
         "symbol": chain_item.get("symbol"),
@@ -678,7 +678,7 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
     }
 
 
-def build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None):
+def build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None, *, require_greeks=True):
     """Analysis Handoff buys one exact ATM Call/Put; never generates a short leg."""
     risk = risk or {}
     if direction not in ('BULLISH', 'BEARISH'):
@@ -698,9 +698,9 @@ def build_long_option_proposals(chain_payload, expiry, master_records, direction
     if not spot or not choices or not expiry_iso:
         return result
     nearest = min(choices, key=lambda r: (abs(float(r['strike_price'])-spot), float(r['strike_price'])))
-    leg = _leg(nearest, master_records.get(nearest.get('symbol')))
+    leg = _leg(nearest, master_records.get(nearest.get('symbol')), require_greeks=require_greeks)
     if not leg['validated'] or str(leg.get('expiry_epoch')) != str(expiry.get('expiry')):
-        return dict(result, reason='Exact ATM option failed contract, expiry, quote, liquidity or Greeks validation.')
+        return dict(result, reason='Exact ATM option failed contract, expiry, quote or liquidity validation.' + (' Complete Greeks are also required.' if require_greeks else ''))
     if not _positive_number(leg.get('lot_size')) or float(leg['lot_size']) != int(leg['lot_size']) or not _positive_number(leg.get('tick_size')):
         return dict(result, reason='Verified positive whole lot size and tick size are required.')
     entry, lot = leg['ask'], int(leg['lot_size'])
@@ -716,7 +716,7 @@ def build_long_option_proposals(chain_payload, expiry, master_records, direction
     if error:
         return dict(result, reason=error)
     proposal = dict(proposal_id='long-call' if direction == 'BULLISH' else 'long-put',
-                    kind='LONG_OPTION', source='ANALYSIS_HANDOFF', label='Buy ATM Call' if direction == 'BULLISH' else 'Buy ATM Put',
+                    kind='LONG_OPTION', greeks_required=require_greeks, source='ANALYSIS_HANDOFF', label='Buy ATM Call' if direction == 'BULLISH' else 'Buy ATM Put',
                     direction=direction, structure='LONG_OPTION', status='ANALYSIS_ONLY',
                     legs=[dict(leg, action='BUY')], entry_points=entry, lot_size=lot,
                     max_loss_per_lot=round(maximum_loss, 2), max_profit_per_lot=None,

@@ -44,6 +44,22 @@ class WorkspaceGuard:
         return user,account
 
     def validate_action(self,account,path,payload):
+        bounce=self.store.folder(account)/'bounce-status.json'
+        if bounce.exists():
+            try:phase=json.loads(bounce.read_text()).get('status')
+            except (OSError,ValueError):raise PermissionError('Dashboard maintenance state is unreadable; refresh after operator review.') from None
+            if phase in {'CHECKING','RESTARTING','WAITING'}:
+                raise PermissionError('Broker dashboard bounce in progress; wait until it is ready.')
+        if account['broker']=='MOTILAL_OSWAL':
+            if not path.startswith('/api/motilal/') or payload.get('broker','MOTILAL_OSWAL')!='MOTILAL_OSWAL':
+                raise PermissionError('This action has no Motilal adapter; it cannot use another broker route.')
+            return
+        if path.startswith('/api/motilal/'):
+            raise PermissionError('Open a Motilal Oswal workspace for this action.')
+        if path.startswith('/api/renko-engine/'):
+            if path.split('/')[3]!=account['id'] or payload.get('broker',account['broker'])!=account['broker']:
+                raise PermissionError('Renko Engine action differs from this broker account.')
+            return
         delta=path.startswith(('/api/delta-india/','/api/renko-delta/'))
         if path.startswith('/api/renko-instances/'):
             if payload.get('broker')!=account['broker']:

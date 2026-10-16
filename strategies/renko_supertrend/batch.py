@@ -8,8 +8,8 @@ import time
 
 
 class Batch:
-    def __init__(self,path,create,lookup):
-        self.path=Path(path);self.create=create;self.lookup=lookup;self.lock=threading.RLock()
+    def __init__(self,path,create,lookup,supported_brokers=('FYERS','DELTA_INDIA')):
+        self.path=Path(path);self.supported_brokers=supported_brokers;self.create=create;self.lookup=lookup;self.lock=threading.RLock()
 
     def save(self,file,data):
         self.path.mkdir(parents=True,exist_ok=True)
@@ -18,7 +18,7 @@ class Batch:
     def start(self,payload,background=True):
         token=payload.get('request_id');symbols=payload.get('instruments');broker=payload.get('broker');settings=payload.get('settings')
         if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}',token):raise ValueError('Unique batch request ID required.')
-        if broker not in ('FYERS','DELTA_INDIA') or not isinstance(symbols,list) or not 1<=len(symbols)<=20 or len(set(symbols))!=len(symbols) or any(not isinstance(s,str) or not s for s in symbols):raise ValueError('Select 1–20 distinct instruments and their broker.')
+        if broker not in self.supported_brokers or not isinstance(symbols,list) or not 1<=len(symbols)<=20 or len(set(symbols))!=len(symbols) or any(not isinstance(s,str) or not s for s in symbols):raise ValueError('Select 1–20 distinct instruments and their broker.')
         if not isinstance(settings,dict) or settings.get('mode') not in ('PAPER','LIVE'):raise ValueError('Review one shared configuration and explicit Paper/Live mode.')
         digest=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
         file=self.path/(hashlib.sha256(token.encode()).hexdigest()+'.json')

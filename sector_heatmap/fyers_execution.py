@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time as clock_time, timedelta
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -17,6 +18,7 @@ from fyers_apiv3 import fyersModel
 
 from .config import _atomic_private_write, load_config
 from .equity_exit_plan import build_equity_exit_plan
+from .exposure_guard import matches_exposure, open_exposures
 from .handoff import FyersCmMaster, FyersFoMaster, MIN_REWARD_TO_RISK, MAX_SPREAD_PCT, fetch_fyers_chain, build_long_option_proposals
 
 
@@ -35,6 +37,35 @@ class PreviewChanged(RuntimeError):
     def __init__(self, preview):
         super().__init__("Fresh FYERS state changed the exact ticket; review and confirm the replacement preview.")
         self.preview = preview
+
+
+def _contract_identity(instrument):
+    fields=('symbol','action','quantity','lot_size','tick_size','expiry_epoch','strike','option_type')
+    return instrument.get('kind'),[{k:leg.get(k) for k in fields} for leg in instrument['contracts']]
+
+
+def _reviewed_instrument(current, reviewed):
+    """Refresh evidence while retaining the exact LIMIT prices already approved."""
+    if _contract_identity(current)!=_contract_identity(reviewed):return current
+    result=deepcopy(reviewed)
+    for leg,fresh in zip(result['contracts'],current['contracts']):
+        for key in ('quote','chain'):
+            if key in fresh:leg[key]=deepcopy(fresh[key])
+    result['margin']=deepcopy(current['margin'])
+    result['submission_eligible']=current['submission_eligible']
+    if current['kind']=='EQUITY':
+        result['minimum_cash_required']=round(current['minimum_cash_required']/current['entry_price']*result['entry_price'],2)
+    return result
+
+
+def _ticket_terms(preview):
+    """Execution terms, excluding changing market/account observation metadata."""
+    instrument=deepcopy(preview['instrument'])
+    for leg in instrument['contracts']:
+        leg.pop('quote',None);leg.pop('chain',None)
+    instrument.get('margin',{}).pop('message',None)
+    protection={k:deepcopy(v) for k,v in (preview.get('protection') or {}).items() if k not in ('calculated_at','implied_volatility')}
+    return {k:deepcopy(preview.get(k)) for k in ('broker','underlying','direction','underlying_invalidation','order_policy')}|dict(instrument=instrument,protection=protection)
 
 
 def _require_cash_session(now):
@@ -491,7 +522,7 @@ class FyersExecutionService:
             "submission_eligible": (action == "BUY" or verified_intraday) and exit_plan["mode"] == "FIXED_TARGET",
         }
 
-    def _preflight(self, payload):
+    def _preflight(self, payload, reviewed=None):
         if str(payload.get("broker", "")).lower() != "fyers":
             raise ValueError("FYERS must be explicitly selected for this dashboard's order preview.")
         invalidation = _number(payload.get("invalidation"))
@@ -513,10 +544,15 @@ class FyersExecutionService:
                       else self._preflight_option_spread(client, payload, proposal, minimum_rr))
         if payload.get("require_market_open") is True:
             _fresh_market_state(self.now(), instrument)
+        if reviewed is not None:
+            instrument=_reviewed_instrument(instrument,reviewed['instrument'])
         funds_response, positions_response, orders_response = client.funds(), client.positions(), client.orderbook()
         available_balance = available_funds(funds_response)
         positions, orders = _positions(positions_response), _orders(orders_response)
         open_positions = [item for item in positions if _number(item.get("netQty", item.get("net_qty", 0)), 0) != 0]
+        if matches_exposure(payload.get('underlying'),open_exposures(positions,orders),
+                            [leg['symbol'] for leg in instrument['contracts']]):
+            raise FyersExecutionUnavailable('An open position or pending order already exists for this symbol/underlying; duplicate entry blocked.')
         if enforce_risk_controls and len(open_positions) >= max_positions:
             raise FyersExecutionUnavailable(f"Fresh FYERS state has {len(open_positions)} open position rows, meeting the configured maximum of {max_positions}.")
         if enforce_risk_controls and open_positions and external_open_risk is None:
@@ -591,9 +627,10 @@ class FyersExecutionService:
         budget = _number(payload.get("allocation_budget"))
         if budget is None or budget <= 0:
             raise ValueError("Enter a positive batch fund allocation.")
-        per_stock = budget / len(items)
+        from sector_heatmap.screener_routes import budget_slices
+        slices=budget_slices(items,budget) if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else [budget/len(items)]*len(items)
         previews = []
-        for item in items:
+        for item,per_stock in zip(items,slices):
             try:
                 probe = self._preflight({**item, "quantity": 1, "require_market_open": True})
                 instrument = probe["instrument"]
@@ -625,7 +662,7 @@ class FyersExecutionService:
         if not all(p["submission_eligible"] for p in previews):
             raise FyersExecutionUnavailable("A selected product or exit mode is unavailable for live submission.")
         return {"broker": "FYERS", "status": "BATCH_PREVIEW_ONLY", "items": previews, "excluded": [],
-            "allocation": {"rule": "EQUAL_ALLOCATED_FUNDS", "budget": budget, "per_stock": round(per_stock, 2),
+            "allocation": {"rule": "CONVICTION_WEIGHTED_ALLOCATED_FUNDS" if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else "EQUAL_ALLOCATED_FUNDS", "budget": budget, "per_stock": [round(value,2) for value in slices] if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else round(per_stock,2),
                 "unspent": round(budget-total_margin-costs, 2)},
             "aggregate": {"order_count": len(previews), "selected_count": len(items), "total_worst_case_risk": round(total_risk, 2),
                 "total_minimum_cash_required": round(total_margin, 2), "estimated_costs": round(costs, 2), "cash_buffer": 0,
@@ -756,9 +793,9 @@ class FyersExecutionService:
             raise ValueError("Type the exact confirmation phrase from the current FYERS batch preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
             raise ValueError("This FYERS batch preview expired. Prepare a fresh preview.")
-        refreshed = self._batch_preflight(stored["payload"])
-        old_critical = {"items": [{"instrument": item["instrument"], "daily_risk_ledger": item["daily_risk_ledger"], "fresh_state": item["fresh_state"]} for item in stored["preview"]["items"]], "aggregate": stored["preview"]["aggregate"]}
-        new_critical = {"items": [{"instrument": item["instrument"], "daily_risk_ledger": item["daily_risk_ledger"], "fresh_state": item["fresh_state"]} for item in refreshed["items"]], "aggregate": refreshed["aggregate"]}
+        refreshed = self._refresh_reviewed_batch(stored['payload'],stored['preview'])
+        old_critical = [_ticket_terms(item) for item in stored['preview']['items']]
+        new_critical = [_ticket_terms(item) for item in refreshed['items']]
         if old_critical != new_critical:
             raise PreviewChanged(self.prepare_batch(stored["payload"]))
         if not refreshed["submission_eligible"] or not all(item["submission_eligible"] for item in refreshed["items"]):
@@ -772,6 +809,8 @@ class FyersExecutionService:
             orders.append({"symbol": leg["symbol"], "qty": leg["quantity"], "type": 1, "side": 1 if leg["action"] == "BUY" else -1,
                            "productType": item["order_policy"]["product_type"], "limitPrice": leg["limit_price"], "stopPrice": 0,
                            "validity": "DAY", "disclosedQty": 0, "offlineOrder": False})
+        with self.lock:
+            if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
         response = client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         status = "PENDING" if len(order_ids) == len(orders) else "EXECUTION_STATUS_UNCERTAIN"
@@ -781,6 +820,37 @@ class FyersExecutionService:
             self.previews.pop(preview_id, None)
         return {"preview_id": preview_id, "status": status, "order_ids": order_ids,
                 "message": "FYERS accepted the complete basket; reconcile every order before further action." if status == "PENDING" else "Batch execution status is uncertain; reconcile FYERS and do not retry automatically."}
+
+    def _refresh_reviewed_batch(self,payload,reviewed):
+        requested={item['underlying']:item for item in payload['items']}
+        items=[]
+        for old in reviewed['items']:
+            original=requested[old['underlying']]
+            instrument=old['instrument']
+            fixed={**original,'quantity':instrument['quantity'],
+                   'proposal':{**original['proposal'],'quantity':instrument['quantity']}}
+            if instrument['kind']!='EQUITY':fixed['lots']=instrument['lots']
+            if payload.get('allocation_budget') is not None and instrument['kind']=='EQUITY':fixed['require_market_open']=True
+            items.append(self._preflight(fixed,reviewed=old))
+        funds=min(item['funds_margin']['available_funds'] for item in items)
+        risk=sum(item['instrument']['worst_case_risk'] for item in items)
+        cash=sum(item['instrument']['minimum_cash_required'] for item in items)
+        limits=[item['daily_risk_ledger']['available_for_new_idea'] for item in items]
+        available=min(v for v in limits if v is not None) if any(v is not None for v in limits) else None
+        reserved=cash+reviewed['aggregate']['estimated_costs']+reviewed['aggregate']['cash_buffer']
+        budget=payload.get('allocation_budget')
+        if reserved>funds+1e-9 or budget is not None and reserved>float(budget)+1e-9:
+            raise FyersExecutionUnavailable('Fresh funds do not cover the reviewed batch; no orders submitted.')
+        if available is not None and risk>available+1e-9:
+            raise FyersExecutionUnavailable('Reviewed batch exceeds fresh aggregate risk capacity; no orders submitted.')
+        for item in items:
+            maximum=item['daily_risk_ledger']['maximum_simultaneous_positions']
+            if maximum is not None and item['fresh_state']['positions_count']+len(items)>maximum:
+                raise FyersExecutionUnavailable('Reviewed batch exceeds the fresh simultaneous-position limit.')
+        result=deepcopy(reviewed);result['items']=items
+        result['aggregate'].update(total_worst_case_risk=round(risk,2),total_minimum_cash_required=round(cash,2),
+                                   cash_reserved=round(reserved,2),available_funds=funds,available_new_risk=available)
+        return result
 
     def _submit_option_batch(self, preview_id, refreshed):
         client = _current_client(self.client_factory)
@@ -834,9 +904,9 @@ class FyersExecutionService:
             raise ValueError("Type the exact confirmation phrase from the current FYERS preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
             raise ValueError("This FYERS preview expired. Prepare a fresh ticket.")
-        refreshed = self._preflight(stored["payload"])
-        old = {key: value for key, value in stored["preview"].items() if key not in {"preview_id", "confirmation_phrase", "state_digest", "created_at", "expires_at"}}
-        new = {key: value for key, value in refreshed.items() if key not in {"state_digest", "created_at", "expires_at"}}
+        refreshed = self._preflight(stored["payload"],reviewed=stored['preview'])
+        old = _ticket_terms(stored['preview'])
+        new = _ticket_terms(refreshed)
         if old != new:
             raise PreviewChanged(self.prepare(stored["payload"]))
         if not refreshed["submission_eligible"]:
@@ -848,6 +918,8 @@ class FyersExecutionService:
             "limitPrice": leg["limit_price"], "stopPrice": 0, "validity": "DAY",
             "disclosedQty": 0, "offlineOrder": False,
         } for leg in refreshed["instrument"]["contracts"]]
+        with self.lock:
+            if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
         response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] in {"EQUITY", "LONG_OPTION"} else client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         if not order_ids:

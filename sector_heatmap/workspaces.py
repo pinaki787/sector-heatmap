@@ -17,10 +17,10 @@ import threading
 import time
 
 COOKIE = 'sector_pulse_session'
-BROKERS = {'FYERS', 'DELTA_INDIA'}
+BROKERS = {'FYERS', 'DELTA_INDIA', 'MOTILAL_OSWAL'}
 LIVE_KEYS = ('SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS',
              'SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_PARSER_PROTECTION',
-             'DELTA_INDIA_ENABLE_LIVE_ORDERS')
+             'DELTA_INDIA_ENABLE_LIVE_ORDERS', 'MOTILAL_ENABLE_LIVE_ORDERS')
 
 
 def password_hash(password, salt):
@@ -49,11 +49,32 @@ class WorkspaceStore:
                 broker TEXT NOT NULL, label TEXT NOT NULL, account_ref TEXT NOT NULL,
                 port INTEGER UNIQUE NOT NULL, live_enabled INTEGER NOT NULL DEFAULT 0,
                 credential_identity TEXT UNIQUE, UNIQUE(broker, account_ref));
+            CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS user_features(user_id TEXT NOT NULL,feature TEXT NOT NULL,PRIMARY KEY(user_id,feature));
             CREATE TABLE IF NOT EXISTS attempts(username TEXT PRIMARY KEY, failures INTEGER NOT NULL,
                 until REAL NOT NULL);
             ''')
         self.path.chmod(0o600)
+
+    def sidebar_visibility(self):
+        from .section_permissions import FEATURES
+        defaults={**{key:True for key in FEATURES},'renko-engine':True,'broker-connection':True}
+        with self.db() as db:
+            row=db.execute("SELECT value FROM app_settings WHERE key='sidebar_visibility'").fetchone()
+        if row:
+            try:
+                saved=json.loads(row['value'])
+                defaults.update({k:saved[k] for k in defaults if type(saved.get(k)) is bool})
+            except (ValueError,TypeError):pass
+        return defaults
+
+    def set_sidebar_visibility(self,actor,settings):
+        if not actor.get('admin'):raise PermissionError('Administrator access required.')
+        if not isinstance(settings,dict) or set(settings)!=set(self.sidebar_visibility()) or any(type(v) is not bool for v in settings.values()):
+            raise ValueError('Choose visibility for every sidebar section.')
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings(key,value) VALUES('sidebar_visibility',?)",(json.dumps(settings),))
+        return self.sidebar_visibility()
 
     @contextmanager
     def db(self):
@@ -142,6 +163,22 @@ class WorkspaceStore:
             db.execute('UPDATE users SET salt=?,password=? WHERE id=?',(salt,password_hash(new_password,salt),user['id']))
             db.execute('DELETE FROM sessions WHERE user_id=?',(user['id'],))
 
+    def reset_password(self, actor, username, new_password):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not actor or not db.execute('SELECT 1 FROM users WHERE id=? AND admin=1', (actor['id'],)).fetchone():
+                raise PermissionError('Only an administrator can reset passwords.')
+            if not isinstance(new_password, str) or not 12 <= len(new_password) <= 256:
+                raise ValueError('Use a new password of 12–256 characters.')
+            target = db.execute('SELECT id,username FROM users WHERE username=?', (str(username).strip().lower(),)).fetchone()
+            if not target:
+                raise ValueError('User does not exist.')
+            salt = secrets.token_hex(16)
+            db.execute('UPDATE users SET salt=?,password=? WHERE id=?', (salt, password_hash(new_password, salt), target['id']))
+            db.execute('DELETE FROM sessions WHERE user_id=?', (target['id'],))
+            db.execute('DELETE FROM attempts WHERE username=?', (target['username'],))
+        return {'username': target['username'], 'signed_out': target['id'] == actor['id']}
+
     def users(self, actor):
         from .section_permissions import FEATURES
         with self.db() as db:
@@ -180,12 +217,14 @@ class WorkspaceStore:
 
     def create_account(self, user, broker, label, account_ref):
         if broker not in BROKERS:
-            raise ValueError('Choose FYERS or Delta India.')
+            raise ValueError('Choose a supported broker, including Motilal Oswal.')
         label, account_ref = str(label).strip(), str(account_ref).strip().upper()
         if not 1 <= len(label) <= 80 or not re.fullmatch(r'[A-Z0-9_.-]{2,80}', account_ref):
             raise ValueError('Enter a label and broker account reference (2–80 letters/digits).')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM accounts WHERE user_id=? AND broker=?',(user['id'],broker)).fetchone():
+                raise ValueError('This user already has an account for the selected broker.')
             port = db.execute('SELECT COALESCE(MAX(port),8099)+1 FROM accounts').fetchone()[0]
             if port > 8999:
                 raise ValueError('Workspace port allocation exhausted.')
@@ -207,7 +246,8 @@ class WorkspaceStore:
         account = self.account(user, aid)
         if not isinstance(live_enabled, bool) or not isinstance(fields, dict):
             raise ValueError('Invalid credential settings.')
-        allowed = {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'} if account['broker']=='FYERS' else {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}
+        if account['broker']=='MOTILAL_OSWAL':allowed={'MO_CLIENT_ID','MO_API_KEY','MO_API_SECRET'}
+        else:allowed = {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'} if account['broker']=='FYERS' else {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}
         if set(fields)-allowed:
             raise ValueError('Unsupported credential field.')
         if any(not isinstance(v,str) or len(v)>4096 or any(c in v for c in '\r\n\x00') for v in fields.values()):
@@ -216,7 +256,7 @@ class WorkspaceStore:
         path = folder/'credentials.json'
         prior = json.loads(path.read_text()) if path.exists() else {}
         credentials = {**prior, **{k:v.strip() for k,v in fields.items() if v.strip()}}
-        identity_key = 'FYERS_APP_ID' if account['broker']=='FYERS' else 'DELTA_INDIA_API_KEY'
+        identity_key = 'MO_API_KEY' if account['broker']=='MOTILAL_OSWAL' else ('FYERS_APP_ID' if account['broker']=='FYERS' else 'DELTA_INDIA_API_KEY')
         required = allowed-{'FYERS_REDIRECT_URI'}
         if not all(credentials.get(k) for k in required):
             raise ValueError('Complete both broker credential fields.')
@@ -227,6 +267,13 @@ class WorkspaceStore:
             if credentials.get('FYERS_REDIRECT_URI',expected) != expected:
                 raise ValueError('Register this workspace callback with FYERS: '+expected)
             credentials['FYERS_REDIRECT_URI'] = expected
+        if account['broker']=='MOTILAL_OSWAL':
+            if not re.fullmatch(r'[A-Z0-9_-]{2,15}',credentials['MO_CLIENT_ID'].upper()):
+                raise ValueError('Motilal client code must fit its native 15-character broadcast login.')
+            if credentials['MO_CLIENT_ID'].upper()!=account['account_ref']:
+                raise ValueError('Motilal client code must match this account reference.')
+            from .motilal_service import network_identity
+            credentials.update(network_identity())
         digest = hashlib.sha256((account['broker']+'|'+credentials[identity_key]).encode()).hexdigest()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -255,10 +302,19 @@ def isolated_environment(account, folder, registry, portal_port):
     env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'AppData'),XDG_CONFIG_HOME=str(home/'.config'),
                HEATMAP_PORT=str(account['port']),FYERS_TOKEN_FILE=str(home/'.fyers/token.json'),
                SECTOR_PULSE_WORKSPACE_REGISTRY=str(registry),SECTOR_PULSE_WORKSPACE_ID=account['id'],
-               SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
+               SECTOR_PULSE_WORKSPACE_BROKER=account['broker'],SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
     env.update({k:'0' for k in LIVE_KEYS})
     if account['live_enabled']:
-        env['SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS' if account['broker']=='FYERS' else 'DELTA_INDIA_ENABLE_LIVE_ORDERS']='1'
+        if account['broker']=='MOTILAL_OSWAL':env['MOTILAL_ENABLE_LIVE_ORDERS']='1'
+        else:env['SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS' if account['broker']=='FYERS' else 'DELTA_INDIA_ENABLE_LIVE_ORDERS']='1'
+    # Account-scoped, explicitly authorized parser capability survives reloads.
+    permission = folder/'parser-live-permission.json'
+    if account['live_enabled'] and account['broker']=='FYERS' and permission.exists():
+        try:
+            if json.loads(permission.read_text()).get('enabled') is True:
+                env['SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS']='1'
+        except (OSError, ValueError, AttributeError):
+            pass  # Invalid permission stays disabled.
     source = folder/'source'
     for name, script in [('NIFTY','nifty_straddle.py'),('SENSEX','sensex_straddle.py')]:
         env['SECTOR_PULSE_'+name+'_STRADDLE_SCRIPT']=str(source/'strategies/long_straddle'/script)
@@ -340,6 +396,8 @@ class WorkspaceRuntime:
         if (self.source/'.git').exists():
             inventory=subprocess.check_output(['git','ls-files','-z'],cwd=self.source).decode().split('\0')
             inventory += ['strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js']
+            inventory += ['sector_heatmap/workspace_bounce.py','strategies/ema_crossover/external_close.py']
+            inventory += ['motilal-oswal.html','motilal-oswal.js'] + ['sector_heatmap/motilal_'+name+'.py' for name in ['api','feed','history','history_seed','calendar','master','execution','service','server','strategy_broker','strategy_service','analysis','shared_routes','shared_tickets']]
             public=[]
             for name in sorted(set(inventory)):
                 path=Path(name)
@@ -357,13 +415,16 @@ class WorkspaceRuntime:
             values=json.loads(credentials.read_text())
             if account['broker']=='FYERS':
                 private_write(source/'.fyers.env','\n'.join(k+'='+v for k,v in values.items())+'\n')
-            else:
+            elif account['broker']=='DELTA_INDIA':
                 private_write(source/'.private/delta-india-credentials.json',json.dumps(values))
         return folder
 
     def start(self,user,aid):
         with self.lock:
             account=self.store.account(user,aid)
+            job=self.store.folder(account)/'bounce-status.json'
+            if job.exists() and json.loads(job.read_text()).get('status') in {'CHECKING','RESTARTING','WAITING'}:
+                raise ValueError('Broker dashboard bounce in progress; wait for readiness before opening it.')
             if not self.running(aid):
                 import socket
                 with socket.socket() as sock:
@@ -375,7 +436,7 @@ class WorkspaceRuntime:
                 log=folder/'dashboard.log'
                 fd=os.open(log,os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
                 with os.fdopen(fd,'a') as output:
-                    self.processes[aid]=subprocess.Popen([sys.executable,'heatmap_server.py'],cwd=folder/'source',env=env,stdout=output,stderr=subprocess.STDOUT)
+                    self.processes[aid]=subprocess.Popen([sys.executable,'-m','sector_heatmap.motilal_server'] if account['broker']=='MOTILAL_OSWAL' else [sys.executable,'heatmap_server.py'],cwd=folder/'source',env=env,stdout=output,stderr=subprocess.STDOUT)
             import socket
             deadline=time.monotonic()+15
             while time.monotonic()<deadline:

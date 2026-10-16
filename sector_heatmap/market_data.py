@@ -2,11 +2,14 @@ from datetime import datetime
 import os
 from pathlib import Path
 import ssl
+import time
 from threading import Lock, Thread
-from fyers_apiv3.FyersWebsocket import data_ws
+from fyers_apiv3.FyersWebsocket import data_ws # Using Fyers Websocket API for live market data
 from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import SECTOR_DEFINITIONS, equity_symbol
 from .market_calendar import market_session
+from .feed_timing import FeedTiming
+from .broker_diagnostics import diagnostics
 
 TOKEN_ERROR_HINTS = ("token", "auth", "unauthor", "401", "expired", "invalid access")
 TICK_TIMESTAMP_FIELDS = ("last_traded_time", "exch_feed_time", "timestamp")
@@ -76,31 +79,48 @@ class FyersLiveFeed:
         self.access_token, self.lock, self.ticks = access_token, Lock(), {}
         self.error, self.connected, self.token_expired = None, False, False
         self.socket = None
+        self.timing = FeedTiming()
+        self.timing.mark("feed_created")
     def start(self):
+        self.timing.mark("start_enter")
         def on_message(message):
             symbol = message.get("symbol") if isinstance(message, dict) else None
             if symbol:
+                self.timing.mark("first_symbol_callback")
                 with self.lock: self.ticks[symbol] = message
+                self.timing.mark("first_tick_stored")
         def on_error(message):
+            self.timing.mark("error_callback")
             error = str(message)
             with self.lock:
                 self.error, self.connected = error, False
                 self.token_expired = is_token_error(message)
         def on_connect():
+            self.timing.mark("sdk_connected_callback")
             with self.lock: self.connected, self.error = True, None
             index_symbols = [sector.symbol for sector in SECTOR_DEFINITIONS]
             stock_symbols = [equity_symbol(item.ticker) for sector in SECTOR_DEFINITIONS for item in sector.constituents]
-            socket.subscribe(list(dict.fromkeys(index_symbols + stock_symbols)), data_type="SymbolUpdate")
+            self.timing.mark("subscription_call")
+            diagnostics.call("FYERS", "socket.subscribe", socket.subscribe, list(dict.fromkeys(index_symbols + stock_symbols)), data_type="SymbolUpdate")
+            self.timing.mark("subscription_return")
         try:
-            configure_websocket_ca_bundle()
+            self.timing.mark("ca_setup_start")
+            diagnostics.call("FYERS", "configure_websocket_ca_bundle", configure_websocket_ca_bundle)
+            self.timing.mark("ca_setup_end")
         except RuntimeError as error:
             with self.lock:
                 self.error, self.connected = str(error), False
             return
-        socket = data_ws.FyersDataSocket(access_token=self.access_token, litemode=False, reconnect=True, on_message=on_message, on_error=on_error, on_connect=on_connect)
+        self.timing.mark("sdk_constructor_start")
+        socket = diagnostics.call("FYERS", "FyersDataSocket constructor", data_ws.FyersDataSocket, access_token=self.access_token, litemode=False, reconnect=True, on_message=on_message, on_error=on_error, on_connect=on_connect)
+        self.timing.mark("sdk_constructor_end")
         with self.lock:
             self.socket = socket
-        Thread(target=socket.connect, daemon=True, name="fyers-market-data").start()
+        def connect():
+            self.timing.mark("connect_enter")
+            diagnostics.call("FYERS", "socket.connect invocation", socket.connect)
+            self.timing.mark("connect_return")
+        Thread(target=connect, daemon=True, name="fyers-market-data").start()
 
     def stop(self):
         """Close the SDK socket so interpreter shutdown does not wait for it."""
@@ -113,6 +133,8 @@ class FyersLiveFeed:
             except Exception:
                 pass
     def snapshot(self):
+        snapshot_started = time.perf_counter()
+        self.timing.mark("first_snapshot_enter")
         with self.lock:
             ticks = dict(self.ticks)
             error = self.error
@@ -164,7 +186,7 @@ class FyersLiveFeed:
                 "top_contributors": [item for item in drivers if item["contribution"] is not None][:3],
                 "drivers": drivers,
             })
-        return {
+        result = {
             "mode": "live" if connected else "connecting",
             "connected": connected,
             "error": error,
@@ -175,3 +197,7 @@ class FyersLiveFeed:
             "market_session": market_session(),
             "sectors": rows,
         }
+        if self.timing.enabled:
+            self.timing.mark("first_snapshot_complete")
+            self.last_snapshot_build_ms = round((time.perf_counter() - snapshot_started) * 1000, 3)
+        return result
