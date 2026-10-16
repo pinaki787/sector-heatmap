@@ -13,8 +13,8 @@ from pathlib import Path
 
 RENAMED={'renko-batch.py':'strategies/renko_supertrend/batch.py',
          'ema-runner.py':'strategies/ema_crossover/runner.py'}
-NEW_FILES={'analysis-jobs.js','market-handoff.js',*[f'sector_heatmap/{name}.py' for name in
-           ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff')]}
+NEW_FILES={'runner-job-details.js','analysis-jobs.js','market-handoff.js',*[f'sector_heatmap/{name}.py' for name in
+           ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit')]}
 
 
 def digest(data):return hashlib.sha256(data).hexdigest()

@@ -36,7 +36,7 @@ function createClient(fetcher,{onUpdate=()=>{},sleep=ms=>new Promise(r=>setTimeo
 }
 if(typeof module!=='undefined'&&module.exports){module.exports={eligible,jobsURL,createClient};return;}
 if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
-const baseFetch=root.fetch.bind(root),records=new Map(),submissions=new Map(),cursors=new Map();let modal,list,output,status,older;
+const baseFetch=root.fetch.bind(root),records=new Map(),submissions=new Map(),cursors=new Map();let modal,list,output,status,older,openedOutput=null;const pendingOutputs=new Map();let outputObserver;
 const referencesKey='sector-pulse:durable-job-references:v1';
 function references(){try{const value=JSON.parse(localStorage.getItem(referencesKey)||'[]');return Array.isArray(value)?value.slice(0,200):[];}catch{return [];}}
 function remember(job,base){
@@ -50,6 +50,7 @@ const client=createClient(baseFetch,{onUpdate(job,base){
  const key=String(base)+':'+job.job_id;
  if(job.status==='CONNECTION_DELAYED'){const old=records.get(key);if(old)job={...old.job,message:job.message};}
  records.set(key,{job,base:String(base)});render();
+ if(openedOutput?.base===String(base)&&openedOutput.id===job.job_id&&job.kind==='RUNNER')showOutput({job,base:String(base)});
  remember(job,base);
  if(job.terminal&&job.output&&job.kind==='ANALYSIS'&&!submissions.has(job.job_id)&&isLatest(job,base))restore({job,base:String(base)});
  root.dispatchEvent(new CustomEvent('sector-pulse-job-update',{detail:{job,base:String(base)}}));
@@ -66,6 +67,11 @@ root.fetch=async function(input,options={}){
  remember(accepted.job,base);
  root.dispatchEvent(new CustomEvent('sector-pulse-job-submitted',{detail:{job:accepted.job,base:String(base)}}));
  if(!accepted.job?.terminal)void client.watch(base,accepted.job_id);
+ const returnAccepted=new Headers(options.headers||input?.headers).get('X-Job-Return-Accepted')==='1';
+ if(returnAccepted&&!accepted.job?.terminal){
+  submissions.delete(accepted.job_id);
+  return new Response(JSON.stringify({...accepted,job_accepted:true}),{status:202,headers:{'Content-Type':'application/json'}});
+ }
  let job=accepted.job;
  const form=accepted.job?.feature==='renko-engine'?null:({handoff:'handoff',screener:'screener','ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko','trade-parser':'parser'})[accepted.job?.feature]||root.BrokerForms?.kind(accepted.job?.request?.path||url);
  const initialAccount=accepted.account_id==='dashboard'?null:accepted.account_id;
@@ -85,12 +91,45 @@ root.fetch=async function(input,options={}){
 };
 function button(label,click){const b=document.createElement('button');b.type='button';b.className='button';b.textContent=label;b.onclick=click;return b;}
 function showOutput(record){
+ const expanded=new Set([...output.querySelectorAll('details[open]')].map(n=>n.dataset.auditKey));
+ openedOutput={base:String(record.base),id:record.job.job_id};
  output.replaceChildren();const title=document.createElement('h3');title.textContent=record.job.label+' · '+record.job.status;output.append(title);
- const pre=document.createElement('pre');pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:55vh;overflow:auto';pre.textContent=JSON.stringify(record.job.output,null,2);output.append(pre);
+ const saved=record.job.output||{};
+ if(record.job.kind==='RUNNER'&&root.RunnerJobDetails){
+  const snapshots=saved.runner_outputs||[saved.runner||saved];
+  for(const state of snapshots){const section=document.createElement('section');output.append(section);
+   const account=root.BrokerForms?.accounts().find(a=>a.id===record.job.request.account_id)||{id:record.job.request.account_id};
+   const audit=[saved.job_audit,...(saved.job_audits||[])].find(a=>a&&a.run_id===root.RunnerJobDetails.identity(state));
+   const inventory=root.RunnerJobInventory,kind={'renko-supertrend':'renko','renko-engine':'engine','ema-band':'band','ema-cross':'rsi',kama:'kama','delta-india':'delta',straddles:'straddle'}[record.job.feature];
+   const source=inventory?.sources(account).find(s=>s.kind===kind&&(!s.market||record.job.request.path.includes(s.market)));
+   const native=source?inventory.normalize(account,source,state):null;
+   root.RunnerJobDetails.render(section,{state,account,audit,jobId:record.job.job_id,lifecycleStatus:record.job.status,title:record.job.label,observedAt:record.job.updated,chartUrl:native?inventory.link(native,location.origin):null,connectionError:record.job.health?.state==='NO_RECENT_PROGRESS'?record.job.health.message:null,
+    onRefresh:async()=>{const fresh=await client.read(record.base,record.job.job_id);showOutput({...record,job:fresh});},
+    onStop:record.job.terminal?null:async()=>{await client.cancel(record.base,record.job.job_id);showOutput({...record,job:await client.read(record.base,record.job.job_id)});}});
+  }
+ }else{const pre=document.createElement('pre');pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:55vh;overflow:auto';pre.textContent=JSON.stringify(record.job.output,null,2);output.append(pre);}
+ for(const node of output.querySelectorAll('details'))if(expanded.has(node.dataset.auditKey))node.open=true;
  output.append(button('Restore output to its card',()=>restore(record)));
  output.append(button('Download output',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(record.job.output,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=record.job.job_id+'.json';a.click();URL.revokeObjectURL(url);}));
 }
 function restore(record){
+ const path=record.job.request?.path||'';
+ const handled=/\/(analysis-handoff\/(analyze|analyze-market)|chartink\/analyze|holdings-analysis\/analyze)$/.test(path);
+ if(record.job.kind==='ANALYSIS'&&record.job.output&&!handled){
+  const feature=record.job.feature,kind=({'renko-engine':'engine','renko-supertrend':'renko','ema-band':'band','ema-cross':'rsi',kama:'kama',handoff:'handoff',screener:'screener'})[feature]||root.BrokerForms?.kind(path);
+  const selected=root.BrokerForms?.account(kind)?.id,owner=record.job.request.account_id;
+  const section=document.getElementById(feature)||document.getElementById(kind),pendingKey=feature+':'+owner;
+  if(!section){
+   pendingOutputs.set(pendingKey,record);
+   if(!outputObserver)outputObserver=new MutationObserver(()=>{for(const value of [...pendingOutputs.values()])restore(value);if(!pendingOutputs.size)outputObserver.disconnect();});
+   outputObserver.observe(document.body,{childList:true,subtree:true});
+  }else pendingOutputs.delete(pendingKey);
+  if(section&&(!selected||owner==='dashboard'||owner===selected)){
+   let panel=section.querySelector('[data-generic-job-output]');if(!panel){panel=document.createElement('section');panel.className='panel';panel.dataset.genericJobOutput='1';panel.style.padding='16px';section.append(panel);}
+   panel.dataset.accountId=owner||'dashboard';panel.replaceChildren();const heading=document.createElement('h3');heading.textContent=record.job.label+' · '+record.job.status;panel.append(heading);
+   const pre=document.createElement('pre');pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto';const text=JSON.stringify(record.job.output,null,2);pre.textContent=text.slice(0,8000)+(text.length>8000?'\nPreview shortened; the complete output remains saved.':'');panel.append(pre,button('Open complete saved output',()=>{modal.showModal();showOutput(record);}));
+  }
+ }
  root.dispatchEvent(new CustomEvent('sector-pulse-job-output',{detail:{job:record.job,output:record.job.output,path:record.job.request.path,base:record.base}}));
 }
 function render(){
@@ -98,7 +137,7 @@ function render(){
  for(const record of [...records.values()].sort((a,b)=>b.job.created-a.job.created)){
   const row=document.createElement('article');row.className='panel';row.style.padding='12px';
   const title=document.createElement('strong');title.textContent=record.job.label||record.job.job_id;row.append(title);
-  const note=document.createElement('p');note.textContent=record.job.status+' · '+(record.job.message||'')+' · '+new Date((record.job.updated||Date.now()/1000)*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});row.append(note);
+  const note=document.createElement('p');note.textContent=(record.job.health?.state==='NO_RECENT_PROGRESS'?'Stalled progress updates':record.job.status)+' · '+(record.job.message||'')+' · '+new Date((record.job.updated||Date.now()/1000)*1000).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});row.append(note);
   if(record.job.output)row.append(button('Open saved output',()=>showOutput(record)));
   if(!record.job.terminal&&record.job.status!=='CONNECTION_DELAYED')row.append(button(record.job.kind==='RUNNER'?'Stop runner job':'Stop analysis',async()=>{try{await client.cancel(record.base,record.job.job_id);}catch(error){status.textContent=error.message;}}));
   list.append(row);
@@ -159,7 +198,7 @@ async function mount(){
    if(seen.has(key))continue;seen.add(key);restore(record);
   }
  };
- restoreLatest();root.addEventListener('broker-account-change',()=>queueMicrotask(restoreLatest));
+ restoreLatest();root.addEventListener('broker-account-change',()=>{for(const panel of document.querySelectorAll('[data-generic-job-output]'))panel.remove();queueMicrotask(restoreLatest);});
 }
 root.SectorPulseJobs={client,refresh,records,restore,open:()=>{modal?.showModal();refresh();}};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>mount());else mount();

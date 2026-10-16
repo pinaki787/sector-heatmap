@@ -165,6 +165,12 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
             payload.pop('async_analysis',None);payload.pop('analysis_job',None)
             request=dict(path=handler.path,payload=payload,account_id=owner.split(':',1)[1])
             def work(context):
+                def save_runner(value,message):
+                    from .runner_job_audit import attach
+                    prior=store.get(owner,context.job_id).get('output')
+                    saved=attach(value,prior,store.clock())
+                    store._update(context.job_id,output=saved,message=message)
+                    return saved
                 context.checkpoint('Validating the submitted workflow.')
                 result=replay(handler,request['path'],payload)
                 if request['path'].split('?',1)[0].endswith('/chartink/analyze') and isinstance(result.get('results'),list):
@@ -186,7 +192,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                         result=replay(handler,request['path'],{**payload,'capture_id':result['capture_id'],'offset':offset,'inventory_only':0})
                         combined.extend(result.get('rows',[]))
                     result={**result,'rows':combined,'next_offset':None}
-                if kind=='RUNNER':store._update(context.job_id,output=result,message='Runner activation output saved.')
+                if kind=='RUNNER':result=save_runner(result,'Runner activation output saved.')
                 else:context.checkpoint('Workflow output saved.',result)
                 handles=runner_factory(handler,request['path'],payload,result) if kind=='RUNNER' and runner_factory else None
                 if handles is not None:
@@ -209,7 +215,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                                 handle['stopped']=True
                             live.append(handle)
                         result={**result,'runner_outputs':snapshots} if len(handles)!=1 else (snapshots[0] if snapshots else result)
-                        store._update(context.job_id,output=result,message='Runner output and journal saved.')
+                        result=save_runner(result,'Runner output and journal saved.')
                         if stop_failed:raise JobStopFailed()
                         owned=live
                         if owned:time.sleep(1)
@@ -225,14 +231,15 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                         # Stop applies only to the submitted run, never a newer run.
                         fresh=replay(handler,routes[0]);fresh=fresh.get('runner',fresh)
                         if expected and (fresh.get('run_id') or fresh.get('started_at'))!=expected:raise JobCancelled()
-                        store._update(context.job_id,output=fresh)
+                        save_runner(fresh,'Runner Stop request retained its current audit.')
                         try:replay(handler,routes[1],{'run_id':expected})
                         except Exception:raise JobStopFailed() from None
                         stop_sent=True
                     time.sleep(1)
                     result=replay(handler,routes[0]);current=result.get('runner',result)
-                    if expected and (current.get('run_id') or current.get('started_at'))!=expected:break
-                    store._update(context.job_id,output=result,message='Runner stopping; reconciliation remains active.' if stop_sent else 'Runner active; output and journal saved.')
+                    if expected and (current.get('run_id') or current.get('started_at'))!=expected:
+                        return store.get(owner,context.job_id).get('output') or {}
+                    result=save_runner(result,'Runner stopping; reconciliation remains active.' if stop_sent else 'Runner active; output and journal saved.')
                 return result
             names=payload.get('symbols') or payload.get('instruments') or []
             summary=', '.join(str(value) for value in names[:3]) if isinstance(names,list) else ''

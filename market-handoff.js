@@ -10,7 +10,7 @@ root.HandoffAIProvider={selected:()=>providerSelect?.value||savedProvider(),payl
 function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
 function button(text,action){const n=el('button',text);n.type='button';n.className='button';n.onclick=action;return n;}
 async function request(path,payload){
- const response=await root.BrokerForms.fetch('handoff',path,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{cache:'no-store'});
+ const response=await root.BrokerForms.fetch('handoff',path,payload?{method:'POST',headers:{'Content-Type':'application/json',...(path.endsWith('/analyze-market')?{'X-Job-Return-Accepted':'1'}:{})},body:JSON.stringify(payload)}:{cache:'no-store'});
  const data=await response.json();if(!response.ok)throw Error(data.error||data.message||'Broker analysis unavailable.');return data;
 }
 function render(data){
@@ -46,7 +46,7 @@ async function run(){
  const symbols=[...choices.selectedOptions].map(n=>n.value);if(!symbols.length||symbols.length>6){note.textContent='Choose one to six instruments.';return;}
  note.textContent='Analysis submitted. It continues if you leave this page; retrieve it from Saved jobs.';
  const revision=++submissionRevision;submitting=true;stopRequested=false;stopSent=false;active=null;submittedSymbols=JSON.stringify(symbols);
- try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account(),...root.HandoffAIProvider.payload()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision){active=null;submitting=false;}}
+ try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account(),...root.HandoffAIProvider.payload()});if(revision!==submissionRevision)return;if(data.job_accepted){note.textContent='Analysis job accepted. You can continue working; output will appear automatically and remain in Saved jobs.';return;}render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision){if(!active?.job||active.job.terminal)active=null;submitting=false;}}
 }
 async function mount(){
  await root.BrokerForms?.ready;const section=document.getElementById('handoff');if(!section)return;

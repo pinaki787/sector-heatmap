@@ -58,6 +58,11 @@ class JobStore:
         value=dict(row)
         value['request']=json.loads(value['request']);value['output']=json.loads(value['output']) if value['output'] else None
         value['job_id']=value.pop('id');value['terminal']=value['status'] in TERMINAL
+        age=max(0,self.clock()-value['updated'])
+        delayed=not value['terminal'] and value['status']!='QUEUED' and age>180
+        value['health']=dict(state='NO_RECENT_PROGRESS' if delayed else 'TERMINAL' if value['terminal'] else 'RESPONDING',
+                             last_progress_at=value['updated'],age_seconds=round(age,1),
+                             message='No job progress update for over three minutes. Execution state is unconfirmed; do not resubmit an order.' if delayed else '')
         return value
     def get(self,owner,job_id):
         with self.db() as db:row=db.execute('SELECT * FROM jobs WHERE id=? AND owner=?',(job_id,owner)).fetchone()

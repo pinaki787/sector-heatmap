@@ -7,12 +7,13 @@ parser.add_argument('--baseline',type=Path,default=root/'outputs/durable-jobs/ba
 parser.add_argument('--account-only',action='store_true',help='Preserve an account snapshot that has no native Motilal routes.')
 parser.add_argument('--output',type=Path,default=root/'outputs/durable-jobs/stage')
 args=parser.parse_args()
+if not (args.baseline/'runner-jobs.js').is_file():raise ValueError('Download the destination runner-jobs.js into the baseline before staging the job window update.')
 base=args.baseline;stage=args.output;(stage/'sector_heatmap').mkdir(parents=True,exist_ok=True)
 def read(name):return (root/name).read_text()
 def save(name,text):
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
  if p.suffix=='.py':ast.parse(text)
-for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff'):
+for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit'):
  save('sector_heatmap/'+name+'.py',read('sector_heatmap/'+name+'.py'))
 # Add cooperative cancellation at existing broker-read boundaries.
 hooks={
@@ -136,6 +137,13 @@ assert old in s;s=s.replace(old,"    $('screener-analysis-status').textContent =
 s=s.replace('  const analyzeScreenerOptionPlans = async () => {\n','  const analyzeScreenerOptionPlans = async () => {\n    screenerAnalysisCancelled = false\n',1)
 
 a=local.index("  window.addEventListener('sector-pulse-job-output'");b=local.index("  window.addEventListener('pagehide',saveHandoffResults)",a);anchor="  window.addEventListener('pagehide',saveHandoffResults)";assert anchor in s;s=s.replace(anchor,local[a:b]+anchor,1)
+# Release Handoff submission controls immediately after durable acceptance.
+s=s.replace("headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)","headers: { 'Content-Type': 'application/json',...(url.endsWith('/analysis-handoff/analyze')?{'X-Job-Return-Accepted':'1'}:{}) }, body: JSON.stringify(payload)",1)
+original_collect = "      analysisRun = await postJson('/api/analysis-handoff/analyze', { mode, recipient, instrument_route: instrumentRoute, risk_policy: policyPayload(policy) })"
+start=local.index("      const submitted = await postJson('/api/analysis-handoff/analyze'")
+end=local.index('\n      candidateCollection =',start)
+assert original_collect in s
+s=s.replace(original_collect,local[start:end],1)
 # Apply provider selection and AI output additions without replacing broker-specific UI.
 provider_line = next(line for line in local.splitlines(keepends=True) if "payload={...payload,...(window.HandoffAIProvider" in line)
 s=s.replace('  const postJson = async (url, payload) => {\n','  const postJson = async (url, payload) => {\n'+provider_line,1)
@@ -149,7 +157,7 @@ save('dashboard-enhancements.js',s)
 s=(base/'workspaces.py').read_text()
 anchor="            public=[]"
 assert anchor in s
-s=s.replace(anchor,"            inventory += ['analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff']]\n"+anchor,1)
+s=s.replace(anchor,"            inventory += ['runner-job-details.js','analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit']]\n"+anchor,1)
 save('sector_heatmap/workspaces.py',s)
 s=(base/'broker-form-routing.js').read_text()
 old="const control=['manual','handoff'].includes(kind)?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
@@ -157,14 +165,14 @@ new="const control=kind==='handoff'?document.getElementById('ticket-broker'):kin
 assert old in s;s=s.replace(old,new,1);save('broker-form-routing.js',s)
 s=(base/'index.html').read_text()
 assert '</body>' in s,'Hosted dashboard closing body tag missing.'
-for asset in ('analysis-jobs.js','market-handoff.js'):
+for asset in ('runner-job-details.js','analysis-jobs.js','market-handoff.js'):
     assert asset not in s,'Job assets already installed; refresh baseline before staging.'
-s=s.replace('</body>','    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-early-stop-2"></script>\n</body>',1)
+s=s.replace('</body>','    <script src="/runner-job-details.js?v=20261016-1"></script>\n    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-early-stop-2"></script>\n</body>',1)
 assert s.count('/analysis-jobs.js?')==1 and s.count('/market-handoff.js?')==1
 import re
-for asset in ('holdings-review.js','dashboard-enhancements.js','broker-form-routing.js'):
- s=re.sub(re.escape(asset)+r'\?v=[^"\s]+',asset+'?v=20261016-durable-jobs-2',s)
+for asset in ('holdings-review.js','dashboard-enhancements.js','broker-form-routing.js','runner-jobs.js','runner-job-details.js','analysis-jobs.js','market-handoff.js'):
+ s=re.sub(re.escape(asset)+r'\?v=[^"\s]+',asset+'?v=20261016-jobs-3',s)
 save('index.html',s)
-for name in ('analysis-jobs.js','market-handoff.js'):save(name,read(name))
+for name in ('runner-job-details.js','runner-jobs.js','analysis-jobs.js','market-handoff.js'):save(name,read(name))
 manifest={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in base.iterdir() if p.is_file()};(stage/'baseline-sha256.json').write_text(json.dumps(manifest,indent=2))
 print('Staged',len(list(stage.rglob('*.py'))),'Python modules and UI files on hosted baseline.')

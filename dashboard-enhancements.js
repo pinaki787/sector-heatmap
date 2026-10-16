@@ -256,7 +256,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
 
     if(url.includes("/start")&&!window.BrokerForms.account(window.BrokerForms.kind(url)))await window.PaperCapital?.ensure(payload.mode)
-    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { method: 'POST', headers: { 'Content-Type': 'application/json',...(url.endsWith('/analysis-handoff/analyze')?{'X-Job-Return-Accepted':'1'}:{}) }, body: JSON.stringify(payload) })
     const contentType = response.headers.get('content-type') || ''
     const data = contentType.includes('application/json')
       ? await response.json().catch(() => ({ error: `The server returned invalid JSON (HTTP ${response.status}).` }))
@@ -2062,7 +2062,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const instrumentRoute = selectedInstrumentRoute()
       if (!instrumentRoute) throw new Error('Choose Cash equity or Stock options before collecting matches.')
       const policy = riskPolicyInputs()
-      analysisRun = await postJson('/api/analysis-handoff/analyze', { mode, recipient, instrument_route: instrumentRoute, risk_policy: policyPayload(policy) })
+      const submitted = await postJson('/api/analysis-handoff/analyze', { mode, recipient, instrument_route: instrumentRoute, risk_policy: policyPayload(policy) })
+      if(submitted.job_accepted){$('candidate-status').textContent='Analysis job accepted. You can continue using the dashboard; output will appear automatically and remain in Saved jobs.';return;}
+      analysisRun = submitted
       candidateCollection = { candidates: analysisRun.candidates || [], scope: analysisRun.scope, updated_at: analysisRun.source?.analysis_updated_at }
       renderCandidates()
       renderAnalysisCards()

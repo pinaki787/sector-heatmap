@@ -100,3 +100,12 @@ class DurableJobTests(unittest.TestCase):
         while self.store.futures and time.monotonic()<deadline:time.sleep(.01)
         self.assertEqual(self.store.futures,{})
         for job_id in ids:self.assertEqual(self.store.get('user:account',job_id)['output'],{'saved':True})
+
+    def test_missing_progress_reports_delay_without_changing_execution_status(self):
+        entered=threading.Event();release=threading.Event()
+        job=self.submit(lambda ctx:entered.set() or release.wait(2));self.assertTrue(entered.wait(1))
+        with self.store.db() as db:db.execute('UPDATE jobs SET updated=? WHERE id=?',(time.time()-181,job['job_id']))
+        value=self.store.get('user:account',job['job_id'])
+        self.assertEqual(value['status'],'RUNNING');self.assertEqual(value['health']['state'],'NO_RECENT_PROGRESS')
+        release.set();value=self.await_status(job['job_id'],{'COMPLETED'})
+        self.assertEqual(value['health']['state'],'TERMINAL')
