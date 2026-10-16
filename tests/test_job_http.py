@@ -15,6 +15,7 @@ class JobHTTPTests(unittest.TestCase):
         self.entered=threading.Event();self.release=threading.Event();self.calls=[];self.running=False;self.observed_run='one';self.fail_stop=False
         test=self
         class Auth:
+            store=type('OwnedAccounts',(),{'account':staticmethod(lambda user,aid:dict(id=aid))})()
             def check(self,h,mutation=False):return True
             def authorize(self,headers,mutation=False):return dict(id=headers.get('X-Test-User','alice'),admin=True)
         class Handler(BaseHTTPRequestHandler):
@@ -48,7 +49,7 @@ class JobHTTPTests(unittest.TestCase):
                 if test.fail_stop:raise ValueError('Fixture Stop failure')
                 test.running=False
             return [(snapshot,stop)]
-        self.store=install(Handler,Path(self.tmp.name),local_auth=Auth(),runner_factory=handles if getattr(self,'direct_monitor',False) else None)
+        self.store=install(Handler,Path(self.tmp.name),local_auth=Auth(),market_factory=getattr(self,'market_factory',None),runner_factory=handles if getattr(self,'direct_monitor',False) else None)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.stop)
@@ -143,3 +144,32 @@ class DirectRunnerJobHTTPTests(JobHTTPTests):
         self.assertTrue(self.running)
         self.assertEqual(self.calls.count('/api/renko-supertrend/stop'),0)
         self.assertEqual(value['output']['run_id'],'one')
+
+
+class NativeHoldingsHTTPTests(unittest.TestCase):
+    request=JobHTTPTests.request
+    stop=JobHTTPTests.stop
+    def setUp(self):
+        from types import SimpleNamespace
+        self.market_factory=lambda handler,payload:(SimpleNamespace(service=None),'DHAN','a'*32)
+        JobHTTPTests.setUp(self)
+
+    def test_native_inventory_and_every_batch_run_as_one_owned_job(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        aid='a'*32
+        adapter=SimpleNamespace(broker='DHAN',identity=aid,inventory=lambda:[dict(id=str(i),symbol='TEST'+str(i),kind='OTHER_HOLDING',quantity=1,currency='INR') for i in range(3)],enrich=lambda rows:rows)
+        with patch('sector_heatmap.native_holdings.DhanHoldings',return_value=adapter):
+            status,job=self.request('POST','/api/dhan/holdings-analysis/analyze?account_id='+aid,dict(account_id=aid,broker='DHAN',inventory_only=1,limit=1))
+            self.assertEqual(status,202)
+            deadline=time.monotonic()+3
+            while time.monotonic()<deadline:
+                value=self.store.get('alice:'+aid,job['job_id'])
+                if value['terminal']:break
+                time.sleep(.02)
+            self.assertEqual(value['status'],'COMPLETED',value.get('error'))
+            self.assertEqual(len(value['output']['rows']),3)
+            self.assertEqual(value['output']['account_id'],aid)
+            self.assertEqual(value['output']['portfolio']['currency'],'INR')
+            status,_=self.request('GET','/api/jobs?job_id='+job['job_id']+'&account_id='+aid,user='bob')
+            self.assertEqual(status,403)

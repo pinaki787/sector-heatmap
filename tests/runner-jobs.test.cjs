@@ -67,13 +67,13 @@ test('rendered inventory reports server status and selection sends only one scop
  assert.doesNotMatch(w.document.querySelector('[data-message]').textContent,/Some jobs unavailable/);
 
  w.document.querySelector('[data-select-all]').click();
- assert.equal(w.document.querySelector('tbody input').checked,true);
+ assert.equal(w.document.querySelector('.job-card-list input').checked,true);
  w.document.querySelector('[data-stop]').click();await new Promise(r=>setImmediate(r));
  assert.equal(calls.filter(c=>c[1]==='POST').length,1);assert.equal(calls.find(c=>c[1]==='POST')[0],'/api/renko-dhan/mine/stop?instance=x');
  assert.match(w.document.querySelector('[data-count]').textContent,/0 running/);
- assert.equal(w.document.querySelector('tbody input'),null);
+ assert.equal(w.document.querySelector('.job-card-list input'),null);
  const history=w.document.querySelector('[data-history]');history.checked=true;history.dispatchEvent(new w.Event('change'));
- assert.equal(w.document.querySelector('tbody input').disabled,true);dom.window.close();
+ assert.equal(w.document.querySelector('.job-card-list input').disabled,true);dom.window.close();
 });
 
 test('net P&L uses after-cost native currency only, never gross or missing as zero',()=>{

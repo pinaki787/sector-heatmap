@@ -19,3 +19,15 @@ test('holdings restores owned output and submits one cancellable server job',asy
  assert(w.document.body.textContent.includes('VALIDATION_ONLY'));
  dom.window.close();
 });
+
+test('all four owned brokers are selectable and native analysis releases on acceptance',async()=>{
+ const dom=new JSDOM('<nav class="nav"></nav><main class="work"></main>',{url:'https://host/',runScripts:'outside-only'}),w=dom.window;
+ const accounts=['FYERS','DHAN','MOTILAL_OSWAL','DELTA_INDIA'].map((broker,i)=>({id:'owner-'+i,broker,label:'Account '+i,configured:true}));
+ const calls=[];
+ w.SectorPulseWorkspace={admin:true,holdings_review_available:true,csrf:'test'};
+ w.BrokerForms={ready:Promise.resolve(),accounts:()=>accounts,initial:()=>null,account:()=>accounts.find(a=>'account:'+a.id===w.document.getElementById('holdings-broker').value),onChange:()=>{},fetch:async(kind,url,options)=>{calls.push({kind,url,options});return {ok:true,json:async()=>({job_accepted:true})};}};
+ w.eval(fs.readFileSync('holdings-review.js','utf8'));await tick();
+ const select=w.document.getElementById('holdings-broker');assert.equal(select.options.length,4);
+ for(const a of accounts){select.value='account:'+a.id;select.dispatchEvent(new w.Event('change'));w.document.getElementById('holdings-analyse').click();await tick();const call=calls.at(-1),payload=JSON.parse(call.options.body);assert.equal(payload.account_id,a.id);assert.equal(payload.broker,a.broker);assert.equal(call.options.headers['X-Job-Return-Accepted'],'1');assert.equal(w.document.getElementById('holdings-analyse').disabled,false);}
+ dom.window.close();
+});

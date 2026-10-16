@@ -131,3 +131,13 @@ test('Renko initialization binds the same account as a sector-origin page',()=>{
  location.search+='&renkoAccount=fyers-owner';
  assert.equal(router.initial('renko'),'fyers-owner');
 });
+
+test('holdings routes each owned broker through its own transport',()=>{
+ const {router,accounts}=setup();
+ const mo={id:'motilal-owner',broker:'MOTILAL_OSWAL'};
+ router.setAccounts([...accounts,mo]);
+ for(const [account,path] of [[accounts[0],'/api/dhan/holdings-analysis/analyze?account_id=dhan-owner'],[accounts[1],'/broker-workspace/fyers-owner/api/holdings-analysis/analyze'],[accounts[2],'/broker-workspace/delta-owner/api/holdings-analysis/analyze'],[mo,'/api/motilal/holdings-analysis/analyze?account_id=motilal-owner']]){
+  assert.equal(router.kind('/api/holdings-analysis/analyze'),'holdings');
+  assert.equal(router.route('holdings','/api/holdings-analysis/analyze',account),'https://portal.example'+path);
+ }
+});

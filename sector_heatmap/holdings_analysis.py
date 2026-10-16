@@ -370,9 +370,9 @@ class HoldingsAnalysis:
                     'next_offset': end if end < len(capture['rows']) else None,
                     'rows': [capture['results'][i] for i in range(offset, end)],
                     'summary': dict(Counter(r['action'] for r in all_results)),
-                    'portfolio': {'priced_holdings_value': round(value, 2) if priced else None, 'currency': 'INR' if adapter.broker == 'FYERS' else None,
+                    'portfolio': {'priced_holdings_value': round(value, 2) if priced else None, 'currency': 'INR' if adapter.broker != 'DELTA_INDIA' else None,
                                   'priced_rows': len(priced), 'reviewed_rows': len(all_results), 'complete': len(all_results) == len(capture['rows']),
                                   'weight_basis': 'Priced delivery holdings only; provisional until every row is analysed. Derivatives excluded.'},
-                    'scope': 'Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding',
+                    'scope': getattr(adapter,'scope',None) or ('Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding'),
                     'policy': 'Advisory only · swing horizon assumed · completed daily/prior-week evidence · no orders or stop modifications',
                     'limitations': ['No fundamental, news, tax or portfolio suitability model.', 'Quotes and holdings are broker snapshots; quantities must be rechecked before any trade.']}

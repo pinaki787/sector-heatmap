@@ -101,3 +101,14 @@ test('live ticks with missing OHLC are distinguished from a disconnected feed',(
  assert.equal(chartStreamHealth(frame).live,false);
  assert.match(chartStreamStatus({...frame,market:{...frame.market,connected:false}}),/disconnected/);
 });
+
+test('native REST order checks do not claim a notification connection',()=>{
+ for(const basis of ['Delta REST reconciliation; broker order notifications not claimed.','Dhan REST reconciliation; broker order notifications not claimed.','Motilal native orderbook reconciliation; acceptance is not a fill']){
+  const frame={server_at:100,market:{connected:true,fresh:true,tick_exchange_at:99},orders:{connected:false,basis},runner:{config:{mode:'LIVE'}}};
+  assert.equal(chartStreamHealth(frame).restOrders,true);
+  assert.equal(chartStreamHealth(frame).ordersConnected,false);
+  assert.doesNotMatch(chartStreamStatus(frame),/unavailable/);
+  assert.equal(chartStreamHealth(frame,6).live,false);
+ }
+ assert.equal(chartStreamHealth({orders:{basis:'Unknown reconciliation'}}).restOrders,false);
+});

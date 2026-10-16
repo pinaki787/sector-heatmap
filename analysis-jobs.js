@@ -113,7 +113,7 @@ function showOutput(record){
  output.append(button('Download output',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(record.job.output,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=record.job.job_id+'.json';a.click();URL.revokeObjectURL(url);}));
 }
 function restore(record){
- const path=record.job.request?.path||'';
+ const path=new URL(record.job.request?.path||'/',location.href).pathname;
  const handled=/\/(analysis-handoff\/(analyze|analyze-market)|chartink\/analyze|holdings-analysis\/analyze)$/.test(path);
  if(record.job.kind==='ANALYSIS'&&record.job.output&&!handled){
   const feature=record.job.feature,kind=({'renko-engine':'engine','renko-supertrend':'renko','ema-band':'band','ema-cross':'rsi',kama:'kama',handoff:'handoff',screener:'screener'})[feature]||root.BrokerForms?.kind(path);

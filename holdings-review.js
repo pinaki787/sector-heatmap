@@ -6,7 +6,8 @@
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   const numeric = value => value == null || !Number.isFinite(Number(value)) ? '—' : new Intl.NumberFormat('en-IN', {maximumFractionDigits: 4}).format(Number(value));
   const displayTime = value => value ? new Date(value).toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'}) + ' IST' : '—';
-  function mount() {
+  async function mount() {
+    await window.BrokerForms?.ready;
     const work = document.querySelector('.work'), nav = document.querySelector('.nav'), context = window.SectorPulseWorkspace;
     if (!work || !nav || document.getElementById('holdings') || !context?.holdings_review_available || window.self !== window.top) return;
     if (Array.isArray(context?.allowed_features) && context.allowed_features.includes('broker') && !context.allowed_features.includes('holdings')) context.allowed_features = [...context.allowed_features, 'holdings'];
@@ -14,7 +15,7 @@
     const button = document.createElement('button'); button.type = 'button'; button.dataset.view = 'holdings'; button.textContent = 'Holdings review'; button.setAttribute('aria-pressed', 'false'); nav.append(button);
     const section = document.createElement('section'); section.id = 'holdings'; section.className = 'view';
     section.innerHTML = `<header class="head"><div><span class="label">PORTFOLIO DECISIONS · ADVISORY</span><h1>Holdings review</h1><small class="muted">Review every holding with completed daily and weekly trend evidence.</small></div><span class="status">Swing horizon</span></header>
-      <section class="panel holdings-controls"><div class="holdings-toolbar"><label class="field">Broker<select id="holdings-broker"></select></label><div><button type="button" class="button" id="holdings-analyse">Analyse all holdings</button><button type="button" class="button" id="holdings-cancel" hidden>Stop after current batch</button></div><button type="button" class="button" id="holdings-export" disabled>Export review</button></div><p class="muted" id="holdings-scope">Delivery holdings for FYERS; open derivative positions for Delta India. Suggestions do not submit orders or change stops.</p><p id="holdings-status" role="status" aria-live="polite">Choose a broker, then analyse its portfolio.</p><progress id="holdings-progress" max="1" value="0" hidden aria-label="Holdings analysis progress"></progress></section>
+      <section class="panel holdings-controls"><div class="holdings-toolbar"><label class="field">Broker<select id="holdings-broker"></select></label><div><button type="button" class="button" id="holdings-analyse">Analyse all holdings</button><button type="button" class="button" id="holdings-cancel" hidden>Stop after current batch</button></div><button type="button" class="button" id="holdings-export" disabled>Export review</button></div><p class="muted" id="holdings-scope">Delivery holdings for FYERS, Dhan and Motilal Oswal; open derivative positions for Delta India. Suggestions do not submit orders or change stops.</p><p id="holdings-status" role="status" aria-live="polite">Choose a broker, then analyse its portfolio.</p><progress id="holdings-progress" max="1" value="0" hidden aria-label="Holdings analysis progress"></progress></section>
       <div id="holdings-counts" class="holdings-counts" aria-label="Filter by suggested action"></div>
       <section class="panel"><div class="holdings-toolbar"><div><span class="label">REVIEW QUEUE</span><h2>Decision and supporting evidence</h2><p id="holdings-coverage" class="muted">No analysis yet.</p></div><label class="field">Show<select id="holdings-filter"><option value="ALL">All holdings</option>${Object.entries(labels).map(([key, text]) => `<option value="${key}">${text}</option>`).join('')}</select></label></div><div class="table-wrap"><table class="holdings-table"><thead><tr><th>Suggested action</th><th>Holding / contract</th><th>Quantity / average</th><th>Reference price / gross P&L</th><th>Candidate protective level</th><th>Rationale and evidence</th></tr></thead><tbody id="holdings-rows"><tr><td colspan="6" class="empty">Your review will appear here. Missing evidence stays visible as Review needed.</td></tr></tbody></table></div></section>
       <details class="panel holdings-method"><summary>How suggestions are made</summary><p>Daily EMA20/EMA50 and the prior completed weekly EMA20 provide trend context. ATR14 measures volatility; RSI14 and the prior 20-session range identify extended profitable holdings.</p><ul><li><b>Hold:</b> aligned daily and weekly trends.</li><li><b>Trail:</b> aligned trends, a gain of at least one ATR and a candidate protective level beyond acquisition cost.</li><li><b>Exit:</b> daily EMA20/EMA50 and weekly trend oppose the holding or position.</li><li><b>Book profit:</b> gross profit, an extreme RSI and price at least two ATR from EMA20 near the range boundary.</li><li><b>Review needed:</b> stale or missing data, mixed trends, unsupported products, options, or an imminent futures expiry.</li></ul><p>Rules are transparent technical hypotheses, not a tested return forecast. They omit fundamental/news analysis and personal tax or risk plans. P&L excludes fees, taxes and funding. Price-return percentages are not returns on margin. Check existing strategy ownership and hedges before acting. A candidate stop is a review level, not a resting order; tighten an existing stop only.</p></details>`;
@@ -24,10 +25,17 @@
     document.head.append(style);
     const $ = id => document.getElementById(id);
     const broker = $('holdings-broker');
-    for (const value of ['FYERS', 'DELTA_INDIA']) {
-      if (context?.workspace?.broker && context.workspace.broker !== value) continue;
-      broker.add(new Option(value === 'FYERS' ? 'FYERS' : 'Delta India', value));
-    }
+    const brokerNames={FYERS:'FYERS',DHAN:'Dhan',MOTILAL_OSWAL:'Motilal Oswal',DELTA_INDIA:'Delta India'};
+    const owned=(window.BrokerForms?.accounts()||[]).filter(a=>brokerNames[a.broker]);
+    for(const account of owned){const option=new Option(brokerNames[account.broker]+' · '+account.label,'account:'+account.id);option.dataset.savedBrokerAccount=account.id;option.dataset.broker=account.broker;option.disabled=account.configured===false;broker.add(option);}
+    if(!window.BrokerForms)for(const value of ['FYERS','DELTA_INDIA']){if(context?.workspace?.broker&&context.workspace.broker!==value)continue;broker.add(new Option(brokerNames[value],value));}
+    const initial=window.BrokerForms?.initial('holdings')||context?.workspace?.id;
+    const remembered=initial&&[...broker.options].find(o=>o.dataset.savedBrokerAccount===initial&&!o.disabled);
+    if(remembered)broker.value=remembered.value;
+    else if([...broker.options].some(o=>!o.disabled))broker.value=[...broker.options].find(o=>!o.disabled).value;
+    const selectedAccount=()=>window.BrokerForms?.account('holdings')||owned.find(a=>'account:'+a.id===broker.value)||null;
+    const selectedBroker=()=>selectedAccount()?.broker||broker.value;
+    const selectedId=()=>selectedAccount()?.id||context?.workspace?.id||'dashboard';
     let rows = [], report = null, busy = false, cancel = false, activeJob = null, stopSent = false;
     const activate = () => {
       document.querySelectorAll('[data-view]').forEach(item => {const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));});
@@ -54,13 +62,14 @@
       if (report) $('holdings-coverage').textContent = `${rows.length}/${report.total} reviewed · ${report.broker} · account fetched ${displayTime(report.as_of)} · ${report.scope}. ${pricedValue == null ? '' : `Priced delivery subtotal ${numeric(pricedValue)} INR (${report.portfolio.priced_rows} rows). Weights ${report.portfolio.complete ? 'exclude unpriced holdings' : 'are provisional'}.`}`;
     };
     $('holdings-filter').onchange = render;
-    broker.onchange = () => {rows = []; report = null; $('holdings-export').disabled = true; $('holdings-coverage').textContent = 'No analysis for the selected broker yet.'; $('holdings-status').textContent = 'Choose Analyse all holdings to load this broker.'; render();};
-    const sameJobScope = job => job?.feature === 'holdings' && job.request?.account_id === (context?.workspace?.id || 'dashboard') && job.request?.payload?.broker === broker.value;
+    broker.onchange = () => {activeJob=null;stopSent=false;cancel=false;$('holdings-cancel').hidden=true;rows = []; report = null; $('holdings-export').disabled = true; $('holdings-coverage').textContent = 'No analysis for the selected broker yet.'; $('holdings-status').textContent = 'Choose Analyse all holdings to load this broker.'; render();if(selectedAccount())window.BrokerForms?.onChange('holdings',selectedAccount());};
+    const sameJobScope = job => job?.feature === 'holdings' && job.request?.account_id === selectedId() && job.request?.payload?.broker === selectedBroker();
     const restoreJob = job => {
       if (!sameJobScope(job) || !Array.isArray(job.output?.rows)) return;
       report = job.output; rows = report.rows.slice(); render();
       $('holdings-export').disabled = false;
       $('holdings-progress').max = report.total || 1; $('holdings-progress').value = report.analysed || 0;
+      if(job.terminal){$('holdings-cancel').hidden=true;}
       $('holdings-status').textContent = `${job.status} · ${rows.length}/${report.total} reviewed. Saved advisory output.`;
     };
     const restoreLatest = () => {
@@ -80,7 +89,7 @@
     });
     window.addEventListener('sector-pulse-job-update', event => {
       if (activeJob?.job.job_id !== event.detail.job.job_id) return;
-      restoreJob(event.detail.job);
+      activeJob=event.detail;restoreJob(event.detail.job);
     });
     window.addEventListener('sector-pulse-job-output', event => restoreJob(event.detail.job));
     broker.addEventListener('change', restoreLatest);
@@ -96,14 +105,16 @@
       $('holdings-cancel').hidden = false; $('holdings-export').disabled = true; $('holdings-progress').hidden = false; $('holdings-progress').value = 0;
       try {
         $('holdings-status').textContent = 'Portfolio analysis submitted as a server job. It continues if you leave this page.';
-        const headers = {'Content-Type':'application/json'}; if (context?.csrf) headers['X-CSRF-Token'] = context.csrf;
-        const response = await fetch('/api/holdings-analysis/analyze', {method:'POST',headers,body:JSON.stringify({broker:broker.value,account_id:context?.workspace?.id,offset:0,limit:1,inventory_only:1})}), data = await response.json();
+        const headers = {'Content-Type':'application/json','X-Job-Return-Accepted':'1'}; if (context?.csrf) headers['X-CSRF-Token'] = context.csrf;
+        const options={method:'POST',headers,body:JSON.stringify({broker:selectedBroker(),account_id:selectedId()==='dashboard'?undefined:selectedId(),offset:0,limit:1,inventory_only:1})};
+        const response = await (window.BrokerForms?window.BrokerForms.fetch('holdings','/api/holdings-analysis/analyze',options):fetch('/api/holdings-analysis/analyze',options)), data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Holdings analysis failed.');
+        if(data.job_accepted){$('holdings-status').textContent='Holdings job accepted. You can continue working; completed and partial output remains saved.';return;}
         report = data; rows = data.rows; render();
         $('holdings-progress').max = data.total || 1; $('holdings-progress').value = data.analysed;
         $('holdings-status').textContent = report.total === 0 ? 'No holdings or open derivative positions were returned for this broker.' : `Review complete · ${rows.length}/${report.total} reviewed. ${rows.filter(row => row.action === 'REVIEW_NEEDED').length} marked Review needed. Suggestions are advisory.`;
       } catch (error) { $('holdings-status').textContent = `${error.message} ${rows.length ? `Partial review retained: ${rows.length} rows.` : 'No complete portfolio review was produced.'}`; }
-      finally {busy = false; broker.disabled = false; $('holdings-analyse').disabled = false; $('holdings-cancel').hidden = true; $('holdings-export').disabled = !report;}
+      finally {busy = false; broker.disabled = false; $('holdings-analyse').disabled = false; $('holdings-cancel').hidden = !activeJob||!!activeJob.job.terminal; $('holdings-export').disabled = !report;}
     };
     restoreLatest();
     $('holdings-export').onclick = () => {

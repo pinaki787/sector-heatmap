@@ -141,11 +141,12 @@
     const closed=data.market?.session?.status==='CLOSED'||data.market?.status==='CLOSED';
     const fresh=!closed&&recent&&data.market?.connected===true&&data.market?.fresh===true&&age!==null&&age>=0&&age<=15;
     const orders=recent&&data.orders?.connected===true;
-    const restOrders=String(data.orders?.basis||'').startsWith('Delta REST reconciliation');
+    const orderBasis=String(data.orders?.basis||'');
+    const restOrders=/^(Delta REST reconciliation|Dhan REST reconciliation|Motilal native orderbook reconciliation)(?:;|$)/.test(orderBasis);
     const tick=age===null?'Tick age unknown':age<0?'Tick timestamp ahead of server':`Tick age ${Math.floor(age)}s`;
     const tickFresh=recent&&data.market?.connected===true&&data.market?.tick_fresh===true&&age!==null&&age>=0&&age<=15;
     const chart=closed?'Market closed':!recent?'Chart updates stale':fresh?'Chart feed is live':tickFresh?'Live ticks · current candle OHLC unavailable':data.market?.connected===false?'Chart feed disconnected':'Chart feed stale / unavailable';
-    return {live:fresh&&data.runner_snapshot_fresh!==false&&(orders||restOrders||data.runner?.config?.mode==='PAPER'),chartFresh:fresh,restOrders,ordersConnected:orders,paper:data.runner?.config?.mode==='PAPER',text:chart+' · '+(orders?'Order stream connected':recent?(restOrders?'Orders: Delta REST reconciliation · no notification stream':'Order stream unavailable; broker reconciliation active'):'Order-stream status stale')+' · '+tick+(data.runner_snapshot_fresh===false?' · Runner status refresh delayed':'')+(data.market?.error?' · '+data.market.error:'')};
+    return {live:fresh&&data.runner_snapshot_fresh!==false&&(orders||restOrders||data.runner?.config?.mode==='PAPER'),chartFresh:fresh,restOrders,ordersConnected:orders,paper:data.runner?.config?.mode==='PAPER',text:chart+' · '+(orders?'Order stream connected':recent?(restOrders?'Orders: '+orderBasis.split(';')[0]+' · no notification stream':'Order stream unavailable; broker reconciliation active'):'Order-stream status stale')+' · '+tick+(data.runner_snapshot_fresh===false?' · Runner status refresh delayed':'')+(data.market?.error?' · '+data.market.error:'')};
   }
   function feedPresentation(data={},elapsed=0){
     const health=chartStreamHealth(data,elapsed);

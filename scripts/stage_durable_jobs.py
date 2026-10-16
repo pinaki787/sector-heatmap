@@ -13,7 +13,7 @@ def read(name):return (root/name).read_text()
 def save(name,text):
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
  if p.suffix=='.py':ast.parse(text)
-for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit'):
+for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit','native_holdings'):
  save('sector_heatmap/'+name+'.py',read('sector_heatmap/'+name+'.py'))
 # Add cooperative cancellation at existing broker-read boundaries.
 hooks={
@@ -33,7 +33,11 @@ for name,pairs in hooks.items():
   if isinstance(node,ast.Expr) and isinstance(node.value,ast.Constant) and isinstance(node.value.value,str) or isinstance(node,ast.ImportFrom) and node.module=='__future__':position=node.end_lineno
   else:break
  lines=s.splitlines(keepends=True);lines.insert(position,'from .persistent_jobs import checkpoint\n')
- save('sector_heatmap/'+name,''.join(lines))
+ text=''.join(lines)
+ if name=='holdings_analysis.py':
+  text=text.replace("'currency': 'INR' if adapter.broker == 'FYERS' else None", "'currency': 'INR' if adapter.broker != 'DELTA_INDIA' else None")
+  text=text.replace("'scope': 'Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding',", "'scope': getattr(adapter,'scope',None) or ('Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding'),")
+ save('sector_heatmap/'+name,text)
 save('holdings-review.js',read('holdings-review.js'))
 s=(base/'renko-batch.py').read_text()
 old="row.update(status='STARTED',running=state['running'],mode=state['config']['mode'])"
@@ -119,7 +123,7 @@ if (base/'dhan_handoff.py').exists():
 
  '''
  assert anchor in s;s=s.replace(anchor,insert.rstrip()+'\n\n'+anchor,1);save('sector_heatmap/dhan_handoff.py',s)
-s=(base/'section_permissions.py').read_text();anchor=" assigned=set(user.get('features',[]))";s=s.replace(anchor,anchor+"\n if path.startswith('/api/jobs'):return bool(assigned & {'broker','runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})",1);save('sector_heatmap/section_permissions.py',s)
+s=(base/'section_permissions.py').read_text();s=s.replace("PREFIXES=[","PREFIXES=[('/api/dhan/holdings-analysis',{'holdings','broker'}),('/api/motilal/holdings-analysis',{'holdings','broker'}),",1);anchor=" assigned=set(user.get('features',[]))";s=s.replace(anchor,anchor+"\n if path.startswith('/api/jobs'):return bool(assigned & {'broker','runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})",1);save('sector_heatmap/section_permissions.py',s)
 s=(base/'dashboard-enhancements.js').read_text();local=read('dashboard-enhancements.js')
 a=local.index('  const renderSavedScreenerAnalysis =');b=local.index('  const analyzeScreenerCandidates',a)
 x=s.index('      const qualified = data.results.filter',s.index('  const analyzeScreenerCandidates'));y=s.index('      screenerAnalysisOffset += data.analyzed',x)
@@ -157,12 +161,18 @@ save('dashboard-enhancements.js',s)
 s=(base/'workspaces.py').read_text()
 anchor="            public=[]"
 assert anchor in s
-s=s.replace(anchor,"            inventory += ['runner-job-details.js','analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit']]\n"+anchor,1)
+s=s.replace(anchor,"            inventory += ['runner-job-details.js','analysis-jobs.js','market-handoff.js'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit','native_holdings']]\n"+anchor,1)
 save('sector_heatmap/workspaces.py',s)
 s=(base/'broker-form-routing.js').read_text()
 old="const control=['manual','handoff'].includes(kind)?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
 new="const control=kind==='handoff'?document.getElementById('ticket-broker'):kind==='manual'?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
-assert old in s;s=s.replace(old,new,1);save('broker-form-routing.js',s)
+assert old in s;s=s.replace(old,new,1)
+s=s.replace("const IDS={parser:","const IDS={holdings:'holdings-broker',parser:",1)
+anchor="function kind(url){const p=new URL(url,location.href).pathname;"
+assert anchor in s;s=s.replace(anchor,anchor+"\n if(/\\/holdings-analysis(?:\\/|$)/.test(p))return 'holdings';",1)
+anchor="function route(kind,url,selected){"
+assert anchor in s;s=s.replace(anchor,anchor+"\n if(kind==='holdings'&&['DHAN','MOTILAL_OSWAL'].includes(selected?.broker)){const u=new URL(url,location.href);if(u.origin!==location.origin||!u.pathname.startsWith('/api/holdings-analysis'))throw Error('Unsupported native holdings request.');u.pathname=u.pathname.replace('/api/','/api/'+(selected.broker==='DHAN'?'dhan':'motilal')+'/');u.searchParams.set('account_id',selected.id);return u.href;}",1)
+save('broker-form-routing.js',s)
 s=(base/'index.html').read_text()
 assert '</body>' in s,'Hosted dashboard closing body tag missing.'
 for asset in ('runner-job-details.js','analysis-jobs.js','market-handoff.js'):

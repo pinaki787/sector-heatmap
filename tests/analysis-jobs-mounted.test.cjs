@@ -59,3 +59,10 @@ test('saved analysis waits for a strategy section that mounts later',async()=>{
  w.Headers=Headers;w.Response=Response;w.AbortSignal=AbortSignal;w.BrokerForms={ready:Promise.resolve(),accounts:()=>[],account:()=>({id:'a'})};w.fetch=async()=>({ok:true,json:async()=>({jobs:[job]})});w.eval(fs.readFileSync('analysis-jobs.js','utf8'));await tick();
  const section=w.document.createElement('section');section.id='renko-engine';w.document.querySelector('main').append(section);await tick();assert.match(section.textContent,/Late section result/);dom.window.close();
 });
+
+test('native holdings paths with account query use the portfolio renderer',async()=>{
+ const dom=new JSDOM('<section id="holdings"></section>',{url:'https://host/',runScripts:'outside-only'}),w=dom.window;const outputs=[];
+ const job={job_id:'f'.repeat(32),created:1,updated:2,feature:'holdings',kind:'ANALYSIS',label:'Portfolio analysis',status:'COMPLETED',terminal:true,request:{path:'/api/motilal/holdings-analysis/analyze?account_id=ours',account_id:'ours'},output:{rows:[]}};
+ w.Headers=Headers;w.Response=Response;w.AbortSignal=AbortSignal;w.BrokerForms={ready:Promise.resolve(),accounts:()=>[],account:()=>({id:'ours'}),kind:()=> 'holdings'};w.fetch=async()=>({ok:true,json:async()=>({jobs:[],next_before:null})});
+ w.addEventListener('sector-pulse-job-output',e=>outputs.push(e.detail));w.eval(fs.readFileSync('analysis-jobs.js','utf8'));await tick();w.SectorPulseJobs.restore({job,base:'https://host/api/jobs'});assert.equal(outputs.length,1);assert.equal(w.document.querySelector('[data-generic-job-output]'),null);dom.window.close();
+});

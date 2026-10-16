@@ -45,6 +45,8 @@ def runner_routes(path):
 
 def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_runs=None,market_factory=None,runner_factory=None):
     store=JobStore(root/'.private/persistent-jobs.sqlite3')
+    from .holdings_analysis import HoldingsAnalysis
+    native_portfolios=HoldingsAnalysis()
     original_get,original_post=handler_class.do_GET,handler_class.do_POST
 
     def identity(handler,mutation=False):
@@ -75,6 +77,15 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
     def replay(handler,path,payload=None):
         clone=object.__new__(handler_class);clone.__dict__=copy(handler.__dict__)
         clone.path=path;clone.command='POST' if payload is not None else 'GET';clone._persistent_job_internal=True
+        if path.split('?',1)[0] in ('/api/dhan/holdings-analysis/analyze','/api/motilal/holdings-analysis/analyze'):
+            if not market_factory:raise ValueError('Selected broker holdings adapter unavailable.')
+            from .native_holdings import DhanHoldings,MotilalHoldings
+            broker,name,aid=market_factory(clone,payload)
+            if payload.get('broker')!=name or payload.get('account_id')!=aid:raise PermissionError('Holdings request differs from the selected broker account.')
+            if name not in ('DHAN','MOTILAL_OSWAL'):raise PermissionError('Native holdings broker mismatch.')
+            adapter=(DhanHoldings if name=='DHAN' else MotilalHoldings)(broker.service)
+            result=native_portfolios.batch(adapter,payload.get('capture_id'),int(payload.get('offset',0)),int(payload.get('limit',1)),bool(payload.get('inventory_only',False)))
+            return dict(result,account_id=aid)
         holdings=path.split('?',1)[0]=='/api/holdings-analysis/analyze'
         if holdings:
             query={k:v for k,v in (payload or {}).items() if k in ('broker','capture_id','offset','limit','inventory_only','account_id') and v is not None}
@@ -182,7 +193,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                         if count<=0:raise ValueError('Screener pagination made no progress; partial output is saved.')
                         combined.extend(next_result.get('results',[]));offset+=count;result=next_result
                     result={**result,'results':combined,'analyzed':len(combined),'has_more':False}
-                if request['path'].split('?',1)[0]=='/api/holdings-analysis/analyze':
+                if request['path'].split('?',1)[0].endswith('/holdings-analysis/analyze'):
                     combined=list(result.get('rows',[]));seen=set()
                     while result.get('next_offset') is not None:
                         offset=result['next_offset']
