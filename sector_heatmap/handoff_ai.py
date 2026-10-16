@@ -41,6 +41,9 @@ class HandoffAI:
         self.key_reader=key_reader or (lambda:configured_key(workspace))
         self.model=model or os.environ.get('SECTOR_PULSE_HANDOFF_MODEL','gpt-4.1-mini')
     def review(self,evidence):
+        for folder in (self.workspace.resolve(),*self.workspace.resolve().parents):
+            if (folder/'.private/openai-api-analysis-disabled').exists():
+                raise ValueError('OpenAI API-key analysis is disabled by your preference. Account-based AI analysis is not configured yet; broker evidence remains saved.')
         checkpoint('Reviewing broker evidence with AI.')
         key=self.key_reader()
         if not key:raise ValueError('Configured OpenAI key unavailable; AI analysis cannot run.')

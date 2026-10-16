@@ -100,3 +100,10 @@ explicitly selected FYERS history source in an existing Motilal runner is a
 separate, consented history setting, never an automatic execution fallback.
 Broker acceptance and fill verification remain separate from implementation
 and read-only validation.
+
+OpenAI API-key analysis can be disabled installation-wide with
+`.private/openai-api-analysis-disabled`. The AI adapter checks this preference
+before reading any key or making a request, including from nested account
+workspaces. Broker evidence and durable outputs remain available. Account-based
+Codex analysis requires a separate provider integration; an existing ChatGPT
+sign-in does not silently replace the Responses API implementation.

@@ -99,24 +99,25 @@ if not args.account_only:
  s=s.replace('                reviewed=self.execution.tickets.preview','                self.exclude_duplicate(symbol)\n                reviewed=self.execution.tickets.preview',1)
  s=s.replace('                    self.adapter.preflight(order,{})',"                    self.exclude_duplicate(item['symbol'])\n                    self.adapter.preflight(order,{})",1)
  save('sector_heatmap/motilal_shared_tickets.py',s)
-s=(base/'dhan_handoff.py').read_text();anchor='    def funds(self):'
-insert='''    def orders(self):
-        rows=self.client.request('GET','/orders')
-        if not isinstance(rows,list) or any(str(r.get('dhanClientId',self.client.client_id))!=self.client.client_id for r in rows):
-            raise PermissionError('Dhan orders do not match selected account.')
-        masters=self.execution.master.load(datetime.now(IST))
-        lookup={(r['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM','I':''}.get(r['SEM_SEGMENT'],''),str(r['SEM_SMST_SECURITY_ID'])):r for r in masters}
-        result=[]
-        for row in rows:
-            if row.get('orderStatus') in ('TRADED','CANCELLED','REJECTED','EXPIRED'):continue
-            if row.get('orderStatus') not in ('TRANSIT','PENDING','PART_TRADED'):raise ValueError('Unknown Dhan order status; duplicate entry cannot be excluded.')
-            meta=lookup.get((row.get('exchangeSegment'),str(row.get('securityId'))))
-            if not meta:raise ValueError('Pending Dhan order has no verified native master mapping.')
-            result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+contract_underlying(meta)+'-EQ',status=row['orderStatus']))
-        return result
+if (base/'dhan_handoff.py').exists():
+ s=(base/'dhan_handoff.py').read_text();anchor='    def funds(self):'
+ insert='''    def orders(self):
+         rows=self.client.request('GET','/orders')
+         if not isinstance(rows,list) or any(str(r.get('dhanClientId',self.client.client_id))!=self.client.client_id for r in rows):
+             raise PermissionError('Dhan orders do not match selected account.')
+         masters=self.execution.master.load(datetime.now(IST))
+         lookup={(r['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM','I':''}.get(r['SEM_SEGMENT'],''),str(r['SEM_SMST_SECURITY_ID'])):r for r in masters}
+         result=[]
+         for row in rows:
+             if row.get('orderStatus') in ('TRADED','CANCELLED','REJECTED','EXPIRED'):continue
+             if row.get('orderStatus') not in ('TRANSIT','PENDING','PART_TRADED'):raise ValueError('Unknown Dhan order status; duplicate entry cannot be excluded.')
+             meta=lookup.get((row.get('exchangeSegment'),str(row.get('securityId'))))
+             if not meta:raise ValueError('Pending Dhan order has no verified native master mapping.')
+             result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+contract_underlying(meta)+'-EQ',status=row['orderStatus']))
+         return result
 
-'''
-assert anchor in s;s=s.replace(anchor,insert+anchor,1);save('sector_heatmap/dhan_handoff.py',s)
+ '''
+ assert anchor in s;s=s.replace(anchor,insert+anchor,1);save('sector_heatmap/dhan_handoff.py',s)
 s=(base/'section_permissions.py').read_text();anchor=" assigned=set(user.get('features',[]))";s=s.replace(anchor,anchor+"\n if path.startswith('/api/jobs'):return bool(assigned & {'broker','runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})",1);save('sector_heatmap/section_permissions.py',s)
 s=(base/'dashboard-enhancements.js').read_text();local=read('dashboard-enhancements.js')
 a=local.index('  const renderSavedScreenerAnalysis =');b=local.index('  const analyzeScreenerCandidates',a)

@@ -78,3 +78,14 @@ class MarketHandoffTests(unittest.TestCase):
         ai=HandoffAI('.',sender=lambda *args,**kwargs:calls.append(kwargs) or Response(),key_reader=lambda:'fixture-secret')
         with self.assertRaisesRegex(ValueError,'submitted broker'):ai.review({'instruments':[{'symbol':'NIFTY'}]})
         self.assertTrue(calls[0]['json']['text']['format']['strict']);self.assertFalse(calls[0]['json']['store'])
+
+    def test_disabling_api_analysis_never_reads_a_key_or_sends_a_request(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.private').mkdir();(root/'.private/openai-api-analysis-disabled').touch()
+            nested=root/'accounts'/'selected'/'source';nested.mkdir(parents=True)
+            calls=[]
+            ai=HandoffAI(nested,sender=lambda *a,**k:calls.append('request'),key_reader=lambda:calls.append('key'))
+            with self.assertRaisesRegex(ValueError,'disabled by your preference'):ai.review({'instruments':[]})
+            self.assertEqual(calls,[])
