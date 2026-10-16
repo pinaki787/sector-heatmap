@@ -1,8 +1,13 @@
 """Stage reviewed changes on downloaded hosted sources, preserving newer broker code."""
 from pathlib import Path
-import ast,shutil,json,hashlib
+import ast,shutil,json,hashlib,argparse
 root=Path(__file__).resolve().parents[1]
-base=root/'outputs/durable-jobs/baseline';stage=root/'outputs/durable-jobs/stage';(stage/'sector_heatmap').mkdir(parents=True,exist_ok=True)
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--baseline',type=Path,default=root/'outputs/durable-jobs/baseline')
+parser.add_argument('--account-only',action='store_true',help='Preserve an account snapshot that has no native Motilal routes.')
+parser.add_argument('--output',type=Path,default=root/'outputs/durable-jobs/stage')
+args=parser.parse_args()
+base=args.baseline;stage=args.output;(stage/'sector_heatmap').mkdir(parents=True,exist_ok=True)
 def read(name):return (root/name).read_text()
 def save(name,text):
  p=stage/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
@@ -18,6 +23,7 @@ hooks={
  'motilal_shared_routes.py': [('        for ticker in page:\n','        for ticker in page:\n            checkpoint("Analyzing "+ticker+" with Motilal evidence.")\n')],
 }
 for name,pairs in hooks.items():
+ if args.account_only and not (base/name).exists():continue
  s=(base/name).read_text()
  for old,new in pairs:
   assert old in s,(name,old);s=s.replace(old,new,1)
@@ -54,7 +60,12 @@ s=s.replace(anchor,'    def stop(self, expected_started_at=None):\n        resul
 save('sector_heatmap/nifty_straddle.py',s)
 s=(base/'web.py').read_text();local=read('sector_heatmap/web.py')
 a=local.index('    from .job_http import install as install_persistent_jobs');b=local.index('    server = ThreadingHTTPServer',a)
-s=s.replace('    server = ThreadingHTTPServer',local[a:b]+'    server = ThreadingHTTPServer',1)
+factory=local[a:b]
+if args.account_only:
+ x=factory.index("        if handler.path.startswith('/api/motilal/'):")
+ y=factory.index('\n        if workspace_guard:\n',x)
+ factory=factory[:x]+"        if handler.path.startswith('/api/motilal/'):\n            raise PermissionError('Open the native Motilal dashboard for this analysis.')\n"+factory[y:]
+s=s.replace('    server = ThreadingHTTPServer',factory+'    server = ThreadingHTTPServer',1)
 s=s.replace('    finally:\n        delta_india.monitoring_stop.set()','    finally:\n        persistent_jobs.close(wait=False)\n        delta_india.monitoring_stop.set()',1)
 a=local.index('        from .exposure_guard import exclude_exposure',local.index('    def analysis_opportunities'));b=local.index('        level_plans = {}',a)
 x=s.index('        position_exposures = open_position_underlyings',s.index('    def analysis_opportunities'));y=s.index('        level_plans = {}',x)
@@ -75,18 +86,19 @@ s=s.replace('from .config import', 'from .exposure_guard import matches_exposure
 a=local.index("        if matches_exposure(payload.get('underlying')");b=local.index('        if enforce_risk_controls',a)
 anchor='        if enforce_risk_controls and len(open_positions) >= max_positions:'
 assert anchor in s;s=s.replace(anchor,local[a:b]+anchor,1);save('sector_heatmap/fyers_execution.py',s)
-s=(base/'motilal_analysis.py').read_text();local=read('sector_heatmap/motilal_analysis.py');a=local.index('    def orders(self):',local.index('class Handoff:'));b=local.index('    def funds(self):',a)
-s=s.replace('    def funds(self):',local[a:b]+'    def funds(self):',1);save('sector_heatmap/motilal_analysis.py',s)
-s=(base/'motilal_shared_tickets.py').read_text();local=read('sector_heatmap/motilal_shared_tickets.py')
-# This file's downloaded baseline is verified against the earlier reviewed local implementation.
-original=local[0:local.index('    def exclude_duplicate')]+local[local.index('    def booked_loss'):]
-# Apply the same focused inserts to the remote version rather than copying local history.
-a=local.index('    def exclude_duplicate');b=local.index('    def booked_loss',a)
-s=s.replace('    def booked_loss',local[a:b]+'    def booked_loss',1)
-s=s.replace("                if symbol in symbols:raise ValueError('Duplicate native contract in batch.')","                underlying_key=meta['exchange'].removesuffix('FO')+':'+meta['underlying']\n                if underlying_key in symbols:raise ValueError('Duplicate native underlying in batch.')\n                symbols.add(underlying_key)\n                if symbol in symbols:raise ValueError('Duplicate native contract in batch.')",1)
-s=s.replace('                reviewed=self.execution.tickets.preview','                self.exclude_duplicate(symbol)\n                reviewed=self.execution.tickets.preview',1)
-s=s.replace('                    self.adapter.preflight(order,{})',"                    self.exclude_duplicate(item['symbol'])\n                    self.adapter.preflight(order,{})",1)
-save('sector_heatmap/motilal_shared_tickets.py',s)
+if not args.account_only:
+ s=(base/'motilal_analysis.py').read_text();local=read('sector_heatmap/motilal_analysis.py');a=local.index('    def orders(self):',local.index('class Handoff:'));b=local.index('    def funds(self):',a)
+ s=s.replace('    def funds(self):',local[a:b]+'    def funds(self):',1);save('sector_heatmap/motilal_analysis.py',s)
+ s=(base/'motilal_shared_tickets.py').read_text();local=read('sector_heatmap/motilal_shared_tickets.py')
+ # This file's downloaded baseline is verified against the earlier reviewed local implementation.
+ original=local[0:local.index('    def exclude_duplicate')]+local[local.index('    def booked_loss'):]
+ # Apply the same focused inserts to the remote version rather than copying local history.
+ a=local.index('    def exclude_duplicate');b=local.index('    def booked_loss',a)
+ s=s.replace('    def booked_loss',local[a:b]+'    def booked_loss',1)
+ s=s.replace("                if symbol in symbols:raise ValueError('Duplicate native contract in batch.')","                underlying_key=meta['exchange'].removesuffix('FO')+':'+meta['underlying']\n                if underlying_key in symbols:raise ValueError('Duplicate native underlying in batch.')\n                symbols.add(underlying_key)\n                if symbol in symbols:raise ValueError('Duplicate native contract in batch.')",1)
+ s=s.replace('                reviewed=self.execution.tickets.preview','                self.exclude_duplicate(symbol)\n                reviewed=self.execution.tickets.preview',1)
+ s=s.replace('                    self.adapter.preflight(order,{})',"                    self.exclude_duplicate(item['symbol'])\n                    self.adapter.preflight(order,{})",1)
+ save('sector_heatmap/motilal_shared_tickets.py',s)
 s=(base/'dhan_handoff.py').read_text();anchor='    def funds(self):'
 insert='''    def orders(self):
         rows=self.client.request('GET','/orders')
@@ -109,8 +121,9 @@ s=(base/'section_permissions.py').read_text();anchor=" assigned=set(user.get('fe
 s=(base/'dashboard-enhancements.js').read_text();local=read('dashboard-enhancements.js')
 a=local.index('  const renderSavedScreenerAnalysis =');b=local.index('  const analyzeScreenerCandidates',a)
 x=s.index('      const qualified = data.results.filter',s.index('  const analyzeScreenerCandidates'));y=s.index('      screenerAnalysisOffset += data.analyzed',x)
+renderer='  const renderSavedScreenerAnalysis = (data, reset) => {\n'+s[x:y]+'  }\n'
 s=s[:x]+'      renderSavedScreenerAnalysis(data, reset)\n'+s[y:]
-s=s.replace('  const analyzeScreenerCandidates =',local[a:b]+'  const analyzeScreenerCandidates =',1)
+s=s.replace('  const analyzeScreenerCandidates =',renderer+'  const analyzeScreenerCandidates =',1)
 a=local.index('  const requestScreenerJobStop =');b=local.index('  const renderSavedScreenerAnalysis =',a)
 s=s.replace('  const renderSavedScreenerAnalysis =',local[a:b]+'  const renderSavedScreenerAnalysis =',1)
 s=s.replace('  let screenerAnalysisCancelled = false','  let screenerAnalysisCancelled = false\n  let screenerActiveJob = null, screenerStopSent = false',1)
@@ -121,7 +134,9 @@ old="    $('screener-analysis-status').textContent = `Cancellation requested · 
 assert old in s;s=s.replace(old,"    $('screener-analysis-status').textContent = 'Stop requested; the server will retain partial analysis output.'\n    requestScreenerJobStop()",1)
 s=s.replace('  const analyzeScreenerOptionPlans = async () => {\n','  const analyzeScreenerOptionPlans = async () => {\n    screenerAnalysisCancelled = false\n',1)
 
-a=local.index("  window.addEventListener('sector-pulse-job-output'");b=local.index("  window.addEventListener('pagehide',saveHandoffResults)",a);anchor="  window.addEventListener('pagehide',saveHandoffResults)";assert anchor in s;s=s.replace(anchor,local[a:b]+anchor,1);save('dashboard-enhancements.js',s)
+a=local.index("  window.addEventListener('sector-pulse-job-output'");b=local.index("  window.addEventListener('pagehide',saveHandoffResults)",a);anchor="  window.addEventListener('pagehide',saveHandoffResults)";assert anchor in s;s=s.replace(anchor,local[a:b]+anchor,1)
+if args.account_only:s=s.replace("BrokerForms?.account('screener')","BrokerForms?.account('account')")
+save('dashboard-enhancements.js',s)
 s=(base/'workspaces.py').read_text()
 anchor="            public=[]"
 assert anchor in s

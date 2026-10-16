@@ -109,7 +109,12 @@ class JobStore:
         if stop:self.stoppers[job_id]=stop
         captured=copy_context()
         pool=self.runner_pool if kind=='RUNNER' else self.pool
-        self.futures[job_id]=pool.submit(captured.run,self._run,owner,job_id,work)
+        future=pool.submit(captured.run,self._run,owner,job_id,work)
+        with self.guard:self.futures[job_id]=future
+        def release(completed):
+            with self.guard:
+                if self.futures.get(job_id) is completed:self.futures.pop(job_id,None)
+        future.add_done_callback(release)
         return self.get(owner,job_id)
     def _run(self,owner,job_id,work):
         with self.guard:

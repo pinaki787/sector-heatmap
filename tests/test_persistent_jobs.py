@@ -90,3 +90,13 @@ class DurableJobTests(unittest.TestCase):
         self.assertTrue(entered.wait(1));self.assertNotIn('secret',str(self.store.get('user:account',job['job_id'])['request']))
         with self.assertRaises(ValueError):self.submit(lambda ctx:None,key='excess')
         release.set()
+
+    def test_finished_jobs_release_worker_handles_while_outputs_remain_retrievable(self):
+        ids=[]
+        for index in range(20):
+            job=self.submit(lambda ctx:{'saved':True},key='history-'+str(index))
+            ids.append(job['job_id']);self.await_status(job['job_id'],{'COMPLETED'})
+        deadline=time.monotonic()+2
+        while self.store.futures and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(self.store.futures,{})
+        for job_id in ids:self.assertEqual(self.store.get('user:account',job_id)['output'],{'saved':True})
