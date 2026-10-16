@@ -9,6 +9,16 @@ def save(name,text):
  if p.suffix=='.py':ast.parse(text)
 for name in ('persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff'):
  save('sector_heatmap/'+name+'.py',read('sector_heatmap/'+name+'.py'))
+s=(base/'renko-batch.py').read_text()
+old="row.update(status='STARTED',running=state['running'],mode=state['config']['mode'])"
+new="row.update(status='STARTED',running=state['running'],mode=state['config']['mode'],run_id=state.get('run_id'),started_at=state.get('started_at'))"
+assert old in s;s=s.replace(old,new,1);save('strategies/renko_supertrend/batch.py',s)
+s=(base/'delta_india.py').read_text()
+s=s.replace("self.runner={'running':True,'config':cfg","self.runner={'run_id':secrets.token_hex(16),'running':True,'config':cfg")
+s=s.replace("self.runner.update(running=True,exit_only=False,config=cfg","self.runner.update(run_id=secrets.token_hex(16),running=True,exit_only=False,config=cfg")
+anchor="    def stop_runner(self,payload=None):\n        with self.lock:\n"
+assert anchor in s;s=s.replace(anchor,anchor+"            if (payload or {}).get('run_id') and payload['run_id']!=self.runner.get('run_id'):\n                raise ValueError('Runner changed; the replacement run was preserved.')\n",1)
+save('sector_heatmap/delta_india.py',s)
 s=(base/'web.py').read_text();local=read('sector_heatmap/web.py')
 a=local.index('    from .job_http import install as install_persistent_jobs');b=local.index('    server = ThreadingHTTPServer',a)
 s=s.replace('    server = ThreadingHTTPServer',local[a:b]+'    server = ThreadingHTTPServer',1)
@@ -67,7 +77,13 @@ s=(base/'broker-form-routing.js').read_text()
 old="const control=['manual','handoff'].includes(kind)?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
 new="const control=kind==='handoff'?document.getElementById('ticket-broker'):kind==='manual'?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);"
 assert old in s;s=s.replace(old,new,1);save('broker-form-routing.js',s)
-s=(base/'index.html').read_text();s=s.replace('  </body>','    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-1"></script>\n  </body>');save('index.html',s)
+s=(base/'index.html').read_text()
+assert '</body>' in s,'Hosted dashboard closing body tag missing.'
+for asset in ('analysis-jobs.js','market-handoff.js'):
+    assert asset not in s,'Job assets already installed; refresh baseline before staging.'
+s=s.replace('</body>','    <script src="/analysis-jobs.js?v=20261016-1"></script>\n    <script src="/market-handoff.js?v=20261016-1"></script>\n</body>',1)
+assert s.count('/analysis-jobs.js?')==1 and s.count('/market-handoff.js?')==1
+save('index.html',s)
 for name in ('analysis-jobs.js','market-handoff.js'):save(name,read(name))
 manifest={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in base.iterdir() if p.is_file()};(stage/'baseline-sha256.json').write_text(json.dumps(manifest,indent=2))
 print('Staged',len(list(stage.rglob('*.py'))),'Python modules and UI files on hosted baseline.')

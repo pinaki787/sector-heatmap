@@ -805,7 +805,7 @@ class DeltaIndia:
             last=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])['last_completed']
             if not last or last.get('rsi_ma') is None:raise ValueError('Completed RSI/MA history is not warmed up.')
             self.live['runner_config']=deepcopy(cfg);self._save_live()
-            self.runner={'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
+            self.runner={'run_id':secrets.token_hex(16),'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start();return self.status()
     def resume_paper_runner(self,payload=None):
         """Explicitly resume the persisted Paper strategy without replacing its position."""
@@ -818,11 +818,13 @@ class DeltaIndia:
             p,_=self._paper_contract(cfg['symbol'])
             snapshot=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])
             if not snapshot.get('last_completed'):raise ValueError('Completed signal history is unavailable.')
-            self.runner.update(running=True,exit_only=False,config=cfg,product_id=p['id'],last_candle=self.live.get('runner_last_candle') or snapshot['last_completed']['timestamp'],pending=None,action=None,message='Explicitly resumed persisted Paper strategy; retained position will be reconciled against completed signals.')
+            self.runner.update(run_id=secrets.token_hex(16),running=True,exit_only=False,config=cfg,product_id=p['id'],last_candle=self.live.get('runner_last_candle') or snapshot['last_completed']['timestamp'],pending=None,action=None,message='Explicitly resumed persisted Paper strategy; retained position will be reconciled against completed signals.')
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start()
             return self.status()
     def stop_runner(self,payload=None):
         with self.lock:
+            if (payload or {}).get('run_id') and payload['run_id']!=self.runner.get('run_id'):
+                raise ValueError('Runner changed; the replacement run was preserved.')
             self.runner['running']=False;self.stop_event.set();self.runner['message']='Stopped intentionally. Held position monitoring will remain stopped across restart.'
             for mode,pos in [('PAPER',self.paper.get('position')),('LIVE',self.live.get('runner_position'))]:
                 if pos:

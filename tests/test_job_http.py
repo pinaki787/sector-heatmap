@@ -12,7 +12,7 @@ from sector_heatmap.job_http import install,operation
 class JobHTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.entered=threading.Event();self.release=threading.Event();self.calls=[];self.running=False
+        self.entered=threading.Event();self.release=threading.Event();self.calls=[];self.running=False;self.observed_run='one'
         test=self
         class Auth:
             def check(self,h,mutation=False):return True
@@ -35,7 +35,7 @@ class JobHTTPTests(unittest.TestCase):
             def log_message(self,*args):pass
         def handles(handler,path,payload,result):
             if not path.endswith('/renko-supertrend/start'):return None
-            def snapshot():return dict(running=test.running,run_id='one')
+            def snapshot():return dict(running=test.running,run_id=test.observed_run)
             def stop():test.running=False;test.calls.append('/api/renko-supertrend/stop')
             return [(snapshot,stop)]
         self.store=install(Handler,Path(self.tmp.name),local_auth=Auth(),runner_factory=handles if getattr(self,'direct_monitor',False) else None)
@@ -96,3 +96,11 @@ class JobHTTPTests(unittest.TestCase):
 
 class DirectRunnerJobHTTPTests(JobHTTPTests):
     direct_monitor=True
+    def test_replacement_run_is_never_adopted_by_older_job(self):
+        self.observed_run='replacement'
+        _,job=self.request('POST','/api/renko-supertrend/start',{'underlying':'NIFTY'})
+        value=self.wait(job['job_id'])
+        self.assertEqual(value['status'],'COMPLETED')
+        self.assertTrue(self.running)
+        self.assertEqual(self.calls.count('/api/renko-supertrend/stop'),0)
+        self.assertEqual(value['output']['run_id'],'one')

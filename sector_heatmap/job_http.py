@@ -144,7 +144,10 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                 handles=runner_factory(handler,request['path'],payload,result) if kind=='RUNNER' and runner_factory else None
                 if handles is not None:
                     def run_identity(value):return value.get('run_id') or value.get('run_started_at') or value.get('started_at')
-                    owned=[dict(snapshot=snapshot,stop=stop,identity=run_identity(snapshot()),stopped=False) for snapshot,stop in handles]
+                    # Bind to activation output, never whichever run happens to
+                    # exist when the background monitor first obtains a snapshot.
+                    activation_identity=run_identity(result.get('runner',result))
+                    owned=[dict(snapshot=handle[0],stop=handle[1],identity=handle[2] if len(handle)>2 else activation_identity,stopped=False) for handle in handles]
                     while owned:
                         if store.shutdown.is_set():raise JobInterrupted()
                         live=[];snapshots=[]

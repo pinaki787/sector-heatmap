@@ -4467,11 +4467,13 @@ def run_server():
         # Resolve already-activated in-process runners once. Monitoring survives
         # session expiry; new activation still goes through the original auth.
         parsed=urlparse(path);route=parsed.path;query=parse_qs(parsed.query)
-        def renko_handle(runner):
-            expected=runner.snapshot().get('run_id')
-            return runner.snapshot,(lambda:runner.request_stop({'run_id':expected})) if hasattr(runner,'request_stop') else runner.stop
+        def renko_handle(runner,activation=None):
+            value=activation if activation is not None else result.get('runner',result)
+            expected=value.get('run_id')
+            stop=(lambda:runner.request_stop({'run_id':expected})) if hasattr(runner,'request_stop') else runner.stop
+            return runner.snapshot,stop,expected or value.get('run_started_at') or value.get('started_at')
         if route=='/api/renko-instances/start-selected':
-            return [renko_handle(renko_lookup_instance(result['broker'],r['instance_key'])) for r in result.get('results',[]) if r.get('status')=='STARTED']
+            return [renko_handle(renko_lookup_instance(result['broker'],r['instance_key']),r) for r in result.get('results',[]) if r.get('status')=='STARTED']
         if route.startswith('/api/renko-supertrend/'):
             return [renko_handle(renko_select(route,path)[0][0])]
         if route.startswith('/api/renko-delta/'):
@@ -4492,7 +4494,8 @@ def run_server():
         if route.startswith('/api/nifty-straddle'):return [(nifty_straddle.snapshot,nifty_straddle.stop)]
         if route.startswith('/api/sensex-straddle'):return [(sensex_straddle.snapshot,sensex_straddle.stop)]
         if route.startswith('/api/delta-india/') and route.endswith('/runner-start'):
-            return [(lambda:delta_india.status()['runner'],delta_india.stop_runner)]
+            expected=result.get('runner',result).get('run_id')
+            return [(lambda:delta_india.status()['runner'],lambda:delta_india.stop_runner({'run_id':expected}),expected)]
         return None
     persistent_jobs = install_persistent_jobs(Handler, ROOT, local_auth, workspace_guard, analysis_runs, market_job_adapter, runner_job_handles)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
