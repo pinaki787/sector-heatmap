@@ -14,6 +14,12 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def handler_factory(guard,service):
+    from .motilal_login import SavedLogin
+    saved_login=None
+    def login():
+        nonlocal saved_login
+        if saved_login is None:saved_login=SavedLogin(service)
+        return saved_login
     class Handler(BaseHTTPRequestHandler):
         def send_json(self,status,value):self.response(status,json.dumps(value,allow_nan=False).encode(),'application/json')
         def response(self,status,data,mime='text/html'):
@@ -43,6 +49,7 @@ def handler_factory(guard,service):
                 if path=='/api/workspace-context':
                     self.send_json(200,{**guard.context(user,account),'csrf':user['csrf'],'visible':guard.store.sidebar_visibility().get('broker',True),
                         'permitted':bool(user.get('admin') or 'broker' in user.get('features',[]))});return
+                if path=='/api/motilal/saved-login':self.send_json(200,login().status(user,cookie_token(self.headers)));return
                 if path=='/api/motilal/status':self.send_json(200,service.status());return
                 if path not in {'/api/motilal/status'}:
                     self.send_json(404,dict(error='Use the existing dashboard workflows for trading and analysis. This page serves broker connection details only.'));return
@@ -56,6 +63,12 @@ def handler_factory(guard,service):
                 payload=json.loads(self.rfile.read(size))
                 if not isinstance(payload,dict):raise ValueError('Send an object.')
                 path=urlparse(self.path).path
+                if path=='/api/motilal/disconnect-session':self.send_json(200,login().disconnect_rechallenge(user,cookie_token(self.headers)));return
+                if path=='/api/motilal/saved-login':self.send_json(200,login().save(payload));return
+                if path=='/api/motilal/saved-login-forget':self.send_json(200,login().forget());return
+                if path=='/api/motilal/saved-login-start':self.send_json(200,login().start(user,cookie_token(self.headers),require_otp=payload.get('require_otp') is True));return
+                if path=='/api/motilal/saved-login-resend':self.send_json(200,login().resend(user,cookie_token(self.headers)));return
+                if path=='/api/motilal/saved-login-verify':self.send_json(200,login().verify(user,cookie_token(self.headers),payload.get('otp')));return
                 if path=='/api/motilal/login-start':self.send_json(200,service.login_start(user,cookie_token(self.headers)));return
                 if path=='/api/motilal/login-complete':self.send_json(200,service.login_complete(user,cookie_token(self.headers),payload.get('auth_token')));return
                 self.send_json(404,dict(error='Use the existing dashboard workflows. Standalone Motilal trading is disabled.'));return

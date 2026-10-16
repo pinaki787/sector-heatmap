@@ -114,6 +114,23 @@ async function refresh() {
       disconnect.onclick=async()=>{
         disconnect.disabled=true;
         try{
+          if(account.broker==='MOTILAL_OSWAL'){
+            const target='/broker-workspace/'+encodeURIComponent(account.id);
+            if(account.disconnected){
+              await api('reconnect',{account_id:account.id});
+              if(!account.running)await api('open',{account_id:account.id});
+            }else{
+              if(!account.running)await api('open',{account_id:account.id});
+              const response=await fetch(target+'/api/motilal/disconnect-session',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':currentUser?.csrf||''},body:'{}'});
+              const value=await response.json();
+              if(!response.ok){
+                if(value.auth_required){location.assign(target+'/?challenge=otp#saved-trading-login');return;}
+                await refresh();throw Error(value.error||'Broker logout or fresh OTP request failed.');
+              }
+              if(!value.otp_required)throw Error('Fresh OTP challenge was not confirmed.');
+            }
+            location.assign(target+'/?challenge=otp#saved-trading-login');return;
+          }
           await api(account.disconnected?'reconnect':'disconnect',{account_id:account.id});
           if(account.broker==='DHAN')sessionStorage.removeItem('dhan-login-account');
           result.textContent='';
@@ -176,6 +193,7 @@ function edit(account) {
   for(const id of ['credential-key','credential-secret','live-enabled'])$(id).disabled=!!account.running;
   $('test-connection').disabled=!account.running;
   $('connection-test-result').textContent='Open the dashboard and complete Motilal login before testing.';
+  const tradingLogin=document.createElement('a');tradingLogin.textContent='Trading login & OTP settings';tradingLogin.href='/broker-workspace/'+account.id+'/#saved-trading-login';tradingLogin.className='button';$('callback').append(document.createElement('br'),tradingLogin);
   $('configuration').scrollIntoView({behavior:'smooth',block:'start'});return;
  }
 

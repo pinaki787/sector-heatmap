@@ -33,3 +33,8 @@ tzdata==2026.2
 numpy==2.2.6
 pandas==2.2.3
 pytz==2025.2
+
+# Optional encrypted Motilal saved login.
+cryptography==46.0.7
+cffi==2.1.1
+pycparser==3.11

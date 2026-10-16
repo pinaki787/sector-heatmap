@@ -33,6 +33,7 @@ READS={
  'trade_detail':'/rest/book/v4/gettradedetailbyuniqueorderid',
  'access_token':'/rest/login/v1/getaccesstoken',
 }
+SESSION_ACTIONS={'logout':'/rest/login/v5/logout'}
 MUTATIONS={
  'place':'/rest/trans/v2/placeorder',
  'cancel':'/rest/trans/v2/cancelorder',
@@ -99,13 +100,14 @@ class Client:
 
     def request(self, operation, payload=None):
         mutation=operation in MUTATIONS
-        if operation not in READS and not mutation:raise ValueError('Unsupported Motilal operation.')
+        if operation not in READS and operation not in SESSION_ACTIONS and not mutation:raise ValueError('Unsupported Motilal operation.')
         if mutation:
             if not self.live_enabled:raise PermissionError('Motilal Live submission is disabled for this account.')
             if not self.identity_verified:raise PermissionError('Verify this Motilal account before requesting an order action.')
-        path=(MUTATIONS if mutation else READS)[operation]
+        path=(MUTATIONS if mutation else SESSION_ACTIONS if operation in SESSION_ACTIONS else READS)[operation]
         body=dict(payload or {})
         if body.get('clientcode') and str(body['clientcode']).upper()!=self.client_id:raise PermissionError('Broker request belongs to a different client code.')
+        if operation=='logout' and (not self.identity_verified or str(body.get('userid','')).upper()!=self.client_id):raise PermissionError('Verify the owned Motilal account before broker logout.')
         headers=self.headers(access_token_call=operation=='access_token')
         started=self.clock()
         try:
