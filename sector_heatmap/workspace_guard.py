@@ -57,23 +57,29 @@ class WorkspaceGuard:
         if path.startswith('/api/motilal/'):
             raise PermissionError('Open a Motilal Oswal workspace for this action.')
         if path.startswith('/api/renko-engine/'):
-            if path.split('/')[3]!=account['id'] or payload.get('broker',account['broker'])!=account['broker']:
-                raise PermissionError('Renko Engine action differs from this broker account.')
+            parts=path[len('/api/renko-engine/'):].split('/')
+            if len(parts)!=2 or parts[0]!=account['id'] or payload.get('account_id')!=account['id'] or payload.get('broker')!=account['broker']:
+                raise PermissionError('Renko Engine must use this exact private account.')
             return
         delta=path.startswith(('/api/delta-india/','/api/renko-delta/'))
         if path.startswith('/api/renko-instances/'):
             if payload.get('broker')!=account['broker']:
                 raise PermissionError('Action broker differs from this account workspace.')
-        elif account['broker']=='FYERS' and delta:
-            raise PermissionError('Open a Delta India account workspace for this action.')
+        elif account['broker']=='DHAN':
+            if not path.startswith(('/api/dhan/', '/api/trade-ticket/', '/api/renko-dhan/', '/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+                raise PermissionError('This action has no Dhan adapter; it cannot be routed to FYERS or Delta.')
+            if payload.get('broker') and str(payload['broker']).upper() != 'DHAN':
+                raise PermissionError('Action broker differs from this Dhan account workspace.')
+        elif account['broker']=='FYERS' and (delta or path.startswith(('/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/'))):
+            raise PermissionError('Open the matching broker account workspace for this action.')
         elif account['broker']=='DELTA_INDIA' and not delta:
-            raise PermissionError('Open a FYERS account workspace for this action.')
+            raise PermissionError('Open the matching broker account workspace for this action.')
         # Credential identity cannot be changed through a running dashboard.
         if path=='/api/delta-india/connect':
             raise PermissionError('Save broker credentials in user and broker setup while the dashboard is stopped.')
 
     def context(self,user,account):
-        return dict(username=user['username'],admin=bool(user['admin']),allowed_features=user.get('features',[]),workspace={k:account[k] for k in ('id','label','broker','account_ref','live_enabled')},
+        return dict(username=user['username'],admin=bool(user['admin']),allowed_features=user.get('features',[]),sidebar_visibility=self.store.sidebar_visibility(),renko_visibility=self.store.renko_visibility(),workspace={k:account[k] for k in ('id','label','broker','account_ref','live_enabled')},
                     portal_url=f'http://127.0.0.1:{self.portal_port}/')
 
     def check(self,handler,mutation=False):

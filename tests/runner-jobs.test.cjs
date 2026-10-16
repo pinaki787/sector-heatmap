@@ -9,6 +9,7 @@ test('Motilal lists only its native Renko route and keeps read/stop bound to tha
  const u=new URL(link(j,'https://portal.example'));assert.equal(u.searchParams.get('renkoBroker'),'MOTILAL_OSWAL');assert.equal(u.searchParams.get('brokerAccount'),a.id);
  assert.deepEqual(sources({id:'unknown',broker:'UNSUPPORTED'}),[]);
 });
+
 for(const broker of ['FYERS','DHAN','DELTA_INDIA'])test(broker+' jobs stay bound to the selected account',()=>{
  const a={id:'owned',broker,label:'Mine'},source=sources(a)[0],state={broker,instance_key:'job1',run_id:'run1',running:true,config:{underlying:'instrument',mode:'PAPER'}};
  const j=normalize(a,source,state);assert(j.read.includes('owned'));assert(j.stop.includes('owned'));assert.equal(j.status,'Watching');
@@ -53,6 +54,7 @@ test('rendered inventory reports server status and selection sends only one scop
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false};
  w.AbortSignal.timeout=()=>undefined;w.setInterval=()=>0;
  w.BrokerForms={ready:Promise.resolve(),accounts:()=>[{id:'mine',label:'Mine',broker:'DHAN',configured:true},{id:'motilal',label:'Motilal Oswal',broker:'MOTILAL_OSWAL',configured:true}]};
+
  const state=()=>({broker:'DHAN',instance_key:'x',run_id:'r',running,config:{underlying:'NIFTY',mode:'PAPER'}});
  w.fetch=async(url,o)=>{calls.push([url,o.method]);if(o.method==='POST'){running=false;return {ok:true,json:async()=>state()};}
  return {ok:true,json:async()=>url.includes('/renko-dhan/')?(url.endsWith('/instances')?{instances:[state()]}:state()):{instances:[]}}};
@@ -63,6 +65,7 @@ test('rendered inventory reports server status and selection sends only one scop
  assert(calls.some(c=>c[0]==='/api/renko-motilal/motilal/instances'));
  assert(!calls.some(c=>c[0].includes('/broker-workspace/motilal/')||c[0].includes('/renko-engine/motilal/')));
  assert.doesNotMatch(w.document.querySelector('[data-message]').textContent,/Some jobs unavailable/);
+
  w.document.querySelector('[data-select-all]').click();
  assert.equal(w.document.querySelector('tbody input').checked,true);
  w.document.querySelector('[data-stop]').click();await new Promise(r=>setImmediate(r));

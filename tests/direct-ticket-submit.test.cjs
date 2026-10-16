@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');
-for(const file of ['dashboard-enhancements.js','outputs/direct-ticket-submit/dashboard.after.js']){
+for(const file of ['dashboard-enhancements.js']){
  test(file+': Submit uses displayed preview without typing and sends once',async()=>{
   const source=fs.readFileSync(path.join(__dirname,'..',file),'utf8');
   const start=source.indexOf("$('screener-route-preview-groups').innerHTML=groups.map");
@@ -21,7 +21,7 @@ for(const file of ['dashboard-enhancements.js','outputs/direct-ticket-submit/das
   dom.window.close();
  });
 }
-test('older account dashboard also enables Submit without typing',async()=>{
+test('archived older account dashboard also enables Submit without typing',{skip:!fs.existsSync(path.join(__dirname,'../outputs/direct-ticket-submit/account-dashboard.after.js'))},async()=>{
  const source=fs.readFileSync(path.join(__dirname,'../outputs/direct-ticket-submit/account-dashboard.after.js'),'utf8');
  assert(source.includes("$('submit-screener-order').disabled = !preview.live_submission_enabled || !preview.submission_eligible"));
  assert(!source.includes('Exact fresh confirmation phrase'));

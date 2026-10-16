@@ -32,6 +32,7 @@ class LongOptionTests(unittest.TestCase):
         symbol,kind=('CE100','CE') if direction=='BULLISH' else ('PE100','PE')
         return dict(broker='fyers',underlying='NSE:TEST-EQ',expiry='2026-09-03',lots=1,invalidation=94 if direction=='BULLISH' else 106,
                     enforce_risk_controls=False,minimum_reward_to_risk=1,
+                    underlying_exit_plan=dict(stop=94 if direction=='BULLISH' else 106,target=110 if direction=='BULLISH' else 90),
                     proposal=dict(kind='LONG_OPTION',source='ANALYSIS_HANDOFF',label='Buy ATM option',direction=direction,target_exit_points=10,
                                   legs=[dict(action='BUY',symbol=symbol,strike=100,option_type=kind)]))
 
@@ -45,7 +46,54 @@ class LongOptionTests(unittest.TestCase):
                 self.assertEqual(result['status'],'OPEN')
                 self.assertEqual(self.client.sent[-1]['symbol'],symbol)
                 self.assertEqual(self.client.sent[-1]['side'],1)
+                self.assertGreater(self.client.sent[-1]['stopLoss'],0)
+                self.assertGreater(self.client.sent[-1]['takeProfit'],0)
+                self.assertEqual(self.client.sent[-1]['legType'],1)
         self.assertEqual(len(self.client.sent),2)
+
+    def test_option_batch_sends_linked_exits(self):
+        preview=self.service.prepare_batch(dict(items=[self.payload('BULLISH')]))
+        self.service.submit_batch(preview['preview_id'],preview['confirmation_phrase'])
+        self.assertEqual(len(self.client.sent),1)
+        self.assertGreater(self.client.sent[0]['stopLoss'],0)
+        self.assertGreater(self.client.sent[0]['takeProfit'],0)
+
+    def test_cash_batch_carries_each_linked_exit(self):
+        payload=dict(broker='fyers',underlying='NSE:TEST-EQ',quantity=2,invalidation=95,enforce_risk_controls=False,
+                     proposal=dict(kind='EQUITY',direction='BULLISH',label='Cash',target=110))
+        sent=[]
+        def basket(orders):
+            sent.extend(orders)
+            return dict(s='ok',data=[dict(s='ok',id=str(i+1)) for i in range(len(orders))])
+        self.client.place_basket_orders=basket
+        preview=self.service.prepare_batch(dict(items=[payload]))
+        self.service.submit_batch(preview['preview_id'],preview['confirmation_phrase'])
+        self.assertEqual(len(sent),1)
+        self.assertEqual(sent[0]['stopLoss'],5)
+        self.assertEqual(sent[0]['takeProfit'],10)
+
+    def test_protection_changes_require_new_review(self):
+        from copy import deepcopy
+        from sector_heatmap.fyers_execution import _review_terms
+        p=self.service.prepare(self.payload('BULLISH'))
+        changed=deepcopy(p);changed['protection']['stop_loss_price']+=.05
+        self.assertNotEqual(_review_terms(p),_review_terms(changed))
+        changed=deepcopy(p);changed['protection']['calculated_at']='later'
+        self.assertEqual(_review_terms(p),_review_terms(changed))
+
+    def test_missing_exit_plan_blocks_before_submission(self):
+        payload=self.payload('BULLISH');payload.pop('underlying_exit_plan')
+        with self.assertRaises(ValueError):self.service.prepare(payload)
+        self.assertEqual(self.client.sent,[])
+
+    def test_cash_order_contains_offsets_not_absolute_prices(self):
+        payload=dict(broker='fyers',underlying='NSE:TEST-EQ',quantity=2,invalidation=95,cash_product='INTRADAY',enforce_risk_controls=False,
+                     proposal=dict(kind='EQUITY',direction='BULLISH',label='Cash',target=110))
+        preview=self.service.prepare(payload)
+        self.service.submit(preview['preview_id'],preview['confirmation_phrase'])
+        self.assertEqual(self.client.sent[0]['stopLoss'],5)
+        self.assertEqual(self.client.sent[0]['takeProfit'],10)
+        self.assertEqual(self.client.sent[0]['legType'],1)
 
     def test_sell_leg_wrong_type_or_spread_fails_before_broker_mutation(self):
         for changes in [dict(action='SELL'),dict(option_type='CE')]:

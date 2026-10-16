@@ -8,15 +8,15 @@ class CostModelTests(unittest.TestCase):
         return dict(tag=tag,lifecycle_id='OWNED',symbol='BSE:SENSEX26O0872700CE',mode='PAPER',side=side,requested=qty,filled=qty,remaining=0,average_price=price,quantity_multiplier=1,lot_size=20,filled_at=1791264000+(side=='SELL')*60,first_fill_confirmed_at=1791264000+(side=='SELL')*60,submitted_at=1791264000+(side=='SELL')*60,reason='TEST',indicator_snapshot={'settings':{'additional_slippage_points':0}})
     def test_buy_sell_asymmetry_and_user_brokerage(self):
         buy=fee(100000,'BUY');sell=fee(100000,'SELL')
-        self.assertEqual(buy['brokerage'],15);self.assertEqual(sell['brokerage'],15)
+        self.assertEqual(buy['brokerage'],20);self.assertEqual(sell['brokerage'],20)
         self.assertEqual(buy['stt'],0);self.assertEqual(sell['stamp'],0)
         self.assertEqual(sell['stt'],150);self.assertEqual(buy['stamp'],3)
-        self.assertEqual(buy['gst'],8.57);self.assertEqual(buy['total'],59.17)
+        self.assertEqual(buy['gst'],11.09);self.assertEqual(buy['total'],75.69)
     def test_closed_gross_net_and_no_double_slippage(self):
         orders=[self.order('BUY',40,10,'B'),self.order('SELL',40,11,'S')]
         t=trade_history(orders)[0];c=t['costs']
         self.assertEqual(t['realized_pnl'],40)
-        self.assertEqual(c['incurred']['brokerage'],30)
+        self.assertEqual(c['incurred']['brokerage'],40)
         self.assertEqual(c['realized_additional_slippage'],0)
         self.assertAlmostEqual(c['realized_net'],40-c['incurred']['total'],2)
         self.assertIn('Embedded',c['actual_slippage'])
@@ -24,9 +24,9 @@ class CostModelTests(unittest.TestCase):
         orders=[self.order('BUY',13,10,'B'),self.order('SELL',5,11,'S')]
         p=dict(lifecycle_id='OWNED')
         t=trade_history(orders,p,16,dict(bid=12,exchange_at=1791264100))[0];c=t['costs']
-        self.assertEqual(c['incurred']['brokerage'],30)
+        self.assertEqual(c['incurred']['brokerage'],40)
         self.assertAlmostEqual(c['entry_costs_allocated_realized']+c['entry_costs_remaining'],c['entry_costs_incurred'],2)
-        self.assertEqual(c['estimated_exit_costs']['brokerage'],15)
+        self.assertEqual(c['estimated_exit_costs']['brokerage'],20)
         self.assertLess(c['unrealized_net'],16)
         self.assertEqual(len(ledger_costs([orders[0],orders[0]])),1)
     def test_open_costs_and_stale_mark_net_unavailable(self):
@@ -34,8 +34,8 @@ class CostModelTests(unittest.TestCase):
         p=dict(lifecycle_id='OWNED')
         c=trade_history(orders,p,40,dict(bid=11))[0]['costs']
         self.assertEqual(c['realized_net'],0)
-        self.assertEqual(c['incurred']['brokerage'],15)
-        self.assertEqual(c['estimated_exit_costs']['brokerage'],15)
+        self.assertEqual(c['incurred']['brokerage'],20)
+        self.assertEqual(c['estimated_exit_costs']['brokerage'],20)
         self.assertLess(c['unrealized_net'],40)
         self.assertIsNone(trade_history(orders,p,None,None)[0]['costs']['unrealized_net'])
     def test_unknown_contract_rates_and_invalid_model_are_unavailable(self):
@@ -58,3 +58,14 @@ class CostModelTests(unittest.TestCase):
         rows=[self.order('SELL',40,10,'S1'),self.order('SELL',40,10,'S2')]
         c=ledger_costs(rows)
         self.assertEqual(c['S1']['stt']+c['S2']['stt'],1)
+
+class NseCostTests(CostModelTests):
+    def order(self,*args):
+        row=super().order(*args);row['symbol']='NSE:NIFTY26O1322500PE';return row
+    def test_nse_fee_schedule(self):
+        c=fee(100000,'SELL',exchange_rate=0.000355299)
+        self.assertEqual(c['exchange'],35.53)
+        self.assertEqual(c['clearing'],9)
+        self.assertEqual(c['brokerage'],20)
+        self.assertEqual(c['gst'],11.63)
+        self.assertEqual(c['total'],226.26)

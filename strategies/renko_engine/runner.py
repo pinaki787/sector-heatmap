@@ -97,7 +97,10 @@ class IndependentSignals:
 
 class FyersRunner(IndependentSignals,Runner):
  configure=staticmethod(lambda p:configuration(p,'FYERS'))
-class DhanRunner(IndependentSignals,Runner):
+from sector_heatmap.dhan_strategy_service import DhanRenkoRunner
+
+class DhanRunner(IndependentSignals,DhanRenkoRunner):
+
  configure=staticmethod(lambda p:configuration(p,'DHAN'))
 class DeltaEngineRunner(IndependentSignals,DeltaRunner):
  configure=staticmethod(lambda p:configuration(p,'DELTA_INDIA'))

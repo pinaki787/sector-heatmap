@@ -1,4 +1,4 @@
-from . import exit_indicators, market_structure
+from . import exit_indicators, market_structure, indicator_families, manual_trend
 """Sequential port of source.pine, including Pine-style missing-value warm-up."""
 from copy import deepcopy
 from .retest import evaluate as retest_evaluate
@@ -9,12 +9,14 @@ from zoneinfo import ZoneInfo
 
 from .indicator_selection import DEFAULTS as INDICATOR_DEFAULTS, validate as validate_indicators, qualify as qualify_indicators
 
-DEFAULTS = dict(**INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
-                use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
+DEFAULTS = dict(**manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
+                use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, rsi_level_enabled=False, rsi_level_mode='THRESHOLD', rsi_bullish_min=60.0, rsi_bullish_max=80.0, rsi_bearish_min=35.0, rsi_bearish_max=40.0, rsi_bullish_above=50.0, rsi_bearish_below=40.0, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
 
 
 def settings(payload):
+    payload=indicator_families.restore(payload)
     c = {key: payload.get(key, default) for key, default in DEFAULTS.items()}
+    c=indicator_families.apply(c)
     for key in ('atr_length', 'adx_length', 'adx_smoothing', 'widening_window'):
         raw = c[key]
         try:
@@ -35,10 +37,21 @@ def settings(payload):
         c[key] = value
     if c['adx_threshold'] > 100 or c['brick_mode'] not in ('Auto', 'Manual') or not isinstance(c['use_adx'], bool):
         raise ValueError('Choose Auto/Manual, a boolean ADX gate and an ADX threshold from 0 to 100.')
-    if any(not isinstance(c[k],bool) for k in ('rsi_slope_enabled','retest_enabled','retest_engulfing','retest_harami','retest_star')):raise ValueError('Retest and pattern choices must be boolean checkboxes.')
+    if any(not isinstance(c[k],bool) for k in ('rsi_level_enabled','rsi_slope_enabled','retest_enabled','retest_engulfing','retest_harami','retest_star')):raise ValueError('Retest and pattern choices must be boolean checkboxes.')
     if c['retest_enabled'] and not any(c[k] for k in ('retest_engulfing','retest_harami','retest_star')):raise ValueError('Select at least one retest candlestick pattern.')
     if not 2 <= c['widening_window'] <= 100:
         raise ValueError('Widening window must be from 2 to 100 completed candles.')
+    for key in ('rsi_bullish_above','rsi_bearish_below','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max'):
+        raw=c[key]
+        try:value=float(raw)
+        except (TypeError,ValueError,OverflowError):raise ValueError('RSI thresholds must be numbers from 0 to 100.')
+        if isinstance(raw,bool) or not math.isfinite(value) or not 0<=value<=100:raise ValueError('RSI thresholds must be numbers from 0 to 100.')
+        c[key]=value
+    if c['rsi_bearish_below']>=c['rsi_bullish_above']:raise ValueError('Bearish RSI threshold must be below bullish threshold.')
+    if c['rsi_level_mode'] not in ('THRESHOLD','BETWEEN'):raise ValueError('Choose RSI Threshold or Between mode.')
+    if not c['rsi_bearish_min']<c['rsi_bearish_max']<c['rsi_bullish_min']<c['rsi_bullish_max']:
+        raise ValueError('RSI bands must have increasing bounds with bearish band below bullish band.')
+    c.update(manual_trend.settings(c))
     validate_indicators(c)
     return c
 
@@ -142,7 +155,8 @@ def project_lifecycle(state, timestamp, entry_direction, reversal_direction, sec
 
 class Engine:
     def __init__(self, config=None, tick_size=0.05, state=None):
-        self.raw_config = dict(config or {})
+        config=indicator_families.apply(config or {})
+        self.raw_config = dict(config)
         self.config = settings(config or {})
         self.chart_zone_rows=(config or {}).get('_chart_zone_rows',[])
         self.chart_zone_timeline=[]
@@ -160,6 +174,7 @@ class Engine:
         self.chart_higher_times=[at for at,row in self.chart_higher]
 
         self.deadline = (config or {}).get('session_deadline','15:15')
+        self.underlying = (config or {}).get('underlying', '')
         self.host_seconds = {'1 minute':60,'2 minutes':120,'3 minutes':180,'5 minutes':300,'10 minutes':600,'15 minutes':900,'30 minutes':1800,'1 hour':3600}.get((config or {}).get('timeframe'),300)
         if isinstance(tick_size, bool) or not math.isfinite(float(tick_size)) or float(tick_size) <= 0:
             raise ValueError('A positive verified host-symbol tick size is required.')
@@ -177,12 +192,15 @@ class Engine:
             raise ValueError('Feed each completed host candle exactly once in chronological order.')
         tr = max(c['high'] - c['low'], abs(c['high'] - previous['close']), abs(c['low'] - previous['close'])) if previous else c['high'] - c['low']
         host_atr = rma(s, 'host', tr, cfg['atr_length'])
+        nse_bse_auto = str(getattr(self, 'underlying', '')).upper().startswith(('NSE:', 'BSE:'))
+        auto_atr5 = rma(s, 'auto_host_atr5', tr, 5) if nse_bse_auto else None
         regime_atr = rma(s, 'regime', tr, 15)
         low_atr = rma(s, 'low_atr', tr, 9)
         ratio = host_atr / regime_atr if regime_atr is not None and regime_atr > 0 and host_atr is not None else None if regime_atr is not None and regime_atr > 0 else 1.0
         high_regime, low_regime = ratio is not None and ratio > 1.2, ratio is not None and ratio < 0.8
         effective = cfg['factor'] + (1.0 if high_regime else -0.5 if low_regime else 0.0)
         auto = host_atr * 1.5 if high_regime else low_atr * 0.7 if low_regime else host_atr
+        if nse_bse_auto: auto = auto_atr5 / 12.0 if auto_atr5 is not None else None
         auto = max(self.tick_size, auto) if auto is not None else None
         box = cfg['manual_brick'] if cfg['brick_mode'] == 'Manual' else auto
         if s['rc'] is None:
@@ -233,6 +251,8 @@ class Engine:
             if retest['retest_signal']:
                 entry.update(entry_direction=retest['retest_direction'],entry_qualified=True,entry_diagnostic='EMA10_RETEST_BOUNCE',entry_buy_signal=direction<0,entry_sell_signal=direction>0)
         rsi_apply(entry,s,rsi_observation,selected_direction,cfg['rsi_slope_enabled'])
+        from .rsi_level import apply as level_apply
+        level_apply(entry,s,rsi_observation,selected_direction,cfg)
         raw=self.raw_config or {}
         if raw.get('chart_entry_guards') and any(raw.get(k) for k in ('ema_proximity_enabled','market_structure_enabled','higher_timeframe_enabled')):
             from . import ema_proximity
@@ -255,6 +275,9 @@ class Engine:
             s['chart_qualified']=selected_direction if qualified else None
             if blocked:s['ema_qualified']=None
             entry.update(entry_qualified=qualified,entry_diagnostic=blocked or entry['entry_diagnostic'],entry_direction=entry_direction,entry_buy_signal=entry_direction=='BULLISH',entry_sell_signal=entry_direction=='BEARISH')
+        if cfg['manual_trend_enabled']:
+            s['manual_trend_rows']=(s.get('manual_trend_rows',[])+[{'timestamp':c['timestamp'],'close':c['close']}])[-cfg['manual_trend_closes']:]
+            manual_trend.apply(entry,manual_trend.check(s['manual_trend_rows'],cfg,selected_direction,self.host_seconds))
         if any(key in raw for key in exit_indicators.DEFAULTS):
             held=s.get('projected_position')
             exit_signal={**c,**entry,**rsi_observation,'adx':adx,'exit_previous_ema_gap':prior_gap,'supertrend_cross_direction':'BULLISH' if direction<0 and pd>0 else 'BEARISH' if direction>0 and pd<0 else None}

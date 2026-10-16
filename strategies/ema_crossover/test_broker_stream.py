@@ -1,6 +1,11 @@
 import unittest,time
 from unittest.mock import patch,MagicMock
 from strategies.ema_crossover.broker import FyersBroker,IndependentDataSocket
+class ImmediateThread:
+ def __init__(self,target=None,args=(),kwargs=None,**options):
+  self.target,self.args,self.kwargs=target,args,kwargs or {}
+ def start(self):
+  if self.target:self.target(*self.args,**self.kwargs)
 class Tests(unittest.TestCase):
  def broker(self):return FyersBroker('/tmp',lambda *a:[],lambda *a:None)
  def test_sdk_instance_isolation(self):
@@ -26,7 +31,7 @@ class Tests(unittest.TestCase):
    self.preflight([dict(symbol='BSE:EXACTCE',netQty=0)],[dict(symbol='BSE:EXACTCE',status=2)])
  def test_stream_reconnect_errors_and_stale_callbacks(self):
   b=self.broker();b.symbols={'BSE:SENSEX-INDEX'};socket=MagicMock()
-  with patch('strategies.ema_crossover.broker.IndependentDataSocket',return_value=socket) as factory,patch('strategies.ema_crossover.broker.configure_websocket_ca_bundle'),patch('strategies.ema_crossover.broker.load_config',return_value={}),patch('strategies.ema_crossover.broker.threading.Thread'):
+  with patch('strategies.ema_crossover.broker.IndependentDataSocket',return_value=socket) as factory,patch('strategies.ema_crossover.broker.configure_websocket_ca_bundle'),patch('strategies.ema_crossover.broker.load_config',return_value={}),patch('strategies.ema_crossover.broker.threading.Thread',ImmediateThread):
    b.start();callbacks=factory.call_args.kwargs
    callbacks['on_connect']()
    with self.assertRaisesRegex(ValueError,'no tick'):b.tick('BSE:OPTIONPE')
@@ -40,6 +45,17 @@ class Tests(unittest.TestCase):
    callbacks['on_connect']();self.assertTrue(b.connected)
    self.assertEqual(set(socket.subscribe.call_args.kwargs['symbols']),{'BSE:SENSEX-INDEX','BSE:OPTIONPE'})
    b.stop();callbacks['on_connect']();self.assertFalse(b.connected)
+ def test_subscription_failure_releases_lock_and_allows_retry(self):
+  b=self.broker();b.connected=True;b.socket=MagicMock();b.symbols={'BSE:SENSEX-INDEX'}
+  b.socket.subscribe.side_effect=[TimeoutError('private detail'),None]
+  with patch('strategies.ema_crossover.broker.threading.Thread',ImmediateThread):
+   b.subscribe_all()
+   self.assertFalse(b.subscription_lock.locked())
+   self.assertIn('automatic retry',b.stream_error)
+   self.assertNotIn('private detail',b.stream_error)
+   b.subscribe_all()
+  self.assertEqual(b.socket.subscribe.call_count,2)
+  self.assertFalse(b.subscription_lock.locked())
  def test_freshness_not_relaxed(self):
   b=self.broker();b.connected=True;b.socket=MagicMock();symbol='BSE:SENSEX-INDEX';b.symbols.add(symbol)
   for received,exchange,message in [(time.time()-16,time.time(),'receive age'),(time.time(),time.time()-61,'exchange timestamp')]:
@@ -47,7 +63,7 @@ class Tests(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,message):b.tick(symbol)
  def test_partial_updates_do_not_refresh_old_executable_bid(self):
   b=self.broker();b.symbols={'BSE:OPTIONPE'};socket=MagicMock()
-  with patch('strategies.ema_crossover.broker.IndependentDataSocket',return_value=socket) as factory,patch('strategies.ema_crossover.broker.configure_websocket_ca_bundle'),patch('strategies.ema_crossover.broker.load_config',return_value={}),patch('strategies.ema_crossover.broker.threading.Thread'):
+  with patch('strategies.ema_crossover.broker.IndependentDataSocket',return_value=socket) as factory,patch('strategies.ema_crossover.broker.configure_websocket_ca_bundle'),patch('strategies.ema_crossover.broker.load_config',return_value={}),patch('strategies.ema_crossover.broker.threading.Thread',ImmediateThread):
    b.start();callbacks=factory.call_args.kwargs;callbacks['on_connect']()
    with patch('strategies.ema_crossover.broker.time.time',return_value=100):callbacks['on_message'](dict(symbol='BSE:OPTIONPE',bid_price=10,ask_price=11,exch_feed_time=100))
    with patch('strategies.ema_crossover.broker.time.time',return_value=110):

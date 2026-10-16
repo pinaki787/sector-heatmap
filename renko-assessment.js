@@ -71,6 +71,39 @@
     result.link=result.fresh&&result.timestamp!==null&&result.close!==null;
     return result;
   }
-  root.RenkoAssessment={assessment};
-  if(typeof module!=='undefined')module.exports={assessment};
+  function exitAssessment(s,view,now=Date.now()/1000,connected=true){
+    const c=s?.config,p=s?.position,q=s?.last_signal;
+    const r={title:'Exit assessment',reason:'No active runner configuration.',checks:[],fresh:false,context:''};
+    if(!c)return r;
+    r.context=`Active ${c.mode} · ${c.underlying} · ${c.timeframe}`;
+    if(c.underlying!==view.symbol||c.timeframe!==view.timeframe){r.reason='Chart differs from active runner; exit evidence unavailable for this view.';return r;}
+    const age=finite(s.updated_at)?now-s.updated_at:null;
+    r.fresh=connected&&s.stream?.connected!==false&&age!==null&&age>=0&&age<=15;
+    const record=s.latest_exit_assessment;
+    const ownedRecord=p&&record&&finite(record.timestamp)&&finite(p.entry_signal_timestamp)&&record.timestamp>=p.entry_signal_timestamp?record:null;
+    const seconds=intervals[c.timeframe],closed=q&&!q.provisional&&!q.is_forming&&finite(q.timestamp)&&seconds&&now-q.timestamp-seconds>=0&&now-q.timestamp-seconds<=seconds;
+    const usable=r.fresh&&s.running&&p&&closed;
+    const bull=p?.direction==='BULLISH',opposite=bull?'BEARISH':'BULLISH';
+    const check=(enabled,label,hit)=>r.checks.push({label,state:!enabled?'OFF':!p?'NO POSITION':!usable||hit===null?'UNAVAILABLE':hit?'CONDITION MET':'NOT MET'});
+    check(c.ema_exit_enabled===true,'EMA '+(c.ema_exit_length||10)+' adverse close',finite(q?.close)&&finite(q?.ema_exit??q?.ema10)?(bull?q.close<(q.ema_exit??q.ema10):q.close>(q.ema_exit??q.ema10)):null);
+    check(c.supertrend_exit_enabled!==false,'Opposite Supertrend reversal',q&&Object.hasOwn(q,'supertrend_cross_direction')?q.supertrend_cross_direction===opposite:null);
+    check(c.ema_slow_exit_enabled,'EMA '+(c.ema_slow_length||30)+' adverse close',finite(q?.close)&&finite(q?.ema30)?(bull?q.close<q.ema30:q.close>q.ema30):null);
+    check(c.rsi_exit_enabled,'Opposing RSI slope',finite(q?.rsi14_slope)?(bull?q.rsi14_slope<0:q.rsi14_slope>0):null);
+    check(c.ema_widening_exit_enabled,'EMA gap contraction',finite(q?.ema_gap)&&finite(q?.exit_previous_ema_gap)?Math.abs(q.ema_gap)<Math.abs(q.exit_previous_ema_gap):null);
+    check(c.adx_exit_enabled,'ADX below '+(c.adx_threshold??25),finite(q?.adx)?q.adx<(c.adx_threshold??25):null);
+    check(c.market_structure_exit_enabled,'Opposing confirmed swings',q?.exit_market_structure?.state?q.exit_market_structure.state===(bull?'BEARISH_LH_LL':'BULLISH_HH_HL'):null);
+    for(const [key,label] of [['spot_stop','Underlying stop'],['spot_target','Underlying target']])r.checks.push({label:label+(finite(c[key])?' '+c[key]:''),state:finite(c[key])?(p?'LIVE TICK RULE':'NO POSITION'):'OFF'});
+    const trail=p?.renko_trailing;
+    r.checks.push({label:'Trailing stop'+(finite(trail?.stop)?' '+trail.stop:'')+(c.trailing_enabled?' · '+c.trailing_basis+' · '+c.trailing_distance:''),state:!c.trailing_enabled?'OFF':!p?'NO POSITION':!r.fresh?'UNAVAILABLE':trail?'TRACKING':'AWAITING FRESH QUOTE'});
+    const zone=p?.zone_target_assessment;
+    r.checks.push({label:'Opposing 5m zone',state:!c.zone_target_enabled?'OFF':!p?'NO POSITION':!r.fresh||p.zone_target_error?'UNAVAILABLE':zone?.state||'AWAITING ASSESSMENT'});
+    r.reason=!s.running?(p?'Monitoring stopped · position remains.':'Runner stopped · exit rules inactive.') :s.pending?'Order reconciliation pending; no exit fill is confirmed.':!p?'No owned position · exit criteria shown for the active configuration.':p.exit_requested?'Exit requested: '+(p.exit_reason||'runner exit intent')+' · awaiting reconciliation.':!r.fresh?'Runner snapshot stale or disconnected; current exit decision unavailable.':'Holding '+p.symbol+' · no exit request recorded.';
+    r.checks=r.checks.filter(item=>item.state!=='OFF'&&item.state!=='NO SESSION DEADLINE');
+    r.record=ownedRecord?{timestamp:ownedRecord.timestamp,observed_at:ownedRecord.observed_at,reason:ownedRecord.reason,eligible:ownedRecord.eligible}:null;
+    r.checks.push({label:'Session square-off'+(c.session_deadline?' '+c.session_deadline+' IST':''),state:c.session_deadline?'SCHEDULED':'NO SESSION DEADLINE'});
+    r.context+=' · '+(c.intrabar_entries?'EMA exits may use fresh intrabar breaches; other indicator exits use completed candles.':'Indicator exits use completed candles.')+' Fixed levels and trailing use fresh ticks. Conditions shown are observations, not confirmed exit fills.';
+    return r;
+  }
+  root.RenkoAssessment={assessment,exitAssessment};
+  if(typeof module!=='undefined')module.exports={assessment,exitAssessment};
 })(typeof window==='undefined'?globalThis:window);

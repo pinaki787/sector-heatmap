@@ -46,5 +46,6 @@ class Service:
    return dict(result,quote_currency=currency,broker=self.broker,account_id=self.account_id,tick_size=tick,timeframe=p['timeframe'],anchor_covered=covered,mode='BACKTEST',basis='Chart-instrument one-unit simulation; not option returns. Explicit modeled friction; no broker orders.',runtime_revision=REVISION)
   if action=='start':
    return self.runner.start(p)
-  if action=='stop':return self.runner.stop()
+  if action=='stop':return self.runner.request_stop(p)
+
   raise ValueError('Unknown Renko Engine action.')

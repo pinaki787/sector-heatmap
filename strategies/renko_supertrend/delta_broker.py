@@ -18,6 +18,13 @@ from .delta_execution import Execution
 from .runner import Broker as FyersRenkoBroker
 from strategies.ema_crossover.runner import TIMEFRAMES
 HISTORY_LOCK=threading.RLock()
+_HISTORY_FILES={}
+def history_file_lock(path, symbol, resolution):
+    # Downloads for independent chart/runner archives must not serialize.
+    # Writers sharing an archive still use one lock for atomic merge/replace.
+    key=(str(Path(path).resolve()),symbol,resolution)
+    with HISTORY_LOCK:
+        return _HISTORY_FILES.setdefault(key,threading.RLock())
 
 
 class Broker:
@@ -210,7 +217,7 @@ class Broker:
     def candles(self, config):
         symbol=config['underlying']; timeframe=config['timeframe']; resolution=RESOLUTIONS[timeframe]
         seconds=TIMEFRAMES[timeframe]; self.subscribe(symbol,seconds)
-        with self.history_lock:
+        with history_file_lock(self.path,symbol,resolution):
             key=(symbol,timeframe,config.get('history_start')); now=self.delta.clock(); cached=self.history_cache.get(key)
             if cached and now-cached[0]<5: return deepcopy(cached[1])
             product=self.delta.product(symbol)

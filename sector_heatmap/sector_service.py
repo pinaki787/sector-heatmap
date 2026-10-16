@@ -9,6 +9,7 @@ from threading import Lock, Thread
 import time
 
 from fyers_apiv3 import fyersModel
+from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
 from .analysis import (
     calculate_sector, calculate_timeframe_state, classify_rotation, detect_events,
@@ -178,7 +179,7 @@ class SectorAnalysisService:
             self.provider = provider
         elif access_token and ":" in access_token:
             app_id, token = access_token.split(":", 1)
-            self.client = fyersModel.FyersModel(client_id=app_id, token=token)
+            self.client = ipv4_fyers_client(client_id=app_id, token=token)
             self.provider = CandleHistoryProvider(self.client)
         else:
             self.provider = None
@@ -270,7 +271,7 @@ class SectorAnalysisService:
         if not self.provider:
             return
         total_symbols = len(SECTOR_DEFINITIONS) + 1
-        self._set_refresh_state("CONNECTING", "Connecting to FYERS history", total=total_symbols)
+        self._set_refresh_state("CONNECTING", f"Connecting to {getattr(self.provider, 'broker', 'FYERS')} history", total=total_symbols)
         benchmark_candles = self._timeframe_candles(BENCHMARK_SYMBOL)
         self._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=1, total=total_symbols)
         benchmark_states = {timeframe: calculate_timeframe_state(timeframe, candles, candles, self._quality(timeframe, candles)) for timeframe, candles in benchmark_candles.items()}

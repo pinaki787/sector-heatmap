@@ -21,6 +21,27 @@ class IndependentDataSocket(data_ws.FyersDataSocket):
     def __new__(cls, *args, **kwargs):
         return object.__new__(cls)
 
+    def _FyersDataSocket__symbol_conversion(self, symbols):
+        """Use the SDK decoder with a private, bounded IPv4 lookup transport."""
+        from types import FunctionType
+        from sector_heatmap.fyers_transport import IPv4Adapter
+        class BoundedSession(requests.Session):
+            def request(self, method, url, **kwargs):
+                kwargs.setdefault("timeout", (5, 10))
+                return super().request(method, url, **kwargs)
+        with BoundedSession() as session:
+            session.trust_env = False
+            session.mount("https://", IPv4Adapter())
+            original = data_ws.SymbolConversion.symbol_to_hsmtoken
+            lookup = FunctionType(original.__code__, dict(original.__globals__, requests=session),
+                                  original.__name__, original.__defaults__, original.__closure__)
+            class Conversion(data_ws.SymbolConversion):
+                symbol_to_hsmtoken = lookup
+            decoder = data_ws.FyersDataSocket._FyersDataSocket__symbol_conversion
+            bounded = FunctionType(decoder.__code__, dict(decoder.__globals__, SymbolConversion=Conversion),
+                                   decoder.__name__, decoder.__defaults__, decoder.__closure__)
+            return bounded(self, symbols)
+
     def reset_feed_state(self):
         # Topic IDs belong to one transport connection. The FYERS SDK retains
         # these maps on reconnect and checks scrips before indices, so a reused

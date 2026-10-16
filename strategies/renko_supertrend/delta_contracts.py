@@ -60,8 +60,6 @@ def configuration(payload):
     route = payload.get('execution_route', 'OPTIONS')
     if route not in ('OPTIONS', FUTURES_ROUTE):
         raise ValueError('Choose Delta options or perpetual futures explicitly.')
-    if route == FUTURES_ROUTE and payload.get('sideways_enabled', False):
-        raise ValueError('Perpetual after-cost sideways filtering requires funding evidence; clear that optional filter.')
     contracts=whole(payload.get('lots'), 'Delta contracts', True)
     if contracts>100000:raise ValueError('Delta quantity exceeds 100000 whole contracts.')
     config = renko_configuration({**payload, 'lots':min(contracts,100), 'execution_route': 'OPTIONS', 'underlying': 'NSE:DELTA-VALIDATION'})

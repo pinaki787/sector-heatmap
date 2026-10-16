@@ -17,12 +17,23 @@ BASE='https://api.india.delta.exchange'
 RESOLUTIONS={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'1d':86400,'1w':604800}
 SUPPORTED={'perpetual_futures','futures','call_options','put_options'}
 
+class DeltaIPv4Adapter(requests.adapters.HTTPAdapter):
+    # Keep outbound API traffic on the server's explicitly whitelisted IPv4.
+    def init_poolmanager(self, connections, maxsize, block=False, **kwargs):
+        kwargs['source_address']=('0.0.0.0',0)
+        return super().init_poolmanager(connections,maxsize,block=block,**kwargs)
+
+def delta_request_session():
+    session=requests.Session()
+    session.mount(BASE,DeltaIPv4Adapter())
+    return session
+
 class DeltaReadUnavailable(ValueError):
     """Temporary public-data outage; execution remains suspended until recovery."""
 
 class DeltaIndia:
     def __init__(self,state_path,credentials=lambda:{},requester=None,clock=time.time):
-        self.path=Path(state_path);self.credentials=credentials;self.requester=requester or requests;self.clock=clock
+        self.path=Path(state_path);self.credentials=credentials;self.requester=requester or delta_request_session();self.clock=clock
         self.lock=threading.RLock();self.cache={};self.previews={};self.auth_state='NOT_CHECKED';self.paper={'schema':1,'position':None,'trades':[]}
         self.auth_at=0;self.auth_identity=None;self.live_path=self.path.with_name('delta-india-live.json');self.key_path=self.path.with_name('delta-india-credentials.json')
         self.live={'schema':1,'orders':{},'runner_position':None};self.runner={'running':False,'message':'Stopped','last_candle':None};self.stop_event=threading.Event()
@@ -138,7 +149,23 @@ class DeltaIndia:
         c=self._credentials();return hashlib.sha256((str(c.get('DELTA_INDIA_API_KEY',''))+'|'+str(c.get('DELTA_INDIA_API_SECRET',''))).encode()).hexdigest()
     def _gate(self):
         return str(self._credentials().get('DELTA_INDIA_ENABLE_LIVE_ORDERS','1')).lower() in ('1','true','yes')
+    def _record_runner_job(self, new=False):
+        from .runner_job_history import record, read
+        with self.lock:
+            if new:
+                self.runner.update(run_id=secrets.token_hex(16),started_at=self.clock())
+                self.live["runner_job"]={k:self.runner[k] for k in ("run_id","started_at")}
+                self._save_live()
+            identity={**self.live.get("runner_job",{}),**{k:self.runner[k] for k in ("run_id","started_at") if k in self.runner}}
+            config=self.runner.get("config") or self.live.get("runner_config")
+            position=self.paper.get("position") if (config or {}).get("mode")=="PAPER" else self.live.get("runner_position")
+            path=self.path.with_name("delta-runner-submissions.json")
+            record(path,{**self.runner,**identity,"config":config,"position":position,"updated_at":self.clock(),
+                         "status":"RUNNING" if self.runner["running"] else "STOPPED"})
+            self.runner["job_history"]=read(path)
+
     def status(self):
+        self._record_runner_job()
         c=self._credentials();configured=bool(c.get('DELTA_INDIA_API_KEY') and c.get('DELTA_INDIA_API_SECRET'))
         verified=configured and self.auth_identity==self._identity() and self.auth_state=='VERIFIED_READ_ONLY'
         fresh=verified and 0<=self.clock()-self.auth_at<=60
@@ -681,6 +708,7 @@ class DeltaIndia:
     def _stage_submit(self,owned):
         cfg=owned['submit_config'];cfg['entry_request_id']=owned['request_id'];self.live.update(runner_config=deepcopy(cfg),runner_pending=owned['request_id'],runner_action='ENTRY')
         self.runner=dict(running=False,config=cfg,product_id=owned['request']['product_id'],pending=owned['request_id'],action='ENTRY',last_candle=cfg['entry_signal_close']-RESOLUTIONS[cfg['resolution']],message='Strategy-managed Submit entry pending reconciliation.')
+        self._record_runner_job(new=True)
     def _launch_monitor(self):
         cfg=self.runner.get('config') or {};pos=self.paper.get('position') if cfg.get('mode')=='PAPER' else self.live.get('runner_position')
         if pos:self._remember_monitor(pos,cfg)
@@ -699,6 +727,7 @@ class DeltaIndia:
         cfg=self._submit_config(payload);cfg['journal_bb']=payload.get('journal_bb');self.live.update(runner_config=deepcopy(cfg),runner_pending=None,runner_action=None);self._save_live()
         position['submit_managed']=True;self._save()
         self.runner=dict(running=False,config=cfg,product_id=position['product_id'],pending=None,action=None,last_candle=cfg['entry_signal_close']-RESOLUTIONS[cfg['resolution']],message='Strategy-managed Submit · waiting for opposite completed RSI crossover. No reentry.')
+        self._record_runner_job(new=True)
         self._launch_monitor()
     def _submit_complete(self):
         self.runner['running']=False;self.stop_event.set();self.runner['message']='Strategy-managed Submit closed / no entry fills · lifecycle finished; no reentry.'
@@ -806,6 +835,8 @@ class DeltaIndia:
             if not last or last.get('rsi_ma') is None:raise ValueError('Completed RSI/MA history is not warmed up.')
             self.live['runner_config']=deepcopy(cfg);self._save_live()
             self.runner={'run_id':secrets.token_hex(16),'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
+            self._record_runner_job(new=True)
+
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start();return self.status()
     def resume_paper_runner(self,payload=None):
         """Explicitly resume the persisted Paper strategy without replacing its position."""
@@ -819,6 +850,8 @@ class DeltaIndia:
             snapshot=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])
             if not snapshot.get('last_completed'):raise ValueError('Completed signal history is unavailable.')
             self.runner.update(run_id=secrets.token_hex(16),running=True,exit_only=False,config=cfg,product_id=p['id'],last_candle=self.live.get('runner_last_candle') or snapshot['last_completed']['timestamp'],pending=None,action=None,message='Explicitly resumed persisted Paper strategy; retained position will be reconciled against completed signals.')
+            self._record_runner_job(new=True)
+
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start()
             return self.status()
     def stop_runner(self,payload=None):

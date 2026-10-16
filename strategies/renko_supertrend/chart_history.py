@@ -41,7 +41,20 @@ def candle_issue(row):
 class ChartHistory:
     def __init__(self,path,min_interval=.35):
         self.path=Path(path);self.lock=threading.RLock();self.memory={}
-        self.analyze=analysis;self.min_interval=min_interval;self.next_request_at=0
+        self.key_locks={};self.rate_lock=threading.Lock()
+        self.min_interval=min_interval;self.next_request_at=0
+
+
+    def history_lock(self,key):
+        with self.lock:
+            return self.key_locks.setdefault(key,threading.RLock())
+
+    def wait_request_slot(self):
+        # Reserve a slot without holding a global lock during broker IO.
+        with self.rate_lock:
+            slot=max(self.next_request_at,time.monotonic())
+            self.next_request_at=slot+self.min_interval
+        time.sleep(max(0,slot-time.monotonic()))
 
     def load(self,client,symbol,timeframe,preset='45',start='',end='',config=None,tick=.05,now=None):
         now=time.time() if now is None else now
@@ -50,7 +63,7 @@ class ChartHistory:
         if not seconds:raise ValueError('Choose a supported host timeframe.')
         identity=json.dumps([symbol,timeframe,str(anchor),str(last)])
         key=hashlib.sha256(identity.encode()).hexdigest()
-        with self.lock:
+        with self.history_lock(key):
             entry=self.memory.get(key)
             if entry is None:
                 p=self.path/(key+'.json')
@@ -77,8 +90,7 @@ class ChartHistory:
                 try:
                     while cursor<=last:
                         stop=min(last,cursor+timedelta(days=2))
-                        time.sleep(max(0,self.next_request_at-time.monotonic()))
-                        self.next_request_at=time.monotonic()+self.min_interval
+                        self.wait_request_slot()
                         response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
                         if isinstance(response,dict) and response.get('s')=='no_data':response={'s':'ok','candles':[]}
                         if not isinstance(response,dict) or response.get('s')!='ok' or not isinstance(response.get('candles'),list):
@@ -111,8 +123,7 @@ class ChartHistory:
                 repairs={}
                 for day in sorted({str(datetime.fromtimestamp(int(r[0]),IST).date()) for r in invalid})[:3]:
                     try:
-                        time.sleep(max(0,self.next_request_at-time.monotonic()))
-                        self.next_request_at=time.monotonic()+self.min_interval
+                        self.wait_request_slot()
                         response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=day,range_to=day,cont_flag=0,oi_flag=1))
                         if isinstance(response,dict) and response.get('s')=='ok':
                             repairs.update({int(r[0]):r for r in response.get('candles',[]) if not candle_issue(r)})
@@ -140,7 +151,8 @@ class ChartHistory:
             recovering=bool(invalid) and sum(not c['is_forming'] for c in usable)>warmup
             available=not invalid or recovering
             if available and entry.get('analysis_key')!=digest:
-                calculated=self.analyze(usable,config,tick,retain=None)
+                calculated=analysis(usable,config,tick,retain=None)
+
                 if recovering:calculated['rows']=calculated['rows'][warmup:]
                 entry.update(analysis=calculated,analysis_key=digest)
             if available:a=entry['analysis']

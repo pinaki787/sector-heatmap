@@ -2,9 +2,10 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 import threading
+import os
 import webbrowser
 from fyers_apiv3 import fyersModel
-from .config import load_config, save_access_token
+from .config import load_config, save_access_token, public_origin
 
 def create_session(cfg, state=None):
     return fyersModel.SessionModel(client_id=cfg["FYERS_APP_ID"], secret_key=cfg["FYERS_SECRET_KEY"], redirect_uri=cfg["FYERS_REDIRECT_URI"], response_type="code", grant_type="authorization_code", state=state)
@@ -14,14 +15,21 @@ def validated_config(expected_port=None):
     required = ("FYERS_APP_ID", "FYERS_SECRET_KEY", "FYERS_REDIRECT_URI")
     missing = [key for key in required if not cfg.get(key)]
     if missing:
-        raise RuntimeError("Missing " + ", ".join(missing) + "; set it in the environment or a supported private config file")
+        raise RuntimeError("Missing " + ", ".join(missing) + "; open User and broker setup, add your FYERS account, and save its client ID and secret key")
     redirect = urlparse(cfg["FYERS_REDIRECT_URI"])
-    if redirect.scheme != "http" or redirect.hostname not in ("127.0.0.1", "localhost") or not redirect.port:
-        raise RuntimeError("FYERS_REDIRECT_URI must be a registered local HTTP callback URL")
-    if redirect.path.rstrip("/") != "/callback":
-        raise RuntimeError("FYERS_REDIRECT_URI path must be /callback")
-    if expected_port is not None and redirect.port != expected_port:
-        raise RuntimeError(f"FYERS_REDIRECT_URI port must match the dashboard port ({expected_port})")
+    public = public_origin()
+    aid = os.getenv('SECTOR_PULSE_WORKSPACE_ID')
+    expected_public = public + (f'/broker-workspace/{aid}/callback' if aid else '/callback')
+    is_public = bool(public and cfg["FYERS_REDIRECT_URI"] in {expected_public,public + '/callback'})
+    if not is_public:
+        if redirect.scheme != "http" or redirect.hostname not in ("127.0.0.1", "localhost") or not redirect.port:
+            raise RuntimeError("FYERS_REDIRECT_URI must be a registered local HTTP callback URL or the configured public HTTPS callback")
+        if redirect.username or redirect.password or redirect.query or redirect.fragment:
+            raise RuntimeError("FYERS_REDIRECT_URI must not contain credentials, query or fragment")
+        if redirect.path.rstrip("/") != "/callback":
+            raise RuntimeError("FYERS_REDIRECT_URI path must be /callback")
+        if expected_port is not None and redirect.port != expected_port:
+            raise RuntimeError(f"FYERS_REDIRECT_URI port must match the dashboard port ({expected_port})")
     return cfg
 
 def authorization_url(expected_port=None, state=None):
@@ -38,6 +46,8 @@ def exchange_auth_code(auth_code):
 
 def refresh_access_token():
     cfg = validated_config()
+    if urlparse(cfg["FYERS_REDIRECT_URI"]).scheme == "https":
+        raise RuntimeError("Use Refresh authentication in the HTTPS dashboard for the public callback.")
     redirect = urlparse(cfg["FYERS_REDIRECT_URI"])
     received, done = {}, threading.Event()
     class Callback(BaseHTTPRequestHandler):

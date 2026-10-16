@@ -1,12 +1,12 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');
-const {JSDOM}=require('/private/tmp/renko-browser-check/node_modules/jsdom');
+const {JSDOM}=require('jsdom');
 const html=fs.readFileSync('motilal-oswal.html','utf8'),script=fs.readFileSync('motilal-oswal.js','utf8');
 const pause=()=>new Promise(resolve=>setTimeout(resolve,10));
 async function mounted(){const aid='a'.repeat(32),calls=[];const dom=new JSDOM(html,{url:'https://example.test/broker-workspace/'+aid+'/workspace-entry',runScripts:'outside-only'});
  dom.window.fetch=async(url,options={})=>{const path=new URL(url,dom.window.location.href).pathname;calls.push({path,options});return {ok:true,json:async()=>path.endsWith('/api/workspace-context')?{workspace:{id:aid,label:'MO test',account_ref:'CLIENT1',live_enabled:true},csrf:'fixture',visible:true,permitted:true}:{authenticated:true,broker:'MOTILAL_OSWAL'}};};dom.window.eval(script);await pause();return {dom,calls,aid};}
 test('Motilal page contains connection details and no standalone trading form',async()=>{const m=await mounted();assert.equal(m.dom.window.document.querySelector('#ticket'),null);assert.equal(m.dom.window.document.querySelector('#submit'),null);assert.ok(m.dom.window.document.querySelector('#connect'));assert.equal(m.calls.some(c=>c.options.method==='POST'),false);m.dom.window.close();});
 test('all four workflow links open existing root sections with exact account binding',async()=>{const m=await mounted();const links=[...m.dom.window.document.querySelectorAll('#workflow-links a')];assert.equal(links.length,4);assert.deepEqual(links.map(a=>new URL(a.href).searchParams.get('brokerForm')),['renko','handoff','screener','sector']);for(const a of links){const url=new URL(a.href);assert.equal(url.pathname,'/');assert.equal(url.searchParams.get('brokerAccount'),m.aid);}m.dom.window.close();});
-const base='outputs/motilal-oswal-integration/shared-route-patch/';
+const base='';
 global.addEventListener=()=>{};
 const {route,kind}=require('../'+base+'broker-form-routing.js');
 const {choices}=require('../'+base+'broker-account-options.js');

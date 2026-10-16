@@ -14,7 +14,10 @@ class ParserQuoteTests(TestCase):
         get = self.get({'lp':466, 'tt':self.now.timestamp()-5})
         result = fetch_parser_quote(self.symbol,'app:token',get=get,now=self.now)
         self.assertEqual(result['ltp'],466)
-        self.assertEqual(result['freshness'],'FRESH')
+        self.assertEqual(result['freshness'],'UNCONFIRMED')
+        self.assertIsNone(result['provider_timestamp'])
+        self.assertIsNone(result['provider_age_seconds'])
+        self.assertIsNotNone(result['trading_day_start'])
         self.assertEqual(get.call_args.kwargs['params'],{'symbols':self.symbol})
     def test_old_or_missing_or_future_timestamp_not_live(self):
         for ts in [None, self.now.timestamp()-3600, self.now.timestamp()+100]:

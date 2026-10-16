@@ -30,6 +30,23 @@ class Tests(unittest.TestCase):
  def paper_preview(self,payload):
   side=payload.get('side','LONG');self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-310,'cross_direction':'BULLISH' if side=='LONG' else 'BEARISH','rsi_ma':50}}
   return self.b.preview(dict(resolution='5m',rsi_length=14,ma_length=14,ma_type='SMA',signal_close=self.req.now-10)|payload)
+ def test_runner_submission_history_survives_restart_and_keeps_distinct_runs(self):
+  self.b.chart=lambda *a,**k:{'last_completed':{'timestamp':self.req.now-300,'rsi_ma':50}}
+  payload=dict(mode='PAPER',symbol='BTCUSD',contracts=1,resolution='5m')
+  first=self.b.start_runner(payload)['runner']['job_history'][0]['job_id']
+  self.b.stop_runner()
+  self.req.now+=1
+  self.b.start_runner(payload)
+  rows=self.b.status()['runner']['job_history']
+  self.assertEqual(len(rows),2)
+  self.assertNotEqual(rows[0]['job_id'],first)
+  self.assertFalse(next(r for r in rows if r['job_id']==first)['running'])
+  self.b.stop_runner()
+  restarted=DeltaIndia(self.b.path,requester=self.req,clock=lambda:self.req.now)
+  rows=restarted.status()['runner']['job_history']
+  self.assertEqual(len(rows),2)
+  self.assertTrue(all(not r['running'] for r in rows))
+  self.assertFalse(restarted.runner['running'])
  def test_catalog_pagination_and_cache(self):
   self.req.pages=True;c=self.b.catalog();self.assertTrue(c['complete']);self.assertEqual(len(c['instruments']),2);self.assertFalse(c['forex_supported']);calls=len(self.req.calls);self.b.catalog();self.assertEqual(calls,len(self.req.calls))
  def test_status_missing_and_live_fail_closed(self):

@@ -79,7 +79,11 @@ class ConcurrentRulesTests(unittest.TestCase):
         self.assertFalse(restored.state['running']);self.assertEqual(restored.state['position'],held)
     def test_exact_signal_formula_is_shared(self):
         broker=FakeBroker();a=config('BTCUSD');b={**a,'underlying':'NSE:NIFTY50-INDEX'}
-        self.assertEqual(analysis(broker.rows,a,.05)['rows'],analysis(broker.rows,b,.05)['rows'])
+        # NSE/BSE automatic-size diagnostics now follow a different reference
+        # ATR rule. Manual sizing must still produce the same execution signals.
+        left=analysis(broker.rows,a,.05)['rows'];right=analysis(broker.rows,b,.05)['rows']
+        self.assertEqual([{k:v for k,v in row.items() if k!='auto_box'} for row in left],
+                         [{k:v for k,v in row.items() if k!='auto_box'} for row in right])
         self.assertIs(DeltaRunner.signal,Runner.signal)
         self.assertEqual(DeltaAdoptedRunner.configure(config())['broker'],'DELTA_INDIA')
     def test_native_adoption_identity_cannot_be_spoofed_by_product_label(self):

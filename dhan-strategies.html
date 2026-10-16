@@ -1,0 +1,34 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dhan strategy workspace</title>
+<style>[hidden]{display:none!important}body{margin:0;background:#0b1321;color:#e4ecf7;font:15px system-ui}main{max-width:960px;margin:40px auto;padding:0 24px}a{color:#74b9ff}header,.actions{display:flex;gap:16px;justify-content:space-between;align-items:center}section{background:#142034;border:1px solid #2b3b53;border-radius:12px;padding:24px;margin-top:22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:18px}label{display:grid;gap:8px;font-size:13px;color:#b9cae0}input,select,button{box-sizing:border-box;background:#0c1728;color:#e4ecf7;border:1px solid #405573;border-radius:6px;padding:11px;font:inherit}button{cursor:pointer;background:#215a85}button:disabled{opacity:.45;cursor:default}small{color:#9db0cb}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}#error{color:#ffaaaa}#status{font-weight:600}h1{margin-bottom:8px}.review{border-color:#4381b1}input[type=checkbox]{width:16px;height:16px}</style>
+<main><header><div><small>YOUR BROKER ACCOUNT</small><h1>Dhan strategy workspace</h1><div id="account-label">Loading your account…</div></div><a href="/accounts">Broker accounts</a></header>
+<p>Bullish setups buy a call. Bearish setups buy a put. Selecting an account or saving settings does not start trading.</p>
+<section><div class="grid">
+<label>Strategy<select id="strategy"><option value="rsi">RSI crossover</option><option value="renko">Renko Supertrend</option><option value="band">EMA Band</option><option value="kama">KAMA V6 · options</option></select></label>
+<label>Mode<select id="mode"><option value="PAPER">Paper</option><option value="LIVE">Live</option></select></label>
+<label>Underlying search<input id="search" placeholder="NIFTY, BANKNIFTY, RELIANCE"></label>
+<label>Exact instrument<select id="underlying"><option value="">Search for an instrument</option></select></label>
+<label>Timeframe<select id="timeframe"><option>1 minute</option><option>2 minutes</option><option>3 minutes</option><option selected>5 minutes</option><option>10 minutes</option><option>15 minutes</option><option>30 minutes</option><option>1 hour</option></select></label>
+<label>Lots<input id="lots" type="number" min="1" max="100" value="1"></label>
+<label>Maximum entries<input id="max-trades" type="number" min="1" value="2"></label>
+<label>Premium cap · INR<input id="max-premium" type="number" min="1" placeholder="Optional"></label>
+<label>Daily loss budget · INR<input id="daily-budget" type="number" min="1" placeholder="Optional"></label>
+<label>Paper capital · INR<input id="paper-capital" type="number" min="1" value="100000"></label>
+<label>Execution<input value="Bought ATM options · Call / Put" readonly></label>
+<label class="band">EMA Band length<input id="ema-length" type="number" min="1" value="21"></label>
+<label class="indicator">Slope lookback<input id="slope-lookback" type="number" min="2" value="8"></label>
+<label class="indicator">Minimum slope · ATR<input id="minimum-slope-atr" type="number" min="0" step=".01" value=".10"></label>
+<label class="kama">KAMA length<input id="kama-length" type="number" min="1" value="10"></label>
+<label class="kama">Fast length<input id="fast-length" type="number" min="1" value="2"></label>
+<label class="kama">Slow length<input id="slow-length" type="number" min="2" value="30"></label>
+<label class="kama">Minimum efficiency<input id="minimum-efficiency" type="number" min="0" max="1" step=".01" value=".35"></label>
+<label class="kama">Breakout bars<input id="breakout-bars" type="number" min="2" value="5"></label>
+<label class="kama">Cooldown bars<input id="cooldown-bars" type="number" min="0" value="2"></label>
+<label class="kama">Allow KAMA reclaims<input id="allow-reclaims" type="checkbox" checked></label>
+<label class="rsi">RSI period<input id="rsi-length" type="number" min="2" value="14"></label>
+<label class="rsi">RSI moving average<select id="ma-type"><option>SMA</option><option>EMA</option></select></label>
+<label class="rsi">Moving average period<input id="ma-length" type="number" min="2" value="14"></label>
+</div><p id="renko-link" hidden><a href="#">Open the full Renko chart and settings for this account</a></p>
+<p id="error" role="alert"></p><div class="actions"><button id="review">Review activation</button><button id="stop" disabled>Stop & close owned position</button></div></section>
+<section id="preview" class="review" hidden><h2>Review strategy activation</h2><pre id="preview-details"></pre><label>Type the confirmation phrase<input id="confirmation" autocomplete="off"></label><p><button id="start" disabled>Start runner</button></p></section>
+<section><header><h2>Runner status</h2><span id="status">Stopped</span></header><p id="message"></p><pre id="position"></pre><small>Paper fills are simulated. A broker acknowledgement is not a fill. After a server restart, runners stay stopped until explicitly resumed.</small></section>
+<script src="/dhan-strategies.js?v=20261010-routing-3"></script></main></html>

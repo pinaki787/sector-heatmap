@@ -26,6 +26,18 @@ class WorkspaceTests(unittest.TestCase):
         self.b=self.store.create_account(self.bob,'DELTA_INDIA','Bob crypto','BOB-ID')
     def tearDown(self):self.tmp.cleanup()
 
+    def test_new_navigation_registry_drives_global_and_user_controls(self):
+        from sector_heatmap.section_permissions import FEATURES
+        for key in ('runner-jobs','user-guide'):
+            self.assertIn(key,FEATURES)
+            self.assertTrue(self.store.sidebar_visibility()[key])
+        choices=self.store.sidebar_visibility()
+        choices['runner-jobs']=False
+        self.store.set_sidebar_visibility(self.admin,choices)
+        self.assertFalse(self.store.sidebar_visibility()['runner-jobs'])
+        with self.assertRaises(PermissionError):
+            self.store.set_sidebar_visibility(self.alice,choices)
+
     def test_password_hash_and_session_are_not_plaintext(self):
         token,user=self.store.login('alice','alice-private-password')
         self.assertEqual(self.store.session(token)['id'],self.alice['id'])
@@ -65,6 +77,21 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.store.accounts(self.alice)[0]['id'],self.a['id'])
         self.assertTrue(self.store.reset_password(self.admin,'admin','replacement-admin-password')['signed_out'])
         with self.assertRaises(PermissionError):self.store.session(admin_token)
+    def test_active_session_renewal_and_revocation(self):
+        token,user=self.store.login('alice','alice-private-password')
+        self.now+=7*3600
+        self.assertEqual(self.store.renew_session(token)['id'],self.alice['id'])
+        self.now+=2*3600
+        self.assertEqual(self.store.session(token)['id'],self.alice['id'])
+        self.store.logout(token)
+        with self.assertRaises(PermissionError):self.store.renew_session(token)
+
+    def test_renewal_cannot_resurrect_expired_session(self):
+        token,_=self.store.login('alice','alice-private-password')
+        self.now+=8*3600
+        with self.assertRaises(PermissionError):self.store.renew_session(token)
+        with self.assertRaises(PermissionError):self.store.session(token)
+
 
     def test_wrong_password_and_rate_limit(self):
         for _ in range(5):
@@ -167,6 +194,7 @@ class WorkspaceTests(unittest.TestCase):
         subprocess.run(['git','add','.'],cwd=repo,check=True)
         subprocess.run(['git','-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','fixture'],cwd=repo,check=True)
         (repo/'.fyers.env').write_text('PRIVATE=secret')
+        self.store.configure(self.alice,self.a["id"],{"FYERS_APP_ID":"OWN-100","FYERS_SECRET_KEY":"own-secret"})
         runtime=WorkspaceRuntime(self.store,repo)
         folder=runtime.provision(self.a);other=runtime.provision(self.b)
         self.assertFalse((folder/'source/.fyers.env').exists())

@@ -68,15 +68,15 @@
     const display=value=>String(value || '');
     let version=0, busy=false, messagePinned=false, running=false, stopping=false, policyReady=false;
     async function request(path,body) {
-      if(path==='preview')await root.PaperCapital?.ensure(body?.mode);
-      const response=await fetch('/api/ema-crossover/'+path,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
+      if(path==='preview'&&!root.BrokerForms.account('rsi'))await root.PaperCapital?.ensure(body?.mode);
+      const response=await root.BrokerForms.fetch('rsi','/api/ema-crossover/'+path,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
       const data=await response.json();if(!response.ok || data.error)throw Error(display(data.error || 'Runner request failed'));return data;
     }
-    const settingsKey='sector-pulse:rsi-based-ema-settings-v1';
+    const settingsKey=()=> 'sector-pulse:rsi-based-ema-settings-v1:'+(root.BrokerForms.account('rsi')?.id||root.BrokerForms.initial('rsi')||'server');
     let savedSettings=null;
-    try {savedSettings=JSON.parse(localStorage.getItem(settingsKey) || 'null');}catch{}
+    try {savedSettings=JSON.parse(localStorage.getItem(settingsKey()) || 'null');}catch{}
     function saveSettings(){
-      try {localStorage.setItem(settingsKey,JSON.stringify(Object.fromEntries([...inputs,'search'].map(id=>[id,id==='trailing-enabled'?el(id).checked:el(id).value]))));}catch{}
+      try {localStorage.setItem(settingsKey(),JSON.stringify(Object.fromEntries([...inputs,'search'].map(id=>[id,id==='trailing-enabled'?el(id).checked:el(id).value]))));}catch{}
     }
     function restoreSettings(values){
       if(!values || typeof values!=='object')return;
@@ -131,12 +131,12 @@
       const pnl=s.pnl;
       el('pnl').textContent=pnl?.available?`Position P&L: ₹${pnl.unrealized.toFixed(2)} · Realized: ₹${pnl.realized.toFixed(2)} · Before fees · ${s.config?.mode || el('mode').value}`:'Position P&L unavailable — waiting for a fresh option bid';
       el('runtime').textContent=s.live_available?'Enabled':'Disabled';
-      section.querySelector('.head .status').textContent=s.live_available?'FYERS live runner available':'FYERS live submission disabled';
+      section.querySelector('.head .status').textContent=s.live_available?(s.broker==='DHAN'?'Dhan live runner available':'FYERS live runner available'):'Selected broker live submission disabled';
       el('owned').textContent=s.position?`${s.position.symbol} · ${s.position.quantity} qty @ ${s.position.entry_price}`:'None';
       el('pending').textContent=s.pending?`${s.pending.order.side===1?'BUY':'SELL'} ${s.pending.order.symbol} · ${s.pending.id || 'Awaiting acknowledgement'}`:'None';
       section.querySelector('.risk-strip > div:last-child b').textContent=s.running ? s.config.mode : s.status;
-      policyReady=s.runtime_revision==='rsi-crossover-partial-trailing-v5';
-      const legacyStream = s.runtime_revision !== 'rsi-crossover-partial-trailing-v5';
+      policyReady=['rsi-crossover-partial-trailing-v5','dhan-rsi-owned-options-v1'].includes(s.runtime_revision);
+      const legacyStream = !policyReady;
       const streamNote = legacyStream ? ' Saved crossover and optional trailing changes are not loaded. Active runner behavior is unchanged. Controlled deployment requires a separate decision after the position is flat.' : s.stream ? ` Stream: ${s.stream.connected ? 'connected' : 'disconnected'}${s.stream.error ? ' · '+s.stream.error : ''}.` : '';
       if(!messagePinned)el('live-message').textContent=display(s.message || s.error || 'Stopped. Select your settings and click Start Runner.') + streamNote;
       running=!!s.running;stopping=running && !!s.squareoff_requested;
@@ -174,6 +174,7 @@
       applyLabel();render(s);saveSettings();
       if(el('symbol').value)el('symbol').dispatchEvent(new Event('change',{bubbles:true}));
     }).catch(e=>{el('live-message').textContent='Runner unavailable: '+e.message;});
+    root.addEventListener('broker-account-change',event=>{if(event.detail.kind==='rsi'){version++;messagePinned=false;policyReady=false;running=false;el('runner-start').disabled=true;el('order-history').textContent='Loading selected account history…';el('live-state').textContent='Loading';el('owned').textContent='Loading selected account';el('pending').textContent='Loading selected account';section.querySelector('.head .status').textContent='Checking selected account';refresh();}});
     setInterval(()=>{if(!document.hidden)refresh();},2000);
   }
   root.EmaCrossoverLive={mount};

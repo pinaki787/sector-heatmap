@@ -49,7 +49,7 @@ class Service:
 
     def chart_config(self, query):
         raw={k:query[k][0] for k in settings({}) if k in query}
-        for key,default in [('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        for key,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
         carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
         if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
         deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
@@ -67,6 +67,21 @@ class Service:
         config['chart_zone_target_enabled']=(query.get('chart_zone_target_enabled') or ['false'])[0]=='true'
         self.chart_broker.session_policy(config)
         return config
+
+    def manual_brick(self, query):
+        from .manual_brick import rule, calculate
+        symbol=(query.get('symbol') or [''])[0]
+        if self.instrument and symbol!=self.instrument:
+            raise ValueError('Reference instrument differs from selected instance.')
+        config=dict(underlying=symbol,timeframe='5 minutes',carry_policy='CONTINUOUS',broker='DELTA_INDIA')
+        policy=self.chart_broker.session_policy(config)
+        if not symbol.startswith(('NSE:','BSE:','MCX:')):
+            policy={**policy,'session_exchange':'CRYPTO'}
+        spec=rule(symbol,policy,atr_length=(query.get('atr_length') or [None])[0])
+        now=time.time()
+        rows=self.chart_broker.candles(dict(config,history_start=now-60*86400))
+        return dict(calculate(rows,spec,300,now),symbol=symbol,
+                    source='Selected account broker completed OHLC; Wilder ATR reference sizing')
 
     def chart(self, query):
         config=self.chart_config(query); now=time.time(); tz=ZoneInfo('Asia/Kolkata')
@@ -108,6 +123,7 @@ class Service:
             elif action=='search':
                 text=(query.get('q') or [''])[0].upper()
                 value=dict(matches=[dict(symbol=p['symbol'],underlying=p['underlying']) for p in self.delta.catalog()['instruments'] if p['contract_type']=='perpetual_futures' and text in p['symbol']][:50])
+            elif action=='manual-brick': value=self.manual_brick(query)
             elif action=='chart': value=self.chart(query)
             elif action in ('journal','journal.xlsx'):
                 snapshot=self.runner.snapshot();value=dict(schema_version=1,exported_at=time.time(),broker='DELTA_INDIA',pnl_currency=snapshot.get('pnl_currency'),trades=snapshot.get('trade_history',[]))
@@ -127,7 +143,7 @@ class Service:
         if (handler.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'): raise PermissionError('Local dashboard required.')
         origin=handler.headers.get('Origin')
         if origin and urlparse(origin).netloc!=handler.headers.get('Host'): raise PermissionError('Cross-origin actions forbidden.')
-        actions=dict(**{'resume-position':self.runner.resume_position},settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.stop(),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode})
+        actions=dict(**{'resume-position':self.runner.resume_position},settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.request_stop(p),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode,'chart-timeframe':self.runner.chart_timeframe})
         action=path[len(PREFIX):]
         if action not in actions: raise ValueError('Unknown Delta Renko action.')
         if self.instrument and action in ('preview','start','adopt','override-entry') and payload.get('underlying')!=self.instrument:raise ValueError('Action instrument differs from selected instance.')
@@ -139,12 +155,14 @@ class Service:
         try:
             while not hasattr(handler,'workspace_stream_valid') or handler.workspace_stream_valid():
                 forming=None; error=None
-                try: forming=self.chart_broker.forming(config,[],time.time())
+                try: forming=self.chart_broker.forming_for_stream(config,time.time()) if hasattr(self.chart_broker,'forming_for_stream') else self.chart_broker.forming(config,[],time.time())
                 except ValueError as exc: error=str(exc)
                 now=time.time();tick_at=None;tick_error=None
                 try:_,tick_at=self.chart_broker.live_price(config,now)
                 except (ValueError,RuntimeError) as exc:tick_error=str(exc)
-                frame=dict(**browser_snapshot(self.runner,now),forming=forming,market=dict(connected=self.chart_broker.connected,fresh=forming is not None,error=error,tick_exchange_at=tick_at,tick_error=tick_error),orders=dict(connected=False,basis='Delta REST reconciliation; broker order notifications not claimed.'),server_at=now,bar_seconds=TIMEFRAMES[config['timeframe']])
+                # Quote may arrive after the pre-request clock sample.
+                now=time.time()
+                frame=dict(**browser_snapshot(self.runner,now),forming=forming,market=dict(connected=self.chart_broker.connected,fresh=forming is not None,error=error,tick_fresh=tick_at is not None and 0<=now-tick_at<=15,tick_exchange_at=tick_at,tick_error=tick_error),orders=dict(connected=False,basis=getattr(self,'order_source','Delta REST reconciliation; broker order notifications not claimed.')),server_at=now,bar_seconds=TIMEFRAMES[config['timeframe']])
                 if self.adoptions.lock.acquire(blocking=False):
                     try:managers=dict(self.adoptions.runners)
                     finally:self.adoptions.lock.release()

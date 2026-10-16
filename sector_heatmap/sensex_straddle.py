@@ -113,6 +113,21 @@ class SensexStraddleService:
                 self.last_exit_code = code
                 self.process = None
 
+    def _job_history(self):
+        from .runner_job_history import record_legacy, read
+        path=self.runtime_dir / "submissions.json"
+        running=self.process is not None and self.process.poll() is None
+        existing=read(path)
+        config={"mode":self.active_mode,"lots":self.active_lots,"exit_mode":self.active_exit_mode,
+                "entry_start":self.active_entry_start,"entry_end":self.active_entry_end,
+                "stoploss":getattr(self,"active_stoploss",None),"target":getattr(self,"active_target",None)}
+        if not self.active_mode and existing:config=existing[0].get("config") or config
+        record_legacy(path,{"started_at":self.started_at,"running":running,
+                           "status":"RUNNING" if running else "STOPPED","config":config,
+                           "message":"Process running" if running else "Process stopped; inspect broker positions separately",
+                           "position":self._read_json(self.state_path)})
+        return read(path)
+
     def snapshot(self):
         with self.lock:
             self._refresh_process()
@@ -129,7 +144,7 @@ class SensexStraddleService:
                 "mode": self.active_mode or "STOPPED",
                 "live_control_available": True,
                 "pid": self.process.pid if running else None,
-                "started_at": self.started_at,
+                "started_at": self.started_at, "job_history": self._job_history(),
                 "last_exit_code": self.last_exit_code,
                 "script_path": str(self.script_path),
                 "interpreter": str(self._interpreter()),
@@ -201,7 +216,8 @@ class SensexStraddleService:
             if not self.script_path.is_file():
                 raise FileNotFoundError(f"SENSEX runner not found: {self.script_path}")
             env = os.environ.copy()
-            # Standalone/external runners must inherit the same IPv4-only policy.
+            # Inherit IPv4-only startup policy in standalone runners.
+
             project_root = str(Path(__file__).resolve().parents[1])
             env["PYTHONPATH"] = os.pathsep.join(filter(None, (project_root, env.get("PYTHONPATH"))))
             self.runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -253,7 +269,7 @@ class SensexStraddleService:
         running = self.process is not None and self.process.poll() is None
         result = {
             "running": running, "mode": self.active_mode or "STOPPED", "live_control_available": True,
-            "pid": self.process.pid if running else None, "started_at": self.started_at,
+            "pid": self.process.pid if running else None, "started_at": self.started_at, "job_history": self._job_history(),
             "exit_mode": self.active_exit_mode,
             "lots": self.active_lots,
         }

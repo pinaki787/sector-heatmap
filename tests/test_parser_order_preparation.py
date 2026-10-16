@@ -21,6 +21,7 @@ class ParserOrderPreparationTests(unittest.TestCase):
         scope.update(
             load_config=lambda: {"FYERS_ACCESS_TOKEN": "test:test"},
             fyersModel=SimpleNamespace(FyersModel=lambda **kwargs: self.client),
+            ipv4_fyers_client=lambda **kwargs: self.client,
             trade_recommendation_preview=lambda payload: {
                 "parsed": {"action": "BUY", "entry": 530, "targets": [550]},
                 "mapping": {"status": "EXACT", "contract": {

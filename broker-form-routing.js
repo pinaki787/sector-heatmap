@@ -30,7 +30,7 @@ function route(kind,url,selected){
   }else if(prefixes[kind]&&u.pathname.startsWith(prefixes[kind]))u.pathname=u.pathname.replace('/api/','/api/motilal/');
   else if(kind==='account'&&['/api/account','/api/live-pnl','/api/realized-pnl','/api/auth/status'].includes(u.pathname))u.pathname='/api/motilal/'+(u.pathname==='/api/auth/status'?'status':u.pathname.slice(5));
   else throw Error('This form has no Motilal route; no alternate broker will be used.');
-  u.searchParams.set('account_id',selected.id);u.searchParams.set('broker',selected.broker);return u.href;
+  u.searchParams.set('account_id',selected.id);return u.href;
  }
  const u=new URL(url,location.href);if(kind==='parser'&&selected?.broker!=='FYERS')throw Error('Select a configured FYERS account for this parser.');if(!selected||u.origin!==location.origin||!u.pathname.startsWith('/api/'))return u.href;
  if(u.pathname.startsWith('/api/dhan/')||Object.values(ROUTES).some(k=>u.pathname.startsWith('/api/'+k+'-dhan/')))return u.href;
