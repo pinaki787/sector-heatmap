@@ -1,4 +1,5 @@
 """Read-only portfolio review. Deterministic hypotheses, never an order interface."""
+from .persistent_jobs import checkpoint
 from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -337,6 +338,7 @@ class HoldingsAnalysis:
                     diagnostics.call(adapter.broker, "holdings.current_quotes", adapter.enrich, pending)
             except Exception: enrichment_error = 'Current broker quote snapshot unavailable. Retry with a new analysis after checking authentication.'
             for row in pending:
+                checkpoint("Reviewing holding "+row["symbol"]+".")
                 candles, failure = [], enrichment_error
                 if row['kind'] in ('DELIVERY_EQUITY', 'LINEAR_FUTURE') and not failure:
                     cache_key = (key, row['symbol'], capture['session'])

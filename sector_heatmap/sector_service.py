@@ -1,4 +1,5 @@
 """FYERS-backed candle caching and bounded sector rotation snapshot service."""
+from .persistent_jobs import checkpoint
 from copy import deepcopy
 from datetime import datetime, time as clock_time, timedelta
 import json
@@ -92,6 +93,7 @@ class CandleHistoryProvider:
         candles_by_timestamp = {}
         cursor = start
         while cursor <= end:
+            checkpoint("Collecting "+symbol+" broker history chunk.")
             chunk_end = min(end, cursor + timedelta(days=chunk_days - 1))
             payload = {"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": cursor.isoformat(), "range_to": chunk_end.isoformat(), "cont_flag": 1}
             response = None
@@ -354,12 +356,14 @@ class SectorAnalysisService:
     def _timeframe_candles(self, symbol):
         result = {}
         for timeframe in ("15m", "1h"):
+            checkpoint("Collecting "+symbol+" "+timeframe+" history.")
             try:
                 result[timeframe] = self.provider.get(symbol, timeframe)
             except FyersAuthenticationError:
                 raise
             except Exception as error:
                 LOGGER.warning("%s history failed for %s: %s", timeframe, symbol, error)
+        checkpoint("Collecting "+symbol+" daily history.")
         try:
             daily_source = self.provider.get(symbol, "daily")
             result["daily"] = daily_source

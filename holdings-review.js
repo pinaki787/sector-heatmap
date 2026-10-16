@@ -28,7 +28,7 @@
       if (context?.workspace?.broker && context.workspace.broker !== value) continue;
       broker.add(new Option(value === 'FYERS' ? 'FYERS' : 'Delta India', value));
     }
-    let rows = [], report = null, busy = false, cancel = false;
+    let rows = [], report = null, busy = false, cancel = false, activeJob = null, stopSent = false;
     const activate = () => {
       document.querySelectorAll('[data-view]').forEach(item => {const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));});
       document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view === section));
@@ -55,28 +55,57 @@
     };
     $('holdings-filter').onchange = render;
     broker.onchange = () => {rows = []; report = null; $('holdings-export').disabled = true; $('holdings-coverage').textContent = 'No analysis for the selected broker yet.'; $('holdings-status').textContent = 'Choose Analyse all holdings to load this broker.'; render();};
-    $('holdings-cancel').onclick = () => {cancel = true; $('holdings-status').textContent = 'Stopping after the current read-only batch completes…';};
+    const sameJobScope = job => job?.feature === 'holdings' && job.request?.account_id === (context?.workspace?.id || 'dashboard') && job.request?.payload?.broker === broker.value;
+    const restoreJob = job => {
+      if (!sameJobScope(job) || !Array.isArray(job.output?.rows)) return;
+      report = job.output; rows = report.rows.slice(); render();
+      $('holdings-export').disabled = false;
+      $('holdings-progress').max = report.total || 1; $('holdings-progress').value = report.analysed || 0;
+      $('holdings-status').textContent = `${job.status} · ${rows.length}/${report.total} reviewed. Saved advisory output.`;
+    };
+    const restoreLatest = () => {
+      const records = [...(window.SectorPulseJobs?.records?.values() || [])].sort((a,b) => b.job.created-a.job.created);
+      const saved = records.find(record => sameJobScope(record.job) && record.job.output);
+      if (saved) restoreJob(saved.job);
+    };
+    const stopAnalysis = async () => {
+      if (!activeJob || stopSent) return;
+      stopSent = true;
+      try {await window.SectorPulseJobs.client.cancel(activeJob.base, activeJob.job.job_id);}
+      catch (error) {stopSent = false; $('holdings-status').textContent = error.message;}
+    };
+    window.addEventListener('sector-pulse-job-submitted', event => {
+      if (!busy || !sameJobScope(event.detail.job)) return;
+      activeJob = event.detail; if (cancel) stopAnalysis();
+    });
+    window.addEventListener('sector-pulse-job-update', event => {
+      if (activeJob?.job.job_id !== event.detail.job.job_id) return;
+      restoreJob(event.detail.job);
+    });
+    window.addEventListener('sector-pulse-job-output', event => restoreJob(event.detail.job));
+    broker.addEventListener('change', restoreLatest);
+    if (!section.querySelector('[data-durable-jobs-open]')) {
+      const saved = document.createElement('button'); saved.type = 'button'; saved.textContent = 'Saved jobs & outputs'; saved.dataset.durableJobsOpen = '1';
+      saved.onclick = () => window.SectorPulseJobs?.open(); section.prepend(saved);
+    }
+    $('holdings-cancel').onclick = () => {cancel = true; $('holdings-status').textContent = 'Stop requested; saved partial output will be retained.'; stopAnalysis();};
     $('holdings-analyse').onclick = async () => {
       if (busy) return;
-      busy = true; cancel = false; rows = []; report = null; $('holdings-coverage').textContent = 'Reading the selected broker portfolio…'; render(); broker.disabled = true; $('holdings-analyse').disabled = true;
+      busy = true; cancel = false; activeJob = null; stopSent = false; rows = []; report = null;
+      $('holdings-coverage').textContent = 'Reading the selected broker portfolio…'; render(); broker.disabled = true; $('holdings-analyse').disabled = true;
       $('holdings-cancel').hidden = false; $('holdings-export').disabled = true; $('holdings-progress').hidden = false; $('holdings-progress').value = 0;
-      let offset = 0, capture = null;
       try {
-        do {
-          $('holdings-status').textContent = `Reading ${broker.value} holdings and completed candles… ${rows.length} reviewed. This may take several seconds per batch.`;
-          const query = new URLSearchParams({broker: broker.value, offset, limit: 1}); if (capture) query.set('capture_id', capture); else query.set('inventory_only', '1');
-          const response = await fetch('/api/holdings-analysis?' + query, {cache: 'no-store'}), data = await response.json();
-          if (!response.ok) throw new Error(data.error || 'Holdings analysis failed.');
-          capture = data.capture_id; report = data; rows.push(...data.rows); offset = data.next_offset;
-          $('holdings-progress').max = data.total || 1; $('holdings-progress').value = data.analysed;
-          render();
-          // Keep the entire portfolio visible; continue in small batches without order calls.
-          if (offset != null && !cancel) await new Promise(resolve => setTimeout(resolve, 1000));
-        } while (offset != null && !cancel);
-        $('holdings-status').textContent = report.total === 0 ? 'No holdings or open derivative positions were returned for this broker.' : `${cancel && offset != null ? 'Stopped · partial review' : 'Review complete'} · ${rows.length}/${report.total} reviewed. ${rows.filter(row => row.action === 'REVIEW_NEEDED').length} marked Review needed. Suggestions are advisory.`;
+        $('holdings-status').textContent = 'Portfolio analysis submitted as a server job. It continues if you leave this page.';
+        const headers = {'Content-Type':'application/json'}; if (context?.csrf) headers['X-CSRF-Token'] = context.csrf;
+        const response = await fetch('/api/holdings-analysis/analyze', {method:'POST',headers,body:JSON.stringify({broker:broker.value,account_id:context?.workspace?.id,offset:0,limit:1,inventory_only:1})}), data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Holdings analysis failed.');
+        report = data; rows = data.rows; render();
+        $('holdings-progress').max = data.total || 1; $('holdings-progress').value = data.analysed;
+        $('holdings-status').textContent = report.total === 0 ? 'No holdings or open derivative positions were returned for this broker.' : `Review complete · ${rows.length}/${report.total} reviewed. ${rows.filter(row => row.action === 'REVIEW_NEEDED').length} marked Review needed. Suggestions are advisory.`;
       } catch (error) { $('holdings-status').textContent = `${error.message} ${rows.length ? `Partial review retained: ${rows.length} rows.` : 'No complete portfolio review was produced.'}`; }
       finally {busy = false; broker.disabled = false; $('holdings-analyse').disabled = false; $('holdings-cancel').hidden = true; $('holdings-export').disabled = !report;}
     };
+    restoreLatest();
     $('holdings-export').onclick = () => {
       const url = URL.createObjectURL(new Blob([JSON.stringify({...report, rows, complete: rows.length === report.total}, null, 2)], {type:'application/json'}));
       const link = document.createElement('a'); link.href = url; link.download = `holdings-review-${report.broker}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000);

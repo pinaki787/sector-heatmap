@@ -1,4 +1,5 @@
 """Three execution choices for verified screener underlyings; advisory only."""
+from .persistent_jobs import checkpoint
 import csv
 import io
 import math
@@ -34,6 +35,7 @@ def analyze(candidates, client, master, fetch_chain, risk):
     except Exception:
         eligible=None  # Unknown eligibility must not be labeled equity-only.
     for item in candidates:
+        checkpoint("Checking stock-option evidence.")
         ticker=str(item.get('symbol') or '').strip().upper()
         if not ticker or any(c not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789&-' for c in ticker):
             excluded.append(dict(symbol=ticker,reason='Invalid stock ticker.'));continue

@@ -4,6 +4,7 @@ import re
 
 ALIASES={'NIFTY50':'NIFTY','NIFTYBANK':'BANKNIFTY','NIFTYFIN':'FINNIFTY','NIFTYMIDSELECT':'MIDCPNIFTY'}
 PENDING={'3','4','6','PENDING','OPEN','TRANSIT','PART_TRADED','PARTIALLY_FILLED','TRIGGER_PENDING','VALIDATION_PENDING'}
+TERMINAL_ORDERS={'1','2','5','7','CANCEL','CANCELLED','CANCELED','TRADED','FILLED','CLOSED','COMPLETE','COMPLETED','REJECTED','ERROR','EXPIRED'}
 
 
 def symbol_key(symbol):
@@ -33,6 +34,7 @@ def open_exposures(positions,orders=()):
     for row in orders:
         status=str(row.get('status',row.get('orderStatus',''))).upper()
         if status in PENDING:result.append(row)
+        elif status not in TERMINAL_ORDERS:raise ValueError('Broker order status unavailable or unknown; duplicate exposure cannot be ruled out.')
     return result
 
 
@@ -50,6 +52,12 @@ def exclude_exposure(candidates,positions,orders=()):
     for candidate in candidates:
         (excluded if matches_exposure(candidate.get('symbol'),rows) else eligible).append(candidate)
     return eligible,excluded
+
+
+def exclude_handoff_cards(candidates,cards,positions,orders=()):
+    eligible,excluded=exclude_exposure(candidates,positions,orders)
+    keys={candidate['key'] for candidate in eligible}
+    return eligible,[card for card in cards if card.get('candidate_key') in keys],excluded
 
 
 def broker_exposures(broker):

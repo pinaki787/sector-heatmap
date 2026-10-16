@@ -16,7 +16,7 @@ function jobsURL(responseURL,accountID){
 }
 function createClient(fetcher,{onUpdate=()=>{},sleep=ms=>new Promise(r=>setTimeout(r,ms))}={}){
  const watching=new Map(),latest=new Map();
- async function read(base,id){const u=new URL(base);u.searchParams.set('job_id',id);const r=await fetcher(u.href,{cache:'no-store'});const value=await r.json();if(!r.ok)throw Error(value.error||'Job unavailable.');return value;}
+ async function read(base,id){const u=new URL(base);u.searchParams.set('job_id',id);const r=await fetcher(u.href,{cache:'no-store',signal:AbortSignal.timeout(10000)});const value=await r.json();if(!r.ok)throw Error(value.error||'Job unavailable.');return value;}
  function watch(base,id){
   const key=String(base)+':'+id;
   if(watching.has(key))return watching.get(key);
@@ -35,11 +35,22 @@ function createClient(fetcher,{onUpdate=()=>{},sleep=ms=>new Promise(r=>setTimeo
 }
 if(typeof module!=='undefined'&&module.exports){module.exports={eligible,jobsURL,createClient};return;}
 if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
-const baseFetch=root.fetch.bind(root),records=new Map(),submissions=new Map();let modal,list,output,status;
+const baseFetch=root.fetch.bind(root),records=new Map(),submissions=new Map(),cursors=new Map();let modal,list,output,status,older;
+const referencesKey='sector-pulse:durable-job-references:v1';
+function references(){try{const value=JSON.parse(localStorage.getItem(referencesKey)||'[]');return Array.isArray(value)?value.slice(0,200):[];}catch{return [];}}
+function remember(job,base){
+ if(job?.kind!=='ANALYSIS'||!job.request?.path||!job.job_id)return;
+ const key=String(base)+':'+job.feature+':'+job.request.path,refs=references(),old=refs.find(r=>r.key===key);
+ if(old&&old.created>job.created)return;
+ try{localStorage.setItem(referencesKey,JSON.stringify([{key,base:String(base),job_id:job.job_id,created:job.created},...refs.filter(r=>r.key!==key)].slice(0,200)));}catch{}
+}
+function isLatest(job,base){const key=String(base)+':'+job.feature+':'+job.request?.path;return !references().some(r=>r.key===key&&r.created>job.created);}
 const client=createClient(baseFetch,{onUpdate(job,base){
  const key=String(base)+':'+job.job_id;
  if(job.status==='CONNECTION_DELAYED'){const old=records.get(key);if(old)job={...old.job,message:job.message};}
  records.set(key,{job,base:String(base)});render();
+ remember(job,base);
+ if(job.terminal&&job.output&&job.kind==='ANALYSIS'&&!submissions.has(job.job_id)&&isLatest(job,base))restore({job,base:String(base)});
  root.dispatchEvent(new CustomEvent('sector-pulse-job-update',{detail:{job,base:String(base)}}));
 }});
 root.fetch=async function(input,options={}){
@@ -51,14 +62,17 @@ root.fetch=async function(input,options={}){
  if(!selected||response.status!==202)return response;
  const accepted=await response.clone().json();if(!accepted.job_id)return response;
  const base=jobsURL(response.url||url,accepted.account_id);submissions.set(accepted.job_id,{base:String(base),url});
- void client.watch(base,accepted.job_id);
+ remember(accepted.job,base);
+ root.dispatchEvent(new CustomEvent('sector-pulse-job-submitted',{detail:{job:accepted.job,base:String(base)}}));
+ if(!accepted.job?.terminal)void client.watch(base,accepted.job_id);
  let job=accepted.job;
- const form=({handoff:'handoff',screener:'screener','ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko','trade-parser':'parser'})[accepted.job?.feature]||root.BrokerForms?.kind(accepted.job?.request?.path||url);
+ const form=accepted.job?.feature==='renko-engine'?null:({handoff:'handoff',screener:'screener','ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko','trade-parser':'parser'})[accepted.job?.feature]||root.BrokerForms?.kind(accepted.job?.request?.path||url);
  const initialAccount=accepted.account_id==='dashboard'?null:accepted.account_id;
  while(true){
   if(job){
-   if(job.kind==='RUNNER'&&job.output)return new Response(JSON.stringify({...job.output,job_id:job.job_id}),{status:200,headers:{'Content-Type':'application/json'}});
+   if(job.kind==='RUNNER'&&job.output){submissions.delete(accepted.job_id);return new Response(JSON.stringify({...job.output,job_id:job.job_id}),{status:200,headers:{'Content-Type':'application/json'}});}
    if(job.terminal){
+    submissions.delete(accepted.job_id);
     const current=root.BrokerForms?.account(form)?.id;
     if(initialAccount&&form&&current&&current!==initialAccount)return new Response(JSON.stringify({error:'Job output is saved for the previous broker account. Open Saved jobs to retrieve it.'}),{status:409,headers:{'Content-Type':'application/json'}});
     return new Response(JSON.stringify(job.status==='COMPLETED'?job.output:{error:job.error||job.message,job_id:job.job_id}),{status:job.status==='COMPLETED'?200:409,headers:{'Content-Type':'application/json'}});
@@ -79,7 +93,7 @@ function restore(record){
  root.dispatchEvent(new CustomEvent('sector-pulse-job-output',{detail:{job:record.job,output:record.job.output,path:record.job.request.path,base:record.base}}));
 }
 function render(){
- if(!list)return;list.replaceChildren();
+ if(!list)return;list.replaceChildren();if(older)older.disabled=![...cursors.values()].some(Boolean);
  for(const record of [...records.values()].sort((a,b)=>b.job.created-a.job.created)){
   const row=document.createElement('article');row.className='panel';row.style.padding='12px';
   const title=document.createElement('strong');title.textContent=record.job.label||record.job.job_id;row.append(title);
@@ -100,19 +114,41 @@ async function refresh(){
  let failures=0;
  await Promise.all(sources.map(async base=>{
   try{const r=await baseFetch(base.href,{cache:'no-store',signal:AbortSignal.timeout(10000)}),data=await r.json();if(!r.ok)throw Error(data.error);
+   cursors.set(base.href,data.next_before||null);
    for(const job of data.jobs||[]){records.set(base.href+':'+job.job_id,{job,base:base.href});if(!job.terminal)client.watch(base,job.job_id);}
   }catch(error){failures++;}
+ }));
+ const permitted=new Set(sources.map(base=>base.href));
+ await Promise.all(references().filter(ref=>permitted.has(ref.base)&&/^[a-f0-9]{32}$/.test(ref.job_id)&&!records.has(ref.base+':'+ref.job_id)).map(async ref=>{
+  try{const job=await client.read(ref.base,ref.job_id);records.set(ref.base+':'+job.job_id,{job,base:ref.base});if(!job.terminal)client.watch(ref.base,job.job_id);}catch{}
  }));render();if(status)status.textContent=failures?'Some account job histories are unavailable; completed outputs remain saved.':'Outputs are saved on the server. Leaving this page does not stop jobs.';
+}
+async function loadOlder(){
+ if(older)older.disabled=true;
+ await Promise.all([...cursors].filter(([,cursor])=>cursor).map(async([base,cursor])=>{
+  try{const url=new URL(base);url.searchParams.set('before',cursor);const response=await baseFetch(url.href,{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw Error(data.error||'Job history unavailable.');
+   cursors.set(base,data.next_before||null);for(const job of data.jobs||[])records.set(base+':'+job.job_id,{job,base});
+  }catch(error){if(status)status.textContent=error.message;}
+ }));render();
 }
 async function mount(){
  await root.BrokerForms?.ready;
  modal=document.createElement('dialog');modal.setAttribute('aria-label','Saved analysis and runner jobs');modal.style.cssText='width:min(1150px,94vw);max-height:88vh;overflow:auto;background:#142033;color:#e4ecf7;border:1px solid #53647e;border-radius:12px;padding:22px';
- const heading=document.createElement('h2');heading.textContent='Saved analysis and runner jobs';modal.append(heading,button('Close',()=>modal.close()),button('Refresh jobs',refresh));
+ const heading=document.createElement('h2');heading.textContent='Saved analysis and runner jobs';older=button('Load older jobs',loadOlder);older.disabled=true;modal.append(heading,button('Close',()=>modal.close()),button('Refresh jobs',refresh),older);
  status=document.createElement('p');status.setAttribute('role','status');modal.append(status);list=document.createElement('div');output=document.createElement('section');modal.append(list,output);document.body.append(modal);
  for(const id of ['handoff','screener']){
   const section=document.getElementById(id);if(section)section.prepend(button('Saved jobs & outputs',()=>{modal.showModal();refresh();}));
  }
- const oldJobs=document.querySelector('nav button[data-feature="runner-jobs"]');if(oldJobs)oldJobs.addEventListener('click',()=>{queueMicrotask(()=>{const dialog=document.querySelector('dialog[aria-label="Runner jobs"]');if(dialog&&!dialog.querySelector('[data-durable-jobs]')){const open=button('Saved analysis jobs & outputs',()=>{modal.showModal();refresh();});open.dataset.durableJobs='1';dialog.prepend(open);}});});
+ const attachRunnerHistory=()=>{
+  const dialog=document.querySelector('dialog[aria-label="Runner jobs"]');if(!dialog)return false;
+  if(!dialog.querySelector('[data-durable-jobs]')){const open=button('Saved jobs & outputs',()=>{modal.showModal();refresh();});open.dataset.durableJobs='1';dialog.prepend(open);}
+  return true;
+ };
+ if(!attachRunnerHistory()){
+  const observer=new MutationObserver(()=>{if(attachRunnerHistory())observer.disconnect();});
+  observer.observe(document.body,{childList:true,subtree:true});
+ }
+
  await refresh();
  const restoreLatest=()=>{
   const seen=new Set();

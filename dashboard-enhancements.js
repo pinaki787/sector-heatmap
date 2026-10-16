@@ -184,7 +184,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('input[name="straddle-exit"][value="supertrend"]').closest('.option-card').querySelector('small').innerHTML = '<code>--supertrend-trail</code> · 7,3 after +10 · 15-point hard stop.'
   document.querySelector('input[name="straddle-exit"][value="fixed"]').closest('.option-card').querySelector('small').innerHTML = '<code>--fixed-target</code> · 30 target · 15-point hard stop.'
   document.querySelector('input[name="straddle-exit"][value="trail"]').closest('.option-card').querySelector('small').innerHTML = '<code>--trail-profit</code> · trail 10 after +30 · 15-point hard stop.'
-  $('screener-analysis-next').textContent = 'Cancel analysis'
+  $('screener-analysis-next').textContent = 'Stop analysis job'
   $('screener-analysis-results').insertAdjacentHTML('afterend', `<section id="screener-watchlist" style="margin-top:18px"><div class="step-title"><div><span class="label">SECONDARY · NON-ACTIONABLE</span><h3>Watchlist</h3><small class="muted">Candidates needing stronger alignment or evidence. No live-order path is available here.</small></div><span class="status">Advisory only</span></div><div id="screener-watchlist-results" class="analysis-board"></div></section>`)
   $('screener-analysis-results').insertAdjacentHTML('afterend', `<section id="screener-options" style="margin-top:18px"><div class="step-title"><div><span class="label">STOCK OPTIONS · DEFINED RISK</span><h3>High-Conviction option spreads</h3><small class="muted">Built only from the High-Conviction equity underlyings using fresh FYERS chain, contract and liquidity evidence.</small></div><button type="button" class="button secondary" id="analyze-screener-options">Refresh option spreads</button></div><div id="screener-options-status" class="handoff-status">Complete the equity analysis to screen stock options.</div><div id="screener-options-results" class="analysis-board"></div></section>`)
   document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="settings" class="view ${initialView === 'settings' ? 'active' : ''}"><header class="head"><div><span class="label">OPTIONAL PREFERENCES</span><h1>Risk Guardrails</h1><small class="muted">Safe defaults apply automatically. Adjustments refresh and recalculate the next plan.</small></div></header><div id="settings-content"></div></section>`)
@@ -692,6 +692,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const screenerClassifications = new Map()
   let screenerAnalysisRunning = false
   let screenerAnalysisCancelled = false
+  let screenerActiveJob = null, screenerStopSent = false
   let screenerSchedulerTimer = null
   const screenerReadySymbols = () => new Set(screenerSources.flatMap(source => source.result?.status === 'READY' && Array.isArray(source.result.candidates) ? source.result.candidates : []).map(symbol => String(symbol).trim()).filter(Boolean))
   const screenerCandidateSelections = new Set()
@@ -936,6 +937,32 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     updateScreenerScheduleLabels()
     screenerSchedulerTimer = setTimeout(runScreenerScheduler, 1000)
   }
+  const requestScreenerJobStop = async () => {
+    if (!screenerActiveJob || screenerStopSent) return
+    screenerStopSent = true
+    try {await window.SectorPulseJobs.client.cancel(screenerActiveJob.base, screenerActiveJob.job.job_id)}
+    catch (error) {screenerStopSent = false; $('screener-analysis-status').textContent = error.message; $('screener-analysis-next').disabled = false}
+  }
+  window.addEventListener('sector-pulse-job-submitted', event => {
+    const {job,base} = event.detail || {}
+    if (job?.feature !== 'screener' || job.kind !== 'ANALYSIS' || job.request?.account_id !== window.BrokerForms?.account('screener')?.id || job.terminal) return
+    if (job.request?.path?.split('?')[0].endsWith('/chartink/analyze-options') && screenerAnalysisRunning) return
+    screenerActiveJob = {job,base}; screenerStopSent = false
+    $('screener-analysis-next').hidden = false; $('screener-analysis-next').disabled = false
+    if (screenerAnalysisCancelled) requestScreenerJobStop()
+  })
+  window.addEventListener('sector-pulse-job-update', event => {
+    const {job} = event.detail || {}
+    if (job?.job_id !== screenerActiveJob?.job.job_id) return
+    if (Array.isArray(job.output?.results) && job.status !== 'COMPLETED') {
+      screenerAnalysisDiagnostics = {analyzed:0,watchlist:0,rejected:0}
+      renderSavedScreenerAnalysis(job.output, true)
+    }
+    if (job.terminal) {$('screener-analysis-next').hidden = true; screenerActiveJob = null}
+  })
+  window.addEventListener('broker-account-change', event => {
+    if (event.detail?.kind === 'screener') {screenerActiveJob = null; screenerStopSent = false; $('screener-analysis-next').hidden = true}
+  })
   const renderSavedScreenerAnalysis = (data, reset) => {
       const qualified = data.results.filter(item => item.decision === 'PASS' && item.conviction?.rating === 'High')
       const watchlist = data.results.filter(item => item.decision === 'WATCHLIST')
@@ -970,6 +997,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       if (!screenerAnalysisSymbols.length) { $('screener-status').textContent = 'Select at least one screener symbol before analysis.'; syncScreenerCandidateSelectionUi(); return }
       screenerAnalysisRunning = true
       screenerAnalysisCancelled = false
+      screenerActiveJob = null; screenerStopSent = false
       syncScreenerCandidateSelectionUi()
       screenerAnalysisOffset = 0
       screenerSelectedPlans.clear()
@@ -1067,6 +1095,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     cards.forEach(card => board.append(card))
   }
   const analyzeScreenerOptionPlans = async () => {
+    screenerAnalysisCancelled = false
     const button = $('analyze-screener-options')
     if (!screenerAnalysisResults.length) return
     button.disabled = true
@@ -3040,7 +3069,8 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('screener-analysis-next').addEventListener('click', () => {
     screenerAnalysisCancelled = true
     $('screener-analysis-next').disabled = true
-    $('screener-analysis-status').textContent = `Cancellation requested · finishing the current safe batch (${screenerAnalysisOffset} complete).`
+    $('screener-analysis-status').textContent = 'Stop requested; the server will retain partial analysis output.'
+    requestScreenerJobStop()
   })
   $('prepare-screener-order').addEventListener('click', prepareScreenerOrder)
   $('analyze-screener-options').addEventListener('click', analyzeScreenerOptionPlans)

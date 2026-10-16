@@ -1,5 +1,5 @@
 import unittest
-from sector_heatmap.exposure_guard import exclude_exposure,matches_exposure,open_exposures,same_underlying
+from sector_heatmap.exposure_guard import exclude_exposure,matches_exposure,open_exposures,same_underlying,exclude_handoff_cards
 
 
 class ExposureGuardTests(unittest.TestCase):
@@ -19,3 +19,12 @@ class ExposureGuardTests(unittest.TestCase):
     def test_unverifiable_position_is_not_silently_ignored(self):
         with self.assertRaises(ValueError):open_exposures([{'symbol':'X','netQty':'unknown'}])
         with self.assertRaises(ValueError):matches_exposure('X',[{'netQty':1}])
+
+    def test_all_cards_for_newly_exposed_underlying_are_removed_before_publish(self):
+        candidates=[{'key':'one','symbol':'NSE:TEST-EQ'},{'key':'two','symbol':'NSE:OTHER-EQ'}]
+        cards=[{'candidate_key':'one','kind':'EQUITY'},{'candidate_key':'one','kind':'LONG_OPTION'},{'candidate_key':'two','kind':'EQUITY'}]
+        good,kept,ignored=exclude_handoff_cards(candidates,cards,[],[{'symbol':'NSE:TEST-EQ','status':6}])
+        self.assertEqual(good,[candidates[1]]);self.assertEqual(kept,[cards[2]]);self.assertEqual(ignored,[candidates[0]])
+
+    def test_unknown_order_state_cannot_silently_permit_another_entry(self):
+        with self.assertRaisesRegex(ValueError,'order status'):open_exposures([],[{'symbol':'NSE:TEST-EQ','status':'UNKNOWN_STATE'}])

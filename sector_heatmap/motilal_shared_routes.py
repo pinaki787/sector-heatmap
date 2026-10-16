@@ -1,4 +1,5 @@
 """Owner-bound routes reused by Renko, Screener, Handoff and Sector Rotation."""
+from .persistent_jobs import checkpoint
 import hashlib,json,re,secrets,threading,time
 from datetime import datetime
 from decimal import Decimal
@@ -49,6 +50,7 @@ class Routes:
         sectors=self.sector(execution);adapter=sectors.provider.adapter
         benchmark=sectors._timeframe_candles('NSE:NIFTY50-INDEX');result=[]
         for ticker in page:
+            checkpoint("Analyzing "+ticker+" with Motilal evidence.")
             symbol='NSE:'+ticker+'-EQ'
             try:
                 candles=sectors._timeframe_candles(symbol)

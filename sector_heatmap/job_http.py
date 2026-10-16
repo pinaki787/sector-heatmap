@@ -8,8 +8,8 @@ from io import BytesIO
 import json
 import re
 import time
-from urllib.parse import urlsplit,parse_qs
-from .persistent_jobs import JobStore,JobCancelled,JobInterrupted
+from urllib.parse import urlsplit,parse_qs,urlencode
+from .persistent_jobs import JobStore,JobCancelled,JobInterrupted,JobStopFailed
 from .section_permissions import allowed
 
 
@@ -18,7 +18,11 @@ def operation(path):
     if not route.startswith('/api/'):return None
     if any(term in route for term in ('trade-ticket','submit','override','squareoff','login','auth/','diagnostic')):return None
     if route.endswith(('/analyze','/analyze-options','/analyze-market','/analysis','/ai-review','/ai-analysis','/backtest')):
-        feature='screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route else 'trade-parser'
+        feature=('screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route
+                 else 'renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route
+                 else 'ema-band' if 'band' in route else 'ema-cross' if 'crossover' in route or 'ema-dhan' in route
+                 else 'kama' if 'kama' in route else 'delta-india' if 'delta-india' in route else 'straddles' if 'straddle' in route
+                 else 'telegram-parser' if 'telegram' in route else 'trade-parser')
         return ('ANALYSIS',feature)
     if route.endswith(('/start','/runner-start','/form-runner-start','/start-selected','/start-paper')) and re.match(r'^/api/(renko|ema-|band-|kama|nifty-straddle|sensex-straddle|straddle|delta-india)',route):
         feature='renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route else 'ema-band' if 'band' in route else 'ema-cross' if 'crossover' in route or 'ema-dhan' in route else 'kama' if 'kama' in route else 'straddles' if 'straddle' in route else 'delta-india'
@@ -70,6 +74,10 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
     def replay(handler,path,payload=None):
         clone=object.__new__(handler_class);clone.__dict__=copy(handler.__dict__)
         clone.path=path;clone.command='POST' if payload is not None else 'GET';clone._persistent_job_internal=True
+        holdings=path.split('?',1)[0]=='/api/holdings-analysis/analyze'
+        if holdings:
+            query={k:v for k,v in (payload or {}).items() if k in ('broker','capture_id','offset','limit','inventory_only','account_id') and v is not None}
+            clone.path='/api/holdings-analysis?'+urlencode(query);clone.command='GET'
         clone.headers=deepcopy(handler.headers)
         content=json.dumps(payload).encode() if payload is not None else b''
         clone.headers.replace_header('Content-Length',str(len(content))) if clone.headers.get('Content-Length') else clone.headers.__setitem__('Content-Length',str(len(content)))
@@ -82,7 +90,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
             return analyze(payload,broker,HandoffAI(root),name,aid)
         def send_json(status,value):captured.update(status=status,value=value)
         clone.send_json=send_json
-        (original_post if payload is not None else original_get)(clone)
+        (original_post if payload is not None and not holdings else original_get)(clone)
         if 'value' not in captured:raise ValueError('Workflow did not return a JSON job result.')
         if captured['status']>=400:raise ValueError(str(captured['value'].get('error','Workflow failed.')))
         return captured['value']
@@ -139,6 +147,16 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                         if count<=0:raise ValueError('Screener pagination made no progress; partial output is saved.')
                         combined.extend(next_result.get('results',[]));offset+=count;result=next_result
                     result={**result,'results':combined,'analyzed':len(combined),'has_more':False}
+                if request['path'].split('?',1)[0]=='/api/holdings-analysis/analyze':
+                    combined=list(result.get('rows',[]));seen=set()
+                    while result.get('next_offset') is not None:
+                        offset=result['next_offset']
+                        if offset in seen:raise ValueError('Holdings analysis made no progress; partial output retained.')
+                        seen.add(offset)
+                        context.checkpoint('Holdings batch saved; collecting remaining submitted holdings.',{**result,'rows':combined})
+                        result=replay(handler,request['path'],{**payload,'capture_id':result['capture_id'],'offset':offset,'inventory_only':0})
+                        combined.extend(result.get('rows',[]))
+                    result={**result,'rows':combined,'next_offset':None}
                 if kind=='RUNNER':store._update(context.job_id,output=result,message='Runner activation output saved.')
                 else:context.checkpoint('Workflow output saved.',result)
                 handles=runner_factory(handler,request['path'],payload,result) if kind=='RUNNER' and runner_factory else None
@@ -150,17 +168,20 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                     owned=[dict(snapshot=handle[0],stop=handle[1],identity=handle[2] if len(handle)>2 else activation_identity,stopped=False) for handle in handles]
                     while owned:
                         if store.shutdown.is_set():raise JobInterrupted()
-                        live=[];snapshots=[]
+                        live=[];snapshots=[];stop_failed=False
                         for handle in owned:
                             value=handle['snapshot']()
                             if handle['identity'] and run_identity(value)!=handle['identity']:continue
                             snapshots.append(value)
                             if not (value.get('running') or value.get('position') or value.get('pending')):continue
                             if context.cancelled() and not handle['stopped']:
-                                handle['stop']();handle['stopped']=True
+                                try:handle['stop']()
+                                except Exception:stop_failed=True
+                                handle['stopped']=True
                             live.append(handle)
                         result={**result,'runner_outputs':snapshots} if len(handles)!=1 else (snapshots[0] if snapshots else result)
                         store._update(context.job_id,output=result,message='Runner output and journal saved.')
+                        if stop_failed:raise JobStopFailed()
                         owned=live
                         if owned:time.sleep(1)
                     return result
@@ -175,13 +196,21 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                         # Stop applies only to the submitted run, never a newer run.
                         fresh=replay(handler,routes[0]);fresh=fresh.get('runner',fresh)
                         if expected and (fresh.get('run_id') or fresh.get('started_at'))!=expected:raise JobCancelled()
-                        replay(handler,routes[1],{'run_id':expected});stop_sent=True
+                        store._update(context.job_id,output=fresh)
+                        try:replay(handler,routes[1],{'run_id':expected})
+                        except Exception:raise JobStopFailed() from None
+                        stop_sent=True
                     time.sleep(1)
                     result=replay(handler,routes[0]);current=result.get('runner',result)
                     if expected and (current.get('run_id') or current.get('started_at'))!=expected:break
                     store._update(context.job_id,output=result,message='Runner stopping; reconciliation remains active.' if stop_sent else 'Runner active; output and journal saved.')
                 return result
-            label=(payload.get('underlying') or payload.get('symbol') or feature)+' · '+kind.lower()
+            names=payload.get('symbols') or payload.get('instruments') or []
+            summary=', '.join(str(value) for value in names[:3]) if isinstance(names,list) else ''
+            if isinstance(names,list) and len(names)>3:summary+=' +'+str(len(names)-3)+' more'
+            subject=payload.get('underlying') or payload.get('symbol') or summary or feature
+            action='option analysis' if path.endswith('/analyze-options') else 'portfolio analysis' if feature=='holdings' else kind.lower()
+            label=str(subject)+' · '+action
             job=store.submit(owner,kind,feature,label,request,work,key)
             return handler.send_json(202,dict(status='QUEUED',job_id=job['job_id'],job=job,jobs_url='/api/jobs',account_id=owner.split(':',1)[1]))
         except PermissionError as error:return handler.send_json(403,{'error':str(error)})
@@ -207,8 +236,10 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                 job=store.get(owner,job_id)
                 if not allowed(user,job['request']['path']):raise PermissionError('Job section is not assigned.')
                 return handler.send_json(200,job)
-            jobs=[job for job in store.list(owner) if allowed(user,job['request']['path'])]
-            return handler.send_json(200,dict(jobs=jobs,account_id=owner.split(':',1)[1]))
+            query=parse_qs(parsed.query)
+            jobs,next_before=store.page(owner,(query.get('before') or [None])[0])
+            jobs=[job for job in jobs if allowed(user,job['request']['path'])]
+            return handler.send_json(200,dict(jobs=jobs,next_before=next_before,account_id=owner.split(':',1)[1]))
         except PermissionError as error:return handler.send_json(403,{'error':str(error)})
         except ValueError as error:return handler.send_json(400,{'error':str(error)})
 

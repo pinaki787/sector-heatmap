@@ -42,6 +42,16 @@ class JobControlTests(TestCase):
             finally:
                 release.set();t.join();runner.stop_thread.join(2)
             self.assertTrue(finished.is_set())
+    def test_start_time_guard_protects_runner_without_a_run_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            runner=Runner(Mock(),Path(d)/'state.json')
+            runner.state.update(run_id=None,running=True,started_at=2,config={'mode':'PAPER'})
+            runner.save()
+            with self.assertRaisesRegex(ValueError,'Run changed'):
+                runner.request_stop({'started_at':1})
+            self.assertFalse(runner.stop_requested.is_set())
+            self.assertTrue(runner.state['running'])
+
     def test_independent_history_archives_do_not_share_network_lock(self):
         self.assertIs(history_file_lock("/tmp/a","BTCUSD","1m"),history_file_lock("/tmp/a","BTCUSD","1m"))
         self.assertIsNot(history_file_lock("/tmp/a","BTCUSD","1m"),history_file_lock("/tmp/b","BTCUSD","1m"))
@@ -122,6 +132,33 @@ class JobControlTests(TestCase):
 
 
 class StraddleHistoryTests(TestCase):
+    def test_stale_straddle_job_cannot_stop_newer_process(self):
+        from sector_heatmap.sensex_straddle import SensexStraddleService
+        with tempfile.TemporaryDirectory() as d:
+            service=SensexStraddleService(runtime_dir=d)
+            process=Mock(pid=111,returncode=0);process.poll.return_value=None
+            service.process=process;service.started_at='2026-10-16T10:00:00+05:30';service.active_mode='PAPER'
+            with self.assertRaisesRegex(ValueError,'replacement run was preserved'):
+                service.stop('older')
+            process.terminate.assert_not_called()
+            self.assertIs(service.process,process)
+
+    def test_new_straddle_started_during_old_process_wait_is_preserved(self):
+        from sector_heatmap.sensex_straddle import SensexStraddleService
+        from sector_heatmap.nifty_straddle import NiftyStraddleService
+        for cls in (SensexStraddleService,NiftyStraddleService):
+            with self.subTest(service=cls.__name__), tempfile.TemporaryDirectory() as d:
+                service=cls(runtime_dir=d)
+                old=Mock(pid=111,returncode=0);old.poll.return_value=None
+                replacement=Mock(pid=222,returncode=None);replacement.poll.return_value=None
+                service.process=old;service.started_at='2026-10-16T09:00:00+05:30';service.active_mode='PAPER'
+                def restart(**kwargs):service.process=replacement;service.started_at='2026-10-16T10:00:00+05:30'
+                old.wait.side_effect=restart
+                result=service.stop('2026-10-16T09:00:00+05:30')
+                self.assertIs(service.process,replacement);self.assertTrue(result['running'])
+                self.assertEqual(service.started_at,'2026-10-16T10:00:00+05:30')
+                replacement.terminate.assert_not_called();old.terminate.assert_called_once()
+
     def test_both_straddle_services_retain_submissions_after_reload(self):
         from sector_heatmap.sensex_straddle import SensexStraddleService
         from sector_heatmap.nifty_straddle import NiftyStraddleService

@@ -273,6 +273,8 @@ class Runner:
             expected = payload.get('run_id')
             if expected and expected != current.get('run_id'):
                 raise ValueError('Run changed. Refresh before stopping.')
+            if payload.get('started_at') is not None and payload['started_at'] != current.get('started_at'):
+                raise ValueError('Run changed. Refresh before stopping.')
             if not (current.get('running') or current.get('position') or current.get('pending')):
                 return current
             self.stop_requested.set()

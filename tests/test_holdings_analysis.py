@@ -166,7 +166,8 @@ class EndpointTests(unittest.TestCase):
         tree = ast.parse(Path('sector_heatmap/web.py').read_text())
         run = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'run_server')
         handler = next(node for node in run.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
-        dispatch = next(node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name in ('diagnostic_get_dispatch','do_GET'))
+        dispatch = next((node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name == 'diagnostic_get_dispatch'), None)
+        if dispatch is None:dispatch = next(node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name == 'do_GET')
         branch = next(node for node in dispatch.body if isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and any(isinstance(n, ast.Constant) and n.value == '/api/holdings-analysis' for n in ast.walk(node.test)))
         function = ast.parse('def endpoint(self, path):\n    pass').body[0]
         function.body = [branch]

@@ -12,7 +12,7 @@ from sector_heatmap.job_http import install,operation
 class JobHTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.entered=threading.Event();self.release=threading.Event();self.calls=[];self.running=False;self.observed_run='one'
+        self.entered=threading.Event();self.release=threading.Event();self.calls=[];self.running=False;self.observed_run='one';self.fail_stop=False
         test=self
         class Auth:
             def check(self,h,mutation=False):return True
@@ -31,12 +31,22 @@ class JobHTTPTests(unittest.TestCase):
                 elif self.path=='/api/renko-supertrend/start':test.running=True;self.send_json(200,dict(running=True,run_id='one'))
                 elif self.path=='/api/renko-supertrend/stop':test.running=False;self.send_json(200,dict(running=False,run_id='one'))
                 else:self.send_json(200,{'ordinary':True})
-            def do_GET(self):self.send_json(200,dict(running=test.running,run_id='one'))
+            def do_GET(self):
+                if self.path.startswith('/api/holdings-analysis?'):
+                    from urllib.parse import urlsplit,parse_qs
+                    q=parse_qs(urlsplit(self.path).query);offset=int(q.get('offset',['0'])[0]);limit=int(q.get('limit',['1'])[0])
+                    end=offset if q.get('inventory_only',['0'])[0]=='1' else min(offset+limit,3)
+                    test.calls.append(self.path)
+                    self.send_json(200,dict(capture_id='capture',broker='FYERS',rows=[{'symbol':str(i)} for i in range(offset,end)],total=3,analysed=end,next_offset=end if end<3 else None))
+                else:self.send_json(200,dict(running=test.running,run_id='one'))
             def log_message(self,*args):pass
         def handles(handler,path,payload,result):
             if not path.endswith('/renko-supertrend/start'):return None
             def snapshot():return dict(running=test.running,run_id=test.observed_run)
-            def stop():test.running=False;test.calls.append('/api/renko-supertrend/stop')
+            def stop():
+                test.calls.append('/api/renko-supertrend/stop')
+                if test.fail_stop:raise ValueError('Fixture Stop failure')
+                test.running=False
             return [(snapshot,stop)]
         self.store=install(Handler,Path(self.tmp.name),local_auth=Auth(),runner_factory=handles if getattr(self,'direct_monitor',False) else None)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
@@ -88,6 +98,19 @@ class JobHTTPTests(unittest.TestCase):
         self.assertFalse(value['output']['has_more'])
         self.assertEqual(self.calls.count('/api/chartink/analyze'),3)
 
+    def test_holdings_submission_executes_every_read_only_batch_on_server(self):
+        status,job=self.request('POST','/api/holdings-analysis/analyze',{'broker':'FYERS','inventory_only':1,'offset':0,'limit':2})
+        self.assertEqual(status,202)
+        value=self.wait(job['job_id']);self.assertEqual(value['status'],'COMPLETED')
+        self.assertEqual([r['symbol'] for r in value['output']['rows']],['0','1','2'])
+        self.assertIsNone(value['output']['next_offset'])
+        self.assertEqual(value['feature'],'holdings')
+        self.assertEqual(len([p for p in self.calls if p.startswith('/api/holdings-analysis?')]),3)
+
+    def test_backtest_and_analysis_keep_original_strategy_feature(self):
+        for path,feature in [('/api/renko-engine/account/backtest','renko-engine'),('/api/renko-supertrend/analyze','renko-supertrend'),('/api/ema-band/analysis','ema-band')]:
+            self.assertEqual(operation(path),('ANALYSIS',feature))
+
     def test_order_mutations_are_never_background_jobs(self):
         for path in ('/api/trade-ticket/submit','/api/trade-ticket/prepare','/api/renko-supertrend/override-entry','/api/straddle-squareoff/submit'):
             self.assertIsNone(operation(path));status,value=self.request('POST',path,{})
@@ -96,6 +119,18 @@ class JobHTTPTests(unittest.TestCase):
 
 class DirectRunnerJobHTTPTests(JobHTTPTests):
     direct_monitor=True
+    def test_failed_stop_never_claims_that_active_runner_was_cancelled(self):
+        self.fail_stop=True
+        _,job=self.request('POST','/api/renko-supertrend/start',{'underlying':'NIFTY'})
+        deadline=time.monotonic()+1
+        while not self.running and time.monotonic()<deadline:time.sleep(.01)
+        self.request('POST','/api/jobs/cancel',{'job_id':job['job_id']})
+        value=self.wait(job['job_id'])
+        self.assertEqual(value['status'],'FAILED');self.assertTrue(self.running)
+        self.assertIn('Stop failed',value['error'])
+        self.assertTrue(value['output']['running'])
+        self.assertEqual(self.calls.count('/api/renko-supertrend/stop'),1)
+
     def test_replacement_run_is_never_adopted_by_older_job(self):
         self.observed_run='replacement'
         _,job=self.request('POST','/api/renko-supertrend/start',{'underlying':'NIFTY'})

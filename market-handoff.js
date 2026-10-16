@@ -1,7 +1,8 @@
 /* AI market research lives inside the existing Analysis Handoff permission scope. */
 (function(root){
 'use strict';
-let panel,choices,result,note,active;
+if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
+let panel,choices,result,note,active,submissionRevision=0;
 const account=()=>root.BrokerForms?.account('handoff')?.id;
 function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
 function button(text,action){const n=el('button',text);n.type='button';n.className='button';n.onclick=action;return n;}
@@ -34,7 +35,8 @@ async function load(){
 async function run(){
  const symbols=[...choices.selectedOptions].map(n=>n.value);if(!symbols.length||symbols.length>6){note.textContent='Choose one to six instruments.';return;}
  note.textContent='Analysis submitted. It continues if you leave this page; retrieve it from Saved jobs.';
- try{render(await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account()}));note.textContent='Analysis completed and saved.';}catch(error){note.textContent=error.message;}finally{active=null;}
+ const revision=++submissionRevision;
+ try{const data=await request('/api/analysis-handoff/analyze-market',{symbols,account_id:account()});if(revision!==submissionRevision)return;render(data);note.textContent='Analysis completed and saved.';}catch(error){if(revision===submissionRevision)note.textContent=error.message;}finally{if(revision===submissionRevision)active=null;}
 }
 async function mount(){
  await root.BrokerForms?.ready;const section=document.getElementById('handoff');if(!section)return;
@@ -45,7 +47,7 @@ async function mount(){
  note=el('p','Load instruments from the selected broker to begin.');note.setAttribute('role','status');result=el('div');panel.append(note,result);section.append(panel);
  root.addEventListener('sector-pulse-job-update',event=>{const d=event.detail;if(d.job.request?.path?.endsWith('/analyze-market')&&d.job.request.account_id===account()&&!d.job.terminal){active=d;note.textContent=d.job.message||d.job.status;}});
  root.addEventListener('sector-pulse-job-output',event=>{const d=event.detail;if(d.output?.kind==='MARKET_HANDOFF'&&d.job.request.account_id===account())render(d.output);});
- root.addEventListener('broker-account-change',()=>{choices.replaceChildren();result.replaceChildren();active=null;note.textContent='Load instruments for the selected broker.';});
+ root.addEventListener('broker-account-change',()=>{submissionRevision++;choices.replaceChildren();result.replaceChildren();active=null;note.textContent='Load instruments for the selected broker.';});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(window);

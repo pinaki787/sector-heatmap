@@ -6,7 +6,7 @@ def allowed(user,path):
  if user.get('admin') or not path.startswith('/api/'):return True
  if path in COMMON:return True
  assigned=set(user.get('features',[]))
- if path.startswith('/api/jobs'):return bool(assigned & {'runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})
+ if path.startswith('/api/jobs'):return bool(assigned & {'broker','runner-jobs','handoff','screener','holdings','trade-parser','telegram-parser','renko-supertrend','ema-band','ema-cross','kama','delta-india','straddles','renko-engine'})
  if path in {'/api/ema-band/underlying-search','/api/ema-band/master-search','/api/ema-band/master-status','/api/ema-band/atm-option'}:
   return bool(assigned & {'ema-band','renko-supertrend','kama','ema-cross','handoff','renko-engine'})
  if any(path.startswith(p) for p in ['/api/nifty-straddle','/api/sensex-straddle','/api/straddle-squareoff/']):return 'straddles' in assigned

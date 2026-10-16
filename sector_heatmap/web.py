@@ -2227,8 +2227,10 @@ def run_server():
         thread.start()
         return ema_runner_snapshot()
 
-    def stop_ema_runner():
+    def stop_ema_runner(expected_started_at=None):
         with ema_runner_lock:
+            if expected_started_at is not None and ema_runner.get('run_started_at') != expected_started_at:
+                raise ValueError('Runner changed; the replacement run was preserved.')
             record_legacy(ema_job_path,{**ema_runner,"running":False,"status":"STOPPED","message":"Monitoring stopped; execution journal retains position evidence."})
             # The execution journals are durable history.  The runner snapshot is
             # only current monitoring context, so never expose an old ticket,
@@ -2847,8 +2849,10 @@ def run_server():
         thread.start()
         return kama_runner_snapshot()
 
-    def stop_kama_runner():
+    def stop_kama_runner(expected_started_at=None):
         with kama_runner_lock:
+            if expected_started_at is not None and kama_runner.get('run_started_at') != expected_started_at:
+                raise ValueError('Runner changed; the replacement run was preserved.')
             record_legacy(kama_job_path,{**kama_runner,"running":False,"status":"STOPPED","message":"Monitoring stopped; execution journal retains position evidence."})
             kama_runner.update({"running": False, "status": "STOPPED", "config": None, "position": None,
                                 "last_event": None, "run_started_at": None, "thread": None})
@@ -3026,6 +3030,8 @@ def run_server():
         rows = []
         with service.candidate_scan_lock:
             for ticker in page:
+                from .persistent_jobs import checkpoint
+                checkpoint("Analyzing "+ticker+" with selected-broker evidence.")
                 symbol = f"NSE:{ticker}-EQ"
                 try:
                     candles = service._timeframe_candles(symbol)
@@ -3238,6 +3244,8 @@ def run_server():
         } for candidate in duplicate_candidates)
         level_plans = {}
         for candidate in candidates:
+            from .persistent_jobs import checkpoint
+            checkpoint("Building Handoff evidence for "+str(candidate.get("symbol") or candidate.get("name"))+".")
             plan = build_equity_opportunity(candidate, policy)
             level_plans[candidate["key"]] = plan
             recommended = plan.get("recommended_invalidation") or {}
@@ -3338,6 +3346,20 @@ def run_server():
                             exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": reason or options.get("reason") or "No exact long-option entry passed the configured gates."})
                     except Exception as error:
                         exclusions.append({"candidate_key": candidate["key"], "name": candidate.get("name"), "kind": "OPTIONS", "reason": str(error)})
+        from .persistent_jobs import checkpoint
+        from .exposure_guard import exclude_handoff_cards
+        checkpoint('Rechecking selected-broker exposure before saving Handoff cards.')
+        if provider:
+            final_positions,final_orders=provider.positions(),provider.orders()
+        else:
+            position_snapshot,order_snapshot=client.positions(),client.orderbook()
+            if position_snapshot.get('s')!='ok' or order_snapshot.get('s')!='ok':
+                raise RuntimeError('Fresh selected-broker exposure is unavailable; duplicate entry recommendations were not published.')
+            final_positions=position_snapshot.get('netPositions') or (position_snapshot.get('data') or {}).get('netPositions') or []
+            final_orders=order_snapshot.get('orderBook') or []
+        candidates,cards,newly_exposed=exclude_handoff_cards(candidates,cards,final_positions,final_orders)
+        exclusions.extend({'candidate_key':candidate['key'],'name':candidate.get('name'),'kind':'OPEN_POSITION',
+                           'reason':'An open position or pending order appeared during analysis; this underlying is excluded.'} for candidate in newly_exposed)
         analysis_id = secrets.token_urlsafe(12)
         for index, card in enumerate(cards):
             card["card_id"] = f"card-{index + 1}"
@@ -4753,10 +4775,11 @@ def run_server():
         # Resolve already-activated in-process runners once. Monitoring survives
         # session expiry; new activation still goes through the original auth.
         parsed=urlparse(path);route=parsed.path;query=parse_qs(parsed.query)
+        activation=result.get('runner',result)
         def renko_handle(runner,activation=None):
             value=activation if activation is not None else result.get('runner',result)
             expected=value.get('run_id')
-            stop=(lambda:runner.request_stop({'run_id':expected})) if hasattr(runner,'request_stop') else runner.stop
+            stop=(lambda:runner.request_stop({'run_id':expected,'started_at':value.get('started_at')})) if hasattr(runner,'request_stop') else runner.stop
             return runner.snapshot,stop,expected or value.get('run_started_at') or value.get('started_at')
         if route=='/api/renko-instances/start-selected':
             return [renko_handle(renko_lookup_instance(result['broker'],r['instance_key']),r) for r in result.get('results',[]) if r.get('status')=='STARTED']
@@ -4764,12 +4787,12 @@ def run_server():
             return [renko_handle(renko_select(route,path)[0][0])]
         if route.startswith('/api/renko-delta/'):
             return [renko_handle(renko_select(route,path)[1].runner)]
-        if route.startswith('/api/ema-crossover/'):return [(ema_crossover.snapshot,ema_crossover.stop)]
-        if route.startswith('/api/ema-band/'):return [(ema_runner_snapshot,stop_ema_runner)]
-        if route.startswith('/api/kama/'):return [(kama_runner_snapshot,stop_kama_runner)]
+        if route.startswith('/api/ema-crossover/'):return [renko_handle(ema_crossover)]
+        if route.startswith('/api/ema-band/'):return [(ema_runner_snapshot,lambda:stop_ema_runner(activation.get('run_started_at')),activation.get('run_started_at'))]
+        if route.startswith('/api/kama/'):return [(kama_runner_snapshot,lambda:stop_kama_runner(activation.get('run_started_at')),activation.get('run_started_at'))]
         if route.startswith('/api/renko-engine/'):
             service=engine_services.get(route.split('/')[3])
-            return [(service.snapshot,service.runner.stop)] if service else None
+            return [(service.snapshot,lambda:service.runner.request_stop({'run_id':activation.get('run_id'),'started_at':activation.get('started_at')}),activation.get('run_id') or activation.get('started_at'))] if service else None
         if route.startswith(('/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
             parts=route.split('/');strategy={'renko-dhan':'renko','ema-dhan':'rsi','band-dhan':'band','kama-dhan':'kama'}[parts[2]]
             service=dhan_strategy_services.get((parts[3],strategy,(query.get('instance') or ['default'])[0]))
@@ -4777,8 +4800,8 @@ def run_server():
         if route.startswith('/api/renko-motilal/'):
             registry=motilal_routes.strategies.get(route.split('/')[3])
             return [renko_handle(registry.service((query.get('instance') or ['default'])[0]).runner)] if registry else None
-        if route.startswith('/api/nifty-straddle'):return [(nifty_straddle.snapshot,nifty_straddle.stop)]
-        if route.startswith('/api/sensex-straddle'):return [(sensex_straddle.snapshot,sensex_straddle.stop)]
+        if route.startswith('/api/nifty-straddle'):return [(nifty_straddle.snapshot,lambda:nifty_straddle.stop(activation.get('started_at')),activation.get('started_at'))]
+        if route.startswith('/api/sensex-straddle'):return [(sensex_straddle.snapshot,lambda:sensex_straddle.stop(activation.get('started_at')),activation.get('started_at'))]
         if route.startswith('/api/delta-india/') and route.endswith('/runner-start'):
             expected=result.get('runner',result).get('run_id')
             return [(lambda:delta_india.status()['runner'],lambda:delta_india.stop_runner({'run_id':expected}),expected)]

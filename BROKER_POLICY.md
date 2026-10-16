@@ -1,7 +1,8 @@
 # Sector Pulse broker and workspace boundaries
 
-The supported trading brokers are FYERS, Dhan and Delta India. Indian-market sector
-analysis supports FYERS and the selected account’s read-only Dhan Data API adapter.
+The implemented trading adapters are FYERS, Dhan, Delta India and Motilal Oswal.
+Indian-market sector analysis supports the selected account’s FYERS, read-only
+Dhan Data API or Motilal native captured-candle provider.
 Dhan selection uses Dhan candles, native security master, option-chain evidence,
 quotes, account funds/positions, and order APIs throughout Sector Rotation,
 Analysis Handoff, and Live Feed & Positions. FYERS selection retains its private
@@ -54,7 +55,8 @@ a fill or active linked protection. Batch previews aggregate risk and margin; su
 any changed ticket, rejection or uncertain outcome without automatic retry.
 
 Dhan previews are bound to one owned account, expire after two minutes and require
-the exact confirmation from the displayed preview. Live capability is off by
+the displayed preview binding and an explicit Submit click. The application sends
+the bound confirmation; users do not type a confirmation phrase. Live capability is off by
 default. Cross-process account locks and private submission journals prevent
 concurrent submission/replay. An uncertain result blocks further orders until
 read-only correlation-ID reconciliation verifies the provider's result. Order
@@ -72,3 +74,29 @@ Handoff cache and analysis sizing are bound to the selected owned account.
 Switching brokers clears incompatible plans, previews and account figures.
 Before sending a reviewed LIMIT ticket, the adapter rechecks executable depth;
 a market beyond the reviewed limit requires a new preview.
+
+
+Analysis and runner jobs are durable, owned by the signed-in user and exact
+broker account, and filtered by the originating section permission. Submitted
+Screener pages execute on the server, with partial and final outputs retained
+across navigation. Cancellation never replays work: analysis stops at bounded
+checkpoints, and runner jobs invoke the existing Stop behavior only for their
+activated run. Restart marks interrupted jobs without automatically rearming
+trading. Restoring research does not restore order authority or bypass fresh
+preview and submission checks.
+
+Index/commodity AI Handoff uses the selected broker's current master, native
+quotes, completed candles and ATM resolver. Existing positions and pending
+orders exclude the underlying before evidence collection and again before
+publication. Premium plans are refreshed after AI review. Incomplete evidence
+produces WAIT or an explicit exclusion. Only public market evidence is sent to
+OpenAI; account identifiers, positions, funds and credentials are not included
+in model input. AI has no order tools. Quota failures retain broker evidence
+and do not trigger an automatic retry or fabricated recommendation.
+
+Motilal workflows use its explicit native adapter and account ownership checks.
+Its captured history must warm up; missing periods remain unavailable. An
+explicitly selected FYERS history source in an existing Motilal runner is a
+separate, consented history setting, never an automatic execution fallback.
+Broker acceptance and fill verification remain separate from implementation
+and read-only validation.

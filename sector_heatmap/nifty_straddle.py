@@ -181,8 +181,8 @@ class NiftyStraddleService(SensexStraddleService):
                 f"{mode.title()} runner started with {requested_lots} lot(s), {requested_stoploss:g}-point stop and {requested_target:g}-point target in the {parsed_entry_start}-{parsed_entry_end} IST entry window."
             )
 
-    def stop(self):
-        result = super().stop()
+    def stop(self, expected_started_at=None):
+        result = super().stop(expected_started_at) if expected_started_at is not None else super().stop()
         if not result.get("running"):
             self.active_stoploss = None
             self.active_target = None

@@ -18,6 +18,7 @@ CURRENT_JOB=ContextVar('sector_pulse_job',default=None)
 
 class JobCancelled(Exception):pass
 class JobInterrupted(Exception):pass
+class JobStopFailed(Exception):pass
 
 
 def checkpoint(message=None, output=None):
@@ -65,6 +66,18 @@ class JobStore:
     def list(self,owner,limit=100):
         with self.db() as db:rows=db.execute('SELECT * FROM jobs WHERE owner=? ORDER BY created DESC LIMIT ?',(owner,max(1,min(int(limit),200)))).fetchall()
         return [self._decode(row) for row in rows]
+    def page(self,owner,before=None,limit=25):
+        limit=max(1,min(int(limit),50))
+        with self.db() as db:
+            params=[owner];where='owner=?'
+            if before:
+                cursor=db.execute('SELECT created,id FROM jobs WHERE owner=? AND id=?',(owner,before)).fetchone()
+                if not cursor:raise PermissionError('Job history cursor is unavailable in this account.')
+                where+=' AND (created,id)<(?,?)';params.extend((cursor['created'],cursor['id']))
+            rows=db.execute('SELECT * FROM jobs WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ?',(*params,limit+1)).fetchall()
+        more=len(rows)>limit;rows=rows[:limit]
+        return [self._decode(row) for row in rows],rows[-1]['id'] if more else None
+
     def _update(self,job_id,status=None,message=None,output=None,error=None):
         fields={'updated':self.clock()}
         for key,value in dict(status=status,message=message,error=error).items():
@@ -79,16 +92,16 @@ class JobStore:
             if isinstance(value,dict):return {k:clean(v) for k,v in value.items() if not any(s in k.lower() for s in ('token','password','secret','cookie','authorization','api_key'))}
             if isinstance(value,list):return [clean(v) for v in value]
             return value
-        encoded=json.dumps(clean(request),allow_nan=False)
+        encoded=json.dumps(clean(request),allow_nan=False,sort_keys=True)
         if len(encoded)>1_000_000:raise ValueError('Job input exceeds 1 MB.')
         with self.guard,self.db() as db:
             existing=db.execute('SELECT * FROM jobs WHERE owner=? AND request_key=?',(owner,request_key)).fetchone()
             if existing:
                 if existing['kind']!=kind or existing['request']!=encoded:raise ValueError('Submission identity already belongs to different inputs.')
                 return self._decode(existing)
-            if kind=='RUNNER':
-                existing=db.execute("SELECT * FROM jobs WHERE owner=? AND kind='RUNNER' AND request=? AND status IN ('QUEUED','RUNNING','CANCELLING')",(owner,encoded)).fetchone()
-                if existing:return self._decode(existing)
+            active_states="('QUEUED','RUNNING','CANCELLING')" if kind=='RUNNER' else "('QUEUED','RUNNING')"
+            existing=db.execute('SELECT * FROM jobs WHERE owner=? AND kind=? AND request=? AND status IN '+active_states,(owner,kind,encoded)).fetchone()
+            if existing:return self._decode(existing)
             active=db.execute("SELECT COUNT(*) FROM jobs WHERE owner=? AND status IN ('QUEUED','RUNNING','CANCELLING')",(owner,)).fetchone()[0]
             if active>=self.capacity:raise ValueError('This account has too many active jobs; stop one before submitting more.')
             job_id=secrets.token_hex(16);now=self.clock()
@@ -113,6 +126,7 @@ class JobStore:
                              message='Stopped; partial output retained.' if cancelled else 'Completed; output saved for later retrieval.')
         except JobCancelled:self._update(job_id,status='CANCELLED',message='Stopped; partial output retained.')
         except JobInterrupted:self._update(job_id,status='INTERRUPTED',message='Server shutdown; output retained, no work replayed.')
+        except JobStopFailed:self._update(job_id,status='FAILED',error='Existing runner Stop failed; inspect Runner jobs and reconcile before retrying.',message='Stop failed; latest runner status retained. No automatic retry.')
         except Exception as error:
             cancelled=context.cancelled()
             # API and broker exception strings can contain private payloads.
