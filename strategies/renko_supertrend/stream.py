@@ -220,9 +220,9 @@ def browser_frame(runner, broker, config, order_stream, now=None):
         forming = broker.forming(config, [], now)
     except (ValueError, RuntimeError) as exc:
         error = str(exc)
-    tick_at, tick_error = None, None
+    tick_price, tick_at, tick_error = None, None, None
     try:
-        _, tick_at = broker.live_price(config, now)
+        tick_price, tick_at = broker.live_price(config, now)
     except (ValueError, RuntimeError) as exc:
         tick_error = str(exc)
     if forming is None:
@@ -232,5 +232,5 @@ def browser_frame(runner, broker, config, order_stream, now=None):
         if not config.get('intrabar_entries',False):
             error+=' Completed-candle runner decisions use separate confirmed history.'
     return {**browser_snapshot(runner,now),'forming':forming,'market':{'connected':broker.connected,
-            'fresh':forming is not None,'error':error,'tick_exchange_at':tick_at,'tick_fresh':tick_at is not None,'tick_error':tick_error},'orders':order_stream.snapshot(),
+            'fresh':forming is not None,'error':error,'tick_exchange_at':tick_at,'tick_price':tick_price,'tick_fresh':tick_at is not None,'tick_error':tick_error},'orders':order_stream.snapshot(),
             'server_at':now,'bar_seconds':broker.frame_seconds and next((n for s,n in broker.frame_seconds if s==config['underlying']),None)}

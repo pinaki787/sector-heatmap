@@ -99,6 +99,7 @@ test('live ticks with missing OHLC are distinguished from a disconnected feed',(
  const frame={server_at:100,market:{connected:true,fresh:false,tick_fresh:true,tick_exchange_at:99,error:'Broker forming OHLC unavailable'},orders:{connected:true}};
  assert.match(chartStreamStatus(frame),/Live ticks · current candle OHLC unavailable/);
  assert.equal(chartStreamHealth(frame).live,false);
+ assert.equal(chartStreamHealth(frame).tickFresh,true);
  assert.match(chartStreamStatus({...frame,market:{...frame.market,connected:false}}),/disconnected/);
 });
 
@@ -111,4 +112,90 @@ test('native REST order checks do not claim a notification connection',()=>{
   assert.equal(chartStreamHealth(frame,6).live,false);
  }
  assert.equal(chartStreamHealth({orders:{basis:'Unknown reconciliation'}}).restOrders,false);
+});
+
+test('missing chart candle does not claim to block completed-candle decisions',()=>{
+ const frame={server_at:100,market:{connected:true,fresh:false,tick_fresh:true,tick_exchange_at:99,error:'Broker forming OHLC unavailable; intrabar entry blocked.'},orders:{connected:true},runner:{config:{intrabar_entries:false}}};
+ assert.match(chartStreamStatus(frame),/runner uses confirmed completed candles/);
+ assert.doesNotMatch(chartStreamStatus(frame),/intrabar entry blocked/);
+ assert.match(chartStreamStatus({...frame,runner:{config:{intrabar_entries:true}}}),/intrabar entry blocked/);
+ assert.equal(chartStreamHealth(frame).chartFresh,false);
+});
+
+
+test('fresh native tick price updates even while broker candle OHLC is unavailable',()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),source=fs.readFileSync('renko-supertrend.js','utf8');
+ const ctx={el:()=>({value:'MCX:TEST'}),lastUnderlyingSymbol:'MCX:TEST',lastUnderlyingPrice:100,underlyingDirection:0,statusFrame:{market:{tick_price:105},forming:null},isDelta:false,underlyingPrice:{style:{}},price:v=>String(v),nativeCashSessionClosed:()=>false};
+ vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('    function paintUnderlyingPrice('),source.indexOf('    let statusFrame='))+';globalThis.paint=paintUnderlyingPrice;',ctx);
+ ctx.paint({chartFresh:false,tickFresh:true});assert.match(ctx.underlyingPrice.textContent,/105 · Live/);
+ ctx.statusFrame.market.tick_price=110;ctx.paint({chartFresh:false,tickFresh:false});assert.match(ctx.underlyingPrice.textContent,/105 · Last known/);
+});
+
+test('history refresh follows latest bars and restores price autoscale without moving history review',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const select=source.match(/const previousRange=chart\.timeScale\(\)\.getVisibleLogicalRange\(\);const followLatest=([^;]+);/)[1];
+ const apply=source.match(/if\(followLatest\)\{el\('readable-chart'\)\.onclick\(\);\}/)[0];
+ const vm=require('node:vm');
+ for(const [same,previousRange,expected] of [[false,{from:0,to:65},true],[true,{from:940,to:1002},true],[true,{from:40,to:105},false],[true,null,true]]){
+  const calls=[];const context={el:()=>({onclick:()=>calls.push({reset:true})}),same,previousRange,plottedCount:1000,plotted:Array(1100),isMotilal:false,chart:{priceScale:()=>({applyOptions:v=>calls.push(v)}),timeScale:()=>({setVisibleLogicalRange:v=>calls.push(v)})}};
+  vm.runInNewContext('const followLatest='+select+';'+apply,context);
+  assert.equal(calls.length,expected?1:0);
+  if(expected)assert.equal(calls[0].reset,true);
+ }
+});
+
+test('viewport follows only after overlays and selected indicator series finish updating',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const start=source.indexOf('const previousRange=chart.timeScale()');
+ const end=source.indexOf('allEvents=events.slice()',start);
+ const render=source.slice(start,end);
+ assert.ok(render.indexOf('if(followLatest)')>render.indexOf('paintSelectedIndicators();'));
+ assert.ok(render.indexOf('if(followLatest)')>render.indexOf('fiveMinuteLine.setData(fiveMinutePointerPoints)'));
+});
+
+test('chart resize repairs latest view only after a visible size exists',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const body=source.match(/new ResizeObserver\(\(\)=>\{const width=el\('chart'\).*?\}\)\.observe\(el\('chart'\)\);/)[0];
+ const vm=require('node:vm');
+ for(const [width,to,expected] of [[0,1002,0],[800,1002,1],[1600,1002,1],[800,100,0]]){
+  let reset=0;const context={plottedCount:1000,el:id=>id==='chart'?{clientWidth:width,clientHeight:600}:{onclick:()=>reset++},chart:{applyOptions:()=>{},timeScale:()=>({getVisibleLogicalRange:()=>({from:to-60,to})})},ResizeObserver:class{constructor(fn){this.fn=fn;}observe(){this.fn();}}};
+  vm.runInNewContext(body,context);assert.equal(reset,expected);
+ }
+});
+
+test('family master locks EMA controls and restores saved choices on re-enable',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const body=source.slice(source.indexOf('    function familyControls(){'),source.indexOf('    const manualReferenceInput='));
+ const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{checked:true,disabled:false,dataset:{},closest(){return {querySelectorAll:()=>[this]};}});return nodes.get(id);};
+ const ids=['ema-fast-enabled','ema-slow-enabled','ema-exit-enabled','ema-fast-length'];
+ get('ema-slow-enabled').checked=false;get('ema-fast-length').value='10';
+ const context={el:get,section:{querySelectorAll:()=>[...nodes.values()].filter(x=>Object.hasOwn(x.dataset,'familyDisabled'))},paintTradingSessionHours:()=>{},lastRunner:{indicator_family_revision:'indicator-family-masters-v1',config:{},running:true},continuationHelp:{},FAMILY_RULES:{ema:ids},familyRows:{ema:ids},exitSectionSync:[],familySettings:()=>({ema_family_enabled:get('ema-family-enabled').checked}),values:()=>({})};
+ require('node:vm').runInNewContext(body+';globalThis.run=familyControls;',context);
+ get('ema-family-enabled').checked=false;context.run();
+ for(const id of ids)assert.equal(get(id).disabled,true);
+ assert.equal(get('ema-slow-enabled').checked,false);assert.equal(get('ema-fast-length').value,'10');
+ get('ema-family-enabled').checked=true;context.run();
+ for(const id of ids)assert.equal(get(id).disabled,false);
+ assert.equal(get('ema-slow-enabled').checked,false);
+ assert.ok(source.includes('familyControls();'));
+});
+
+test('actual Start handler awaits current displayed settings instead of stale child payload',async()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const start=source.indexOf('    async function toggleRunner()');const end=source.indexOf("    el('toggle').onclick",start);
+ const nodes=new Map();const el=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,textContent:''});return nodes.get(id);};
+ const submitted=[];const latest={underlying:'BTCUSD',ema_fast_enabled:false,rsi_level_enabled:false,ema_family_enabled:false};let handoffs=0;
+ const context={el,toggleBusy:false,overrideBusy:false,lastRunner:{running:false,indicator_selection_revision:'independent-indicators-v1'},running:false,owned:false,syncChartControl:()=>{},payload:()=>({ema_fast_enabled:true,rsi_level_enabled:true}),selectedStartPayload:async()=>{handoffs++;await Promise.resolve();return latest;},request:async(path,body)=>submitted.push({path,body}),status:async()=>true};
+ require('node:vm').runInNewContext(source.slice(start,end)+';globalThis.run=toggleRunner;',context);
+ await context.run();assert.equal(handoffs,1);assert.equal(submitted.length,1);assert.equal(submitted[0].path,'start');assert.equal(submitted[0].body,latest);assert.equal(submitted[0].body.ema_fast_enabled,false);assert.equal(submitted[0].body.rsi_level_enabled,false);
+ context.lastRunner.running=true;await context.run();assert.equal(handoffs,1);assert.equal(submitted[1].path,'stop');
+});
+
+test('restore never forces deselected higher-timeframe or saved strategy switches on',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const restore=source.slice(source.indexOf('    async function restore(){'),source.indexOf('if(isBatchChartView){const compact=',source.indexOf('    async function restore(){')));
+ for(const id of ['higher-timeframe-enabled','higher-timeframe-enabled-indicator','sideways-enabled','supertrend-exit-enabled'])assert.ok(!restore.includes("el('"+id+"').checked=true"));
+ const {signalSettings,chartSettings}=require('../renko-supertrend.js');
+ const fields={'higher-timeframe-enabled':false,'higher-timeframe-enabled-indicator':false,'supertrend-timeframe':'15 minutes'};
+ assert.equal(signalSettings(fields).higher_timeframe_enabled,false);assert.equal(chartSettings(fields).higher_timeframe_enabled,false);
 });

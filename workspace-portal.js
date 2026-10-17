@@ -127,28 +127,10 @@ async function refresh() {
       if(account.disconnected){test.disabled=true;open.disabled=true;result.textContent='Disconnected';}
     }
     if (currentUser.admin) {
-      const bounce = document.createElement('button');
-      bounce.type = 'button'; bounce.className = 'quiet';
-      bounce.textContent = 'Rolling bounce';
-      bounce.title = 'Restart only this broker dashboard. Active runners, owned positions or pending orders block restart.';
-      bounce.disabled = !account.running;
-      bounce.onclick = async () => {
-        if (!window.confirm(`Restart ${account.label} dashboard? All strategy runners must be stopped and will remain stopped.`)) return;
-        bounce.disabled = true;
-        try {
-          let job = await api('bounce', {account_id: account.id});
-          for (let attempt = 0; attempt < 45; attempt++) {
-            message(`${account.label} · ${job.tag || 'Broker rolling bounce'} · ${job.message}`);
-            if (job.status === 'READY') { await refresh(); return; }
-            if (job.status === 'FAILED') throw new Error(job.message);
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            job = await api('bounce-status', {account_id: account.id});
-          }
-          message('Readiness is not confirmed yet. Check the account status; no automatic second bounce was sent.');
-        } catch (error) { message(error.message); }
-        finally { bounce.disabled = false; }
-      };
-      actions.append(bounce);
+      const restart = document.createElement('a');
+      restart.className = 'quiet';restart.href='/?serverResources=1';
+      restart.textContent='Restart in Server resources';
+      actions.append(restart);
     }
     actions.prepend(configure, test, open);result.className='account-status';section.append(detail, actions, result); $('accounts').append(section);
   }

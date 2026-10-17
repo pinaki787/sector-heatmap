@@ -1,0 +1,4637 @@
+{
+  "updated": "17 October 2026",
+  "parameters": [
+    {
+      "id": "renko-broker",
+      "label": "Broker view",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "FYERS",
+          "value": "FYERS"
+        },
+        {
+          "label": "Delta India",
+          "value": "DELTA_INDIA"
+        }
+      ],
+      "description": "Select the broker workspace whose instruments, market data, account and execution routes will be used. Account selection does not move another broker’s positions.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market",
+      "label": "Market",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "All FYERS markets",
+          "value": "ALL"
+        },
+        {
+          "label": "NSE indices",
+          "value": "NSE_INDEX"
+        },
+        {
+          "label": "BSE indices",
+          "value": "BSE_INDEX"
+        },
+        {
+          "label": "NSE cash equity",
+          "value": "NSE_EQUITY"
+        },
+        {
+          "label": "BSE cash equity",
+          "value": "BSE_EQUITY"
+        },
+        {
+          "label": "NSE stock options",
+          "value": "NSE_STOCK"
+        },
+        {
+          "label": "BSE stock options",
+          "value": "BSE_STOCK"
+        },
+        {
+          "label": "MCX commodities",
+          "value": "MCX"
+        }
+      ],
+      "description": "Restrict instrument search and session/product rules to the selected exchange segment.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-cash-product",
+      "label": "Holding",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Intraday",
+          "value": "INTRADAY"
+        },
+        {
+          "label": "Carry forward (overnight)",
+          "value": "CNC"
+        }
+      ],
+      "description": "Choose intraday cash or delivery (CNC). Delivery does not permit a new bearish short entry; broker sell authorization may be required.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-commodity-holding",
+      "label": "Holding",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Intraday",
+          "value": "INTRADAY"
+        },
+        {
+          "label": "Carry forward (overnight)",
+          "value": "CARRY_FORWARD"
+        }
+      ],
+      "description": "Intraday follows the selected MCX contract session cutoff. Carry Forward uses the supported overnight MARGIN route and expiry controls.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-fyers-history-enabled",
+      "label": "Use FYERS history for Motilal",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Explicitly permit the selected FYERS account to supply labelled history for Motilal analysis. Execution remains on the selected Motilal account.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-fyers-history-account-id",
+      "label": "FYERS history account",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Select a FYERS account",
+          "value": ""
+        }
+      ],
+      "description": "Choose the history-only FYERS account. Its identifiers must never be used to submit Motilal orders.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-search",
+      "label": "Underlying search",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Find instruments using the selected broker’s current master. Search text alone is not a selected contract.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-symbol",
+      "label": "Instrument",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Search and select an underlying",
+          "value": ""
+        }
+      ],
+      "description": "Exact selected underlying. Signals use this underlying; the execution route determines whether orders use options, futures or shares.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-mode",
+      "label": "Execution mode",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live — real FYERS orders",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Paper simulates fills. Live can submit real broker orders when you explicitly Start. Changing this selector does not change an already running job.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-runner-timeframe",
+      "label": "Runner timeframe",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "1 minute",
+          "value": "1 minute"
+        },
+        {
+          "label": "2 minutes",
+          "value": "2 minutes"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval used for the next runner Start. For example, 5 minutes evaluates five-minute host candles. It stays synchronized with the chart timeframe; an active runner retains its Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-lots",
+      "label": "Lots",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "1",
+      "description": "Position size for the next Start. Indian derivatives use whole lots; Delta uses whole contracts; cash equities use whole shares.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-paper-capital",
+      "label": "Virtual Paper capital · INR",
+      "type": "number",
+      "min": "1",
+      "max": "1000000000",
+      "step": "any",
+      "description": "Virtual INR capital available to Paper execution. This does not add funds to a broker account.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-max-trades",
+      "label": "Trade limit",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "1",
+      "description": "Maximum number of new entry trades allowed for this runner run. Exits and protective position management remain separate.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-config-name",
+      "label": "Configuration name",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Name of the single saved configuration for this instrument. Save settings updates that record; renaming does not create a duplicate.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-batch-symbols",
+      "label": "Selected instruments",
+      "type": "select-multiple",
+      "options": [
+        {
+          "label": "MCX:CRUDEOILM26OCTFUT",
+          "value": "MCX:CRUDEOILM26OCTFUT"
+        }
+      ],
+      "description": "Instruments selected for independent runner submissions. Differences from each saved configuration are resolved before batch submissions start.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-intrabar-entries",
+      "label": "Intrabar entries and EMA exits",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "OFF evaluates completed candles. ON allows fresh provisional live entry and EMA-exit evaluation; provisional signals can change before candle close.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-sideways-enabled",
+      "label": "Sideways filter · quick after-cost loss",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "After a quick loss, blocks new entries inside the recorded position high–low range until a fresh strict breakout. The window uses host candles touched by the actual trade; incomplete exposure evidence stays locked for review.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-sideways-max-candles",
+      "label": "Quick-loss window · host candles touched",
+      "type": "number",
+      "min": "1",
+      "max": "10",
+      "step": "1",
+      "description": "Maximum host candle intervals touched between the actual entry and exit fills for a quick-loss lock. Both entry and exit candles count. With a limit of 3 on five-minute candles, a losing trade spanning at most three candle intervals can lock new entries until a fresh price breaks its recorded position range. This is not a forced exit after three candles.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-family-enabled",
+      "label": "Enable Renko Supertrend strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-continuation-enabled",
+      "label": "Allow continuation entries",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional continuation entries require the supported runtime and selected higher-timeframe agreement. A disabled control means that runtime capability is unavailable; it does not imply the rule is active.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-trading-session-hours",
+      "label": "Trading session hours",
+      "type": "number",
+      "min": "",
+      "max": "",
+      "step": "any",
+      "description": "Read-only broker contract session duration used by reference sizing. Crypto and exchange sessions differ; missing verified policy is shown explicitly.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-enabled",
+      "label": "Renko Supertrend · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Include Renko Supertrend direction in strategy entry evaluation when its family master is enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-enabled-indicator",
+      "label": "Renko Supertrend · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Include Renko Supertrend direction in strategy entry evaluation when its family master is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-atr-length",
+      "label": "ATR length",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Number of candles used for the ATR calculation. In manual reference sizing this also selects the reference ATR period.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-factor",
+      "label": "Base factor",
+      "type": "number",
+      "min": "0.1",
+      "max": "",
+      "step": "0.1",
+      "description": "Multiplier applied by the Supertrend calculation. Changes apply to the next Start.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-brick-mode",
+      "label": "Brick size mode",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Auto",
+          "value": "Auto"
+        },
+        {
+          "label": "Manual",
+          "value": "Manual"
+        }
+      ],
+      "description": "Auto derives brick size from the strategy calculation. Manual uses the verified fixed reference brick shown below.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-brick",
+      "label": "Manual brick size",
+      "type": "number",
+      "min": "0.00000001",
+      "max": "",
+      "step": "any",
+      "description": "Fixed reference brick size, retained across live ticks and chart timeframes. Recalculate reference brick explicitly to refresh it.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-higher-timeframe-enabled",
+      "label": "Higher timeframe check · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Requires agreement with the selected higher timeframe for new strategy entries when enabled. OFF removes that entry check.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-higher-timeframe-enabled-indicator",
+      "label": "Higher timeframe check · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Requires agreement with the selected higher timeframe for new strategy entries when enabled. OFF removes that entry check. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-timeframe",
+      "label": "Supertrend timeframe (HTF)",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "2 minutes",
+          "value": "2 minutes"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Higher candle interval used by the optional higher-timeframe Supertrend check or chart study.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-family-enabled",
+      "label": "Enable EMA strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-fast-enabled",
+      "label": "EMA 10 · first EMA · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require the first EMA entry criterion when EMA strategy rules are enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-fast-enabled-indicator",
+      "label": "EMA 10 · first EMA · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require the first EMA entry criterion when EMA strategy rules are enabled. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-fast-length",
+      "label": "First EMA period",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "",
+      "description": "Number of host candles in the first exponential moving average.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-slow-enabled",
+      "label": "EMA 30 · second EMA · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require the second EMA entry criterion when EMA strategy rules are enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-slow-enabled-indicator",
+      "label": "EMA 30 · second EMA · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require the second EMA entry criterion when EMA strategy rules are enabled. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-slow-length",
+      "label": "Second EMA period",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "",
+      "description": "Number of host candles in the second exponential moving average.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-widening-enabled",
+      "label": "EMA gap widening · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require the signed EMA gap to widen across the configured window before a normal entry.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-widening-enabled-indicator",
+      "label": "EMA gap widening · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require the signed EMA gap to widen across the configured window before a normal entry. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-widening-window",
+      "label": "EMA gap widening window",
+      "type": "number",
+      "min": "2",
+      "max": "100",
+      "step": "1",
+      "description": "Number of recent host candles inspected by the EMA gap-widening criterion.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-proximity-enabled",
+      "label": "EMA proximity · first EMA · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Entry-only filter that rejects a price too far from the first EMA. It does not close a held position.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-proximity-enabled-indicator",
+      "label": "EMA proximity · first EMA · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Entry-only filter that rejects a price too far from the first EMA. It does not close a held position. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-proximity-mode",
+      "label": "EMA10 distance basis",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Completed host ATR multiple",
+          "value": "ATR"
+        },
+        {
+          "label": "Underlying points",
+          "value": "POINTS"
+        }
+      ],
+      "description": "Measure absolute distance from the first EMA as native price points or as a multiple of completed host ATR.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-proximity-distance",
+      "label": "Entry distance limit · |price − EMA10| / completed ATR, or points",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Maximum allowed absolute price-to-first-EMA distance in the selected basis. This limits new entries only.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-retest-enabled",
+      "label": "EMA10 retest entries · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional first-EMA pullback touch and confirmed bounce entry path. Other selected entry gates still apply.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-retest-enabled-indicator",
+      "label": "EMA10 retest entries · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Optional first-EMA pullback touch and confirmed bounce entry path. Other selected entry gates still apply. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-retest-engulfing",
+      "label": "Retest: bullish / bearish engulfing",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow the bullish or bearish engulfing geometry as a retest confirmation.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-retest-harami",
+      "label": "Retest: bullish / bearish harami",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow the bullish or bearish harami geometry as a retest confirmation.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-retest-star",
+      "label": "Retest: morning / evening star",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow the intraday morning/evening-star retest geometry; a market-opening gap is not required.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-family-enabled",
+      "label": "Enable RSI strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-level-enabled",
+      "label": "RSI level entry filter · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require the configured directional RSI level or inclusive RSI range for new entries.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-level-enabled-indicator",
+      "label": "RSI level entry filter · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require the configured directional RSI level or inclusive RSI range for new entries. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-level-mode",
+      "label": "RSI entry mode",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Threshold · above / below",
+          "value": "THRESHOLD"
+        },
+        {
+          "label": "Between · inclusive range",
+          "value": "BETWEEN"
+        }
+      ],
+      "description": "Choose a single bullish/bearish threshold or an inclusive allowed RSI range.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bullish-min",
+      "label": "Bullish RSI minimum",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Lower inclusive RSI bound for bullish entries in Between mode.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bullish-max",
+      "label": "Bullish RSI maximum",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Upper inclusive RSI bound for bullish entries in Between mode.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bearish-min",
+      "label": "Bearish RSI minimum",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Lower inclusive RSI bound for bearish entries in Between mode.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bearish-max",
+      "label": "Bearish RSI maximum",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Upper inclusive RSI bound for bearish entries in Between mode.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bullish-above",
+      "label": "Bullish RSI strictly above",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Strict bullish RSI threshold in Threshold mode; equality does not pass.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-bearish-below",
+      "label": "Bearish RSI strictly below",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Strict bearish RSI threshold in Threshold mode; equality does not pass.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-slope-enabled",
+      "label": "RSI slope filter · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require rising RSI for bullish entries and falling RSI for bearish entries. Flat or unready RSI does not satisfy slope.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-slope-enabled-indicator",
+      "label": "RSI slope filter · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require rising RSI for bullish entries and falling RSI for bearish entries. Flat or unready RSI does not satisfy slope. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-length",
+      "label": "RSI period",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "",
+      "description": "Number of host candles used to calculate RSI.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-family-enabled",
+      "label": "Enable ADX strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-use-adx",
+      "label": "Choppy filter · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the ADX strength/choppiness entry gate; compare ADX with the configured threshold.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-use-adx-indicator",
+      "label": "Choppy filter · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Enable the ADX strength/choppiness entry gate; compare ADX with the configured threshold. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-threshold",
+      "label": "ADX threshold",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "any",
+      "description": "Minimum ADX value required when the ADX strategy filter is enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-length",
+      "label": "ADX DI length",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Period used to calculate directional movement for ADX.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-smoothing",
+      "label": "ADX smoothing",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Smoothing period used by the ADX calculation.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-structure-family-enabled",
+      "label": "Enable Market structure strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market-structure-enabled",
+      "label": "Directional swing structure entry filter · selected host timeframe · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require confirmed directional swing structure on the selected host timeframe for normal entries.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market-structure-enabled-indicator",
+      "label": "Directional swing structure entry filter · selected host timeframe · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Require confirmed directional swing structure on the selected host timeframe for normal entries. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-zones-family-enabled",
+      "label": "Enable Supply / demand zones strategy rules",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-trend-enabled",
+      "label": "Enable",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the manual price-marker and consecutive-completed-close entry filter. This does not submit an immediate manual order.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-trend-bullish",
+      "label": "Bullish marker",
+      "type": "number",
+      "min": "0.00000001",
+      "max": "",
+      "step": "any",
+      "description": "Underlying price marker used by the bullish manual-trend completed-close test.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-trend-bearish",
+      "label": "Bearish marker",
+      "type": "number",
+      "min": "0.00000001",
+      "max": "",
+      "step": "any",
+      "description": "Underlying price marker used by the bearish manual-trend completed-close test.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-trend-closes",
+      "label": "Consecutive completed closes",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "1",
+      "description": "Number of consecutive completed host closes required by the enabled manual price-marker filter.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-volume-enabled",
+      "label": "Volume · chart only",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Show broker volume on the chart. Missing volume is not inferred, and this visual switch does not enable strategy entries.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-sma-enabled",
+      "label": "RSI moving average · chart only",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Show the moving average of RSI in the chart study. It is independent of strategy entry selection.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-exit-enabled-section-toggle",
+      "label": "Enable ema exits",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-exit-enabled",
+      "label": "EMA breach · configurable exit period · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow an adverse breach of the configurable exit EMA to close an owned position. Completed/intrabar timing follows the selected timing rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-exit-enabled-indicator",
+      "label": "EMA breach · configurable exit period · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow an adverse breach of the configurable exit EMA to close an owned position. Completed/intrabar timing follows the selected timing rule. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-exit-length",
+      "label": "Exit EMA period · host candle close",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "1",
+      "description": "Period of the EMA used by the enabled EMA breach exit.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-slow-exit-enabled",
+      "label": "Second EMA breach · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow an adverse second-EMA breach as an independent exit criterion.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-slow-exit-enabled-indicator",
+      "label": "Second EMA breach · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow an adverse second-EMA breach as an independent exit criterion. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-widening-exit-enabled",
+      "label": "EMA gap contraction · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow EMA-gap contraction to close a position when the associated exit family is enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-ema-widening-exit-enabled-indicator",
+      "label": "EMA gap contraction · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow EMA-gap contraction to close a position when the associated exit family is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-exit-enabled-section-toggle",
+      "label": "Enable supertrend exit",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-exit-enabled",
+      "label": "Supertrend reversal · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow a confirmed Supertrend reversal to close the owned position when its exit family is enabled.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-supertrend-exit-enabled-indicator",
+      "label": "Supertrend reversal · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow a confirmed Supertrend reversal to close the owned position when its exit family is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-exit-enabled-section-toggle",
+      "label": "Enable rsi exit",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-exit-enabled",
+      "label": "RSI slope against the position · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow RSI slope against the held direction to trigger an independent exit.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-exit-enabled-indicator",
+      "label": "RSI slope against the position · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow RSI slope against the held direction to trigger an independent exit. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-exit-enabled-section-toggle",
+      "label": "Enable adx exit",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-exit-enabled",
+      "label": "ADX below the selected threshold · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow ADX below the configured threshold to trigger an independent exit.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adx-exit-enabled-indicator",
+      "label": "ADX below the selected threshold · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow ADX below the configured threshold to trigger an independent exit. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market-structure-exit-enabled-section-toggle",
+      "label": "Enable market structure exit",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market-structure-exit-enabled",
+      "label": "Opposing confirmed swing structure · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Allow confirmed swing structure opposing the position to trigger an exit.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-market-structure-exit-enabled-indicator",
+      "label": "Opposing confirmed swing structure · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Allow confirmed swing structure opposing the position to trigger an exit. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-zone-target-enabled-section-toggle",
+      "label": "Enable supply / demand targets",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-zone-target-enabled",
+      "label": "Opposing strong 5m supply/demand target exit · optional · Strategy",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional exit at an opposing strong five-minute supply/demand zone. Zones and target eligibility depend on verified data.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-zone-target-enabled-indicator",
+      "label": "Opposing strong 5m supply/demand target exit · optional · Indicator",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chart-only selection: Optional exit at an opposing strong five-minute supply/demand zone. Zones and target eligibility depend on verified data. This controls the study/replay display and does not enable the corresponding strategy rule.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-max-premium",
+      "label": "Quoted premium cap",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "Optional quoted option-premium cap for entry selection. It is not an underlying stop or a total-account capital amount.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-daily-budget",
+      "label": "Daily loss budget",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "Optional strategy loss-budget limit in the displayed native currency. Blank disables this optional limit; broker affordability checks still apply.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-additional-slippage-points",
+      "label": "Additional slippage · option premium points per side",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "any",
+      "description": "Additional cost allowance in option-premium points per side. Actual fill slippage is already reflected in fill prices; an allowance is not a guaranteed fill adjustment.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-trailing-enabled",
+      "label": "Enable trailing stop-loss",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable application-managed trailing exits using fresh observations after entry. This does not place an exchange-resting protective stop by itself.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-trailing-basis",
+      "label": "Trailing stop basis",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Option executable bid · percent",
+          "value": "OPTION_PREMIUM_PERCENT"
+        },
+        {
+          "label": "Underlying · points",
+          "value": "UNDERLYING_POINTS"
+        }
+      ],
+      "description": "Choose percentage or underlying-point distance for the full-position trailing policy.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-trailing-distance",
+      "label": "Trailing distance · percent or underlying points",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Distance used by the enabled trailing exit in the selected trailing basis.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-spot-target",
+      "label": "Hard target · underlying price",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Optional absolute underlying target PRICE, not a number of points gained and not an option-premium target. Direction and tick validation apply.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-spot-stop",
+      "label": "Hard stop-loss · underlying price",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Optional absolute underlying stop PRICE, not a loss distance, percentage or option premium. Direction and tick validation apply.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-delta-execution-route",
+      "label": "Trade product",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Options · buy ATM Call / Put",
+          "value": "OPTIONS"
+        },
+        {
+          "label": "Perpetual futures · long / short",
+          "value": "DELTA_PERPETUAL"
+        }
+      ],
+      "description": "Choose bought ATM options or supported perpetual futures. Options buy a Call/Put; futures use the supported long/short contract route.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-session-deadline",
+      "label": "Optional daily strategy cutoff · IST",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional crypto daily strategy cutoff in IST. Continuous mode has no daily cutoff; held contract expiry and risk rules still apply.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-price-source",
+      "label": "Price source",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Perpetual traded-price candles",
+          "value": "PERPETUAL_LAST_TRADE"
+        }
+      ],
+      "description": "Broker price/candle source used for the selected Delta signal instrument. Do not mix another broker’s prices into execution evidence.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-order-terms",
+      "label": "Order terms",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Marketable limit · IOC",
+          "value": "MARKETABLE_LIMIT_IOC"
+        }
+      ],
+      "description": "Supported broker order execution terms. An IOC can fill partly and cancel the remainder; acceptance is not a completed fill.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-carry-policy",
+      "label": "Crypto trading schedule",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Continuous · 24/7 · no daily cutoff",
+          "value": "CONTINUOUS"
+        },
+        {
+          "label": "Optional daily strategy cutoff",
+          "value": "DAILY_SQUARE_OFF"
+        }
+      ],
+      "description": "Continuous crypto trading runs across days. A daily cutoff is an explicit optional strategy policy; it does not mean crypto has an exchange close.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-chart-view",
+      "label": "Chart view",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Host candles — broker OHLC",
+          "value": "host"
+        },
+        {
+          "label": "Synthetic Renko — calculated bodies",
+          "value": "synthetic"
+        }
+      ],
+      "description": "Host view displays broker OHLC. Synthetic view displays calculated Renko bodies. Historical chart signals remain simulations.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-history-preset",
+      "label": "History review range",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Last 7 calendar days",
+          "value": "7"
+        },
+        {
+          "label": "Last 45 calendar days (~30 sessions)",
+          "value": "45"
+        },
+        {
+          "label": "Last 90 calendar days",
+          "value": "90"
+        },
+        {
+          "label": "Custom date range",
+          "value": "custom"
+        }
+      ],
+      "description": "Historical display/replay range. Changing the replay anchor can change path-dependent indicators; it does not rewrite an active runner’s captured settings.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-history-from",
+      "label": "From · IST",
+      "type": "date",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Beginning of the custom historical chart range, interpreted in IST.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-history-to",
+      "label": "To · IST",
+      "type": "date",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "End of the custom historical chart range, interpreted in IST.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-show-one-minute-label",
+      "label": "Show one-minute Supertrend label",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Show or hide the one-minute Supertrend chart label. Chart display only.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-show-five-minute-label",
+      "label": "Show five-minute Supertrend label",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Show or hide the five-minute Supertrend chart label. Chart display only.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-timeframe",
+      "label": "Chart & runner timeframe",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "1 minute",
+          "value": "1 minute"
+        },
+        {
+          "label": "2 minutes",
+          "value": "2 minutes"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Authoritative chart and next-Start host candle interval. The Runner timeframe selector mirrors this same value.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-override-direction",
+      "label": "Override entry direction",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Choose direction",
+          "value": ""
+        },
+        {
+          "label": "Bullish",
+          "value": "BULLISH"
+        },
+        {
+          "label": "Bearish",
+          "value": "BEARISH"
+        }
+      ],
+      "description": "Explicit direction for a separate override-entry action. Requires the active matching runner, fresh evidence, available quota and no conflicting exposure.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-rsi-sma-period",
+      "label": "SMA of RSI period",
+      "type": "number",
+      "min": "1",
+      "max": "200",
+      "step": "1",
+      "description": "Number of usable RSI observations averaged by the chart-only SMA of RSI.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-adoption-reentry",
+      "label": "Re-entry after adopted exit",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "After an adopted existing position exits, allow later qualifying strategy entries. OFF completes management after that position closes.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-journal-mode",
+      "label": "Mode",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "All",
+          "value": "ALL"
+        },
+        {
+          "label": "Paper",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Filter displayed journal records by Paper or Live. Filtering does not delete trades or change execution mode.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "renko-manual-brick-reference",
+      "label": "Manual brick reference",
+      "type": "hidden",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Reference sizing value retained by the manual-brick workflow; the displayed verified calculation and selected contract policy govern its use.",
+      "group": "Renko Supertrend",
+      "source": "renko-supertrend.js"
+    },
+    {
+      "id": "sector-filter",
+      "label": "Filter",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "All sectors",
+          "value": "all"
+        },
+        {
+          "label": "Top 3",
+          "value": "top3"
+        },
+        {
+          "label": "Top 5",
+          "value": "top5"
+        },
+        {
+          "label": "Bottom 3",
+          "value": "bottom3"
+        },
+        {
+          "label": "Bottom 5",
+          "value": "bottom5"
+        },
+        {
+          "label": "Leading",
+          "value": "leading"
+        },
+        {
+          "label": "Improving",
+          "value": "improving"
+        },
+        {
+          "label": "Neutral",
+          "value": "neutral"
+        },
+        {
+          "label": "Weakening",
+          "value": "weakening"
+        },
+        {
+          "label": "Lagging",
+          "value": "lagging"
+        },
+        {
+          "label": "Bullish MTF alignment",
+          "value": "bullish"
+        },
+        {
+          "label": "Bearish MTF alignment",
+          "value": "bearish"
+        },
+        {
+          "label": "Strong outperformers",
+          "value": "strong-outperformer"
+        },
+        {
+          "label": "Strong underperformers",
+          "value": "strong-underperformer"
+        }
+      ],
+      "description": "Limit the displayed sector rows to the chosen rank, rotation, alignment or relative-strength category. This is a view filter, not an entry order.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "sector-sort",
+      "label": "Sort by",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Rank",
+          "value": "rank"
+        },
+        {
+          "label": "Score",
+          "value": "score"
+        },
+        {
+          "label": "Rank change",
+          "value": "rank-change"
+        },
+        {
+          "label": "Relative strength",
+          "value": "relative-strength"
+        },
+        {
+          "label": "Momentum",
+          "value": "momentum"
+        },
+        {
+          "label": "Breadth",
+          "value": "breadth"
+        },
+        {
+          "label": "Volume",
+          "value": "volume"
+        },
+        {
+          "label": "ADX",
+          "value": "adx"
+        }
+      ],
+      "description": "Choose the metric used to order sector rows. A ranking is analysis rather than a confirmed trade signal.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "analysis-refresh-interval",
+      "label": "Sector analysis refresh interval",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 seconds",
+          "value": "5000"
+        },
+        {
+          "label": "15 seconds",
+          "value": "15000"
+        },
+        {
+          "label": "30 seconds",
+          "value": "30000"
+        },
+        {
+          "label": "1 minute",
+          "value": "60000"
+        },
+        {
+          "label": "5 minutes",
+          "value": "300000"
+        },
+        {
+          "label": "15 minutes",
+          "value": "900000"
+        },
+        {
+          "label": "1 hour",
+          "value": "3600000"
+        },
+        {
+          "label": "4 hours",
+          "value": "14400000"
+        }
+      ],
+      "description": "How often sector analysis is refreshed. A new response is not necessarily a new completed market candle.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "straddle-lots",
+      "label": "Lots per legBuys this many lots of both the ATM call and put. Confirm available funds before live use.",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "20",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "straddle-entry-start",
+      "label": "Start time",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Earliest time at which a new entry may qualify, in IST. It does not guarantee an entry at that time.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "straddle-entry-end",
+      "label": "End time",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Latest time at which a new entry may qualify, in IST. Exit management follows the strategy’s separate rules.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "nifty-straddle-lots",
+      "label": "Lots per leg",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "20",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "nifty-straddle-stoploss",
+      "label": "Hard stop (premium points)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.05",
+      "max": "",
+      "step": "0.05",
+      "description": "Combined option-premium stop distance in points for the straddle. Both legs and residual orders must be reconciled separately.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "nifty-straddle-target",
+      "label": "Target (premium points)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.05",
+      "max": "",
+      "step": "0.05",
+      "description": "Combined option-premium profit target in points for the straddle, distinct from an underlying-price target.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "nifty-straddle-entry-start",
+      "label": "Entry start (IST)",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Earliest time at which a new entry may qualify, in IST. It does not guarantee an entry at that time.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "nifty-straddle-entry-end",
+      "label": "Entry end (IST)",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Latest time at which a new entry may qualify, in IST. Exit management follows the strategy’s separate rules.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "enforce-risk-controls",
+      "label": "Apply these capital limits to analysis and ticket sizing",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Apply the optional capital and risk constraints to analysis and ticket sizing. Turning this off does not disable independent broker or strategy checks.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "planning-capital",
+      "label": "Planning capital (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1000",
+      "description": "INR capital used for planning position sizes; it is separate from actual broker cash.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "daily-loss-limit",
+      "label": "Maximum daily loss (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "100",
+      "description": "Maximum planned daily loss in INR when optional planning controls apply.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "idea-risk-limit",
+      "label": "Per-idea risk allocation (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "100",
+      "description": "Maximum planned risk allocated to one trade idea in INR.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "risk-reserve",
+      "label": "Reserved risk buffer (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "100",
+      "description": "INR buffer withheld from the planning risk allocation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "max-positions",
+      "label": "Maximum simultaneous positions",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Maximum simultaneously planned positions when the planning policy is enforced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "minimum-rr",
+      "label": "Optional minimum reward:risk (0 = no gate)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "0.1",
+      "description": "Minimum planned reward divided by planned risk. Zero disables this optional planning gate.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "stop-basis",
+      "label": "Stop / invalidation basis",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Exact price level",
+          "value": "price"
+        },
+        {
+          "label": "Percent from entry / spot",
+          "value": "percent"
+        }
+      ],
+      "description": "Specify an exact invalidation price or a percentage distance when preparing an analysis plan.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "order-type",
+      "label": "Order-type preference",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Limit (default, live eligible)",
+          "value": "LIMIT"
+        },
+        {
+          "label": "Market (preview only)",
+          "value": "MARKET"
+        }
+      ],
+      "description": "Preferred ticket order type; actual route support and the preview determine whether submission is available.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "include-funds",
+      "label": "Include freshly read selected-broker available funds",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Request that freshly read funds from the selected broker be included in the analysis packet.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "confirm-funds",
+      "label": "I confirm funds may be included in this local packet",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Consent to including the selected account’s funds in the local analysis packet; it does not authorize an order.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ticket-broker",
+      "label": "Broker",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "FYERS · existing account",
+          "value": "fyers"
+        }
+      ],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ticket-proposal",
+      "label": "Defined-risk proposal",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Choose a packet proposal",
+          "value": ""
+        }
+      ],
+      "description": "Choose a proposal from the current analysis packet for a separate reviewed ticket. A proposal is not a broker fill.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ticket-lots",
+      "label": "Quantity / lots",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "external-open-risk",
+      "label": "Declared external open risk (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "100",
+      "description": "Manually declare INR risk from exposure outside the positions known to this workflow.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-enabled",
+      "label": "Enable policy after acknowledgement",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Policy activation choice. Saving an enabled flag alone does not bypass acknowledgement, runtime availability or broker validation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-kill",
+      "label": "Kill switch engaged",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Engage the policy kill switch to block new automatic activity covered by this policy. Already accepted orders need reconciliation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-uncertain",
+      "label": "Halt on uncertain order status",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Halt new policy actions when a previous order has an uncertain outcome.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-completed",
+      "label": "Completed candles required",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require completed-candle evidence for policy signals.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-option-evidence",
+      "label": "Full option chain/master/liquidity/Greeks/lot/tick evidence required",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require verified option master, chain, liquidity, Greeks, lot and tick evidence for an option proposal.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-risk-defined",
+      "label": "Stop or defined-risk spread required",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require a stop or supported defined-risk structure before a policy proposal is eligible.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-target",
+      "label": "Target required",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Require an explicit target in eligible policy proposals.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-mode",
+      "label": "Execution mode",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper / dry-run",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live (extra runtime gate)",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Choose a Paper policy or the separately gated Live route. A saved draft is not proof that execution is running.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-universe",
+      "label": "Universe",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Aligned equities + index and stock options",
+          "value": "ALIGNED_EQUITIES_AND_OPTIONS"
+        },
+        {
+          "label": "Aligned equities only",
+          "value": "ALIGNED_EQUITIES"
+        },
+        {
+          "label": "Aligned options only",
+          "value": "ALIGNED_OPTIONS"
+        }
+      ],
+      "description": "Restrict eligible instruments to the selected equity/option universe.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-symbols",
+      "label": "Exact allowed FYERS underlyings, comma-separated",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Exact allowed FYERS underlying symbols; entries outside this allowlist are ineligible.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-index-underlyings",
+      "label": "Supported index underlyings",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Index underlyings permitted by the policy; a name still requires supported current contracts.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-segments",
+      "label": "Allowed segments, comma-separated",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated segment allowlist for the optional policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-strategies",
+      "label": "Allowed strategies, comma-separated",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated strategy allowlist for the optional policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-signals",
+      "label": "Completed-candle signal conditions, one per line15m, 1h, Daily and Weekly completed candles must all be fresh Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEA",
+      "source": "dashboard-enhancements.js",
+      "type": "textarea",
+      "description": "Completed-candle alignment conditions required by the optional policy; unavailable or stale observations do not count as agreement.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-planning-capital",
+      "label": "Planning capital (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "INR planning capital for this policy, separate from broker funds.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-daily-loss",
+      "label": "Maximum daily loss (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "5000",
+      "step": "",
+      "description": "Maximum daily INR loss allowed by this policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-idea-risk",
+      "label": "Per-idea risk (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "Maximum INR risk allocated to one idea by this policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-risk-reserve",
+      "label": "Reserved risk buffer (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "",
+      "description": "INR risk buffer retained by this policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-max-positions",
+      "label": "Maximum concurrent positions",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "20",
+      "step": "",
+      "description": "Maximum concurrent positions permitted by this policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-max-orders",
+      "label": "Maximum concurrent orders",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "20",
+      "step": "",
+      "description": "Maximum simultaneously outstanding orders permitted by this policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-min-rr",
+      "label": "Minimum reward:risk",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "10",
+      "step": "0.1",
+      "description": "Minimum expected reward-to-risk ratio for eligible policy proposals.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-order-type",
+      "label": "Order type",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Limit only",
+          "value": "LIMIT"
+        }
+      ],
+      "description": "Order type permitted by this policy; the shown policy supports limit-only submission.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-limit-buffer",
+      "label": "Maximum limit buffer (%)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "5",
+      "step": "0.1",
+      "description": "Maximum percentage price buffer permitted around the policy reference quote.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-max-spread",
+      "label": "Maximum bid/ask spread (%)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.1",
+      "max": "20",
+      "step": "0.1",
+      "description": "Maximum permitted bid/ask spread percentage before an entry is vetoed.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-start",
+      "label": "Trading start (IST)",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Beginning of the policy entry window, in IST.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-end",
+      "label": "Trading end (IST)",
+      "source": "dashboard-enhancements.js",
+      "type": "time",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "End of the policy entry window, in IST; existing exposure still needs its applicable exit management.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-min-dte",
+      "label": "Minimum DTE",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "365",
+      "step": "",
+      "description": "Minimum days to expiry accepted by the option policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-max-dte",
+      "label": "Maximum DTE",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "365",
+      "step": "",
+      "description": "Maximum days to expiry accepted by the option policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-cooldown",
+      "label": "Cooldown (minutes)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "1440",
+      "step": "",
+      "description": "Minimum wait in minutes before another policy action covered by the cooldown.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-stale",
+      "label": "Stale-data veto (seconds)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "300",
+      "step": "",
+      "description": "Maximum permitted evidence age in seconds; older data vetoes the policy action.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "auto-ack",
+      "label": "Exact policy acknowledgement",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Acknowledgement required by this policy workflow after reviewing its complete preview. It is separate from the Renko configuration-choice popup.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "trade-parser-input",
+      "label": "Recommendation textVerify the source independently. The ticket uses the FYERS master and a fresh FYERS quote.",
+      "source": "dashboard-enhancements.js",
+      "type": "textarea",
+      "description": "Recommendation text to parse into a reviewed ticket. Verify its source, instrument and levels; parsing does not submit an order.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "trade-parser-lots",
+      "label": "Lots",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-segment",
+      "label": "Segment",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Cash / index",
+          "value": "index"
+        },
+        {
+          "label": "F&O",
+          "value": "fno"
+        },
+        {
+          "label": "Commodities",
+          "value": "commodity"
+        },
+        {
+          "label": "Stock options",
+          "value": "stock-option"
+        }
+      ],
+      "description": "Exchange/product segment used to restrict broker-master search and supported execution routes.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-underlying",
+      "label": "Broker-master instrument",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Refresh the official cache to search instruments",
+          "value": "Refresh the official cache to search instruments"
+        }
+      ],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-search",
+      "label": "Broker-supported symbol or option searchFor stock options, enter the underlying or exact master search. Expiry, strike, call/put, lot size and tick must be returned by broker metad",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-timeframe",
+      "label": "Research timeframe",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-length",
+      "label": "EMA band length (High / Low)Applies separately to High and Low, exactly as the Pine source.",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "500",
+      "step": "",
+      "description": "EMA period applied independently to candle High and Low to form the EMA band.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-chart-timeframe",
+      "label": "Chart timeframeDisplay only; this never changes the runner’s timeframe or trade logic.",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Display-only chart timeframe; it does not change an active EMA Band runner’s trade logic.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-chart-bars",
+      "label": "Chart historyControls the displayed FYERS history only.",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "80 candles",
+          "value": "80"
+        },
+        {
+          "label": "160 candles",
+          "value": "160"
+        },
+        {
+          "label": "240 candles",
+          "value": "240"
+        },
+        {
+          "label": "320 candles",
+          "value": "320"
+        },
+        {
+          "label": "500 candles",
+          "value": "500"
+        }
+      ],
+      "description": "Number of historical broker candles shown in the chart; this is a display setting.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-cooldown",
+      "label": "Same-direction re-entry cooldown (bars)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "",
+      "description": "Minimum completed bars between repeated entries in the same direction.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-session",
+      "label": "Entry session (IST)Optional Pine entry filter; exits remain active outside it.",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional IST entry-session filter. The strategy’s exit monitoring remains separate.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-confirmation",
+      "label": "Signal confirmation",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Completed candle only",
+          "value": "Completed candle only"
+        }
+      ],
+      "description": "This EMA Band workflow uses completed-candle confirmation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-underlying",
+      "label": "Exact broker-master underlyingScreened against the current master only.",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-timeframe",
+      "label": "Timeframe",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-length",
+      "label": "KAMA efficiency length",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "Completed-close efficiency-ratio lookback used by KAMA.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-fast",
+      "label": "Fast / slow lengths",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "",
+      "description": "Fast smoothing length used in the adaptive KAMA calculation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-slow",
+      "label": "Fast / slow lengths",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "2",
+      "max": "",
+      "step": "",
+      "description": "Slow smoothing length used in the adaptive KAMA calculation.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-efficiency",
+      "label": "Minimum efficiency ratio",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "1",
+      "step": "0.05",
+      "description": "Minimum efficiency ratio accepted by the KAMA entry gate.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-breakout",
+      "label": "Breakout / cooldown bars",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "2",
+      "max": "",
+      "step": "",
+      "description": "Completed-bar lookback used to establish the KAMA breakout condition.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-cooldown",
+      "label": "Breakout / cooldown bars",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "",
+      "description": "Completed bars required between eligible KAMA entries.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-reclaims",
+      "label": "Allow KAMA reclaim entries",
+      "source": "dashboard-enhancements.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Permit qualifying completed-close KAMA reclaim entries in addition to the supported breakout path.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-mode",
+      "label": "Mode",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live — operator-gated",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-quantity",
+      "label": "Quantity",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-invalidation",
+      "label": "Invalidation / stop price",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "0.05",
+      "description": "Absolute invalidation/stop price for the KAMA idea; source direction and tick checks apply.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "kama-idea-risk",
+      "label": "Maximum idea risk (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Maximum INR risk permitted for this KAMA idea.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "screener-label",
+      "label": "Friendly label (optional)",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Optional display name for a saved screener; it does not change the query.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "screener-url",
+      "label": "Chartink screener URL",
+      "source": "dashboard-enhancements.js",
+      "type": "url",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Chartink screener to evaluate. Results are analysis candidates; submission uses a separate broker-native ticket.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "screener-order-broker",
+      "label": "Broker account",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "FYERS · existing account",
+          "value": "fyers"
+        }
+      ],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "screener-order-product",
+      "label": "Cash product",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Intraday",
+          "value": "INTRADAY"
+        },
+        {
+          "label": "Delivery (CNC)",
+          "value": "CNC"
+        }
+      ],
+      "description": "Choose intraday cash or delivery CNC for eligible screener orders.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "screener-order-external-risk",
+      "label": "Declared external open risk (₹)",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "100",
+      "description": "Manually declare INR risk from exposure outside the positions known to this workflow.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-underlying-search",
+      "label": "UnderlyingOnly current FYERS cash/index or commodity-future underlyings with listed options are shown.",
+      "source": "dashboard-enhancements.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-underlying-picker",
+      "label": "UnderlyingChoose an underlying; the completed EMA Band signal chooses Call (CE) or Put (PE).",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Type at least two characters to search",
+          "value": ""
+        }
+      ],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-mode",
+      "label": "ModePaper/forward testing is active. No broker order route exists in this mode.",
+      "source": "dashboard-enhancements.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper / forward test",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live (auto order submission)",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-lots",
+      "label": "LotsQuantity for the automatic BUY entry order.",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-stop-pct",
+      "label": "Stop-loss (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price falls this % below entry. Leave blank to exit purely on the EMA Band indica",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.1",
+      "max": "99.9",
+      "step": "0.1",
+      "description": "Optional option-premium percentage stop below the filled entry. Blank retains the normal indicator-based exit policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "ema-band-target-pct",
+      "label": "Target (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price rises this % above entry. Leave blank to exit purely on the EMA Band indicator",
+      "source": "dashboard-enhancements.js",
+      "type": "number",
+      "min": "0.1",
+      "max": "",
+      "step": "0.1",
+      "description": "Optional option-premium percentage target above the filled entry. Blank retains the normal indicator-based exit policy.",
+      "group": "Sector analysis, handoff, screener and planning"
+    },
+    {
+      "id": "dbt-symbol",
+      "label": "Research underlying",
+      "source": "delta-backtest.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "BTCUSD",
+          "value": "BTCUSD"
+        },
+        {
+          "label": "ETHUSD",
+          "value": "ETHUSD"
+        }
+      ],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-start",
+      "label": "Start date · IST",
+      "source": "delta-backtest.js",
+      "type": "date",
+      "min": "2024-01-01",
+      "max": "",
+      "step": "",
+      "description": "Beginning of the research history in IST.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-end",
+      "label": "End date · IST · inclusive",
+      "source": "delta-backtest.js",
+      "type": "date",
+      "min": "2024-01-01",
+      "max": "",
+      "step": "",
+      "description": "Inclusive end date of the research history in IST.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-holdout",
+      "label": "Held-out tail · %",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "10",
+      "max": "50",
+      "step": "",
+      "description": "Chronological tail percentage reserved for held-out evaluation instead of fitting.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-rsi",
+      "label": "RSI lengths · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated RSI periods to compare in the research grid.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-ma",
+      "label": "RSI MA lengths · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated RSI moving-average periods to compare.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-entry",
+      "label": "Entry rules to compare",
+      "source": "delta-backtest.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Current rules · crossover + EMA touch",
+          "value": "CURRENT"
+        },
+        {
+          "label": "Crossover only",
+          "value": "CROSS_ONLY"
+        },
+        {
+          "label": "Compare both entry rules",
+          "value": "BOTH"
+        }
+      ],
+      "description": "Compare the supported crossover-only or crossover-plus-EMA-touch entry rules.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-direction",
+      "label": "Futures direction",
+      "source": "delta-backtest.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Long and short",
+          "value": "BOTH"
+        },
+        {
+          "label": "Long only",
+          "value": "LONG_ONLY"
+        },
+        {
+          "label": "Short only",
+          "value": "SHORT_ONLY"
+        }
+      ],
+      "description": "Research long-only, short-only or both futures directions. This does not change a live runner.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-adx",
+      "label": "Select ADX(14) entry filter",
+      "source": "delta-backtest.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Include the ADX entry filter in the selected research configuration.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-adx-compare",
+      "label": "Compare ADX off / on",
+      "source": "delta-backtest.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Compare both enabled and disabled ADX variants in the research grid.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-momentum",
+      "label": "Select previous-candle momentum filter",
+      "source": "delta-backtest.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Include the previous-candle momentum entry filter in research.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-momentum-compare",
+      "label": "Compare momentum off / on",
+      "source": "delta-backtest.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Compare both enabled and disabled momentum variants.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-adx-values",
+      "label": "ADX thresholds · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated ADX thresholds tested by the research grid.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-bb-lengths",
+      "label": "Bollinger lengths · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Comma-separated Bollinger lookbacks used to study volatility squeeze.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-bb-dev",
+      "label": "Standard deviations · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Standard-deviation multipliers for the research Bollinger bands.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-lookback",
+      "label": "Squeeze history · bars · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Lookback bars used to rank historical squeeze observations.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-percentile",
+      "label": "Squeeze percentiles · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Percentile thresholds used to classify volatility squeeze.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-release",
+      "label": "Release windows · bars · comma-separated",
+      "source": "delta-backtest.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Bar windows over which a research squeeze release may qualify.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-capital",
+      "label": "Initial equity · native USD (engine input)",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "10",
+      "max": "10000000",
+      "step": "",
+      "description": "Initial equity in native USD for the research engine; not a broker deposit.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-contracts",
+      "label": "Fixed contracts",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "1",
+      "max": "100000",
+      "step": "",
+      "description": "Fixed contract quantity used by the research simulation.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-fee",
+      "label": "Fee allowance · bps / fill",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Assumed fee basis points for each simulated fill.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-slip",
+      "label": "Slippage · bps / fill",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Assumed slippage basis points for each simulated fill.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-spread",
+      "label": "Half-spread · bps / fill",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Assumed half-spread basis points per simulated fill.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-funding",
+      "label": "Funding drag · bps / day",
+      "source": "delta-backtest.js",
+      "type": "number",
+      "min": "0",
+      "max": "100",
+      "step": "0.1",
+      "description": "Assumed funding drag in basis points per day; actual funding can differ.",
+      "group": "Delta research"
+    },
+    {
+      "id": "dbt-segment",
+      "label": "Inspect period",
+      "source": "delta-backtest.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Chronological held-out",
+          "value": "held_out"
+        },
+        {
+          "label": "Training",
+          "value": "train"
+        }
+      ],
+      "description": "Inspect training or chronological held-out research results.",
+      "group": "Delta research"
+    },
+    {
+      "id": "delta-broker",
+      "label": "Broker",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Delta Exchange India",
+          "value": "DELTA_INDIA"
+        }
+      ],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-workflow",
+      "label": "Workflow",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Read-only analysis",
+          "value": "READ_ONLY"
+        },
+        {
+          "label": "Paper simulation",
+          "value": "PAPER"
+        },
+        {
+          "label": "LIVE trading",
+          "value": "LIVE"
+        },
+        {
+          "label": "Backtest · research only",
+          "value": "BACKTEST"
+        }
+      ],
+      "description": "Choose read-only analysis, Paper, explicitly authorized Live execution, or research backtesting. These modes have different side effects.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-type",
+      "label": "Contract type",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "All supported derivatives",
+          "value": ""
+        }
+      ],
+      "description": "Filter the broker contract master by supported derivative type.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-search",
+      "label": "Instrument search",
+      "source": "delta-india.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-symbol",
+      "label": "Exact listed instrument",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-timeframe",
+      "label": "Timeframe",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "5 minutes",
+          "value": "5m"
+        },
+        {
+          "label": "1 minute",
+          "value": "1m"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15m"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30m"
+        },
+        {
+          "label": "1 hour",
+          "value": "1h"
+        },
+        {
+          "label": "6 hours",
+          "value": "6h"
+        },
+        {
+          "label": "1 day",
+          "value": "1d"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-rsi",
+      "label": "RSI length",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "",
+      "description": "Number of completed price changes used to calculate the RSI that drives this workflow’s signal.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-ma",
+      "label": "RSI MA",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "SMA",
+          "value": "SMA"
+        },
+        {
+          "label": "EMA",
+          "value": "EMA"
+        }
+      ],
+      "description": "Type of moving average applied to RSI, not to underlying price.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-ma-length",
+      "label": "RSI MA length",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "",
+      "description": "Period of the moving average applied to RSI.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-side",
+      "label": "Manual Submit side",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Bullish · buy ATM call",
+          "value": "buy"
+        },
+        {
+          "label": "Bearish · buy ATM put",
+          "value": "sell"
+        }
+      ],
+      "description": "Direction for the next manual ATM option ticket: bullish buys a Call; bearish buys a Put.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-contracts",
+      "label": "Quantity · contractsWhole Delta contracts; units shown above.",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "1",
+      "max": "100000",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-order-type",
+      "label": "Order type",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Limit order · price protected",
+          "value": "limit_order"
+        },
+        {
+          "label": "Market order · best available price",
+          "value": "market_order"
+        }
+      ],
+      "description": "Limit uses a price cap; market uses available executable prices. Both remain subject to supported broker terms.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-price",
+      "label": "Option limit premium · native quote points",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "0",
+      "max": "",
+      "step": "any",
+      "description": "Limit premium for the exact option, in native quote units and aligned to its tick size.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-tif",
+      "label": "Time in force",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "IOC · cancel unfilled quantity",
+          "value": "ioc"
+        },
+        {
+          "label": "GTC · remain open until cancelled",
+          "value": "gtc"
+        }
+      ],
+      "description": "IOC cancels an unfilled remainder; GTC can remain outstanding until filled or cancelled.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-reduce",
+      "label": "Position control",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Open / increase position",
+          "value": "false"
+        },
+        {
+          "label": "Reduce only",
+          "value": "true"
+        }
+      ],
+      "description": "Reduce-only restricts an order to decreasing existing exposure; it does not open a new position.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-strategy-mode",
+      "label": "Strategy executionUnderlying RSI signals · ATM options by default",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Options · buy ATM call / put (default)",
+          "value": "ATM_OPTIONS"
+        },
+        {
+          "label": "Futures · buy long / sell short",
+          "value": "FUTURES"
+        }
+      ],
+      "description": "Choose bought ATM options or supported futures long/short execution for the strategy.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-direction",
+      "label": "Runner signal direction",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Automatic · bullish CALL / bearish PUT",
+          "value": "BOTH"
+        },
+        {
+          "label": "Bullish call only",
+          "value": "LONG_ONLY"
+        }
+      ],
+      "description": "Allow both supported signal directions or restrict the runner to bullish calls.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-trailing-enabled",
+      "label": "Runner trailing stop · optionalOff by default · application-managed",
+      "source": "delta-india.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the strategy’s optional application-managed trailing exit. Manual orders do not automatically inherit a runner’s trailing policy.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-trailing-mode",
+      "label": "Trailing step mode",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Percentage of original filled entry",
+          "value": "PERCENTAGE"
+        },
+        {
+          "label": "Quoted price points",
+          "value": "POINTS"
+        },
+        {
+          "label": "Trail by ATR · dynamic volatility",
+          "value": "ATR"
+        }
+      ],
+      "description": "Choose entry-based percentage/points step trailing or the separately supported full-position ATR trailing mode.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-trailing-step",
+      "label": "Trailing step",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Distance for the selected trailing policy, in percentage or native quote points as labelled.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-adx-enabled",
+      "label": "ADX entry filter",
+      "source": "delta-india.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the optional ADX strength entry filter. It does not disable independent exits.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-adx-threshold",
+      "label": "Minimum ADX · must exceed",
+      "source": "delta-india.js",
+      "type": "number",
+      "min": "0.1",
+      "max": "99.9",
+      "step": "0.1",
+      "description": "Minimum ADX strength required by the enabled entry filter; the selected strategy’s strict comparison applies.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "delta-saved-symbol",
+      "label": "Saved contract / timeframe",
+      "source": "delta-india.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Current chart selection",
+          "value": ""
+        }
+      ],
+      "description": "Choose a saved contract/timeframe view. Opening it is not Start authorization.",
+      "group": "Delta trading"
+    },
+    {
+      "id": "cross-label",
+      "label": "Strategy label",
+      "source": "ema-crossover-live.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Friendly label for this strategy instance; it does not alter signal calculations.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-mode",
+      "label": "Execution mode",
+      "source": "ema-crossover-live.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live — real FYERS orders",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-max-trades",
+      "label": "Maximum trades per runCaps entry orders, including uncertain submissions. Exit orders remain allowed. Resets only on a new start while flat.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "1",
+      "max": "1000",
+      "step": "1",
+      "description": "Maximum new entries per run. Exit orders remain allowed, and a new flat Start creates a new run quota.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-paper-capital",
+      "label": "Virtual Paper capital · INR",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "1",
+      "max": "1000000000",
+      "step": "",
+      "description": "Virtual Paper INR capital used for affordability and reservations; it does not alter live broker funds.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-lots",
+      "label": "Lots",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-spot-target",
+      "label": "Underlying spot target (optional)When either spot level is entered, EMA exit is ignored.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Optional absolute underlying target. In this RSI/MA runner, setting either underlying hard level suppresses the EMA exit as described by the workflow.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-spot-stop",
+      "label": "Underlying spot stop-loss (optional)Completed-close checks. Blank levels are unused.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "0.01",
+      "max": "",
+      "step": "any",
+      "description": "Optional absolute underlying stop checked on completed closes. Blank leaves that level unused.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-premium",
+      "label": "Quoted premium cap per entry (₹, optional)Leave blank for no per-entry cap. Any configured daily budget still applies.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Optional per-entry quoted premium cap; blank disables that cap while any daily budget still applies.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-budget",
+      "label": "Daily loss budget (₹, optional)Leave blank for no daily budget. When set, realized losses plus new premium must fit; fees are additional.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Optional daily INR loss budget for this runner; realized losses and new premium are checked by its policy.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-trailing-enabled",
+      "label": "Trailing stopOption premium · optionalOff",
+      "source": "ema-crossover-live.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the strategy’s optional application-managed trailing exit. Manual orders do not automatically inherit a runner’s trailing policy.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-trailing-mode",
+      "label": "Trailing mode",
+      "source": "ema-crossover-live.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Percentage of filled entry",
+          "value": "PERCENTAGE"
+        },
+        {
+          "label": "Premium points",
+          "value": "POINTS"
+        }
+      ],
+      "description": "Choose a percentage of the filled option entry or a fixed premium-point step; it does not compound the base distance.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-trailing-step",
+      "label": "Trailing stepPercentage defaults to 10%. Points require your positive distance. Fixed distance; never compounds.",
+      "source": "ema-crossover-live.js",
+      "type": "number",
+      "min": "0.000001",
+      "max": "",
+      "step": "any",
+      "description": "Positive fixed trailing step. Percentage and premium-point units depend on the selected trailing mode.",
+      "group": "RSI / MA crossover runner"
+    },
+    {
+      "id": "cross-search",
+      "label": "Underlying search",
+      "source": "ema-crossover.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "cross-symbol",
+      "label": "Broker-master instrument",
+      "source": "ema-crossover.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Search and select an underlying",
+          "value": ""
+        }
+      ],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "cross-timeframe",
+      "label": "Signal timeframe",
+      "source": "ema-crossover.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "1 minute",
+          "value": "1 minute"
+        },
+        {
+          "label": "2 minutes",
+          "value": "2 minutes"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "cross-rsi-length",
+      "label": "RSI length",
+      "source": "ema-crossover.js",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "",
+      "description": "Number of completed price changes used to calculate the RSI that drives this workflow’s signal.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "cross-ma-type",
+      "label": "RSI smoothing",
+      "source": "ema-crossover.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "SMA",
+          "value": "SMA"
+        },
+        {
+          "label": "EMA",
+          "value": "EMA"
+        }
+      ],
+      "description": "Use SMA or EMA as the smoothing of RSI for completed-candle crossovers.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "cross-sma-length",
+      "label": "RSI MA length",
+      "source": "ema-crossover.js",
+      "type": "number",
+      "min": "1",
+      "max": "100",
+      "step": "1",
+      "description": "Period of the SMA/EMA applied to RSI.",
+      "group": "EMA Band and KAMA"
+    },
+    {
+      "id": "holdings-broker",
+      "label": "Broker",
+      "source": "holdings-review.js",
+      "type": "select-one",
+      "options": [],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Holdings review"
+    },
+    {
+      "id": "holdings-filter",
+      "label": "Show${Object.entries(labels).map(([key, text]) =>",
+      "source": "holdings-review.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "All holdings",
+          "value": "ALL"
+        }
+      ],
+      "description": "Filter the holdings review results by the displayed category. It does not sell or rebalance holdings.",
+      "group": "Holdings review"
+    },
+    {
+      "id": "engine-account",
+      "label": "Broker account",
+      "source": "renko-engine.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Loading your accounts…",
+          "value": ""
+        }
+      ],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-execution-mode",
+      "label": "Execution mode",
+      "source": "renko-engine.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Backtest · historical replay",
+          "value": "BACKTEST"
+        },
+        {
+          "label": "Paper · broker-backed runner",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live · broker orders",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Historical replay, Paper or Live Renko Engine mode. Live requires its supported broker/runtime and explicit Start.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-search",
+      "label": "Underlying search",
+      "source": "renko-engine.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-symbol",
+      "label": "Instrument",
+      "source": "renko-engine.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Select an instrument",
+          "value": ""
+        }
+      ],
+      "description": "Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-timeframe",
+      "label": "Timeframe",
+      "source": "renko-engine.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "1 minute",
+          "value": "1 minute"
+        },
+        {
+          "label": "2 minutes",
+          "value": "2 minutes"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "10 minutes",
+          "value": "10 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-lots",
+      "label": "Lots / Delta contracts",
+      "source": "renko-engine.js",
+      "type": "number",
+      "min": "1",
+      "max": "100000",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-max-trades",
+      "label": "Maximum entries per run",
+      "source": "renko-engine.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Maximum new entries per run. Exit orders remain allowed, and a new flat Start creates a new run quota.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-capital",
+      "label": "Paper capital · INR",
+      "source": "renko-engine.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Virtual Paper INR capital used for affordability and reservations; it does not alter live broker funds.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "engine-history",
+      "label": "History",
+      "source": "renko-engine.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "7 days",
+          "value": "7"
+        },
+        {
+          "label": "45 days",
+          "value": "45"
+        },
+        {
+          "label": "90 days",
+          "value": "90"
+        }
+      ],
+      "description": "Historical replay window; it is research input rather than an active-run reset.",
+      "group": "Renko Engine"
+    },
+    {
+      "id": "resource-range",
+      "label": "History",
+      "source": "resource-monitor.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Last 24 hours",
+          "value": "24"
+        },
+        {
+          "label": "All retained records",
+          "value": "0"
+        }
+      ],
+      "description": "Time window for displayed retained resource samples. It does not change services or restart them.",
+      "group": "Server resources"
+    },
+    {
+      "id": "tg-channel-label",
+      "label": "Channel display nameDisplay name only; channel ID and bot access are still required.",
+      "source": "telegram-parser.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Friendly display name for a Telegram source; a valid channel identity and bot access are still required.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-channel",
+      "label": "Channel @username or -100 ID",
+      "source": "telegram-parser.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Exact public channel handle or private numeric channel identity accessible to the configured bot.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-interval",
+      "label": "Polling interval · seconds",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "10",
+      "max": "3600",
+      "step": "",
+      "description": "Polling interval in seconds. Polling discovers new evidence; it does not guarantee a fill or replay old submissions.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-broker",
+      "label": "Order broker",
+      "source": "telegram-parser.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Delta Exchange India",
+          "value": "DELTA_INDIA"
+        },
+        {
+          "label": "FYERS",
+          "value": "FYERS"
+        }
+      ],
+      "description": "Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-quantity",
+      "label": "Quantity · whole Delta contracts",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "1",
+      "max": "",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-auto",
+      "label": "Auto submission",
+      "source": "telegram-parser.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Explicit optional automatic submission policy. It is separate from loading recommendations; startup backlog remains review-only.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-text",
+      "label": "Telegram recommendation text",
+      "source": "telegram-parser.js",
+      "type": "textarea",
+      "description": "Recommendation text used for parsing and review. Text edits invalidate an existing ticket.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-entry-mode",
+      "label": "Entry type",
+      "source": "telegram-parser.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Limit",
+          "value": "LIMIT"
+        },
+        {
+          "label": "Stop-limit",
+          "value": "STOP_LIMIT"
+        }
+      ],
+      "description": "Limit or stop-limit entry. Stop-limit requires a valid trigger and limit relationship.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-trigger",
+      "label": "Trigger price",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "",
+      "max": "",
+      "step": "any",
+      "description": "Trigger price for a supported stop-limit order; triggering does not guarantee a fill.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-limit",
+      "label": "Limit price",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "",
+      "max": "",
+      "step": "any",
+      "description": "Limit price for the ticket, aligned to the selected broker contract’s tick.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-product",
+      "label": "Ticket product",
+      "source": "telegram-parser.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Bought ATM Call / Put · Renko owner",
+          "value": "ATM_OPTIONS"
+        },
+        {
+          "label": "Exact native contract · legacy entry only",
+          "value": "EXACT"
+        }
+      ],
+      "description": "Choose the supported bought-ATM-option Renko owner workflow or the explicitly labelled legacy exact-contract route.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-mode",
+      "label": "Option execution mode",
+      "source": "telegram-parser.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "Paper · simulated option fills",
+          "value": "PAPER"
+        },
+        {
+          "label": "Live · real Delta option order",
+          "value": "LIVE"
+        }
+      ],
+      "description": "Paper simulates the selected option route; Live can send a real option order on explicit Submit.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-qty",
+      "label": "Whole option contracts",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "1",
+      "max": "100000",
+      "step": "1",
+      "description": "Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-timeframe",
+      "label": "Renko timeframe",
+      "source": "telegram-parser.js",
+      "type": "select-one",
+      "options": [
+        {
+          "label": "1 minute",
+          "value": "1 minute"
+        },
+        {
+          "label": "3 minutes",
+          "value": "3 minutes"
+        },
+        {
+          "label": "5 minutes",
+          "value": "5 minutes"
+        },
+        {
+          "label": "15 minutes",
+          "value": "15 minutes"
+        },
+        {
+          "label": "30 minutes",
+          "value": "30 minutes"
+        },
+        {
+          "label": "1 hour",
+          "value": "1 hour"
+        }
+      ],
+      "description": "Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-ema-length",
+      "label": "Renko EMA exit period",
+      "source": "telegram-parser.js",
+      "type": "number",
+      "min": "1",
+      "max": "200",
+      "step": "",
+      "description": "EMA period for the selected completed-candle Renko exit.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-gold-proxy",
+      "label": "XAUUSD → XAUT bought options · explicit gold-token proxy",
+      "source": "telegram-parser.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Explicitly permit the labelled XAUUSD-to-XAUT gold-token option proxy. This is not the same instrument as spot gold.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-ema",
+      "label": "Completed-candle EMA exit",
+      "source": "telegram-parser.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the selected completed-candle EMA exit for the option owner.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-st",
+      "label": "Renko Supertrend exit",
+      "source": "telegram-parser.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Enable the supported Renko Supertrend exit for the option owner.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "tg-option-confirm",
+      "label": "I reviewed the mapped option, entered quantity and selected Renko exits; enter now when I click Submit.",
+      "source": "telegram-parser.js",
+      "type": "checkbox",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Explicit review of mapped option, quantity and selected exits before Submit. It does not make an old recommendation fresh.",
+      "group": "Telegram parser"
+    },
+    {
+      "id": "wa-group",
+      "label": "Exact group name",
+      "source": "whatsapp-polling.js",
+      "type": "text",
+      "min": "",
+      "max": "",
+      "step": "",
+      "description": "Exact WhatsApp group/chat name used by the local native polling helper.",
+      "group": "WhatsApp parser"
+    },
+    {
+      "id": "wa-interval",
+      "label": "Interval (seconds)",
+      "source": "whatsapp-polling.js",
+      "type": "number",
+      "min": "30",
+      "max": "3600",
+      "step": "",
+      "description": "Polling interval in seconds. Polling discovers new evidence; it does not guarantee a fill or replay old submissions.",
+      "group": "WhatsApp parser"
+    },
+    {
+      "id": "engine-anchorTime",
+      "label": "Deterministic anchor/start · IST",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Deterministic IST start/anchor for the recurrence and eligible replay window."
+    },
+    {
+      "id": "engine-basis",
+      "label": "Percentage base hypothesis",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Select the engine hypothesis for the price base used in percentage sizing."
+    },
+    {
+      "id": "engine-direction",
+      "label": "Directions",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Permit long, short or both directions in the engine hypothesis."
+    },
+    {
+      "id": "engine-endTime",
+      "label": "Research end · IST",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "End of the research/engine evaluation window in IST."
+    },
+    {
+      "id": "engine-fixedBox",
+      "label": "Fixed box (points)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Fixed brick distance in native underlying price points."
+    },
+    {
+      "id": "engine-flatHour",
+      "label": "Flat hour · IST",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Hour of the configured session flat boundary in IST."
+    },
+    {
+      "id": "engine-flatMinute",
+      "label": "Flat minute · IST",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Minute of the configured session flat boundary in IST."
+    },
+    {
+      "id": "engine-mode",
+      "label": "Brick calculation",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Choose percentage or fixed-price brick calculation. This is the engine brick mode, not Paper/Live execution mode."
+    },
+    {
+      "id": "engine-percent",
+      "label": "Brick %",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Percentage used to derive a brick from the selected percentage base."
+    },
+    {
+      "id": "engine-rangeSession",
+      "label": "Range window · IST (HHMM-HHMM)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "IST interval used to construct the displayed intraday range study."
+    },
+    {
+      "id": "engine-reversalBricks",
+      "label": "Reversal threshold (bricks)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Required opposing move in brick units before the engine changes direction."
+    },
+    {
+      "id": "engine-roundBrick",
+      "label": "Round brick to symbol tick",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Round the calculated brick to the selected symbol tick."
+    },
+    {
+      "id": "engine-rule",
+      "label": "Entry hypothesis",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Choose the explicitly labelled entry hypothesis; these research rules are not interchangeable."
+    },
+    {
+      "id": "engine-seedLevel",
+      "label": "Anchor level (0 = first close)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Initial synthetic level; zero seeds it from the first eligible close."
+    },
+    {
+      "id": "engine-seedTrend",
+      "label": "Anchor direction (-1 / 0 / 1)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Initial direction: -1 bearish, 0 neutral or 1 bullish."
+    },
+    {
+      "id": "engine-session",
+      "label": "Entry session · IST (HHMM-HHMM)",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Permitted IST entry window in HHMM-HHMM form."
+    },
+    {
+      "id": "engine-sessionOnly",
+      "label": "NSE intraday session filter",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Restrict entry eligibility to the configured IST session and enable its session flat rule."
+    },
+    {
+      "id": "engine-showCPR",
+      "label": "Previous daily HLC CPR",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Show central pivot range calculated from previous daily high, low and close. Chart context only."
+    },
+    {
+      "id": "engine-showFR",
+      "label": "Opening / first later red 44 / 56",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Show opening/first-later-red 44/56 chart study. Chart context only."
+    },
+    {
+      "id": "engine-showRange",
+      "label": "Intraday range 44 / 56",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Show the selected intraday range 44/56 study. Chart context only."
+    },
+    {
+      "id": "engine-stepping",
+      "label": "Step hypothesis",
+      "group": "Renko Engine",
+      "source": "renko-engine.js",
+      "description": "Select how the engine advances its synthetic level after a price move: whole bricks, one per bar, or price-minus-brick."
+    },
+    {
+      "id": "handoff-ai-path",
+      "label": "AI analysis path",
+      "group": "Analysis handoff",
+      "description": "Choose broker candles/rule-based analysis with no AI call, or Codex / ChatGPT-account analysis. An API key is not required by these configured choices."
+    },
+    {
+      "id": "handoff-market-symbols",
+      "label": "Index and commodity instruments",
+      "group": "Analysis handoff",
+      "description": "Select one to six broker-native symbols for the asynchronous market analysis job."
+    },
+    {
+      "id": "runner-job-search",
+      "label": "Find a job",
+      "group": "Runner jobs",
+      "description": "Filter visible jobs by the displayed account, instrument, strategy or status."
+    },
+    {
+      "id": "runner-job-history",
+      "label": "Include stopped / saved",
+      "group": "Runner jobs",
+      "description": "Include inactive saved instances/history in the job view. This does not restart them."
+    },
+    {
+      "id": "restart-service",
+      "label": "Service to restart",
+      "group": "Server resources",
+      "description": "Choose the dashboard or selected broker service, inspect exposure requirements, then explicitly request its restart. Frequent probes report the result."
+    },
+    {
+      "id": "section-visibility",
+      "label": "Visible dashboard sections",
+      "group": "Appearance and access",
+      "description": "Choose which permitted sidebar sections are displayed. Hiding a section does not stop its jobs or grant missing permissions."
+    }
+  ],
+  "sections": [
+    {
+      "id": "start",
+      "title": "Start here · accounts and dashboard navigation",
+      "text": [
+        "Choose a saved broker account before reviewing instruments, holdings, funds or orders. FYERS, Dhan, Motilal Oswal and Delta India have separate data and execution routes. Connection status, market-data permission, runner status and order-stream status are different checks.",
+        "Configuration → Brokers manages saved connections and account dashboards. User Master manages users and section access for administrators. Sidebar visibility preferences and permissions determine which sections you can open; a hidden section is not proof that its server job stopped.",
+        "Use the search box in this guide to find a setting by its on-screen name, strategy or purpose. The parameter reference lists allowed options and form bounds. These are UI constraints, not guarantees of broker support. The broker master, fresh data and server validation remain authoritative."
+      ]
+    },
+    {
+      "id": "sectors",
+      "title": "Sector rotation and stock cards",
+      "text": [
+        "Sector rotation ranks available sector observations using the selected mode, score components, relative strength, momentum, breadth, volume and timeframe alignment. Filter narrows the visible set; Sort changes ranking. Missing observations are disclosed rather than treated as zero.",
+        "Open a sector or stock card to inspect contributors, indicator evidence and historical observations. A sector leader or historical BUY label is not an accepted order. Official constituent weights can be partial or dated. Stock-card broker-candle and rule-based analysis makes no OpenAI call."
+      ]
+    },
+    {
+      "id": "handoff",
+      "title": "Analysis handoff · stock, index and commodity analysis",
+      "text": [
+        "Select the broker account and instruments, planning preferences and analysis path. Broker candles and rule-based analysis uses no AI call. Codex / ChatGPT-account analysis uses the configured account workflow rather than an OpenAI API key. AI or broker data unavailability must remain visible; it does not establish a login failure by itself.",
+        "The index/commodity panel accepts one to six broker-native symbols. Eligible results can include the actual ATM option contract, premium entry, premium target, premium stop, lot size and reward/risk; missing or stale contract/quote evidence leaves the idea ineligible. Existing open exposure can exclude an instrument to avoid duplicate entries.",
+        "Analysis submissions run as background jobs. The page releases submission controls after acceptance, renders results when available, and retains completed or partial output for later retrieval. Stop targets the selected analysis job. Recommendations remain research until a separate explicit trading action passes current validation.",
+        "Planning capital, daily and per-idea limits, reserve, concurrent positions, reward/risk and declared external risk constrain planning when enabled. Fresh funds inclusion is optional. Exporting a packet or downloading settings does not send an order."
+      ]
+    },
+    {
+      "id": "jobs",
+      "title": "Runner jobs and saved analysis outputs",
+      "text": [
+        "Each submitted job/run has an independent identity. Active jobs are listed separately from optional stopped/saved history. Completed, failed, cancelled, running, pending reconciliation and stalled are different states; stalled/unresponsive requires heartbeat evidence.",
+        "Open a job to inspect its account, captured settings, chart link, status, trade journal and audit evidence. Entries and exits show recorded reasons, quantities, times, prices and P&L where supplied. Missing older evidence is unavailable, not fabricated. P&L refreshes independently of the background work.",
+        "Results persist across section changes, page reloads and navigation. Use saved jobs to retrieve them later. Stop is job-specific. Cancellation can preserve partial analysis output; stopping a trading runner follows its own position and pending-order policy, so verify terminal status and broker reconciliation."
+      ]
+    },
+    {
+      "id": "renko",
+      "title": "Renko Supertrend · setup, entries and exits",
+      "text": [
+        "Select the instrument, Runner timeframe, Paper/Live mode, quantity, capital and trade limit in Trade setup. The launch timeframe mirrors the chart timeframe. One saved editable preset is retained per instrument in the saved-configuration library. Save settings updates it; autosave retains the working draft separately.",
+        "When Start finds different parameters, the popup lists saved versus form values. Use form parameters submits the edited values; Use saved configuration applies that record, including its shown execution mode; Cancel submits no Start. Batch Start resolves each instrument choice before submitting. An already running job keeps its captured settings.",
+        "Family masters govern their strategy and chart children. OFF disables the family while retaining subordinate choices for ON. Strategy selections affect entries/exits; Indicator/chart selections affect studies and historical replay. Independent enabled entry gates must satisfy their supported rules. A disabled control can mean the loaded runtime does not support it.",
+        "Completed-candle mode waits for verified host closes. Intrabar mode evaluates a provisional state using verified current-candle OHLC and fresh market evidence; a provisional signal may disappear. A signal before arming, reconnection or lock release is skipped rather than replayed as an old entry.",
+        "Renko/Supertrend uses ATR, factor and Auto/Manual brick settings. Manual reference brick stays fixed across live ticks and chart timeframes. Broker-verified session duration drives its reference policy; do not substitute assumed NSE/MCX/crypto hours. EMA, RSI, ADX, structure, zones, proximity and optional retest/manual-marker filters have separate settings below.",
+        "Enabled exit criteria can act independently. Absolute underlying target/stop values are PRICE LEVELS, not distances or option premium points. Optional trailing is application monitoring, not automatically an exchange-resting stop. Entry filters do not imply that all exit checks are disabled.",
+        "Quick-loss protection counts host intervals touched by actual entry/exit fills, including both endpoint candles. A qualifying quick losing exit locks new entries within the recorded position range; a fresh strict breakout releases it. The window is not a forced exit timer. Missing net-cost/exposure evidence can retain a protective review lock.",
+        "Stop Runner requests the strategy’s stop/reconciliation/owned-exit workflow. A Stop click or order acknowledgement does not establish a fill. Check pending orders and any residual position. A new configuration must not silently adopt unexplained broker exposure."
+      ]
+    },
+    {
+      "id": "engine",
+      "title": "Renko Engine · research and execution modes",
+      "text": [
+        "Renko Engine is a separate strategy/replay workflow. Select its broker account, exact instrument, host timeframe, lots/contracts and maximum entries. Historical replay evaluates the selected history and engine parameters; its chart markers are simulated events.",
+        "Paper and Live engine runs require the selected broker’s supported runtime and fresh source data. Engine ATR/Supertrend, EMA, rule, direction, session and anchor settings are defined by the engine form; they are not automatically interchangeable with Renko Supertrend settings. Replay does not authorize promotion or start a Live runner."
+      ]
+    },
+    {
+      "id": "ema",
+      "title": "EMA Band, RSI / MA crossover and KAMA",
+      "text": [
+        "EMA Band calculates its chosen EMA independently on candle High and Low. The supported completed-candle signal selects the current eligible ATM Call/Put; entry session and same-direction cooldown restrict entries. Its chart timeframe/history are display-only. Optional option-premium stop/target percentages supplement the supported indicator exits.",
+        "The RSI / MA crossover runner smooths RSI with the selected SMA or EMA. RSI length and RSI-MA length are distinct from price EMA periods. A future completed crossover can produce the supported bullish Call or bearish Put entry. Trade limit, lots, premium cap, daily budget and Paper capital apply to that run.",
+        "The crossover runner’s underlying hard target/stop settings have their own exit semantics; when either is configured, its displayed workflow suppresses the EMA exit. Its optional percentage/point step trail differs from Renko’s full-position trailing policy. Read the module’s active journal and settings before interpreting a shared label.",
+        "KAMA uses completed-close efficiency, adaptive fast/slow smoothing, breakout or reclaim, slope and cooldown rules. Choose quantity, invalidation and per-idea risk. WAIT remains WAIT when its signal is absent; account eligibility does not create an entry. Live requires the module’s supported broker/runtime gate."
+      ]
+    },
+    {
+      "id": "delta",
+      "title": "Delta India · tickets, options, futures and research",
+      "text": [
+        "Read-only analysis, Paper, Live and research backtest workflows have different side effects. Select the exact listed contract or supported ATM option route, native quote currency, whole contracts, order type, limit premium and IOC/GTC terms. A perpetual signal instrument and an option execution contract are different instruments.",
+        "Bought-option mode buys a Call for bullish signals or a Put for bearish signals. The supported perpetual route uses long/short exposure and its own collateral policy. Native contract units, tick, expiry and multiplier come from the selected broker master; INR display follows the verified conversion policy.",
+        "Manual tickets and strategy runners are separate intents. Manual orders do not inherit a runner’s trail automatically. Stop behavior is module-specific: the legacy Delta runner can stop entries while leaving exposure; use its explicit close/reconciliation path and verify residuals. The Renko Stop flow has different behavior.",
+        "Research grids compare RSI/MA, ADX, momentum and squeeze variants with explicit fee, spread, slippage, funding, contracts and capital assumptions. Chronological holdout is separate from training. Backtest profit is not evidence of option fills or permission to promote a configuration."
+      ]
+    },
+    {
+      "id": "straddles",
+      "title": "NIFTY / SENSEX long straddles",
+      "text": [
+        "A long straddle buys both supported ATM Call and Put legs. Lots per leg, entry window, combined-premium stop and target belong to that straddle workflow, not to a one-leg Renko option runner.",
+        "Paired legs are not an atomic exchange transaction. Inspect each leg’s accepted, filled and remaining quantities. Process Stop is not proof of broker square-off; use the module’s explicit managed close flow and reconcile both legs. Paper and Live scripts/configurations must be identified in the displayed runtime evidence."
+      ]
+    },
+    {
+      "id": "portfolio",
+      "title": "Holdings review, live feed and positions",
+      "text": [
+        "Holdings review selects a saved broker account, fetches that broker’s holdings and shows the available review categories. It is not a combined unlabelled portfolio. Missing permissions, session failures or unavailable holdings routes must be shown for that account.",
+        "Live feed & positions separates ticks, candles, order stream, positions, orders and fills. Fresh ticks do not prove the current candle has a verified open. Fresh receipt time does not prove a fresh exchange quote. An accepted order, a partial fill, a full fill and an unresolved submission are distinct.",
+        "Existing-position Renko adoption is a separate explicit live-management action. Eligible owned quantities and pending orders must be verified; adopting a filled position does not submit an initial buy. Pause monitoring can preserve exposure, unlike a stop-and-close action. Reconcile/resume does not invent missing historical fills or ticks."
+      ]
+    },
+    {
+      "id": "screener",
+      "title": "Screener, trade parser, Telegram and WhatsApp",
+      "text": [
+        "Save a screener label and supported Chartink URL, evaluate candidates, then inspect account-native instruments and analysis. Cash product, quantity and external risk belong to the reviewed order flow. A screener row is not a submitted trade.",
+        "Paste or load recommendation text, parse it, inspect exact contract, side, quantity, entry/trigger/limit, stop and targets, then explicitly Submit. Edits invalidate stale tickets. Network uncertainty requires reconciliation rather than duplicate submission. An open position/order can block a redundant symbol entry.",
+        "Telegram channel label is only a display name. Bot access and exact channel identity are separate. Poll interval controls discovery; Auto submission is an explicit separate policy. Startup backlog and duplicate/edit evidence do not authorize replayed orders. Stop polling does not cancel already accepted broker orders.",
+        "The Telegram bought-option route can attach selected Renko exits after the reviewed mapping/quantity choice. XAUUSD-to-XAUT is an explicit proxy, not the same instrument. WhatsApp polling requires the native helper and exact chat; unavailable source/unread evidence blocks automatic ingestion."
+      ]
+    },
+    {
+      "id": "charts",
+      "title": "Charts, timeframe, viewport and freshness",
+      "text": [
+        "Runner timeframe is the host interval for the next Start and is synchronized with the chart control. Timeframe changes on an active job require the explicit supported workflow; ordinary draft edits do not silently change its captured run. EMA Band has a separately labelled display-only chart interval.",
+        "Host candles use broker OHLC. Synthetic Renko bodies and historical entry/exit arrows are calculations. Actual trade markers use recorded order/fill evidence. Full screen changes layout; Reset view restores readable scale and recent bars. Deliberate historical scrolling should remain distinct from following latest.",
+        "History range, initialization anchor and warmup affect path-dependent replay. Missing or invalid OHLC can withhold indicators while valid candles remain displayed. Tick-live/candle-delayed means price observations exist but verified candle data is incomplete. Chart differs from active runner means compare instrument/timeframe/settings, not assume a login failure."
+      ]
+    },
+    {
+      "id": "operations",
+      "title": "Server resources, restart progress and recovery",
+      "text": [
+        "Server resources shows resource samples and retained history. Admin restart controls for the dashboard and broker services are grouped here. Restart requests have independent identities and reported outcomes; a browser/network timeout does not establish restart failure.",
+        "The progress indicator shows Request, Restart, Readiness and Complete, with elapsed time and frequent probes. It does not invent an estimated percentage. READY requires the applicable readiness evidence. FAILED and UNKNOWN are explicit; do not automatically resend an uncertain restart request.",
+        "Before a restart, inspect active runners, retained positions and pending orders. A service can return while a retained strategy remains stopped. Never infer that exit monitoring resumed from a green page badge; check the specific job and broker state. Access controls and account isolation remain in force."
+      ]
+    },
+    {
+      "id": "evidence",
+      "title": "P&L, journals, exports and troubleshooting",
+      "text": [
+        "Gross P&L, estimated costs, estimated net and broker-reported values are separate. Fresh executable valuation and known fills are required; missing fees, funding or prices can leave net unknown. Zero must not replace unavailable evidence.",
+        "Job detail journals retain actual entry criteria, settings snapshot, requested/filled/remaining quantity, entry/exit prices and times, exit reasons and recorded P&L. Older missing evidence remains missing. Configuration TXT records settings; journal exports record execution evidence; neither export sends an order.",
+        "Start blocked: read the exact account, instrument, data, runtime or exposure reason. Feed delayed: distinguish tick freshness, candle verification and order connectivity. Stopping or UNKNOWN: reconcile the selected job and broker orders before another action. Some jobs unavailable: other jobs can still be running; a partial inventory is not proof of termination.",
+        "Expired session: renew the same saved account through its supported connection workflow, then test it. A slow analysis or market-data request alone does not prove login failure. Inspect Server resources and the affected job rather than repeatedly starting or submitting."
+      ]
+    }
+  ]
+}

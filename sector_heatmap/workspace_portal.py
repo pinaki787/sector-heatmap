@@ -48,6 +48,13 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/users':
                     from .section_permissions import FEATURES
                     self.response(200,{'users':store.users(user),'sections':FEATURES});return
+                if path=='/api/workspaces/service-restart-status':
+                    from .service_restart import status
+                    self.response(200,status(store,user));return
+                if path=='/api/workspaces/restart-targets':
+                    if not user.get('admin'):raise PermissionError('Administrator access required.')
+                    rows=[dict(id=a['id'],label=a['label'],broker=a['broker'],running=runtime.running(a['id'])) for a in store.accounts(user)]
+                    self.response(200,dict(accounts=rows));return
                 if path=='/api/workspaces/accounts':
                     rows=store.accounts(user)
                     for a in rows:
@@ -132,8 +139,14 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/configure':
                     a=runtime.configure(user,payload.get('account_id'),payload.get('credentials',{}),payload.get('live_enabled',False))
                     self.response(200,{'id':a['id'],'configured':True,'live_enabled':bool(a['live_enabled'])});return
+                if path=='/api/workspaces/service-restart':
+                    from .service_restart import begin
+                    self.response(202,begin(store,runtime,user,payload.get('request_id')));return
                 if path in {'/api/workspaces/bounce','/api/workspaces/bounce-status'}:
                     from .workspace_bounce import begin, status
+                    if path.endswith('/bounce'):
+                        from .service_restart import status as dashboard_status, ACTIVE
+                        if dashboard_status(store,user)['status'] in ACTIVE:raise ValueError('Wait for the dashboard restart to finish first.')
                     result = begin(store,runtime,user,payload.get('account_id')) if path.endswith('/bounce') else status(store,user,payload.get('account_id'))
                     self.response(202 if path.endswith('/bounce') else 200,result);return
                 if path=='/api/workspaces/open':

@@ -4117,18 +4117,12 @@ def run_server():
                     specification=rule(symbol,policy,atr_length=(query.get('atr_length') or [None])[0])
                     now=time.time()
                     today=ReferenceDateTime.fromtimestamp(now,ZoneInfo('Asia/Kolkata')).date()
-                    cursor=today-ReferenceDelta(days=60)
-                    rows={}
-                    while cursor<=today:
-                        stop=min(today,cursor+ReferenceDelta(days=9))
-                        response=reference_history(ema_readonly_client(),dict(symbol=symbol,resolution='5',date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
-                        if response.get('s') not in ('ok','no_data'):
-                            raise ValueError('Reference history unavailable: '+str(response.get('message','broker rejected history')))
-                        for row in response.get('candles',[]):
-                            rows[int(row[0])]=dict(timestamp=int(row[0]),open=row[1],high=row[2],low=row[3],close=row[4])
-                        cursor=stop+ReferenceDelta(days=1)
-                    value=calculate(list(rows.values()),specification,300,now)
-                    self.send_json(200,dict(value,symbol=symbol,source='Selected FYERS account completed fixed-contract OHLC'))
+                    from strategies.renko_supertrend.manual_brick import calculate_sessions
+                    response=reference_history(ema_readonly_client(),dict(symbol=symbol,resolution='D',date_format=1,range_from=str(today-ReferenceDelta(days=365)),range_to=str(today),cont_flag=0,oi_flag=1))
+                    if response.get('s')!='ok' or not isinstance(response.get('candles'),list):raise ValueError('Native daily reference history unavailable.')
+                    value=calculate_sessions(response['candles'],specification,now)
+                    value['session_policy']=policy
+                    self.send_json(200,dict(value,symbol=symbol,source='Selected FYERS account native completed-session OHLC'))
                 except Exception as error:self.send_json(409,dict(error=str(error)))
                 return
             if path == "/api/renko-supertrend/chart":
