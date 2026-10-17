@@ -801,6 +801,55 @@ class Runner(BaseRunner):
         def minutes(v):h,m=map(int,v.split(':'));return h*60+m
         return minutes(opening),minutes(ending)
 
+    @staticmethod
+    def valuation_identity(state):
+        """Stable economic/ownership fields, excluding mutable monitoring observations."""
+        position=state.get('position')
+        if not position:return None
+        config=state.get('config') or {}
+        return (state.get('run_id'),state.get('account_identity'),config.get('broker'),
+                config.get('underlying'),config.get('mode'),config.get('account_id'),
+                tuple(position.get(key) for key in ('run_id','lifecycle_id','symbol','product_id',
+                    'entry_order_id','opened_at','entry_price','entry_side','quantity',
+                    'quantity_multiplier','lot_size','broker','product','quote_currency')))
+
+    def snapshot_valuation(self, result):
+        """Value the copied position without acquiring the execution lock.
+
+        The base result is a coherent copy (or an atomically persisted snapshot).
+        Identity checks bracket the independent quote read so a closed, resized or
+        replaced live position cannot lend a mark to the copied position.
+        """
+        position=result.get('position')
+        if not position:return None
+        identity=self.valuation_identity(result)
+        pnl=result['pnl']
+        try:
+            if identity!=self.valuation_identity(self.state):
+                raise ValueError('Position changed; waiting for a matching runner snapshot.')
+            quote=self.valuation_quote(position['symbol'])  # Adapter retains bid/ask freshness checks.
+            observed=self.clock()
+            for key in ('exchange_at','received_at'):
+                if key in quote and (not isinstance(quote[key],(int,float)) or not math.isfinite(quote[key]) or not 0<=observed-quote[key]<=15):
+                    raise ValueError('Held-contract quote is stale; fresh executable bid/ask required.')
+            side=position.get('entry_side',1)
+            mark=quote['ask' if side==-1 else 'bid']
+            if not isinstance(mark,(int,float)) or not math.isfinite(mark) or mark<=0:
+                raise ValueError('Held-contract executable price is invalid.')
+            value=(mark-position['entry_price'])*side*position['quantity']*position.get('quantity_multiplier',1)
+            if not math.isfinite(value):raise ValueError('Held-position valuation is invalid.')
+            if identity!=self.valuation_identity(self.state):
+                raise ValueError('Position changed during valuation; waiting for a matching runner snapshot.')
+            basis='Fresh executable ask for short / bid for long; before fees'
+            pnl.update(available=True,unrealized=value,updated_at=observed,basis=basis)
+            pnl.pop('quote_error',None)
+            return dict(bid=quote.get('bid'),price=mark,exchange_at=quote.get('exchange_at'),
+                        received_at=quote.get('received_at'),observed_at=observed,basis=basis)
+        except Exception as error:
+            pnl.update(available=False,unrealized=None,basis='Held-position valuation unavailable; see quote_error',quote_error=str(error) if isinstance(error,ValueError) else 'Held-contract valuation unavailable.')
+            pnl.pop('updated_at',None)
+            return None
+
     def snapshot(self):
         result = super().snapshot()
         result['auto_recovery']=self.recovery.snapshot() if hasattr(self,'recovery') else {'status':'INITIALIZING'}
@@ -833,37 +882,27 @@ class Runner(BaseRunner):
         if result.get('status')=='STOPPED' and not result.get('running') and not result.get('position') and not result.get('pending'):
             result['message']='Runner stopped. Start Runner uses the selected visible mode and settings.'
         result['shutdown_pending']=bool(self.thread and self.thread.is_alive() and not self.state.get('running'))
-        valuation=None
-        if result.get('position') and result['pnl'].get('available'):
-            try:
-                quote=self.valuation_quote(result['position']['symbol'])
-                valuation=dict(bid=quote.get('bid'),exchange_at=quote.get('exchange_at'),received_at=quote.get('received_at'),observed_at=self.clock(),basis='Fresh executable option bid; before fees')
-                pos=result['position']
-                mark=quote['ask' if pos.get('entry_side',1)==-1 else 'bid']
-                valuation.update(price=mark,basis='Fresh executable ask for short / bid for long; before fees')
-                result['pnl']['unrealized']=(mark-pos['entry_price'])*pos.get('entry_side',1)*pos['quantity']*pos.get('quantity_multiplier',1)
-            except Exception:
-                result['pnl'].update(available=False,unrealized=None)
-        result['trade_history']=trade_history(self.state.get('order_history',[]),self.state.get('position'),result['pnl'].get('unrealized') if result['pnl'].get('available') else None,valuation)
+        valuation=self.snapshot_valuation(result)
+        result['trade_history']=trade_history(result.get('order_history',[]),result.get('position'),result['pnl'].get('unrealized') if result['pnl'].get('available') else None,valuation)
         for trade in result['trade_history']:
-            trade['sideways_lock_release']=next((deepcopy(e) for e in reversed(self.state.get('sideways_events',[])) if e.get('trade_id')==trade['trade_id'] and e.get('released_at')),None)
-        if (self.state.get('config') or {}).get('mode') == 'PAPER':
+            trade['sideways_lock_release']=next((deepcopy(e) for e in reversed(result.get('sideways_events',[])) if e.get('trade_id')==trade['trade_id'] and e.get('released_at')),None)
+        if (result.get('config') or {}).get('mode') == 'PAPER':
             try:result['paper_capital']=self.paper_funds()
             except (ValueError,AttributeError,KeyError) as error:result['paper_capital']=dict(available=False,error=str(error))
-        current=[t for t in result['trade_history'] if t.get('run_id')==self.state.get('run_id') and t.get('entry_filled')]
+        current=[t for t in result['trade_history'] if t.get('run_id')==result.get('run_id') and t.get('entry_filled')]
         net_realized=sum(t['costs']['realized_net'] for t in current) if all(t['costs'].get('realized_net') is not None for t in current) else None
         opened=[t for t in current if t.get('remaining_quantity')]
         net_open=sum(t['costs']['unrealized_net'] for t in opened) if all(t['costs'].get('unrealized_net') is not None for t in opened) else None
-        result['cost_pnl']=dict(realized_net=net_realized,unrealized_net=net_open,total_net=net_realized+net_open if net_realized is not None and net_open is not None else None,basis='After estimated charges and configured additional slippage; open value assumes liquidation at fresh option bid.',brokerage_per_executed_order=20,additional_slippage_points=(self.state.get('config') or {}).get('additional_slippage_points',0),model=costs.MODEL)
-        if (self.state.get('config') or {}).get('execution_route') == 'CASH_EQUITY':
+        result['cost_pnl']=dict(realized_net=net_realized,unrealized_net=net_open,total_net=net_realized+net_open if net_realized is not None and net_open is not None else None,basis='After estimated charges and configured additional slippage; open value assumes liquidation at fresh option bid.',brokerage_per_executed_order=20,additional_slippage_points=(result.get('config') or {}).get('additional_slippage_points',0),model=costs.MODEL)
+        if (result.get('config') or {}).get('execution_route') == 'CASH_EQUITY':
             result['cost_pnl'].update(model={'id':'CASH_EQUITY_FEES_UNVERIFIED'},basis='Cash gross P&L only; verified cash charge model unavailable. After-cost values unavailable.',realized_net=None,unrealized_net=None,total_net=None)
         result['manual_trend_revision']=manual_trend.REVISION
-        result['sideways_status']=dict(revision='quick-close-cost-fallback-v2',enabled=(self.state.get('config') or {}).get('sideways_enabled',False),max_candles=(self.state.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK',lock=deepcopy(self.state.get('sideways_lock')),events=deepcopy(self.state.get('sideways_events',[])))
-        signals=deepcopy([event for event in self.state.get('execution_signals',[]) if event.get('run_id')==self.state.get('run_id')])
+        result['sideways_status']=dict(revision='quick-close-cost-fallback-v2',enabled=(result.get('config') or {}).get('sideways_enabled',False),max_candles=(result.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK',lock=deepcopy(result.get('sideways_lock')),events=deepcopy(result.get('sideways_events',[])))
+        signals=deepcopy([event for event in result.get('execution_signals',[]) if event.get('run_id')==result.get('run_id')])
         for event in signals:
-            if event.get('status')=='WAITING FOR OPTION QUOTE' and self.clock()-event['event_at']>TIMEFRAMES[self.state['config']['timeframe']]:
+            if event.get('status')=='WAITING FOR OPTION QUOTE' and self.clock()-event['event_at']>TIMEFRAMES[result['config']['timeframe']]:
                 event.update(status='EXPIRED',reason='Option quote was unavailable before signal freshness expired; no historical replay.')
-            orders=entry_orders(event,self.state.get('order_history',[]),TIMEFRAMES[self.state['config']['timeframe']])
+            orders=entry_orders(event,result.get('order_history',[]),TIMEFRAMES[result['config']['timeframe']])
             if orders:
                 event['first_assessment']={k:event.get(k) for k in ('status','reason','eligible','event_at','observed_at')}
                 event['status']='FILLED' if any(row.get('filled',0)>0 for row in orders) else 'ORDER '+str(orders[-1].get('status','PENDING'))
@@ -873,7 +912,7 @@ class Runner(BaseRunner):
             elif event.get('eligible') and event==signals[-1] and result.get('status')=='BLOCKED':
                 event['status']='BLOCKED';event['reason']=result.get('message')
         result['execution_signals']=signals
-        result['session_policy']={k:(self.state.get('config') or {}).get(k) for k in ('session_segment','session_deadline','requested_deadline','session_source')}
+        result['session_policy']={k:(result.get('config') or {}).get(k) for k in ('session_segment','session_deadline','requested_deadline','session_source')}
         return result
 
     def signal_key(self, sig):
