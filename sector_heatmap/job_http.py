@@ -1,0 +1,358 @@
+"""Durable jobs around existing authenticated analysis and runner workflows.
+
+No order prepare/submit/override/cancel route is eligible for asynchronous replay.
+Interrupted requests are never restarted automatically.
+"""
+from copy import copy,deepcopy
+from io import BytesIO
+import json
+import re
+import time
+from urllib.parse import urlsplit,parse_qs,urlencode
+from .persistent_jobs import JobStore,JobCancelled,JobInterrupted,JobStopFailed
+from .section_permissions import allowed
+
+
+def operation(path):
+    route=urlsplit(path).path
+    if route=='/api/investment/analyze':return ('ANALYSIS','investment')
+    if not route.startswith('/api/'):return None
+    if any(term in route for term in ('trade-ticket','submit','override','squareoff','login','auth/','diagnostic')):return None
+    if route.endswith('/analysis-handoff/preview'):return ('ANALYSIS','handoff')
+    if route.endswith(('/analyze','/analyze-options','/analyze-market','/analysis','/ai-review','/ai-analysis','/backtest')):
+        feature=('screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route
+                 else 'renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route
+                 else 'ema-band' if 'band' in route else 'ema-cross' if 'crossover' in route or 'ema-dhan' in route
+                 else 'kama' if 'kama' in route else 'delta-india' if 'delta-india' in route else 'straddles' if 'straddle' in route
+                 else 'telegram-parser' if 'telegram' in route else 'trade-parser')
+        return ('ANALYSIS',feature)
+    if route.endswith(('/start','/runner-start','/form-runner-start','/start-selected','/start-paper')) and re.match(r'^/api/(renko|ema-|band-|kama|nifty-straddle|sensex-straddle|straddle|delta-india)',route):
+        feature='renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route else 'ema-band' if 'band' in route else 'ema-cross' if 'crossover' in route or 'ema-dhan' in route else 'kama' if 'kama' in route else 'straddles' if 'straddle' in route else 'delta-india'
+        return ('RUNNER',feature)
+    return None
+
+
+def runner_routes(path):
+    parsed=urlsplit(path);route=parsed.path;query=('?'+parsed.query) if parsed.query else ''
+    if route.endswith('/form-runner-start'):return route[:-len('form-runner-start')]+'form-runner'+query,route[:-len('form-runner-start')]+'form-runner-stop'+query
+    if route.endswith('/runner/start'):return route[:-len('/start')]+query,route[:-len('/start')]+'/stop'+query
+    if route.endswith('/runner-start'):return route[:-len('/runner-start')]+'/status'+query,route[:-len('/runner-start')]+'/runner-stop'+query
+    if route.endswith('/start-paper'):return route[:-len('/start-paper')]+query,route[:-len('/start-paper')]+'/stop'+query
+    if route.endswith('/start'):
+        base=route[:-len('/start')]
+        return base+('' if 'straddle' in base else '/runner')+query,base+'/stop'+query
+    return None
+
+
+def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_runs=None,market_factory=None,runner_factory=None,trailing_factory=None):
+    store=JobStore(root/'.private/persistent-jobs.sqlite3')
+    from .holdings_analysis import HoldingsAnalysis
+    native_portfolios=HoldingsAnalysis()
+    holding_action_services={}
+    holding_trail_services={}
+    original_get,original_post=handler_class.do_GET,handler_class.do_POST
+
+    def identity(handler,mutation=False):
+        if workspace_guard:
+            if not workspace_guard.check(handler,mutation=mutation):return None
+            user,account=handler.workspace_identity
+        elif local_auth:
+            if not local_auth.check(handler,mutation=mutation):return None
+            user=local_auth.authorize(handler.headers,mutation)
+            account=None
+        else:
+            host=handler.headers.get('Host','').split(':')[0]
+            if host not in ('127.0.0.1','localhost'):raise PermissionError('Authenticated workspace required for jobs.')
+            user={'id':'local','admin':True};account=None
+        return user,account
+
+    def owner_for(handler,user,account,path=None,payload=None):
+        aid=account['id'] if account else 'dashboard'
+        candidate=(payload or {}).get('account_id') or (parse_qs(urlsplit(path or handler.path).query).get('account_id') or [None])[0]
+        match=re.search(r'/api/(?:renko-motilal|renko-dhan|ema-dhan|band-dhan|kama-dhan|renko-engine)/([a-f0-9]{32})/',path or handler.path)
+        if match:candidate=match.group(1)
+        if candidate:
+            if account and candidate!=aid:raise PermissionError('Job differs from this broker account.')
+            if local_auth:local_auth.store.account(user,candidate)
+            aid=candidate
+        return str(user.get('id',user.get('username')))+':'+aid
+
+    def replay(handler,path,payload=None):
+        if urlsplit(path).path=='/api/investment/analyze':
+            from .investment import analyze
+            return analyze(root,payload or {})
+        clone=object.__new__(handler_class);clone.__dict__=copy(handler.__dict__)
+        clone.path=path;clone.command='POST' if payload is not None else 'GET';clone._persistent_job_internal=True
+        if path.split('?',1)[0]=='/api/delta-india/holdings-analysis/analyze':
+            if not trailing_factory:raise ValueError('Native Delta adapter unavailable.')
+            port=trailing_factory(clone,payload)
+            if port.account['broker']!='DELTA_INDIA':raise PermissionError('Delta analysis account mismatch.')
+            result=native_portfolios.batch(port.adapter(),payload.get('capture_id'),int(payload.get('offset',0)),int(payload.get('limit',1)),bool(payload.get('inventory_only',False)))
+            return dict(result,account_id=port.account['id'])
+        if path.split('?',1)[0] in ('/api/dhan/holdings-analysis/analyze','/api/motilal/holdings-analysis/analyze'):
+            if not market_factory:raise ValueError('Selected broker holdings adapter unavailable.')
+            from .native_holdings import DhanHoldings,MotilalHoldings
+            broker,name,aid=market_factory(clone,payload)
+            if payload.get('broker')!=name or payload.get('account_id')!=aid:raise PermissionError('Holdings request differs from the selected broker account.')
+            if name not in ('DHAN','MOTILAL_OSWAL'):raise PermissionError('Native holdings broker mismatch.')
+            adapter=(DhanHoldings if name=='DHAN' else MotilalHoldings)(broker.service)
+            result=native_portfolios.batch(adapter,payload.get('capture_id'),int(payload.get('offset',0)),int(payload.get('limit',1)),bool(payload.get('inventory_only',False)))
+            return dict(result,account_id=aid)
+        holdings=path.split('?',1)[0]=='/api/holdings-analysis/analyze'
+        if holdings:
+            query={k:v for k,v in (payload or {}).items() if k in ('broker','capture_id','offset','limit','inventory_only','account_id') and v is not None}
+            clone.path='/api/holdings-analysis?'+urlencode(query);clone.command='GET'
+        clone.headers=deepcopy(handler.headers)
+        content=json.dumps(payload).encode() if payload is not None else b''
+        clone.headers.replace_header('Content-Length',str(len(content))) if clone.headers.get('Content-Length') else clone.headers.__setitem__('Content-Length',str(len(content)))
+        clone.rfile=BytesIO(content);clone.wfile=BytesIO();captured={}
+        if path.split('?',1)[0].endswith('/analysis-handoff/analyze-market'):
+            if not market_factory:raise ValueError('This broker market analysis adapter is unavailable.')
+            from .market_handoff import analyze
+            from .handoff_ai import HandoffAI
+            broker,name,aid=market_factory(clone,payload)
+            return analyze(payload,broker,HandoffAI.from_payload(root,payload),name,aid)
+        def send_json(status,value):captured.update(status=status,value=value)
+        clone.send_json=send_json
+        (original_post if payload is not None and not holdings else original_get)(clone)
+        if 'value' not in captured:raise ValueError('Workflow did not return a JSON job result.')
+        if captured['status']>=400:raise ValueError(str(captured['value'].get('error','Workflow failed.')))
+        result=captured['value']
+        if holdings and isinstance(result,dict):result=dict(result,account_id=(payload or {}).get('account_id'))
+        if path.split('?',1)[0].endswith(('/analysis-handoff/analyze','/analysis-handoff/preview')) and payload.get('ai_provider'):
+            from .handoff_ai import review_stock_handoff
+            def exclude_current_exposure():
+                if not market_factory:return
+                from .exposure_guard import broker_exposures,matches_exposure
+                broker,_,_=market_factory(clone,payload)
+                try:exposures=broker_exposures(broker)
+                finally:broker.stop()
+                removed=[c for c in result.get('candidates',[]) if matches_exposure(c.get('symbol'),exposures)]
+                result['candidates']=[c for c in result.get('candidates',[]) if c not in removed]
+                keys={c['key'] for c in result['candidates']};symbols={c['symbol'] for c in result['candidates']}
+                result['cards']=[c for c in result.get('cards',[]) if c.get('candidate_key') in keys]
+                result.setdefault('ai_review',{})['recommendations']=[r for r in result.get('ai_review',{}).get('recommendations',[]) if r['symbol'] in symbols]
+                if removed:
+                    result['ai_review']['summary']='Exposure changed during AI review; recommendations for those underlyings were removed.'
+                    result.setdefault('exclusions',[]).extend(dict(candidate_key=c['key'],name=c.get('name'),kind='OPEN_POSITION',reason='Exposure appeared during AI review; excluded.') for c in removed)
+                if analysis_runs and result.get('analysis_id') in analysis_runs:
+                    analysis_runs[result['analysis_id']]['cards']={c['card_id']:c for c in result['cards']}
+            exclude_current_exposure()
+            result=review_stock_handoff(result,payload,root)
+            exclude_current_exposure()
+        if path.split('?',1)[0].endswith('/analysis-handoff/preview') and payload.get('ai_provider'):
+            result['ai_provider']=payload['ai_provider']
+            result.setdefault('delivery',{})['statement']='The full packet and account details remain local; only public market evidence is used for the selected AI review.'
+        return result
+
+    def restore(owner,payload):
+        if analysis_runs is None or not payload.get('analysis_id') or payload['analysis_id'] in analysis_runs:return
+        for job in store.list(owner,200):
+            value=job.get('output')
+            if isinstance(value,dict) and value.get('analysis_id')==payload['analysis_id']:
+                aid=owner.split(':',1)[1]
+                analysis_runs[payload['analysis_id']]=dict(created_at=value.get('created_at',time.time()),
+                    cards={card['card_id']:card for card in value.get('cards',[])},policy=value.get('risk_policy',{}),provider=None,
+                    account_id=aid if aid!='dashboard' and job['request']['path'].startswith(('/api/dhan/','/api/motilal/')) else None)
+                return
+
+    def post(handler):
+        if getattr(handler,'_persistent_job_internal',False):return original_post(handler)
+        path=urlsplit(handler.path).path
+        # The portal proxies first; its owning account worker handles this job.
+        if path.startswith('/broker-workspace/'):return original_post(handler)
+        selected=operation(handler.path)
+        holding_action=bool(re.fullmatch(r'/api/(?:dhan/|motilal/|delta-india/)?holdings-analysis/(?:trail-preview|trail-enable|trail-status|trail-stop|trail-interval)',path)) or path in ('/api/dhan/holdings-analysis/action-preview','/api/dhan/holdings-analysis/action-submit')
+        if not selected and not holding_action and not path.startswith('/api/jobs/') and not path.endswith('/analysis-handoff/size'):return original_post(handler)
+        try:
+            authenticated=identity(handler,True)
+            if not authenticated:return
+            user,account=authenticated
+            payload=handler.read_json();owner=owner_for(handler,user,account,payload=payload)
+            if holding_action:
+                if not allowed(user,path):raise PermissionError('Holdings review is not assigned.')
+                if workspace_guard:workspace_guard.validate_action(account,path,payload)
+                if path.startswith('/api/dhan/'):
+                    if not market_factory:raise ValueError('Native broker action service unavailable.')
+                    broker,name,aid=market_factory(handler,payload)
+                    if name!='DHAN' or payload.get('broker')!='DHAN' or payload.get('account_id')!=aid:raise PermissionError('Action differs from selected Dhan account.')
+                    from .holdings_actions import HoldingActions
+                    service=holding_action_services.setdefault(aid,HoldingActions(broker.service))
+                    from .holdings_trailing import HoldingTrails
+                    trails=holding_trail_services.setdefault(aid,HoldingTrails(broker.service,service,store))
+                else:
+                    if not trailing_factory:raise ValueError('Native trailing adapter unavailable.')
+                    port=trailing_factory(handler,payload);aid=port.account['id'];name=port.account['broker']
+                    expected='/api/motilal/' if name=='MOTILAL_OSWAL' else '/api/delta-india/' if name=='DELTA_INDIA' else '/api/'
+                    if not path.startswith(expected) or name not in ('FYERS','MOTILAL_OSWAL','DELTA_INDIA'):raise PermissionError('Broker route mismatch.')
+                    from .holdings_native_trailing import NativeTrails
+                    if aid not in holding_trail_services:holding_trail_services[aid]=NativeTrails(port,store)
+                    trails=holding_trail_services[aid];service=trails.actions
+                if path.endswith('/trail-status'):return handler.send_json(200,dict(monitors=trails.list(owner),account_id=aid))
+                if path.endswith('/trail-stop'):return handler.send_json(200,trails.stop(owner,str(payload.get('monitor_id') or '')))
+                if path.endswith('/trail-interval'):return handler.send_json(200,trails.change_interval(owner,str(payload.get('monitor_id') or ''),payload.get('interval_minutes')))
+                if path.endswith('/trail-enable'):
+                    result=trails.enable(owner,str(payload.get('preview_id') or ''),str(payload.get('confirmation') or ''),payload.get('automatic_order_consent'))
+                    return handler.send_json(202,result)
+                if path.endswith('/action-submit'):
+                    if payload.get('live_confirmation') is not True:raise ValueError('Explicit live order consent is required.')
+                    result=service.submit(str(payload.get('preview_id') or ''),str(payload.get('confirmation') or ''))
+                else:
+                    job=store.get(owner,str(payload.get('job_id') or ''))
+                    report=job.get('output') or {}
+                    if job.get('feature')!='holdings' or job.get('status')!='COMPLETED' or report.get('account_id')!=aid:
+                        raise ValueError('A completed portfolio review for this exact account is required.')
+                    rows=[r for r in report.get('rows',[]) if str(r.get('id'))==str(payload.get('row_id'))]
+                    if len(rows)!=1:raise ValueError('Reviewed holding is unavailable. Analyse again.')
+                    result=trails.preview(owner,report,rows[0],payload) if path.endswith('/trail-preview') else service.prepare(report,rows[0],payload)
+                return handler.send_json(200,result)
+            if path.endswith('/analysis-handoff/size'):
+                restore(owner,payload)
+                return handler.send_json(200,replay(handler,handler.path,payload))
+            if path=='/api/jobs/cancel':
+                job=store.get(owner,str(payload.get('job_id','')))
+                if not allowed(user,job['request']['path']):raise PermissionError('Job section is not assigned.')
+                return handler.send_json(200,store.cancel(owner,job['job_id']))
+            if not selected:return handler.send_json(404,{'error':'Unknown job operation.'})
+            if workspace_guard:workspace_guard.validate_action(account,path,payload)
+            kind,feature=selected
+            if feature=='investment':
+                if not allowed(user,path):raise PermissionError('Investment section is not assigned.')
+                auth_store=workspace_guard.store if workspace_guard else local_auth.store if local_auth else None
+                if auth_store and not auth_store.sidebar_visibility().get('investment',True):raise PermissionError('Investment section is hidden in dashboard visibility settings.')
+                from .investment import options
+                options(payload)
+            if feature=='handoff' and payload.get('ai_provider'):
+                from .handoff_ai import HandoffAI
+                HandoffAI.from_payload(root,payload)
+            key=handler.headers.get('X-Job-Request-ID') or payload.pop('_job_request_id',None)
+            if not key:
+                import secrets
+                key=secrets.token_hex(16)
+            # The legacy ephemeral queue must not sit inside the durable queue.
+            payload.pop('async_analysis',None);payload.pop('analysis_job',None)
+            request=dict(path=handler.path,payload=payload,account_id=owner.split(':',1)[1])
+            def work(context):
+                def save_runner(value,message):
+                    from .runner_job_audit import attach
+                    prior=store.get(owner,context.job_id).get('output')
+                    saved=attach(value,prior,store.clock())
+                    store._update(context.job_id,output=saved,message=message)
+                    return saved
+                context.checkpoint('Validating the submitted workflow.')
+                result=replay(handler,request['path'],payload)
+                if request['path'].split('?',1)[0].endswith('/chartink/analyze') and isinstance(result.get('results'),list):
+                    combined=list(result['results']);offset=int(payload.get('offset',0))+int(result.get('analyzed',0))
+                    while result.get('has_more'):
+                        context.checkpoint('Screener batch saved; collecting remaining submitted symbols.',{**result,'results':combined,'analyzed':len(combined)})
+                        next_result=replay(handler,request['path'],{**payload,'offset':offset})
+                        count=int(next_result.get('analyzed',0))
+                        if count<=0:raise ValueError('Screener pagination made no progress; partial output is saved.')
+                        combined.extend(next_result.get('results',[]));offset+=count;result=next_result
+                    result={**result,'results':combined,'analyzed':len(combined),'has_more':False}
+                if request['path'].split('?',1)[0].endswith('/holdings-analysis/analyze'):
+                    combined=list(result.get('rows',[]));seen=set()
+                    while result.get('next_offset') is not None:
+                        offset=result['next_offset']
+                        if offset in seen:raise ValueError('Holdings analysis made no progress; partial output retained.')
+                        seen.add(offset)
+                        context.checkpoint('Holdings batch saved; collecting remaining submitted holdings.',{**result,'rows':combined})
+                        result=replay(handler,request['path'],{**payload,'capture_id':result['capture_id'],'offset':offset,'inventory_only':0})
+                        combined.extend(result.get('rows',[]))
+                    result={**result,'rows':combined,'next_offset':None}
+                    from .fundamental_feedback import holdings as holdings_ai_feedback
+                    result=holdings_ai_feedback(result,payload,root)
+                if kind=='RUNNER':result=save_runner(result,'Runner activation output saved.')
+                else:context.checkpoint('Workflow output saved.',result)
+                handles=runner_factory(handler,request['path'],payload,result) if kind=='RUNNER' and runner_factory else None
+                if handles is not None:
+                    def run_identity(value):return value.get('run_id') or value.get('run_started_at') or value.get('started_at')
+                    # Bind to activation output, never whichever run happens to
+                    # exist when the background monitor first obtains a snapshot.
+                    activation_identity=run_identity(result.get('runner',result))
+                    owned=[dict(snapshot=handle[0],stop=handle[1],identity=handle[2] if len(handle)>2 else activation_identity,stopped=False) for handle in handles]
+                    while owned:
+                        if store.shutdown.is_set():raise JobInterrupted()
+                        live=[];snapshots=[];stop_failed=False
+                        for handle in owned:
+                            value=handle['snapshot']()
+                            if handle['identity'] and run_identity(value)!=handle['identity']:continue
+                            snapshots.append(value)
+                            if not (value.get('running') or value.get('position') or value.get('pending')):continue
+                            if context.cancelled() and not handle['stopped']:
+                                try:handle['stop']()
+                                except Exception:stop_failed=True
+                                handle['stopped']=True
+                            live.append(handle)
+                        result={**result,'runner_outputs':snapshots} if len(handles)!=1 else (snapshots[0] if snapshots else result)
+                        result=save_runner(result,'Runner output and journal saved.')
+                        if stop_failed:raise JobStopFailed()
+                        owned=live
+                        if owned:time.sleep(1)
+                    return result
+                routes=runner_routes(request['path']) if kind=='RUNNER' else None
+                if not routes:return result
+                current=result.get('runner',result)
+                expected=current.get('run_id') or current.get('started_at')
+                stop_sent=False
+                while current.get('running') or current.get('position') or current.get('pending'):
+                    if store.shutdown.is_set():raise JobInterrupted()
+                    if context.cancelled() and not stop_sent:
+                        # Stop applies only to the submitted run, never a newer run.
+                        fresh=replay(handler,routes[0]);fresh=fresh.get('runner',fresh)
+                        if expected and (fresh.get('run_id') or fresh.get('started_at'))!=expected:raise JobCancelled()
+                        save_runner(fresh,'Runner Stop request retained its current audit.')
+                        try:replay(handler,routes[1],{'run_id':expected})
+                        except Exception:raise JobStopFailed() from None
+                        stop_sent=True
+                    time.sleep(1)
+                    result=replay(handler,routes[0]);current=result.get('runner',result)
+                    if expected and (current.get('run_id') or current.get('started_at'))!=expected:
+                        return store.get(owner,context.job_id).get('output') or {}
+                    result=save_runner(result,'Runner stopping; reconciliation remains active.' if stop_sent else 'Runner active; output and journal saved.')
+                return result
+            names=payload.get('symbols') or payload.get('instruments') or []
+            summary=', '.join(str(value) for value in names[:3]) if isinstance(names,list) else ''
+            if isinstance(names,list) and len(names)>3:summary+=' +'+str(len(names)-3)+' more'
+            subject=payload.get('underlying') or payload.get('symbol') or summary or feature
+            action='option analysis' if path.endswith('/analyze-options') else 'portfolio analysis' if feature=='holdings' else kind.lower()
+            label=str(subject)+' · '+action
+            job=store.submit(owner,kind,feature,label,request,work,key)
+            return handler.send_json(202,dict(status='QUEUED',job_id=job['job_id'],job=job,jobs_url='/api/jobs',account_id=owner.split(':',1)[1]))
+        except PermissionError as error:return handler.send_json(403,{'error':str(error)})
+        except ValueError as error:return handler.send_json(409,{'error':str(error)})
+        except Exception as error:
+            if holding_action and getattr(error,'auth_required',False):return handler.send_json(403,{'error':'Reconnect the selected broker account before reviewing new protection. Existing monitor status and Stop remain available.'})
+            if holding_action:return handler.send_json(502,{'error':'Broker verification or submission response is unavailable. Check the selected broker order book before another action; no automatic retry.'})
+            raise
+
+    def get(handler):
+        if getattr(handler,'_persistent_job_internal',False):return original_get(handler)
+        parsed=urlsplit(handler.path)
+        if parsed.path.startswith('/broker-workspace/'):return original_get(handler)
+        is_catalog=parsed.path.endswith('/analysis-handoff/market-catalog')
+        if parsed.path!='/api/jobs' and not is_catalog:return original_get(handler)
+        try:
+            authenticated=identity(handler)
+            if not authenticated:return
+            user,account=authenticated;owner=owner_for(handler,user,account)
+            if is_catalog:
+                if not market_factory:raise ValueError('Broker market catalog unavailable.')
+                from .market_handoff import catalog
+                broker,name,aid=market_factory(handler,{})
+                try:return handler.send_json(200,dict(catalog(broker,name),account_id=aid))
+                finally:broker.stop()
+            job_id=(parse_qs(parsed.query).get('job_id') or [None])[0]
+            if job_id:
+                job=store.get(owner,job_id)
+                if not allowed(user,job['request']['path']):raise PermissionError('Job section is not assigned.')
+                return handler.send_json(200,job)
+            query=parse_qs(parsed.query)
+            jobs,next_before=store.page(owner,(query.get('before') or [None])[0])
+            jobs=[job for job in jobs if allowed(user,job['request']['path'])]
+            return handler.send_json(200,dict(jobs=jobs,next_before=next_before,account_id=owner.split(':',1)[1]))
+        except PermissionError as error:return handler.send_json(403,{'error':str(error)})
+        except ValueError as error:return handler.send_json(400,{'error':str(error)})
+
+    handler_class.do_GET=get;handler_class.do_POST=post
+    return store

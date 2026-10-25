@@ -1,0 +1,24 @@
+[Unit]
+Description=Sector Pulse private trade notifications
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trading
+Group=trading
+WorkingDirectory=/home/trading/sector-heatmap
+ExecStart=/home/trading/sector-heatmap/.venv/bin/python -B -m sector_heatmap.trade_notifications run
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trading/sector-heatmap/.private/notifications
+
+[Install]
+WantedBy=multi-user.target
+

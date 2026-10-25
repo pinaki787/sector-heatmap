@@ -20,7 +20,7 @@ class DestinationTests(unittest.TestCase):
             self.assertEqual(reason(destinations.chart(cfg),sig,'BULLISH') is not None,indicator)
     def test_entry_replay_is_independent(self):
         bars=[dict(timestamp=1800000000+i*300,open=p,high=p+1,low=p-1,close=p,volume=1) for i,p in enumerate([100,102,104,106,108,110])]
-        base=dict(supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,session_deadline=None)
+        base=dict(supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,session_deadline=None)
         for strategy,indicator in ((True,False),(False,True),(True,True),(False,False)):
             cfg={**base,'ema_fast_enabled':strategy,'ema_fast_enabled_indicator':indicator}
             self.assertEqual(any(r['entry_buy_signal'] for r in series(bars,cfg)),strategy)
@@ -37,7 +37,7 @@ class DestinationTests(unittest.TestCase):
 
     def test_historical_exit_markers_follow_chart_destination(self):
         bars=[dict(timestamp=1800000000+i*300,open=p,high=p+1,low=p-1,close=p,volume=1) for i,p in enumerate([100,120,140,80,60])]
-        base=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,ema_exit_enabled=False,session_deadline=None)
+        base=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,ema_exit_enabled=False,session_deadline=None)
         for strategy,indicator in ((True,False),(False,True),(True,True),(False,False)):
             cfg={**base,'ema_slow_exit_enabled':strategy,'ema_slow_exit_enabled_indicator':indicator}
             def exits(config):return any((r.get('lifecycle_event') or '').endswith('EXIT') for r in series(bars,config))
@@ -50,7 +50,7 @@ class DestinationTests(unittest.TestCase):
         bars[16].update(high=112,low=109);bars[20].update(high=111,low=108)
         timeline=[];zone_target.zones(bars,timeline)
         self.assertIsNotNone(timeline[18]['supply'])
-        cfg=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,ema_exit_enabled=False,session_deadline=None,timeframe='5 minutes',_chart_zone_rows=bars)
+        cfg=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,ema_exit_enabled=False,session_deadline=None,timeframe='5 minutes',_chart_zone_rows=bars)
         without=series(bars,{**cfg,'chart_zone_target_enabled':False})
         with_zone=series(bars,{**cfg,'chart_zone_target_enabled':True})
         self.assertFalse(any((r.get('lifecycle_reason') or '').startswith('SD_5M') for r in without))
@@ -62,7 +62,7 @@ class DestinationTests(unittest.TestCase):
     def test_optional_chart_entry_filters_and_future_htf_are_isolated(self):
         start=1800000000+31*300
         bars=[dict(timestamp=start+i*60,open=p,high=p+1,low=p-1,close=p,volume=1) for i,p in enumerate([100,102,104])]
-        base=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,session_deadline=None,timeframe='1 minute')
+        base=dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,supertrend_exit_enabled=False,session_deadline=None,timeframe='1 minute')
         for extra in ({'ema_proximity_enabled':True,'ema_proximity_mode':'POINTS','ema_proximity_distance':.001},{'market_structure_enabled':True}):
             self.assertTrue(any(r['entry_buy_signal'] for r in series(bars,{**base,**extra,'chart_entry_guards':False})))
             self.assertFalse(any(r['entry_buy_signal'] for r in series(bars,{**base,**extra,'chart_entry_guards':True})))

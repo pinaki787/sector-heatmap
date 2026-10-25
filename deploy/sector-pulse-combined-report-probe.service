@@ -1,0 +1,22 @@
+[Unit]
+Description=Sector Pulse combined market reports every 15 minutes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trading
+Group=trading
+WorkingDirectory=/home/trading/sector-heatmap
+ExecStart=/home/trading/sector-heatmap/.venv/bin/python -B -m sector_heatmap.combined_reports probe
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+Restart=no
+RestartSec=30
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trading/sector-heatmap/.private/notifications /home/trading/sector-heatmap/.private/dashboard-login/accounts/bf46fc364b610a0dfd338419e133cb41/source/.private /home/trading/sector-heatmap/.private/dashboard-login/accounts/bf46fc364b610a0dfd338419e133cb41/home
+

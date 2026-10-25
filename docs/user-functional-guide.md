@@ -1,243 +1,1537 @@
-# Sector Pulse User Functional Guide
+# Sector Pulse user guide
 
-Audited 8 October 2026. Start with [technical formulas](technical-guide.md), [deployment and private restore](deployment-guide.md), and [complete settings/source catalog](source-reference.md). This guide describes controls and expected behavior, not the current account or a trading recommendation.
+Updated 17 October 2026
 
-Updated 8 October 2026 · Renko Support and Strategy
+## Start here · accounts and dashboard navigation
 
-This section explains the deployed Renko chart and management of existing FYERS positions. For other dashboard areas, use the [project documentation](../README.md), [Delta India guide](delta-india.md) and [Trade Parser guide](telegram-trade-parser.md).
+Choose a saved broker account before reviewing instruments, holdings, funds or orders. FYERS, Dhan, Motilal Oswal and Delta India have separate data and execution routes. Connection status, market-data permission, runner status and order-stream status are different checks.
 
-## Renko Support and Strategy
+Configuration → Brokers manages saved connections and account dashboards. User Master manages users and section access for administrators. Sidebar visibility preferences and permissions determine which sections you can open; a hidden section is not proof that its server job stopped.
 
-Open **Renko Supertrend Strategy** from **Trading Strategies**. Choose the broker-master underlying, host timeframe and visible strategy settings before applying them. The selected settings are copied into the new manager; changing the form later does not change an active manager.
+Use the search box in this guide to find a setting by its on-screen name, strategy or purpose. The parameter reference lists allowed options and form bounds. These are UI constraints, not guarantees of broker support. The broker master, fresh data and server validation remain authoritative.
 
-### Paper runner versus existing FYERS positions
+## Sector rotation and stock cards
 
-**Start Runner** uses the form's selected Paper or Live mode to start a new strategy run. Paper trades are simulated; a chart BUY/SELL marker is not a confirmed broker fill. Historical chart events are also separate from actual positions.
+Sector rotation ranks available sector observations using the selected mode, score components, relative strength, momentum, breadth, volume and timeframe alignment. Filter narrows the visible set; Sort changes ranking. Missing observations are disclosed rather than treated as zero.
 
-**Apply Renko · start LIVE management** manages positions already filled in the connected FYERS account. This button starts LIVE management even if the main runner's form shows Paper. It does not convert a paper trade into a broker position. The original Paper runner remains separate.
+Open a sector or stock card to inspect contributors, indicator evidence and historical observations. A sector leader or historical BUY label is not an accepted order. Official constituent weights can be partial or dated. Stock-card broker-candle and rule-based analysis makes no OpenAI call.
 
-### Refresh orders and open positions
+## Analysis handoff · stock, index and commodity analysis
 
-Use **Refresh FYERS positions and orders** in **Existing FYERS positions · Renko management**. The list shows broker symbol, net quantity, broker average and product. The broker order book is shown separately, with requested and filled quantities and statuses such as pending, filled, rejected and cancelled.
+Select the broker account and instruments, planning preferences and analysis path. Broker candles and rule-based analysis uses no AI call. Codex / ChatGPT-account analysis uses the configured account workflow rather than an OpenAI API key. AI or broker data unavailability must remain visible; it does not establish a login failure by itself.
 
-An accepted or pending order is not an open filled position. A partially filled entry with an outstanding remainder cannot be adopted while that order is still pending. If there are no open positions, the dashboard says **No open FYERS positions** and the Apply button stays disabled.
+The index/commodity panel accepts one to six broker-native symbols. Eligible results can include the actual ATM option contract, premium entry, premium target, premium stop, lot size and reward/risk; missing or stale contract/quote evidence leaves the idea ineligible. Existing open exposure can exclude an instrument to avoid duplicate entries.
 
-### Select positions and start management
+Analysis submissions run as background jobs. The page releases submission controls after acceptance, renders results when available, and retains completed or partial output for later retrieval. Stop targets the selected analysis job. Recommendations remain research until a separate explicit trading action passes current validation.
 
-1. Choose the underlying, timeframe and Renko settings you want to apply.
-2. Refresh FYERS positions and orders.
-3. Select eligible positions. Currently supported positions are filled, long, whole-lot **MARGIN options** on the chosen underlying: long Calls or long Puts. Shorts, futures, shares and other products are not supported by this adoption workflow.
-4. Choose **Re-entry after adopted exit** if you want subsequent strategy entries. It is off by default.
-5. Click **Apply Renko · start LIVE management**. The dashboard checks fresh account, contract, quantity, average, product, pending orders and ownership before taking control.
+Planning capital, daily and per-idea limits, reserve, concurrent positions, reward/risk and declared external risk constrain planning when enabled. Fresh funds inclusion is optional. Exporting a packet or downloading settings does not send an order.
 
-The already-filled position becomes the managed position. **No initial BUY is submitted.** Each selected position gets its own manager, with its own saved settings, exposure, order audit and trade quota. The adopted position counts as the first trade; later entries use the configured lots and remaining quota.
+## Runner jobs and saved analysis outputs
 
-### Exit rules after adoption
+Each submitted job/run has an independent identity. Active jobs are listed separately from optional stopped/saved history. Completed, failed, cancelled, running, pending reconciliation and stalled are different states; stalled/unresponsive requires heartbeat evidence.
 
-The selected existing Renko exit rules become active when management starts. An already adverse EMA or configured underlying price boundary does not require another entry or a new crossing. Trailing starts from fresh observations after adoption; it does not invent an earlier price peak. Execution still requires the relevant fresh price and broker reconciliation; starting monitoring does not guarantee an immediate fill.
+Open a job to inspect its account, captured settings, chart link, status, trade journal and audit evidence. Entries and exits show recorded reasons, quantities, times, prices and P&L where supplied. Missing older evidence is unavailable, not fabricated. P&L refreshes independently of the background work.
 
-- With the EMA exit enabled, a Call exits below the selected EMA; a Put exits above it. Intrabar entries off requires a completed host close; on permits a fresh intrabar breach. Equality alone is not a breach. EMA exit is independent of the entry widening rule and ADX filter.
-- An opposite **confirmed Supertrend reversal** is an additional exit, subject to the selected ADX gate.
-- Configured underlying stop/target levels and optional trailing stops apply when enabled.
-- Session square-off uses the instrument's broker-master segment and verified session policy. Current source uses 15:10 IST for NSE/BSE and the verified regular-session end for MCX, subject to holding/expiry policy. New adoption is unavailable after its cutoff.
+Results persist across section changes, page reloads and navigation. Use saved jobs to retrieve them later. Stop is job-specific. Cancellation can preserve partial analysis output; stopping a trading runner follows its own position and pending-order policy, so verify terminal status and broker reconciliation.
 
-Only the confirmed managed quantity is eligible for an exit. An exit order's acceptance is not a confirmed closure; partial fills and outstanding remainder are reconciled before another action.
+## Renko Supertrend · setup, entries and exits
 
-### Optional re-entry
+Select the instrument, Runner timeframe, Paper/Live mode, quantity, capital and trade limit in Trade setup. The launch timeframe mirrors the chart timeframe. One saved editable preset is retained per instrument in the saved-configuration library. Save settings updates it; autosave retains the working draft separately.
 
-With **Re-entry after adopted exit** off, the manager completes after the adopted position closes. With it on, later entries must meet the existing Renko signal and execution rules, including the selected filters, trade quota, fresh prices and session cutoff. Re-entry is not unconditional, and there is no same-candle re-entry after a strategy exit. Subsequent entries use the existing nearest-expiry ATM Call/Put selection; they need not reuse the adopted strike.
+When Start finds different parameters, the popup lists saved versus form values. Use form parameters submits the edited values; Use saved configuration applies that record, including its shown execution mode; Cancel submits no Start. Batch Start resolves each instrument choice before submitting. An already running job keeps its captured settings.
 
-The original broker entry time, fees and price ticks before adoption are unavailable. They are not invented. The adopted trade is therefore not retrospectively classified as a quick-loss sideways trade; later runner-generated entries retain the normal sideways-range behavior.
+Family masters govern their strategy and chart children. OFF disables the family while retaining subordinate choices for ON. Strategy selections affect entries/exits; Indicator/chart selections affect studies and historical replay. Independent enabled entry gates must satisfy their supported rules. A disabled control can mean the loaded runtime does not support it.
 
-### Pause, resume and restart recovery
+Completed-candle mode waits for verified host closes. Intrabar mode evaluates a provisional state using verified current-candle OHLC and fresh market evidence; a provisional signal may disappear. A signal before arming, reconnection or lock release is skipped rather than replayed as an old entry.
 
-**Pause monitoring** stops that manager and preserves its position and ownership claim. It does not send a square-off order. This differs from the main runner's **Stop Runner**, which follows its existing stop-and-close workflow.
+Renko/Supertrend uses ATR, factor and Auto/Manual brick settings. Manual reference brick stays fixed across live ticks and chart timeframes. Broker-verified session duration drives its reference policy; do not substitute assumed NSE/MCX/crypto hours. EMA, RSI, ADX, structure, zones, proximity and optional retest/manual-marker filters have separate settings below.
 
-After a dashboard restart, adopted managers remain stopped with saved exposure and pending intent. Use **Reconcile / resume** to verify the same broker account and exposure before resuming. An owned pending order is reconciled using its saved ID or tag; it is not replaced with another entry order.
+Enabled exit criteria can act independently. Absolute underlying target/stop values are PRICE LEVELS, not distances or option premium points. Optional trailing is application monitoring, not automatically an exchange-resting stop. Entry filters do not imply that all exit checks are disabled.
 
-External quantity, average, side or product changes, or unavailable broker evidence, pause management before further orders and preserve the claim for manual reconciliation. If the broker confirms the position was fully closed externally, **Reconcile / resume** acknowledges that closure and releases the claim without inventing an exit price or starting re-entry.
+Quick-loss protection counts host intervals touched by actual entry/exit fills, including both endpoint candles. A qualifying quick losing exit locks new entries within the recorded position range; a fresh strict breakout releases it. The window is not a forced exit timer. Missing net-cost/exposure evidence can retain a protective review lock.
 
-### When adoption is unavailable
+Stop Runner requests the strategy’s stop/reconciliation/owned-exit workflow. A Stop click or order acknowledgement does not establish a fill. Check pending orders and any residual position. A new configuration must not silently adopt unexplained broker exposure.
 
-- No eligible position is selected, or no position is open.
-- The selected position changed or closed since the inventory was refreshed.
-- The position has an unsupported side/product, a partial-lot quantity, an unavailable average, or a contract that cannot be verified against the current master and selected underlying.
-- A pending entry/remainder exists, another strategy owns the position, or an outstanding protective order conflicts with management.
-- FYERS authentication, account identity, ownership verification or broker evidence is unavailable.
-- The live execution gate is disabled, the strategy revision requires a dashboard reload, or the session cutoff has passed.
+## Renko Engine · research and execution modes
 
-If protective-order ownership cannot be verified, the inventory can remain visible but adoption stays disabled. Refresh again after the broker response recovers. Do not treat an unavailable check as permission to start.
+Renko Engine is a separate strategy/replay workflow. Select its broker account, exact instrument, host timeframe, lots/contracts and maximum entries. Historical replay evaluates the selected history and engine parameters; its chart markers are simulated events.
 
-### Manager information and saved evidence
+Paper and Live engine runs require the selected broker’s supported runtime and fresh source data. Engine ATR/Supertrend, EMA, rule, direction, session and anchor settings are defined by the engine form; they are not automatically interchangeable with Renko Supertrend settings. Replay does not authorize promotion or start a Live runner.
 
-The manager table shows contract, quantity, broker entry average, status, re-entry setting, and gross unrealized and realized P&L. **Broker adoption / order evidence** expands the saved adoption snapshot, selected settings and subsequent order audit. Live adopted-position unrealized P&L also appears in the chart overlay; unavailable or disconnected quotes do not appear as live profit. Earlier fill times and full historical costs remain unknown.
+## EMA Band, RSI / MA crossover and KAMA
 
-## Candlestick volume bars
+EMA Band calculates its chosen EMA independently on candle High and Low. The supported completed-candle signal selects the current eligible ATM Call/Put; entry session and same-direction cooldown restrict entries. Its chart timeframe/history are display-only. Optional option-premium stop/target percentages supplement the supported indicator exits.
 
-The strategy chart shows **actual FYERS host-candle volume** in the lower band, on its own scale so it does not compress the price candles. Each volume bar uses exactly the same opening timestamp as its host candle and follows the chart's visible time range.
+The RSI / MA crossover runner smooths RSI with the selected SMA or EMA. RSI length and RSI-MA length are distinct from price EMA periods. A future completed crossover can produce the supported bullish Call or bearish Put entry. Trade limit, lots, premium cap, daily budget and Paper capital apply to that run.
 
-- Green volume corresponds to a host candle closing at or above its open; red corresponds to a close below its open. This shows candle direction, not buy/sell volume decomposition.
-- Missing provider volume leaves a gap and an unavailable readout. It is not replaced with zero.
-- A genuine provider value of zero remains zero and has no visible bar height.
-- Hovering a candle shows its volume in the chart readout.
-- Forming-candle volume is a broker OHLC snapshot. It updates when that candle snapshot is refreshed; LTP WebSocket ticks do not by themselves refresh or calculate volume. Price may therefore move while the displayed forming volume stays unchanged.
-- In Synthetic Renko view, the histogram still represents real host-candle volume. It is not volume inferred for individual Renko bricks.
+The crossover runner’s underlying hard target/stop settings have their own exit semantics; when either is configured, its displayed workflow suppresses the EMA exit. Its optional percentage/point step trail differs from Renko’s full-position trailing policy. Read the module’s active journal and settings before interpreting a shared label.
 
-Candles, volume and the RSI zone pane remain together in **Full screen**. RSI zones are 0–40, 40–60, 60–80 and 80–100. These chart displays do not add volume or RSI entry/exit conditions to the strategy.
+KAMA uses completed-close efficiency, adaptive fast/slow smoothing, breakout or reclaim, slope and cooldown rules. Choose quantity, invalidation and per-idea risk. WAIT remains WAIT when its signal is absent; account eligibility does not create an entry. Live requires the module’s supported broker/runtime gate.
 
-## Further reference
+## Delta India · tickets, options, futures and research
 
-Read the [Renko strategy rules](../strategies/renko_supertrend/README.md) for full signal and session details, or the [position-adoption lifecycle notes](renko-position-adoption.md) for implementation and verification scope. Live adoption was validated with fake-broker lifecycle tests; browser checks used read-only actual FYERS inventory and did not start live management or submit an order.
+Read-only analysis, Paper, Live and research backtest workflows have different side effects. Select the exact listed contract or supported ATM option route, native quote currency, whole contracts, order type, limit premium and IOC/GTC terms. A perpetual signal instrument and an option execution contract are different instruments.
 
-## Compact Renko workspace and independent instances
+Bought-option mode buys a Call for bullish signals or a Put for bearish signals. The supported perpetual route uses long/short exposure and its own collateral policy. Native contract units, tick, expiry and multiplier come from the selected broker master; INR display follows the verified conversion policy.
 
-The Renko page keeps broker, market, instrument search, timeframe, execution mode, sizing and **Start selected** together. **Selected instance** shows its status, P&L, trailing state and Start/Stop control. Active and saved instances use compact rows. Signal settings, risk/exit settings, order audit, chart history, existing-position management and the Excel journal expand when needed. Candles, actual volume and the four RSI zones remain together.
+Manual tickets and strategy runners are separate intents. Manual orders do not inherit a runner’s trail automatically. Stop behavior is module-specific: the legacy Delta runner can stop entries while leaving exposure; use its explicit close/reconciliation path and verify residuals. The Renko Stop flow has different behavior.
 
-Choose **FYERS** for NSE indices, BSE indices, NSE/BSE stock-option underlyings and MCX commodities. The **Market** selector lists matching underlyings from actual broker masters; search narrows that category. A category with no listed option underlyings shows an explicit empty result. Listed instruments still need a currently available Call/Put route, valid expiry, fresh executable quotes and broker preflight before an entry. Ordinary equities without listed options are not offered as option routes.
+Research grids compare RSI/MA, ADX, momentum and squeeze variants with explicit fee, spread, slippage, funding, contracts and capital assumptions. Chronological holdout is separate from training. Backtest profit is not evidence of option fills or permission to promote a configuration.
 
-Choose **Delta India** for public perpetual traded-price signals with long nearest-expiry ATM Call/Put execution. Perpetual signals do not authorize perpetual orders. Instruments without listed Call/Put options are blocked explicitly. Delta supports 1/3/5/15/30-minute and 1-hour host candles, seven-day eligibility, an explicit daily IST cutoff, marketable IOC limits and reduce-only exits. Quantity means whole native option contracts; P&L stays in the verified native currency. Fee estimates use native commission or product-rate/index evidence, estimated GST and the premium fee cap; unavailable costs stay unavailable rather than becoming zero.
+## NIFTY / SENSEX long straddles
 
-Use **Add displayed instrument** for each choice, select the instruments in the multi-select, then **Start selected**. The shared visible settings apply separately to each broker/instrument instance. Every result identifies STARTED, BLOCKED, ALREADY_RUNNING or REVIEW_REQUIRED; partial success is shown per instrument. An uncertain activation is not silently retried. **Save displayed instrument as an instance** creates or opens a stopped configuration without starting it.
+A long straddle buys both supported ATM Call and Put legs. Lots per leg, entry window, combined-premium stop and target belong to that straddle workflow, not to a one-leg Renko option runner.
 
-Switching broker or instance changes the displayed controls and chart; other runners retain their own position, trade quota and settings. **Stop & close** targets only its row's runner. Existing-position adoption remains separate and requires explicit application; pausing an adopted manager preserves exposure. On service restart, saved instances remain stopped and require reconciliation before renewed activity.
+Paired legs are not an atomic exchange transaction. Inspect each leg’s accepted, filled and remaining quantities. Process Stop is not proof of broker square-off; use the module’s explicit managed close flow and reconcile both legs. Paper and Live scripts/configurations must be identified in the displayed runtime evidence.
 
+## Holdings review, live feed and positions
 
-## Dashboard orientation and broker connection
+Holdings review selects a saved broker account, fetches that broker’s holdings and shows the available review categories. It is not a combined unlabelled portfolio. Missing permissions, session failures or unavailable holdings routes must be shown for that account.
 
-Open the local Sector Pulse dashboard after setup. Choose the broker and module explicitly. FYERS Indian equity/index/commodity routes and Delta India crypto routes remain independent, including saved instances, positions and journals. A broker picker or green status does not start a runner. Sector rankings and handoff packets are analysis; research screens are simulations. Dhan-labelled choices do not prove a connected production Dhan execution route.
+Live feed & positions separates ticks, candles, order stream, positions, orders and fills. Fresh ticks do not prove the current candle has a verified open. Fresh receipt time does not prove a fresh exchange quote. An accepted order, a partial fill, a full fill and an unresolved submission are distinct.
 
-Connect FYERS with the supported private application configuration/browser login. Verify the account, token validity and requested master/history. Delta Connection settings take India key/secret through masked fields and verify a signed wallet read; destination IP and permissions matter. Credential fields clear on save. Configure Telegram only with an actual bot/channel token; native WhatsApp requires macOS helper and OS permissions. See the deployment guide rather than copying secrets into notes.
+Existing-position Renko adoption is a separate explicit live-management action. Eligible owned quantities and pending orders must be verified; adopting a filled position does not submit an initial buy. Pause monitoring can preserve exposure, unlike a stop-and-close action. Reconcile/resume does not invent missing historical fills or ticks.
 
-## Sector heatmap and analysis workflow
+## Screener, trade parser, Telegram and WhatsApp
 
-Choose Intraday or Swing mode, inspect score, timeframe alignment, relative strength, ADX, rotation and data quality together. Open a sector for timeframe/history and stock-contribution detail. Official weights are dated and may cover only the published top ten; missing constituents are not renormalized into a full index. A strong contributor is not automatically a valid stock entry.
+Save a screener label and supported Chartink URL, evaluate candidates, then inspect account-native instruments and analysis. Cash product, quantity and external risk belong to the reviewed order flow. A screener row is not a submitted trade.
 
-Refresh returns available snapshots, not necessarily a new completed bar. Rotation needs distinct completed-history observations; unavailable or warming-up is expected when history is insufficient. Missing breadth/volume is explained and their scoring weight is redistributed across available components. Sort/filter the heatmap to inspect candidates. Use planning capital, risk limits, stop/invalidation choice and order preference to build a handoff packet; review contract, whole quantity, quote age, spread, OI/volume and R:R before any separate execution ticket. Exporting a handoff does not send an order. A partial-target/ST equity plan is planning-only where labelled NOT_IMPLEMENTED.
+Paste or load recommendation text, parse it, inspect exact contract, side, quantity, entry/trigger/limit, stop and targets, then explicitly Submit. Edits invalidate stale tickets. Network uncertainty requires reconciliation rather than duplicate submission. An open position/order can block a redundant symbol entry.
 
-## Initial Renko setup and dated configuration export
+Telegram channel label is only a display name. Bot access and exact channel identity are separate. Poll interval controls discovery; Auto submission is an explicit separate policy. Startup backlog and duplicate/edit evidence do not authorize replayed orders. Stop polling does not cancel already accepted broker orders.
 
-In the main initial setup UI, select broker/instance, market, underlying, Paper/Live and timeframe. Enter option lots or cash whole shares, max trades and optional daily risk budget. Choose holding policy where supported. ATR length/factor, Auto/Manual brick, widening window, ADX, RSI slope, retest/patterns, EMA exit, target/stop, proximity, sideways lock, trailing and slippage/capital controls apply to the next Start, not silently to an armed run.
+The Telegram bought-option route can attach selected Renko exits after the reviewed mapping/quantity choice. XAUUSD-to-XAUT is an explicit proxy, not the same instrument. WhatsApp polling requires the native helper and exact chat; unavailable source/unread evidence blocks automatic ingestion.
 
-**Save settings** and **Download settings .txt** are in the main setup UI. Optionally name the configuration. The dated IST export includes visible draft values, false checkboxes and blank optional fields, broker/instance, requested Start configuration, and separately recorded active configuration from the last runner snapshot. Draft edited/save pending/unconfirmed and last confirmed save status are shown. Saving/exporting does not apply changes to a running position. The text file is a configuration record, not an import, credential backup, order journal or proof of fill.
+## Charts, timeframe, viewport and freshness
 
-The candlestick/fullscreen chart adds only **Start Runner / Stop Runner**, using the same selected-instance lifecycle handler as the main control. Saving and exporting remain in the main setup UI. The chart button disables during an in-flight request/status failure; errors are displayed. Start applies the visible next-Start configuration with existing validation. Stop Renko seeks cancellation/reconciliation and owned closure; remain attentive while Stopping or UNKNOWN. No new order policy is created by moving the button into the chart.
+Runner timeframe is the host interval for the next Start and is synchronized with the chart control. Timeframe changes on an active job require the explicit supported workflow; ordinary draft edits do not silently change its captured run. EMA Band has a separately labelled display-only chart interval.
 
-## Renko settings explained
+Host candles use broker OHLC. Synthetic Renko bodies and historical entry/exit arrows are calculations. Actual trade markers use recorded order/fill evidence. Full screen changes layout; Reset view restores readable scale and recent bars. Deliberate historical scrolling should remain distinct from following latest.
 
-- Mode: Paper uses finite virtual INR capital; Live uses actual broker checks and explicit capability. Saved Paper settings never establish a live position.
-- Instrument/market: options use nearest-expiry ATM call/put on a supported underlying; no fallback to futures. Cash uses exact shares; NSE/BSE cash search excludes indices. Delta underlying is crypto perpetual signal data with listed long option execution.
-- Host timeframe: drives completed entry/indicator state. A synthetic chart view does not change the broker host bars. Changing history range/anchor can change path-dependent historical signals.
-- ATR length/factor/brick: defaults5/3/Auto, manual12.8; volatility regime alters effective factor/Auto brick. Exact recurrences are in the technical guide.
-- Widening: default2 requires one strict EMA10/30 signed-gap increase. Larger windows require consecutive increases across all selected completed observations.
-- ADX: off by default; enabled requires strict threshold exceedance. RSI slope on by default requires rising bullish/falling bearish RSI14, blocks flat/unwarmed data.
-- Retest: optional established trend touch/bounce with selected engulfing/harami/intraday-star geometry. Selecting it does not disable the other gates. At least one pattern is required.
-- Intrabar entries: off by default; provisional cloned engine on verified current candle and fresh tick. A transient candidate can disappear. Missing open/history is a blocker even when tick status is green.
-- EMA exit: runner default on/10; editable1–1000 or disabled. With Intrabar entries off, it uses a completed host-candle close; with it on, a fresh provisional breach can exit. Entry widening does not govern exits. Opposite confirmed ST remains a separate exit.
-- Underlying stop/target: optional positive absolute underlying prices, not option premium points or percentages; direction/tick validation applies.
-- EMA proximity: optional ATR/points maximum distance from entry EMA10, defaultATR/.5; prevents far-from-EMA entries only when enabled.
-- Sideways: off by default; max3 host buckets. Quick finalized estimated net loss can freeze actual exposure range, blocking new entries until fresh strict breakout. It does not prevent exits.
-- Renko trail: off by default; premium percent10 or underlying points, full-position monotonic post-fill stop without partial targets/profit activation. It is different from EMA/Delta step trailing and the research shortlist.
-- Cash Intraday/CNC and MCX Intraday/Carry forward: read exact session/expiry policy in the runtime preview. CNC blocks new bearish shorts; carry does not waive ownership or expiry protection.
-- Lots/shares/quota/capital: positive exact quantities. Insufficient capital rejects rather than downsizes; adopted exposure counts as first trade. Settings are saved independently from armed state.
+History range, initialization anchor and warmup affect path-dependent replay. Missing or invalid OHLC can withhold indicators while valid candles remain displayed. Tick-live/candle-delayed means price observations exist but verified candle data is incomplete. Chart differs from active runner means compare instrument/timeframe/settings, not assume a login failure.
 
-## Live chart, LED, zones and history
+## Server resources, restart progress and recovery
 
-A green chart-feed/order-stream LED requires a fresh snapshot, connected/fresh market, tick age0–15seconds and order-stream connection. Snapshot age over5seconds, missing tick time, closed market or errors change the status. Read tick age and candle readiness separately. A green LED does not certify broker fills, current candle-open recovery, future latency or profitability.
+Server resources shows resource samples and retained history. Admin restart controls for the dashboard and broker services are grouped here. Restart requests have independent identities and reported outcomes; a browser/network timeout does not establish restart failure.
 
-Five-minute strong supply/demand shaded bands come from completed broker OHLC, regardless of strategy timeframe. Two bars on either side confirm a strict pivot. Strength requires a close beyond the opposite pivot wick with at least one ATR14 departure within the following two closed bars. Shading starts retrospectively at origin; the region before confirmation was not known then. A later strict close beyond the outside boundary marks broken; a wick/equality alone does not. Latest qualifying band and origin/confirmation/break information remain visible until replaced. Shading is a chart reference. The optional five-minute zone target exit described below can use the completed zone evidence.
+The progress indicator shows Request, Restart, Readiness and Complete, with elapsed time and frequent probes. It does not invent an estimated percentage. READY requires the applicable readiness evidence. FAILED and UNKNOWN are explicit; do not automatically resend an uncertain restart request.
 
-Choose host/synthetic, volume, RSI pane and its chart-only SMA period, overlays, historical range and fit/latest/fullscreen independently. Synthetic volume is real host volume, not generated volume per brick. Cloud overlays include EMA10/30, Bollinger, RSI ranges, session/Fib/CPR references and drawings; enabling a visual does not alter the armed strategy. Session timezone/start preferences are chart-only. Floating red-bar Fib applies to5m. Earlier/later history may require provider retrieval and replay; gaps/errors remain explicit.
+Before a restart, inspect active runners, retained positions and pending orders. A service can return while a retained strategy remains stopped. Never infer that exit monitoring resumed from a green page badge; check the specific job and broker state. Access controls and account isolation remain in force.
 
-Entry assessment explains the selected completed/provisional candle, gates and evaluation time. Historical BUY/SELL/EXIT labels are simulations; actual execution markers use owned fill/order evidence. Do not infer option returns from host candle points. No next-candle re-entry is forced by a range breakout or a marker.
+## P&L, journals, exports and troubleshooting
 
-## FYERS RSI strategy and KAMA workflow
+Gross P&L, estimated costs, estimated net and broker-reported values are separate. Fresh executable valuation and known fills are required; missing fees, funding or prices can leave net unknown. Zero must not replace unavailable evidence.
 
-For RSI-based SMA/EMA choose underlying, host timeframe, lots, max trades, Paper/Live, RSI length/MA length/type, optional underlying hard levels and step-trail settings. Arm explicitly and wait for a future completed crossover. Bullish buys ATM call, bearish buys ATM put; these are long premium routes. Opposite completed cross exits. A price EMA10/30 cloud is visual context, not the RSI trigger. Confirm current master lot/multiplier/expiry and broker funds for Live. Stop/unknown/partial fills require reconciliation.
+Job detail journals retain actual entry criteria, settings snapshot, requested/filled/remaining quantity, entry/exit prices and times, exit reasons and recorded P&L. Older missing evidence remains missing. Configuration TXT records settings; journal exports record execution evidence; neither export sends an order.
 
-Optional step trailing uses entry-based premium percentage or points: at first favorable step the first allocation can exit and stop moves to entry; second step exits the second allocation and ratchets; residual follows. Whole filled lots determine allocation. No stop exists before first step in this mode. It differs from Renko's full-position best-price trail.
+Start blocked: read the exact account, instrument, data, runtime or exposure reason. Feed delayed: distinguish tick freshness, candle verification and order connectivity. Stopping or UNKNOWN: reconcile the selected job and broker orders before another action. Some jobs unavailable: other jobs can still be running; a partial inventory is not proof of termination.
 
-KAMA is separate from EMA/RSI: completed-close efficiency, breakout/reclaim, slope and cooldown rules. Choose its supported instrument/quantity/risk/stop settings and mode, inspect data readiness and policy blockers, then deliberately Start. A KAMA WAIT cannot be converted to an entry by eligibility checks. KAMA Live requires its own gate and FYERS capability. Entry09:15–15:10 and square-off15:15–15:30 are its source defaults, distinct from Renko cutoffs.
+Expired session: renew the same saved account through its supported connection workflow, then test it. A slow analysis or market-data request alone does not prove login failure. Inspect Server resources and the affected job rather than repeatedly starting or submitting.
 
-## Delta manual orders, strategy and monitoring
+## Renko Supertrend parameters
 
-Choose Paper/Live, listed contract or current supported ATM strategy route, quantity in contracts, timeframe/RSI/MA and optional ADX/momentum/trailing. Manual exact-symbol tickets and ATM strategy-managed Submit have different intent; read the route shown. Legacy futures configurations retain their recorded Long-only/Both rules until explicitly stopped/replaced. Current ATM options buy long call/put from underlying signals and never write options or silently fall back to futures.
+### Broker view
 
-Manual limit uses tick-aligned price and IOC/GTC; market uses IOC without local limit. A direct Submit is deliberate authorization and internally validates contract, quotes, account/funds/ownership. Paper uses fresh ask/bid simulation without broker order; it does not simulate a resting limit queue. Bullish/bearish RSI crosses and EMA-only candle-extreme touches are completed-bar decisions. Touch evidence is inferred from OHLC, not recovered tick sequence. ADX/momentum are entry filters; exits still run.
+Select the broker workspace whose instruments, market data, account and execution routes will be used. Account selection does not move another broker’s positions.
 
-Delta Stop Runner stops entry polling and can leave owned exposure. Use explicit Close runner position for verified remainder. Saved active monitoring intent can restore exit-only monitoring after restart and reconciliation; intentional stops remain stopped. IOC/limit exits can partly fill; protect/reconcile residuals. Trailing is application monitoring, not an exchange-resting stop. Step percentage/points has staged allocations; ATR mode is separate full-position contract-ATR stop. Manual orders do not automatically inherit a runner trail. INR display requires a current verified conversion policy and can be unavailable while native evidence remains intact.
+### Market
 
-Review Orders/fills, positions, lifecycle journal and saved history separately. Unknown network outcome is not permission to resubmit. Never attach a new strategy to an unexplained broker quantity. Research/history screens do not change execution settings. Details: [Delta guide](delta-india.md).
+Restrict instrument search and session/product rules to the selected exchange segment.
 
-## NIFTY and SENSEX straddle workflow
+### Holding
 
-Both bridges include bundled script fallback for fresh installs; existing configured/legacy scripts retain precedence. Choose module, lots, entry window and supported exit mode, then Paper or explicit confirmed Live Start. NumPy/pandas and valid paired contracts/credentials are needed; no process starts during setup. Paper uses isolated source and virtual capital. Live submits paired legs through the selected reviewed script; legs are not one atomic transaction.
+Choose intraday cash or delivery (CNC). Delivery does not permit a new bearish short entry; broker sell authorization may be required.
 
-Default signal is compressed rolling5m realised volatility below percentile50, entry09:15–11:30, one lot per leg, default stop15 combined-premium points, ST7/3 after+10 gain or selected fixed target30; EOD15:20. One same-day re-entry waits for a completed5m checkpoint. External/bundled source, actual selected configuration and broker lot evidence are authoritative; a static lot constant is not current contract proof.
+### Holding
 
-Stop process is not broker square-off confirmation. Managed LIVE square-off uses a fresh preview/account/position/order check and explicit confirmation. Verify both legs, pending orders and actual residual quantities. These Live starts have their own confirmation and are not universally controlled by EMA/KAMA/parser environment switches.
+Intraday follows the selected MCX contract session cutoff. Carry Forward uses the supported overnight MARGIN route and expiry controls.
 
-## Trade parser, WhatsApp and Telegram
+### Use FYERS history for Motilal
 
-Paste or Load recommendation, choose broker and exact lots/contracts, Parse, inspect contract/side/entry/stop/targets, then Submit deliberately. Text edits/broker changes invalidate tickets. Fresh quote/master/account and trigger/limit geometry checks can block submission. A trigger or accepted order is not a fill. Unknown outcome remains pending reconciliation rather than a blind retry.
+Explicitly permit the selected FYERS account to supply labelled history for Motilal analysis. Execution remains on the selected Motilal account.
 
-Recommendation stops/targets are displayed plans. FYERS optional protective OCO requires explicit supported consent, selected full-position target and confirmed attributed fills; it never adopts unrelated positions. OCO may fail/trigger without filling; review actual broker status. Telegram plan levels do not automatically become protection. OpenAI advisory adds structured analysis; it cannot replace missing prices or silently submit.
+### FYERS history account
 
-WhatsApp polling requires native helper, selected chat, verified latest unread source and durable IDs; fail-closed unread/source errors are displayed. It is not guaranteed bulk ingestion. Telegram requires bot membership/access to selected channel; Verify reads bot/channel/webhook status without sending a message. Confirmation mode queues Load→Parse→Submit; tickets120seconds, recommendation5minutes. Auto is defaultoff and must be deliberately started with selected broker/quantity. Startup backlog is review-only, edits/duplicates do not auto-resubmit. Stop polling disables new discovery, not accepted broker orders. Restart does not rearm polling/Auto. [Telegram detail](telegram-trade-parser.md).
+Choose the history-only FYERS account. Its identifiers must never be used to submit Motilal orders.
 
-## Paper funds, trade history and exports
+### Underlying search
 
-Virtual Paper capital defaults100000INR and remains independent of live balance. Available capital includes realized gross result, fee provision and open premium/notional reservation with1% headroom; no leverage or silent quantity reduction. Some brokers require a verified native-to-INR policy. Capital changes cannot silently rewrite an open lifecycle. Live affordability is separately broker-derived.
+Find instruments using the selected broker’s current master. Search text alone is not a selected contract.
 
-Review requested/filled/remaining quantities, actual broker/Paper IDs, contract/expiry, premium averages, reason, local fill-confirmation time and saved indicator/config snapshots. Gross and estimated net are distinct. Costs can be unknown for unsupported routes; old missing data is not zero. Actual slippage is already in fills. Saved closed-trade research and executable open P&L use different evidence.
+### Instrument
 
-Journal Excel export uses portable recorded Trades/Orders sheets and raw snapshot chunks. It is a static snapshot with full evidence; layout differs from older styled exports. Configuration TXT is separate from a trade journal. Keep exports private when they contain account/trade information.
+Exact selected underlying. Signals use this underlying; the execution route determines whether orders use options, futures or shares.
 
-## Research and operational recovery
+### Execution mode
 
-Delta manual grid and adaptive cycles evaluate underlying futures proxies with cost/holdout assumptions. Select bounds/fees/slippage/funding/contracts/capital explicitly, examine data coverage and train-versus-held-out results, and stop/cancel research independently from trading. Adaptive scheduling and AI experiment proposals never authorize promotion. Trailing research found no optimum; apparent hybrid gains reversed under intraminute paths. Research-only Pine/replay/EMA variants are not active strategy settings.
+Paper simulates fills. Live can submit real broker orders when you explicitly Start. Changing this selector does not change an already running job.
 
-Before update/restart, inspect every active instance and actual broker exposure. Renko Stop seeks flat; adopted Pause retains exposure; Delta Stop can retain exposure; straddle process Stop can retain both legs. Backups and ownership are essential. Restoring credentials does not restore active ownership safely. Use [deployment recovery steps](deployment-guide.md). Do not automatically rearm entries after restart; resolve account/quantity/order mismatches first.
+### Runner timeframe
 
-## Troubleshooting by symptom
+Candle interval used for the next runner Start. For example, 5 minutes evaluates five-minute host candles. It stays synchronized with the chart timeframe; an active runner retains its Start settings.
 
-If data is stale or warming up, inspect missing component/history/master and await verified refresh; never reinterpret unavailable as neutral or zero. Green tick status with missing forming open blocks intrabar entries until recovery. If quote subscription is warming, the limited fresh-signal retry may recover before intent; UNKNOWN submission cannot be retried. A stopped button with owned quantity still requires module-specific reconciliation.
+### Lots
 
-If capital insufficient, choose a deliberately revised quantity/capital after understanding its basis; rejected quantities are not silently changed. If contract not listed or expiry/units cannot be verified, the route is unavailable. If export fails, verify project dependencies and stored evidence. If native WhatsApp unavailable on your OS, use manual/Telegram routes. Broker token renewal, IP/permissions and platform limits are documented in deployment guidance.
+Position size for the next Start. Indian derivatives use whole lots; Delta uses whole contracts; cash equities use whole shares.
 
+### Virtual Paper capital · INR
 
-## October 8 release: entry controls and chart evidence
+Virtual INR capital available to Paper execution. This does not add funds to a broker account.
 
-Every Renko entry now requires the latest completed **1-minute and 5-minute Supertrend** directions to agree with the requested side. This applies across selected host timeframes and to manual overrides. Missing, stale, nonconsecutive or warming-up source candles block entry. The dashed five-minute chart line becomes available after that candle closes; it never uses a forming five-minute value.
+### Trade limit
 
-**Market structure** is optional and off by default. It requires two confirmed higher highs and higher lows for bullish automatic entries, or lower highs and lower lows for bearish entries, on actual host candles. Each strict pivot needs two completed bars on either side. Mixed, equal or insufficient swings block automatic entry when enabled.
+Maximum number of new entry trades allowed for this runner run. Exits and protective position management remain separate.
 
-**Five-minute zone target** is optional and off by default. A bullish position targets the latest known unbroken supply band; a bearish position targets demand. Only a whole five-minute candle after the fill can decide the outcome, using a zone known before that candle opened. Touching the zone and closing strictly beyond its outer boundary permits continuation. Other touched closes request an exit. Missing/stale evidence provides no zone exit; ordinary enabled exits continue. This is an underlying-price rule, not a guaranteed premium profit target.
+### Configuration name
 
-**Manual entry override** requires an already active, flat selected runner with no pending order. Choose Bullish or Bearish explicitly. It bypasses automatic setup qualification, market structure, EMA proximity and the adverse-EMA entry check. It retains completed 1-minute/5-minute agreement, fresh quotes, exact contract/account/ownership, session and quota, capital, hard boundaries, sideways lock and Live capability checks. Normal exit management remains active. A manually entered position can therefore exit quickly. If the response is uncertain, **Check override result** reuses the same request identity; do not create another entry to resolve uncertainty.
+Name of the single saved configuration for this instrument. Save settings updates that record; renaming does not create a duplicate.
 
-EMA exits follow **Intrabar entries** timing: off requires a completed host-candle close; on permits a fresh intrabar adverse breach. Actual exit markers use the recorded fill candle and applied EMA period. Chart assessment preserves recorded runner evaluations across routine history revisions. Feed status distinguishes fresh market ticks from delayed runner snapshots; read both timestamps before interpreting execution state.
+### Selected instruments
 
-Saved configuration choices can be restored or deleted in the setup controls. Restoring prepares the next Start; deleting a saved choice does not close a position. Review draft and active settings separately.
+Instruments selected for independent runner submissions. Differences from each saved configuration are resolved before batch submissions start.
 
-## Analysis Handoff: buy ATM Call or Put
+### Intrabar entries and EMA exits
 
-Stock-option handoff now proposes a single bought nearest-strike ATM Call for bullish direction, or Put for bearish direction, on the selected verified expiry. It does not construct a short leg. Contract, whole lot, tick, quote, liquidity and Greeks evidence must pass. The full paid premium is the maximum option loss excluding costs. A selected reward-to-risk target is a premium planning target, not a return forecast. Review quantity, premium and allocation in the execution ticket; exporting the packet sends no order. An unavailable exact contract remains blocked.
+OFF evaluates completed candles. ON allows fresh provisional live entry and EMA-exit evaluation; provisional signals can change before candle close.
 
-## Multiple users and broker accounts
+### Sideways filter · quick after-cost loss
 
-Open the separate **User & broker setup** portal after the operator bootstraps its administrator. Sign in, add your FYERS or Delta India account, save **Connection settings**, then **Launch dashboard**. Add another account to use another broker or another account with the same broker. Each opens in a separate tab and shows its user/account/broker identity in the top bar. Credentials, settings, Paper capital and journals belong to that workspace. The Renko broker selector stays bound to the account; switch accounts through **Users & broker accounts**.
+After a quick loss, blocks new entries inside the recorded position high–low range until a fresh strict breakout. The window uses host candles touched by the actual trade; incomplete exposure evidence stays locked for review.
 
-Administrators can add users but do not receive access to their trading workspaces. Password changes revoke login sessions. Sign out stops access and streaming updates; background strategies still require their normal Stop/reconcile workflow. Live capability is off by default and saving a connection places no order. Native WhatsApp polling is unavailable in these isolated workspaces. The existing single-user service is independent and does not acquire portal authentication automatically. Read the [complete setup and update procedure](multi-user-broker-setup.md) before activation.
+### Quick-loss window · host candles touched
 
+Maximum host candle intervals touched between the actual entry and exit fills for a quick-loss lock. Both entry and exit candles count. With a limit of 3 on five-minute candles, a losing trade spanning at most three candle intervals can lock new entries until a fresh price breaks its recorded position range. This is not a forced exit after three candles.
 
-## Shared appearance
+### Enable Renko Supertrend strategy rules
 
-Login, account setup and the trading dashboard use the same dark Sector Pulse colours, typography, panels, fields and buttons. A licensed NSE building photograph and decorative green bull, red bear and dollar/rupee coin motifs appear faintly behind the interface. These background symbols are decoration; they do not indicate a signal or account state. Foreground controls and chart canvases retain readable surfaces.
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
 
-### Candlestick Reset view
+### Allow continuation entries
 
-Reset view restores automatic price scaling and adjusts candle spacing to the chart width and height. Price charts grow with the available width; the RSI panel stays aligned to the same visible candles. Distant supply/demand boundaries do not stretch the candle price scale. Fit history remains available for reviewing all loaded candles.
+Optional continuation entries require the supported runtime and selected higher-timeframe agreement. A disabled control means that runtime capability is unavailable; it does not imply the rule is active.
 
-### Chart P&L and partial data availability
+### Trading session hours
 
-P&L remains visible in a compact strip above the candles, including fullscreen. Runner controls and expandable entry assessment stay on the chart screen without covering candles. The stream distinguishes fresh ticks with unavailable current-candle OHLC from a full disconnection. Missing forming OHLC triggers at most three chart recovery attempts per host candle, spaced at least ten seconds apart. Completed candles remain visible during recovery; no synthetic broker OHLC is invented. A cached history refresh warning does not mean that all market data has stopped.
+Read-only broker contract session duration used by reference sizing. Crypto and exchange sessions differ; missing verified policy is shown explicitly.
+
+### Renko Supertrend · Strategy
+
+Include Renko Supertrend direction in strategy entry evaluation when its family master is enabled.
+
+### Renko Supertrend · Indicator
+
+Chart-only selection: Include Renko Supertrend direction in strategy entry evaluation when its family master is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### ATR length
+
+Number of candles used for the ATR calculation. In manual reference sizing this also selects the reference ATR period.
+
+### Base factor
+
+Multiplier applied by the Supertrend calculation. Changes apply to the next Start.
+
+### Brick size mode
+
+Auto derives brick size from the strategy calculation. Manual uses the verified fixed reference brick shown below.
+
+### Manual brick size
+
+Fixed reference brick size, retained across live ticks and chart timeframes. Recalculate reference brick explicitly to refresh it.
+
+### Higher timeframe check · Strategy
+
+Requires agreement with the selected higher timeframe for new strategy entries when enabled. OFF removes that entry check.
+
+### Higher timeframe check · Indicator
+
+Chart-only selection: Requires agreement with the selected higher timeframe for new strategy entries when enabled. OFF removes that entry check. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Supertrend timeframe (HTF)
+
+Higher candle interval used by the optional higher-timeframe Supertrend check or chart study.
+
+### Enable EMA strategy rules
+
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
+
+### EMA 10 · first EMA · Strategy
+
+Require the first EMA entry criterion when EMA strategy rules are enabled.
+
+### EMA 10 · first EMA · Indicator
+
+Chart-only selection: Require the first EMA entry criterion when EMA strategy rules are enabled. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### First EMA period
+
+Number of host candles in the first exponential moving average.
+
+### EMA 30 · second EMA · Strategy
+
+Require the second EMA entry criterion when EMA strategy rules are enabled.
+
+### EMA 30 · second EMA · Indicator
+
+Chart-only selection: Require the second EMA entry criterion when EMA strategy rules are enabled. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Second EMA period
+
+Number of host candles in the second exponential moving average.
+
+### EMA gap widening · Strategy
+
+Require the signed EMA gap to widen across the configured window before a normal entry.
+
+### EMA gap widening · Indicator
+
+Chart-only selection: Require the signed EMA gap to widen across the configured window before a normal entry. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### EMA gap widening window
+
+Number of recent host candles inspected by the EMA gap-widening criterion.
+
+### EMA proximity · first EMA · Strategy
+
+Entry-only filter that rejects a price too far from the first EMA. It does not close a held position.
+
+### EMA proximity · first EMA · Indicator
+
+Chart-only selection: Entry-only filter that rejects a price too far from the first EMA. It does not close a held position. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### EMA10 distance basis
+
+Measure absolute distance from the first EMA as native price points or as a multiple of completed host ATR.
+
+### Entry distance limit · |price − EMA10| / completed ATR, or points
+
+Maximum allowed absolute price-to-first-EMA distance in the selected basis. This limits new entries only.
+
+### EMA10 retest entries · Strategy
+
+Optional first-EMA pullback touch and confirmed bounce entry path. Other selected entry gates still apply.
+
+### EMA10 retest entries · Indicator
+
+Chart-only selection: Optional first-EMA pullback touch and confirmed bounce entry path. Other selected entry gates still apply. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Retest: bullish / bearish engulfing
+
+Allow the bullish or bearish engulfing geometry as a retest confirmation.
+
+### Retest: bullish / bearish harami
+
+Allow the bullish or bearish harami geometry as a retest confirmation.
+
+### Retest: morning / evening star
+
+Allow the intraday morning/evening-star retest geometry; a market-opening gap is not required.
+
+### Enable RSI strategy rules
+
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
+
+### RSI level entry filter · Strategy
+
+Require the configured directional RSI level or inclusive RSI range for new entries.
+
+### RSI level entry filter · Indicator
+
+Chart-only selection: Require the configured directional RSI level or inclusive RSI range for new entries. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### RSI entry mode
+
+Choose a single bullish/bearish threshold or an inclusive allowed RSI range.
+
+### Bullish RSI minimum
+
+Lower inclusive RSI bound for bullish entries in Between mode.
+
+### Bullish RSI maximum
+
+Upper inclusive RSI bound for bullish entries in Between mode.
+
+### Bearish RSI minimum
+
+Lower inclusive RSI bound for bearish entries in Between mode.
+
+### Bearish RSI maximum
+
+Upper inclusive RSI bound for bearish entries in Between mode.
+
+### Bullish RSI strictly above
+
+Strict bullish RSI threshold in Threshold mode; equality does not pass.
+
+### Bearish RSI strictly below
+
+Strict bearish RSI threshold in Threshold mode; equality does not pass.
+
+### RSI slope filter · Strategy
+
+Require rising RSI for bullish entries and falling RSI for bearish entries. Flat or unready RSI does not satisfy slope.
+
+### RSI slope filter · Indicator
+
+Chart-only selection: Require rising RSI for bullish entries and falling RSI for bearish entries. Flat or unready RSI does not satisfy slope. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### RSI period
+
+Number of host candles used to calculate RSI.
+
+### Enable ADX strategy rules
+
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
+
+### Choppy filter · Strategy
+
+Enable the ADX strength/choppiness entry gate; compare ADX with the configured threshold.
+
+### Choppy filter · Indicator
+
+Chart-only selection: Enable the ADX strength/choppiness entry gate; compare ADX with the configured threshold. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### ADX threshold
+
+Minimum ADX value required when the ADX strategy filter is enabled.
+
+### ADX DI length
+
+Period used to calculate directional movement for ADX.
+
+### ADX smoothing
+
+Smoothing period used by the ADX calculation.
+
+### Enable Market structure strategy rules
+
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
+
+### Directional swing structure entry filter · selected host timeframe · Strategy
+
+Require confirmed directional swing structure on the selected host timeframe for normal entries.
+
+### Directional swing structure entry filter · selected host timeframe · Indicator
+
+Chart-only selection: Require confirmed directional swing structure on the selected host timeframe for normal entries. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable Supply / demand zones strategy rules
+
+Master switch for this indicator family. OFF disables its strategy/chart controls while retaining subordinate choices for ON. A running job keeps its captured Start settings.
+
+### Enable
+
+Enable the manual price-marker and consecutive-completed-close entry filter. This does not submit an immediate manual order.
+
+### Bullish marker
+
+Underlying price marker used by the bullish manual-trend completed-close test.
+
+### Bearish marker
+
+Underlying price marker used by the bearish manual-trend completed-close test.
+
+### Consecutive completed closes
+
+Number of consecutive completed host closes required by the enabled manual price-marker filter.
+
+### Volume · chart only
+
+Show broker volume on the chart. Missing volume is not inferred, and this visual switch does not enable strategy entries.
+
+### RSI moving average · chart only
+
+Show the moving average of RSI in the chart study. It is independent of strategy entry selection.
+
+### Enable ema exits
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### EMA breach · configurable exit period · Strategy
+
+Allow an adverse breach of the configurable exit EMA to close an owned position. Completed/intrabar timing follows the selected timing rule.
+
+### EMA breach · configurable exit period · Indicator
+
+Chart-only selection: Allow an adverse breach of the configurable exit EMA to close an owned position. Completed/intrabar timing follows the selected timing rule. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Exit EMA period · host candle close
+
+Period of the EMA used by the enabled EMA breach exit.
+
+### Second EMA breach · Strategy
+
+Allow an adverse second-EMA breach as an independent exit criterion.
+
+### Second EMA breach · Indicator
+
+Chart-only selection: Allow an adverse second-EMA breach as an independent exit criterion. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### EMA gap contraction · Strategy
+
+Allow EMA-gap contraction to close a position when the associated exit family is enabled.
+
+### EMA gap contraction · Indicator
+
+Chart-only selection: Allow EMA-gap contraction to close a position when the associated exit family is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable supertrend exit
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### Supertrend reversal · Strategy
+
+Allow a confirmed Supertrend reversal to close the owned position when its exit family is enabled.
+
+### Supertrend reversal · Indicator
+
+Chart-only selection: Allow a confirmed Supertrend reversal to close the owned position when its exit family is enabled. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable rsi exit
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### RSI slope against the position · Strategy
+
+Allow RSI slope against the held direction to trigger an independent exit.
+
+### RSI slope against the position · Indicator
+
+Chart-only selection: Allow RSI slope against the held direction to trigger an independent exit. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable adx exit
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### ADX below the selected threshold · Strategy
+
+Allow ADX below the configured threshold to trigger an independent exit.
+
+### ADX below the selected threshold · Indicator
+
+Chart-only selection: Allow ADX below the configured threshold to trigger an independent exit. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable market structure exit
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### Opposing confirmed swing structure · Strategy
+
+Allow confirmed swing structure opposing the position to trigger an exit.
+
+### Opposing confirmed swing structure · Indicator
+
+Chart-only selection: Allow confirmed swing structure opposing the position to trigger an exit. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Enable supply / demand targets
+
+Enable or disable this exit section as a whole. Child selections are retained for re-enabling. Changes apply to the next Start, not silently to the active run.
+
+### Opposing strong 5m supply/demand target exit · optional · Strategy
+
+Optional exit at an opposing strong five-minute supply/demand zone. Zones and target eligibility depend on verified data.
+
+### Opposing strong 5m supply/demand target exit · optional · Indicator
+
+Chart-only selection: Optional exit at an opposing strong five-minute supply/demand zone. Zones and target eligibility depend on verified data. This controls the study/replay display and does not enable the corresponding strategy rule.
+
+### Quoted premium cap
+
+Optional quoted option-premium cap for entry selection. It is not an underlying stop or a total-account capital amount.
+
+### Daily loss budget
+
+Optional strategy loss-budget limit in the displayed native currency. Blank disables this optional limit; broker affordability checks still apply.
+
+### Additional slippage · option premium points per side
+
+Additional cost allowance in option-premium points per side. Actual fill slippage is already reflected in fill prices; an allowance is not a guaranteed fill adjustment.
+
+### Enable trailing stop-loss
+
+Enable application-managed trailing exits using fresh observations after entry. This does not place an exchange-resting protective stop by itself.
+
+### Trailing stop basis
+
+Choose percentage or underlying-point distance for the full-position trailing policy.
+
+### Trailing distance · percent or underlying points
+
+Distance used by the enabled trailing exit in the selected trailing basis.
+
+### Hard target · underlying price
+
+Optional absolute underlying target PRICE, not a number of points gained and not an option-premium target. Direction and tick validation apply.
+
+### Hard stop-loss · underlying price
+
+Optional absolute underlying stop PRICE, not a loss distance, percentage or option premium. Direction and tick validation apply.
+
+### Trade product
+
+Choose bought ATM options or supported perpetual futures. Options buy a Call/Put; futures use the supported long/short contract route.
+
+### Optional daily strategy cutoff · IST
+
+Optional crypto daily strategy cutoff in IST. Continuous mode has no daily cutoff; held contract expiry and risk rules still apply.
+
+### Price source
+
+Broker price/candle source used for the selected Delta signal instrument. Do not mix another broker’s prices into execution evidence.
+
+### Order terms
+
+Supported broker order execution terms. An IOC can fill partly and cancel the remainder; acceptance is not a completed fill.
+
+### Crypto trading schedule
+
+Continuous crypto trading runs across days. A daily cutoff is an explicit optional strategy policy; it does not mean crypto has an exchange close.
+
+### Chart view
+
+Host view displays broker OHLC. Synthetic view displays calculated Renko bodies. Historical chart signals remain simulations.
+
+### History review range
+
+Historical display/replay range. Changing the replay anchor can change path-dependent indicators; it does not rewrite an active runner’s captured settings.
+
+### From · IST
+
+Beginning of the custom historical chart range, interpreted in IST.
+
+### To · IST
+
+End of the custom historical chart range, interpreted in IST.
+
+### Show one-minute Supertrend label
+
+Show or hide the one-minute Supertrend chart label. Chart display only.
+
+### Show five-minute Supertrend label
+
+Show or hide the five-minute Supertrend chart label. Chart display only.
+
+### Chart & runner timeframe
+
+Authoritative chart and next-Start host candle interval. The Runner timeframe selector mirrors this same value.
+
+### Override entry direction
+
+Explicit direction for a separate override-entry action. Requires the active matching runner, fresh evidence, available quota and no conflicting exposure.
+
+### SMA of RSI period
+
+Number of usable RSI observations averaged by the chart-only SMA of RSI.
+
+### Re-entry after adopted exit
+
+After an adopted existing position exits, allow later qualifying strategy entries. OFF completes management after that position closes.
+
+### Mode
+
+Filter displayed journal records by Paper or Live. Filtering does not delete trades or change execution mode.
+
+### Manual brick reference
+
+Reference sizing value retained by the manual-brick workflow; the displayed verified calculation and selected contract policy govern its use.
+
+## Sector analysis, handoff, screener and planning parameters
+
+### Filter
+
+Limit the displayed sector rows to the chosen rank, rotation, alignment or relative-strength category. This is a view filter, not an entry order.
+
+### Sort by
+
+Choose the metric used to order sector rows. A ranking is analysis rather than a confirmed trade signal.
+
+### Sector analysis refresh interval
+
+How often sector analysis is refreshed. A new response is not necessarily a new completed market candle.
+
+### Lots per legBuys this many lots of both the ATM call and put. Confirm available funds before live use.
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Start time
+
+Earliest time at which a new entry may qualify, in IST. It does not guarantee an entry at that time.
+
+### End time
+
+Latest time at which a new entry may qualify, in IST. Exit management follows the strategy’s separate rules.
+
+### Lots per leg
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Hard stop (premium points)
+
+Combined option-premium stop distance in points for the straddle. Both legs and residual orders must be reconciled separately.
+
+### Target (premium points)
+
+Combined option-premium profit target in points for the straddle, distinct from an underlying-price target.
+
+### Entry start (IST)
+
+Earliest time at which a new entry may qualify, in IST. It does not guarantee an entry at that time.
+
+### Entry end (IST)
+
+Latest time at which a new entry may qualify, in IST. Exit management follows the strategy’s separate rules.
+
+### Apply these capital limits to analysis and ticket sizing
+
+Apply the optional capital and risk constraints to analysis and ticket sizing. Turning this off does not disable independent broker or strategy checks.
+
+### Planning capital (₹)
+
+INR capital used for planning position sizes; it is separate from actual broker cash.
+
+### Maximum daily loss (₹)
+
+Maximum planned daily loss in INR when optional planning controls apply.
+
+### Per-idea risk allocation (₹)
+
+Maximum planned risk allocated to one trade idea in INR.
+
+### Reserved risk buffer (₹)
+
+INR buffer withheld from the planning risk allocation.
+
+### Maximum simultaneous positions
+
+Maximum simultaneously planned positions when the planning policy is enforced.
+
+### Optional minimum reward:risk (0 = no gate)
+
+Minimum planned reward divided by planned risk. Zero disables this optional planning gate.
+
+### Stop / invalidation basis
+
+Specify an exact invalidation price or a percentage distance when preparing an analysis plan.
+
+### Order-type preference
+
+Preferred ticket order type; actual route support and the preview determine whether submission is available.
+
+### Include freshly read selected-broker available funds
+
+Request that freshly read funds from the selected broker be included in the analysis packet.
+
+### I confirm funds may be included in this local packet
+
+Consent to including the selected account’s funds in the local analysis packet; it does not authorize an order.
+
+### Broker
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Defined-risk proposal
+
+Choose a proposal from the current analysis packet for a separate reviewed ticket. A proposal is not a broker fill.
+
+### Quantity / lots
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Declared external open risk (₹)
+
+Manually declare INR risk from exposure outside the positions known to this workflow.
+
+### Enable policy after acknowledgement
+
+Policy activation choice. Saving an enabled flag alone does not bypass acknowledgement, runtime availability or broker validation.
+
+### Kill switch engaged
+
+Engage the policy kill switch to block new automatic activity covered by this policy. Already accepted orders need reconciliation.
+
+### Halt on uncertain order status
+
+Halt new policy actions when a previous order has an uncertain outcome.
+
+### Completed candles required
+
+Require completed-candle evidence for policy signals.
+
+### Full option chain/master/liquidity/Greeks/lot/tick evidence required
+
+Require verified option master, chain, liquidity, Greeks, lot and tick evidence for an option proposal.
+
+### Stop or defined-risk spread required
+
+Require a stop or supported defined-risk structure before a policy proposal is eligible.
+
+### Target required
+
+Require an explicit target in eligible policy proposals.
+
+### Execution mode
+
+Choose a Paper policy or the separately gated Live route. A saved draft is not proof that execution is running.
+
+### Universe
+
+Restrict eligible instruments to the selected equity/option universe.
+
+### Exact allowed FYERS underlyings, comma-separated
+
+Exact allowed FYERS underlying symbols; entries outside this allowlist are ineligible.
+
+### Supported index underlyings
+
+Index underlyings permitted by the policy; a name still requires supported current contracts.
+
+### Allowed segments, comma-separated
+
+Comma-separated segment allowlist for the optional policy.
+
+### Allowed strategies, comma-separated
+
+Comma-separated strategy allowlist for the optional policy.
+
+### Completed-candle signal conditions, one per line15m, 1h, Daily and Weekly completed candles must all be fresh Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEA
+
+Completed-candle alignment conditions required by the optional policy; unavailable or stale observations do not count as agreement.
+
+### Planning capital (₹)
+
+INR planning capital for this policy, separate from broker funds.
+
+### Maximum daily loss (₹)
+
+Maximum daily INR loss allowed by this policy.
+
+### Per-idea risk (₹)
+
+Maximum INR risk allocated to one idea by this policy.
+
+### Reserved risk buffer (₹)
+
+INR risk buffer retained by this policy.
+
+### Maximum concurrent positions
+
+Maximum concurrent positions permitted by this policy.
+
+### Maximum concurrent orders
+
+Maximum simultaneously outstanding orders permitted by this policy.
+
+### Minimum reward:risk
+
+Minimum expected reward-to-risk ratio for eligible policy proposals.
+
+### Order type
+
+Order type permitted by this policy; the shown policy supports limit-only submission.
+
+### Maximum limit buffer (%)
+
+Maximum percentage price buffer permitted around the policy reference quote.
+
+### Maximum bid/ask spread (%)
+
+Maximum permitted bid/ask spread percentage before an entry is vetoed.
+
+### Trading start (IST)
+
+Beginning of the policy entry window, in IST.
+
+### Trading end (IST)
+
+End of the policy entry window, in IST; existing exposure still needs its applicable exit management.
+
+### Minimum DTE
+
+Minimum days to expiry accepted by the option policy.
+
+### Maximum DTE
+
+Maximum days to expiry accepted by the option policy.
+
+### Cooldown (minutes)
+
+Minimum wait in minutes before another policy action covered by the cooldown.
+
+### Stale-data veto (seconds)
+
+Maximum permitted evidence age in seconds; older data vetoes the policy action.
+
+### Exact policy acknowledgement
+
+Acknowledgement required by this policy workflow after reviewing its complete preview. It is separate from the Renko configuration-choice popup.
+
+### Recommendation textVerify the source independently. The ticket uses the FYERS master and a fresh FYERS quote.
+
+Recommendation text to parse into a reviewed ticket. Verify its source, instrument and levels; parsing does not submit an order.
+
+### Lots
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Segment
+
+Exchange/product segment used to restrict broker-master search and supported execution routes.
+
+### Broker-master instrument
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Broker-supported symbol or option searchFor stock options, enter the underlying or exact master search. Expiry, strike, call/put, lot size and tick must be returned by broker metad
+
+Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
+
+### Research timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### EMA band length (High / Low)Applies separately to High and Low, exactly as the Pine source.
+
+EMA period applied independently to candle High and Low to form the EMA band.
+
+### Chart timeframeDisplay only; this never changes the runner’s timeframe or trade logic.
+
+Display-only chart timeframe; it does not change an active EMA Band runner’s trade logic.
+
+### Chart historyControls the displayed FYERS history only.
+
+Number of historical broker candles shown in the chart; this is a display setting.
+
+### Same-direction re-entry cooldown (bars)
+
+Minimum completed bars between repeated entries in the same direction.
+
+### Entry session (IST)Optional Pine entry filter; exits remain active outside it.
+
+Optional IST entry-session filter. The strategy’s exit monitoring remains separate.
+
+### Signal confirmation
+
+This EMA Band workflow uses completed-candle confirmation.
+
+### Exact broker-master underlyingScreened against the current master only.
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### KAMA efficiency length
+
+Completed-close efficiency-ratio lookback used by KAMA.
+
+### Fast / slow lengths
+
+Fast smoothing length used in the adaptive KAMA calculation.
+
+### Fast / slow lengths
+
+Slow smoothing length used in the adaptive KAMA calculation.
+
+### Minimum efficiency ratio
+
+Minimum efficiency ratio accepted by the KAMA entry gate.
+
+### Breakout / cooldown bars
+
+Completed-bar lookback used to establish the KAMA breakout condition.
+
+### Breakout / cooldown bars
+
+Completed bars required between eligible KAMA entries.
+
+### Allow KAMA reclaim entries
+
+Permit qualifying completed-close KAMA reclaim entries in addition to the supported breakout path.
+
+### Mode
+
+Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.
+
+### Quantity
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Invalidation / stop price
+
+Absolute invalidation/stop price for the KAMA idea; source direction and tick checks apply.
+
+### Maximum idea risk (₹)
+
+Maximum INR risk permitted for this KAMA idea.
+
+### Friendly label (optional)
+
+Optional display name for a saved screener; it does not change the query.
+
+### Chartink screener URL
+
+Chartink screener to evaluate. Results are analysis candidates; submission uses a separate broker-native ticket.
+
+### Broker account
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Cash product
+
+Choose intraday cash or delivery CNC for eligible screener orders.
+
+### Declared external open risk (₹)
+
+Manually declare INR risk from exposure outside the positions known to this workflow.
+
+### UnderlyingOnly current FYERS cash/index or commodity-future underlyings with listed options are shown.
+
+Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
+
+### UnderlyingChoose an underlying; the completed EMA Band signal chooses Call (CE) or Put (PE).
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### ModePaper/forward testing is active. No broker order route exists in this mode.
+
+Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.
+
+### LotsQuantity for the automatic BUY entry order.
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Stop-loss (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price falls this % below entry. Leave blank to exit purely on the EMA Band indica
+
+Optional option-premium percentage stop below the filled entry. Blank retains the normal indicator-based exit policy.
+
+### Target (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price rises this % above entry. Leave blank to exit purely on the EMA Band indicator
+
+Optional option-premium percentage target above the filled entry. Blank retains the normal indicator-based exit policy.
+
+## Delta research parameters
+
+### Research underlying
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Start date · IST
+
+Beginning of the research history in IST.
+
+### End date · IST · inclusive
+
+Inclusive end date of the research history in IST.
+
+### Held-out tail · %
+
+Chronological tail percentage reserved for held-out evaluation instead of fitting.
+
+### RSI lengths · comma-separated
+
+Comma-separated RSI periods to compare in the research grid.
+
+### RSI MA lengths · comma-separated
+
+Comma-separated RSI moving-average periods to compare.
+
+### Entry rules to compare
+
+Compare the supported crossover-only or crossover-plus-EMA-touch entry rules.
+
+### Futures direction
+
+Research long-only, short-only or both futures directions. This does not change a live runner.
+
+### Select ADX(14) entry filter
+
+Include the ADX entry filter in the selected research configuration.
+
+### Compare ADX off / on
+
+Compare both enabled and disabled ADX variants in the research grid.
+
+### Select previous-candle momentum filter
+
+Include the previous-candle momentum entry filter in research.
+
+### Compare momentum off / on
+
+Compare both enabled and disabled momentum variants.
+
+### ADX thresholds · comma-separated
+
+Comma-separated ADX thresholds tested by the research grid.
+
+### Bollinger lengths · comma-separated
+
+Comma-separated Bollinger lookbacks used to study volatility squeeze.
+
+### Standard deviations · comma-separated
+
+Standard-deviation multipliers for the research Bollinger bands.
+
+### Squeeze history · bars · comma-separated
+
+Lookback bars used to rank historical squeeze observations.
+
+### Squeeze percentiles · comma-separated
+
+Percentile thresholds used to classify volatility squeeze.
+
+### Release windows · bars · comma-separated
+
+Bar windows over which a research squeeze release may qualify.
+
+### Initial equity · native USD (engine input)
+
+Initial equity in native USD for the research engine; not a broker deposit.
+
+### Fixed contracts
+
+Fixed contract quantity used by the research simulation.
+
+### Fee allowance · bps / fill
+
+Assumed fee basis points for each simulated fill.
+
+### Slippage · bps / fill
+
+Assumed slippage basis points for each simulated fill.
+
+### Half-spread · bps / fill
+
+Assumed half-spread basis points per simulated fill.
+
+### Funding drag · bps / day
+
+Assumed funding drag in basis points per day; actual funding can differ.
+
+### Inspect period
+
+Inspect training or chronological held-out research results.
+
+## Delta trading parameters
+
+### Broker
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Workflow
+
+Choose read-only analysis, Paper, explicitly authorized Live execution, or research backtesting. These modes have different side effects.
+
+### Contract type
+
+Filter the broker contract master by supported derivative type.
+
+### Instrument search
+
+Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
+
+### Exact listed instrument
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### RSI length
+
+Number of completed price changes used to calculate the RSI that drives this workflow’s signal.
+
+### RSI MA
+
+Type of moving average applied to RSI, not to underlying price.
+
+### RSI MA length
+
+Period of the moving average applied to RSI.
+
+### Manual Submit side
+
+Direction for the next manual ATM option ticket: bullish buys a Call; bearish buys a Put.
+
+### Quantity · contractsWhole Delta contracts; units shown above.
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Order type
+
+Limit uses a price cap; market uses available executable prices. Both remain subject to supported broker terms.
+
+### Option limit premium · native quote points
+
+Limit premium for the exact option, in native quote units and aligned to its tick size.
+
+### Time in force
+
+IOC cancels an unfilled remainder; GTC can remain outstanding until filled or cancelled.
+
+### Position control
+
+Reduce-only restricts an order to decreasing existing exposure; it does not open a new position.
+
+### Strategy executionUnderlying RSI signals · ATM options by default
+
+Choose bought ATM options or supported futures long/short execution for the strategy.
+
+### Runner signal direction
+
+Allow both supported signal directions or restrict the runner to bullish calls.
+
+### Runner trailing stop · optionalOff by default · application-managed
+
+Enable the strategy’s optional application-managed trailing exit. Manual orders do not automatically inherit a runner’s trailing policy.
+
+### Trailing step mode
+
+Choose entry-based percentage/points step trailing or the separately supported full-position ATR trailing mode.
+
+### Trailing step
+
+Distance for the selected trailing policy, in percentage or native quote points as labelled.
+
+### ADX entry filter
+
+Enable the optional ADX strength entry filter. It does not disable independent exits.
+
+### Minimum ADX · must exceed
+
+Minimum ADX strength required by the enabled entry filter; the selected strategy’s strict comparison applies.
+
+### Saved contract / timeframe
+
+Choose a saved contract/timeframe view. Opening it is not Start authorization.
+
+## RSI / MA crossover runner parameters
+
+### Strategy label
+
+Friendly label for this strategy instance; it does not alter signal calculations.
+
+### Execution mode
+
+Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.
+
+### Maximum trades per runCaps entry orders, including uncertain submissions. Exit orders remain allowed. Resets only on a new start while flat.
+
+Maximum new entries per run. Exit orders remain allowed, and a new flat Start creates a new run quota.
+
+### Virtual Paper capital · INR
+
+Virtual Paper INR capital used for affordability and reservations; it does not alter live broker funds.
+
+### Lots
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Underlying spot target (optional)When either spot level is entered, EMA exit is ignored.
+
+Optional absolute underlying target. In this RSI/MA runner, setting either underlying hard level suppresses the EMA exit as described by the workflow.
+
+### Underlying spot stop-loss (optional)Completed-close checks. Blank levels are unused.
+
+Optional absolute underlying stop checked on completed closes. Blank leaves that level unused.
+
+### Quoted premium cap per entry (₹, optional)Leave blank for no per-entry cap. Any configured daily budget still applies.
+
+Optional per-entry quoted premium cap; blank disables that cap while any daily budget still applies.
+
+### Daily loss budget (₹, optional)Leave blank for no daily budget. When set, realized losses plus new premium must fit; fees are additional.
+
+Optional daily INR loss budget for this runner; realized losses and new premium are checked by its policy.
+
+### Trailing stopOption premium · optionalOff
+
+Enable the strategy’s optional application-managed trailing exit. Manual orders do not automatically inherit a runner’s trailing policy.
+
+### Trailing mode
+
+Choose a percentage of the filled option entry or a fixed premium-point step; it does not compound the base distance.
+
+### Trailing stepPercentage defaults to 10%. Points require your positive distance. Fixed distance; never compounds.
+
+Positive fixed trailing step. Percentage and premium-point units depend on the selected trailing mode.
+
+## EMA Band and KAMA parameters
+
+### Underlying search
+
+Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
+
+### Broker-master instrument
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Signal timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### RSI length
+
+Number of completed price changes used to calculate the RSI that drives this workflow’s signal.
+
+### RSI smoothing
+
+Use SMA or EMA as the smoothing of RSI for completed-candle crossovers.
+
+### RSI MA length
+
+Period of the SMA/EMA applied to RSI.
+
+## Holdings review parameters
+
+### Broker
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Show${Object.entries(labels).map(([key, text]) =>
+
+Filter the holdings review results by the displayed category. It does not sell or rebalance holdings.
+
+## Renko Engine parameters
+
+### Broker account
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Execution mode
+
+Historical replay, Paper or Live Renko Engine mode. Live requires its supported broker/runtime and explicit Start.
+
+### Underlying search
+
+Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
+
+### Instrument
+
+Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
+
+### Timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### Lots / Delta contracts
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Maximum entries per run
+
+Maximum new entries per run. Exit orders remain allowed, and a new flat Start creates a new run quota.
+
+### Paper capital · INR
+
+Virtual Paper INR capital used for affordability and reservations; it does not alter live broker funds.
+
+### History
+
+Historical replay window; it is research input rather than an active-run reset.
+
+### Deterministic anchor/start · IST
+
+Deterministic IST start/anchor for the recurrence and eligible replay window.
+
+### Percentage base hypothesis
+
+Select the engine hypothesis for the price base used in percentage sizing.
+
+### Directions
+
+Permit long, short or both directions in the engine hypothesis.
+
+### Research end · IST
+
+End of the research/engine evaluation window in IST.
+
+### Fixed box (points)
+
+Fixed brick distance in native underlying price points.
+
+### Flat hour · IST
+
+Hour of the configured session flat boundary in IST.
+
+### Flat minute · IST
+
+Minute of the configured session flat boundary in IST.
+
+### Brick calculation
+
+Choose percentage or fixed-price brick calculation. This is the engine brick mode, not Paper/Live execution mode.
+
+### Brick %
+
+Percentage used to derive a brick from the selected percentage base.
+
+### Range window · IST (HHMM-HHMM)
+
+IST interval used to construct the displayed intraday range study.
+
+### Reversal threshold (bricks)
+
+Required opposing move in brick units before the engine changes direction.
+
+### Round brick to symbol tick
+
+Round the calculated brick to the selected symbol tick.
+
+### Entry hypothesis
+
+Choose the explicitly labelled entry hypothesis; these research rules are not interchangeable.
+
+### Anchor level (0 = first close)
+
+Initial synthetic level; zero seeds it from the first eligible close.
+
+### Anchor direction (-1 / 0 / 1)
+
+Initial direction: -1 bearish, 0 neutral or 1 bullish.
+
+### Entry session · IST (HHMM-HHMM)
+
+Permitted IST entry window in HHMM-HHMM form.
+
+### NSE intraday session filter
+
+Restrict entry eligibility to the configured IST session and enable its session flat rule.
+
+### Previous daily HLC CPR
+
+Show central pivot range calculated from previous daily high, low and close. Chart context only.
+
+### Opening / first later red 44 / 56
+
+Show opening/first-later-red 44/56 chart study. Chart context only.
+
+### Intraday range 44 / 56
+
+Show the selected intraday range 44/56 study. Chart context only.
+
+### Step hypothesis
+
+Select how the engine advances its synthetic level after a price move: whole bricks, one per bar, or price-minus-brick.
+
+## Server resources parameters
+
+### History
+
+Time window for displayed retained resource samples. It does not change services or restart them.
+
+### Service to restart
+
+Choose the dashboard or selected broker service, inspect exposure requirements, then explicitly request its restart. Frequent probes report the result.
+
+## Telegram parser parameters
+
+### Channel display nameDisplay name only; channel ID and bot access are still required.
+
+Friendly display name for a Telegram source; a valid channel identity and bot access are still required.
+
+### Channel @username or -100 ID
+
+Exact public channel handle or private numeric channel identity accessible to the configured bot.
+
+### Polling interval · seconds
+
+Polling interval in seconds. Polling discovers new evidence; it does not guarantee a fill or replay old submissions.
+
+### Order broker
+
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+
+### Quantity · whole Delta contracts
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Auto submission
+
+Explicit optional automatic submission policy. It is separate from loading recommendations; startup backlog remains review-only.
+
+### Telegram recommendation text
+
+Recommendation text used for parsing and review. Text edits invalidate an existing ticket.
+
+### Entry type
+
+Limit or stop-limit entry. Stop-limit requires a valid trigger and limit relationship.
+
+### Trigger price
+
+Trigger price for a supported stop-limit order; triggering does not guarantee a fill.
+
+### Limit price
+
+Limit price for the ticket, aligned to the selected broker contract’s tick.
+
+### Ticket product
+
+Choose the supported bought-ATM-option Renko owner workflow or the explicitly labelled legacy exact-contract route.
+
+### Option execution mode
+
+Paper simulates the selected option route; Live can send a real option order on explicit Submit.
+
+### Whole option contracts
+
+Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
+
+### Renko timeframe
+
+Candle interval for this workflow’s signals or replay. Active jobs retain their captured Start interval unless an explicit supported change is applied.
+
+### Renko EMA exit period
+
+EMA period for the selected completed-candle Renko exit.
+
+### XAUUSD → XAUT bought options · explicit gold-token proxy
+
+Explicitly permit the labelled XAUUSD-to-XAUT gold-token option proxy. This is not the same instrument as spot gold.
+
+### Completed-candle EMA exit
+
+Enable the selected completed-candle EMA exit for the option owner.
+
+### Renko Supertrend exit
+
+Enable the supported Renko Supertrend exit for the option owner.
+
+### I reviewed the mapped option, entered quantity and selected Renko exits; enter now when I click Submit.
+
+Explicit review of mapped option, quantity and selected exits before Submit. It does not make an old recommendation fresh.
+
+## WhatsApp parser parameters
+
+### Exact group name
+
+Exact WhatsApp group/chat name used by the local native polling helper.
+
+### Interval (seconds)
+
+Polling interval in seconds. Polling discovers new evidence; it does not guarantee a fill or replay old submissions.
+
+## Analysis handoff parameters
+
+### AI analysis path
+
+Choose broker candles/rule-based analysis with no AI call, or Codex / ChatGPT-account analysis. An API key is not required by these configured choices.
+
+### Index and commodity instruments
+
+Select one to six broker-native symbols for the asynchronous market analysis job.
+
+## Runner jobs parameters
+
+### Find a job
+
+Filter visible jobs by the displayed account, instrument, strategy or status.
+
+### Include stopped / saved
+
+Include inactive saved instances/history in the job view. This does not restart them.
+
+## Appearance and access parameters
+
+### Visible dashboard sections
+
+Choose which permitted sidebar sections are displayed. Hiding a section does not stop its jobs or grant missing permissions.

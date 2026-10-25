@@ -1,4 +1,5 @@
 """Read-only sector analysis using one owned Dhan account's Data API."""
+from .persistent_jobs import checkpoint
 from datetime import datetime, timedelta
 import logging
 import math
@@ -117,6 +118,7 @@ class DhanCandleHistoryProvider(CandleHistoryProvider):
         rows = {}
         daily = resolution == 'D'
         while cursor < end:
+            checkpoint("Collecting "+symbol+" Dhan history chunk.")
             chunk_end = min(end, cursor + timedelta(days=365 if daily else 89))
             payload = dict(meta, oi=False, fromDate=cursor.isoformat(), toDate=chunk_end.isoformat())
             if daily:

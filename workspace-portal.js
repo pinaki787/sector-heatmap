@@ -2,9 +2,9 @@
 (function(root){
 'use strict';
 async function testConnection(account,request){
- if(!account?.id||!['FYERS','DHAN','DELTA_INDIA'].includes(account.broker))throw Error('Select a saved broker account.');
+ if(!account?.id||!['FYERS','DHAN','DELTA_INDIA','MOTILAL_OSWAL'].includes(account.broker))throw Error('Select a saved broker account.');
  const prefix='/broker-workspace/'+encodeURIComponent(account.id);
- const url=account.broker==='DHAN'?'/api/dhan/status?account_id='+encodeURIComponent(account.id):prefix+(account.broker==='FYERS'?'/api/account':'/api/delta-india/verify-auth');
+ const url=account.broker==='DHAN'?'/api/dhan/status?account_id='+encodeURIComponent(account.id):prefix+(account.broker==='MOTILAL_OSWAL'?'/api/motilal/status':account.broker==='FYERS'?'/api/account':'/api/delta-india/verify-auth');
  const response=await request(url,account.broker==='DELTA_INDIA'?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{cache:'no-store'});
  const data=await response.json();
  if(!response.ok)throw Error(String(data.error||data.message||'Broker rejected the connection test.').replace(' Do not retry an uncertain order submission.',''));
@@ -22,7 +22,7 @@ const $ = id => document.getElementById(id);
 function updateAccountLabelHint() {
   const form = $('add-account');
   const broker = form.elements.namedItem('broker').value;
-  form.elements.namedItem('label').placeholder = 'Personal · ' + ({FYERS: 'FYERS', DHAN: 'Dhan', DELTA_INDIA: 'Delta India'}[broker] || 'Broker');
+  form.elements.namedItem('label').placeholder = 'Personal · ' + ({FYERS: 'FYERS', DHAN: 'Dhan', MOTILAL_OSWAL: 'Motilal Oswal', DELTA_INDIA: 'Delta India'}[broker] || 'Broker');
 }
 $('add-account').elements.namedItem('broker').addEventListener('change', updateAccountLabelHint);
 updateAccountLabelHint();
@@ -34,6 +34,10 @@ async function api(path, data) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Request failed.');
   return result;
+}
+async function notificationApi(path,data){
+  const response=await fetch('/api/notification-admin/'+path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':currentUser?.csrf||''},body:JSON.stringify(data)});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'Notification settings unavailable.');return result;
 }
 async function refresh() {
   currentUser = await api('me');
@@ -52,16 +56,31 @@ async function refresh() {
   } catch { $('owner-dashboard-link').href='/'; }
   $('user-list').replaceChildren();
   if(currentUser.admin){
-    const {users,sections}=await api('users');
+    const {users,sections}=await api('users');sections['runner-jobs']='Saved analysis and runner jobs';
+    let emailControls=false;
+    try{const notificationSettings=await notificationApi('users');if(notificationSettings.enabled===true){const byName=new Map(notificationSettings.users.map(u=>[u.username,u]));for(const user of users){const settings=byName.get(user.username);if(settings)Object.assign(user,settings);}emailControls=true;}}catch{}
+
     const sidebar=await api('sidebar-visibility');$('sidebar-choices').replaceChildren();
     for(const [key,value] of Object.entries(sidebar)){const label=document.createElement('label');label.className='permission-option';const check=document.createElement('input');check.type='checkbox';check.name=key;check.checked=value;label.append(check,document.createTextNode(sections[key]||({'renko-engine':'Renko Engine','broker-connection':'Broker connection'})[key]||key));$('sidebar-choices').append(label);}
 
     const visibility=await api('renko-visibility');for(const [key,value] of Object.entries(visibility))$('renko-visibility').elements.namedItem(key).checked=value;
     const table=document.createElement('table');table.className='user-table';
-    const head=table.createTHead().insertRow();for(const name of ['Username','Role']){const th=document.createElement('th');th.textContent=name;head.append(th);}
+    const head=table.createTHead().insertRow();for(const name of ['Username','Role',...(emailControls?['Notification email']:[])]){const th=document.createElement('th');th.textContent=name;head.append(th);}
     head.append(Object.assign(document.createElement('th'),{textContent:'Visible sections'}));
     const body=table.createTBody();for(const user of users){
       const row=body.insertRow();row.insertCell().textContent=user.username;row.insertCell().textContent=user.admin?'Administrator':'User';
+      if(emailControls){
+      const emailCell=row.insertCell();emailCell.className='user-notification-email';
+      const emailForm=document.createElement('form');emailForm.className='notification-email-form';
+      const emailInput=document.createElement('input');emailInput.type='email';emailInput.maxLength=254;emailInput.autocomplete='off';emailInput.value=user.notification_email||'';emailInput.placeholder='Recipient email address';emailInput.setAttribute('aria-label','Notification email for '+user.username);
+      const emailEnabled=document.createElement('input');emailEnabled.type='checkbox';emailEnabled.checked=user.notification_email_enabled===true;emailEnabled.setAttribute('aria-label','Send notifications to '+user.username);
+      const emailEnableLabel=document.createElement('label');emailEnableLabel.className='check';emailEnableLabel.append(emailEnabled,document.createTextNode('Send notifications'));
+      const emailSave=document.createElement('button');emailSave.type='submit';emailSave.textContent='Save email';emailSave.className='permission-save';
+      const emailHint=document.createElement('small');emailHint.textContent='Receives only this user’s own account updates when checked. A valid email is required.';
+      emailForm.append(emailInput,emailEnableLabel,emailSave,emailHint);
+      emailForm.onsubmit=async event=>{event.preventDefault();emailInput.required=emailEnabled.checked;if(!emailInput.reportValidity())return;emailSave.disabled=true;try{const result=await notificationApi('user-email',{username:user.username,email:emailInput.value.trim(),enabled:emailEnabled.checked});emailInput.value=result.notification_email;emailEnabled.checked=result.notification_email_enabled;message('Notification settings saved for '+user.username+'. Email delivery is '+(result.notification_email_enabled?'enabled.':'disabled.'));}catch(e){message(e.message);}finally{emailSave.disabled=false;}};
+      emailCell.append(emailForm);
+      }
       const cell=row.insertCell();cell.className='user-permissions';if(user.admin){cell.textContent='All sections';continue;}
       const assigned=new Set(user.features);const controls=[];const choices=document.createElement('div');choices.className='permission-grid';cell.append(choices);
       for(const [key,name] of Object.entries(sections)){const label=document.createElement('label');label.className='permission-option';const check=document.createElement('input');check.type='checkbox';check.checked=assigned.has(key);check.value=key;label.append(check,document.createTextNode(name));choices.append(label);controls.push(check);}
@@ -79,7 +98,7 @@ async function refresh() {
     const section = document.createElement('section'); section.className = 'panel account'; section.dataset.broker = account.broker;
     const detail = document.createElement('div'), title = document.createElement('strong'), meta = document.createElement('small');
     title.textContent = account.label;
-    meta.textContent = `${({FYERS:'FYERS',DHAN:'Dhan',DELTA_INDIA:'Delta India'})[account.broker]} · ${account.account_ref} · ${account.configured ? 'Connection saved' : 'Connection needed'} · ${account.live_enabled ? 'Live capability enabled' : 'Paper / read-only'} · ${account.running ? 'Dashboard process running' + (account.dashboard_pid ? ' · PID ' + account.dashboard_pid : '') : 'Dashboard stopped'}`;
+    meta.textContent = `${({FYERS:'FYERS',DHAN:'Dhan',MOTILAL_OSWAL:'Motilal Oswal',DELTA_INDIA:'Delta India'})[account.broker]} · ${account.account_ref} · ${account.configured ? 'Connection saved' : 'Connection needed'} · ${account.live_enabled ? 'Live capability enabled' : 'Paper / read-only'} · ${account.running ? 'Dashboard process running' + (account.dashboard_pid ? ' · PID ' + account.dashboard_pid : '') : 'Dashboard stopped'}`;
     detail.append(title, meta);
     const actions = document.createElement('div'); actions.className = 'actions';
     const configure = document.createElement('button'); configure.type = 'button'; configure.className = 'quiet'; configure.textContent = 'Connection settings'; configure.disabled = false;
@@ -114,6 +133,23 @@ async function refresh() {
       disconnect.onclick=async()=>{
         disconnect.disabled=true;
         try{
+          if(account.broker==='MOTILAL_OSWAL'){
+            const target='/broker-workspace/'+encodeURIComponent(account.id);
+            if(account.disconnected){
+              await api('reconnect',{account_id:account.id});
+              if(!account.running)await api('open',{account_id:account.id});
+            }else{
+              if(!account.running)await api('open',{account_id:account.id});
+              const response=await fetch(target+'/api/motilal/disconnect-session',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':currentUser?.csrf||''},body:'{}'});
+              const value=await response.json();
+              if(!response.ok){
+                if(value.auth_required){location.assign(target+'/?challenge=otp#saved-trading-login');return;}
+                await refresh();throw Error(value.error||'Broker logout or fresh OTP request failed.');
+              }
+              if(!value.otp_required)throw Error('Fresh OTP challenge was not confirmed.');
+            }
+            location.assign(target+'/?challenge=otp#saved-trading-login');return;
+          }
           await api(account.disconnected?'reconnect':'disconnect',{account_id:account.id});
           if(account.broker==='DHAN')sessionStorage.removeItem('dhan-login-account');
           result.textContent='';
@@ -126,6 +162,12 @@ async function refresh() {
       actions.append(disconnect);
       if(account.disconnected){test.disabled=true;open.disabled=true;result.textContent='Disconnected';}
     }
+    if (currentUser.admin) {
+      const restart = document.createElement('a');
+      restart.className = 'quiet';restart.href='/?serverResources=1';
+      restart.textContent='Restart in Server resources';
+      actions.append(restart);
+    }
     actions.prepend(configure, test, open);result.className='account-status';section.append(detail, actions, result); $('accounts').append(section);
   }
 }
@@ -137,6 +179,25 @@ async function runConnectionTest(account,button,result){
 }
 $('test-connection').onclick=()=>runConnectionTest(currentAccount,$('test-connection'),$('connection-test-result'));
 function edit(account) {
+ if(account.broker==='MOTILAL_OSWAL'){
+  currentAccount=account;$('configuration').hidden=false;
+  if($('connection-name-controls'))$('connection-name-controls').hidden=true;
+  if($('dhan-api-fields'))$('dhan-api-fields').hidden=true;
+  $('configuration-title').textContent='Connect '+account.label;
+  $('callback').textContent='Client code: '+account.account_ref+'. Register this redirect URL in your Motilal API application: '+(location.protocol==='https:'?location.origin+'/broker-workspace/'+account.id+'/workspace-entry':'http://127.0.0.1:'+account.port+'/workspace-entry')+'. Save API credentials, open this account dashboard and connect to Motilal. Register server static IP '+(account.server_public_ip||'(shown after saving)')+' in the broker portal before Live orders.';
+  $('key-label').firstChild.textContent='Motilal API key';$('secret-label').firstChild.textContent='Motilal API secret';
+  $('credential-key').value=account.credential_key||'';$('credential-key').required=!account.configured;
+  $('credential-secret').value='';$('credential-secret').required=!account.configured;$('credential-secret').placeholder=account.configured?'Saved securely · leave blank to keep':'Enter API secret';
+  if($('redirect-label'))$('redirect-label').hidden=true;
+  if($('credential-redirect'))$('credential-redirect').required=false;
+  $('live-enabled').checked=!!account.live_enabled;
+  for(const id of ['credential-key','credential-secret','live-enabled'])$(id).disabled=!!account.running;
+  $('test-connection').disabled=!account.running;
+  $('connection-test-result').textContent='Open the dashboard and complete Motilal login before testing.';
+  const tradingLogin=document.createElement('a');tradingLogin.textContent='Trading login & OTP settings';tradingLogin.href='/broker-workspace/'+account.id+'/#saved-trading-login';tradingLogin.className='button';$('callback').append(document.createElement('br'),tradingLogin);
+  $('configuration').scrollIntoView({behavior:'smooth',block:'start'});return;
+ }
+
  $('connection-test-result').textContent='Tests saved credentials. Save any changes first.';
  $('test-connection').disabled=!account.configured;
   currentAccount = account; $('connection-name-controls').hidden=!currentUser?.account_rename; $('connection-name').value=account.label; $('configuration').hidden = false;
@@ -182,7 +243,7 @@ bind('change-password', async data => {
   message('Password updated. All your sessions were signed out. Background strategies continue their existing lifecycle.');
 });
 async function saveAccountCredentials(){
-  const credentials = currentAccount.broker === 'FYERS' ? {FYERS_APP_ID: $('credential-key').value, FYERS_SECRET_KEY: $('credential-secret').value, FYERS_REDIRECT_URI: $('credential-redirect').value} : currentAccount.broker === 'DHAN' ? {DHAN_CLIENT_ID: $('credential-key').value, DHAN_ACCESS_TOKEN: $('credential-secret').value, ...(currentUser?.dhan_api_login?{DHAN_API_KEY:$('dhan-api-key').value,DHAN_API_SECRET:$('dhan-api-secret').value}:{})} : {DELTA_INDIA_API_KEY: $('credential-key').value, DELTA_INDIA_API_SECRET: $('credential-secret').value};
+  const credentials = currentAccount.broker === 'MOTILAL_OSWAL' ? {MO_CLIENT_ID:currentAccount.account_ref,MO_API_KEY:$('credential-key').value,MO_API_SECRET:$('credential-secret').value} : currentAccount.broker === 'FYERS' ? {FYERS_APP_ID: $('credential-key').value, FYERS_SECRET_KEY: $('credential-secret').value, FYERS_REDIRECT_URI: $('credential-redirect').value} : currentAccount.broker === 'DHAN' ? {DHAN_CLIENT_ID: $('credential-key').value, DHAN_ACCESS_TOKEN: $('credential-secret').value, ...(currentUser?.dhan_api_login?{DHAN_API_KEY:$('dhan-api-key').value,DHAN_API_SECRET:$('dhan-api-secret').value}:{})} : {DELTA_INDIA_API_KEY: $('credential-key').value, DELTA_INDIA_API_SECRET: $('credential-secret').value};
   await api('configure', {account_id: currentAccount.id, credentials, live_enabled: $('live-enabled').checked});
 }
 bind('configure', async () => {

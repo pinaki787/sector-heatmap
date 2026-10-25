@@ -49,7 +49,7 @@ class Service:
 
     def chart_config(self, query):
         raw={k:query[k][0] for k in settings({}) if k in query}
-        for key,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        for key,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
         carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
         if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
         deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
@@ -63,7 +63,7 @@ class Service:
         config=dict(execution_route=route,**settings(raw),**exits,**exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]}),underlying=(query.get('symbol') or [''])[0],timeframe=(query.get('timeframe') or ['5 minutes'])[0],session_deadline=deadline,carry_policy=carry,broker='DELTA_INDIA')
         if self.instrument and config['underlying']!=self.instrument:raise ValueError('Select this instance instrument or create another instance.')
         from .chart_destinations import query_settings
-        config.update(query_settings(query))
+        config.update(query_settings({**query,'broker':[self.execution.account['broker'] if hasattr(self,'execution') else 'DELTA_INDIA']}))
         config['chart_zone_target_enabled']=(query.get('chart_zone_target_enabled') or ['false'])[0]=='true'
         self.chart_broker.session_policy(config)
         return config
@@ -102,6 +102,12 @@ class Service:
             config['_chart_zone_rows']=[r for r in self.chart_broker.candles(dict(config,timeframe='5 minutes',history_start=begin)) if begin<=r['timestamp']<end and not r.get('is_forming')]
         if config.get('higher_timeframe_enabled') and config.get('chart_entry_guards'):
             config['_chart_higher_rows']=[r for r in self.chart_broker.candles(dict(config,timeframe=config['supertrend_timeframe'],history_start=begin)) if begin<=r['timestamp']<end and not r.get('is_forming')]
+        from . import mtf_rsi
+        if config.get('chart_entry_guards') and mtf_rsi.enabled(config):
+            config['_chart_rsi_rows']={}
+            for frame in mtf_rsi.frames(config):
+                try:config['_chart_rsi_rows'][frame]=self.chart_broker.candles(dict(config,timeframe=frame,history_start=begin))
+                except Exception:config['_chart_rsi_rows'][frame]=[]  # Missing native evidence blocks the enabled slot.
         result=analysis(candles,config,tick,retain=None)
         display_start=datetime.combine(first,datetime.min.time(),tz).timestamp()
         rows=[r for r in result['rows'] if r['timestamp']>=display_start]

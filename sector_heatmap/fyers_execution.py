@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from fyers_apiv3 import fyersModel
 from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
+from .exposure_guard import matches_exposure, open_exposures
 from .config import _atomic_private_write, load_config
 from .equity_exit_plan import build_equity_exit_plan
 from .premium_exit_mapping import premium_exits, cash_exits
@@ -99,6 +100,36 @@ class PreviewChanged(RuntimeError):
     def __init__(self, preview):
         super().__init__("Fresh FYERS state changed the exact ticket; review and confirm the replacement preview.")
         self.preview = preview
+
+
+def _contract_identity(instrument):
+    fields=('symbol','action','quantity','lot_size','tick_size','expiry_epoch','strike','option_type')
+    return instrument.get('kind'),[{k:leg.get(k) for k in fields} for leg in instrument['contracts']]
+
+
+def _reviewed_instrument(current, reviewed):
+    """Refresh evidence while retaining the exact LIMIT prices already approved."""
+    if _contract_identity(current)!=_contract_identity(reviewed):return current
+    result=deepcopy(reviewed)
+    for leg,fresh in zip(result['contracts'],current['contracts']):
+        for key in ('quote','chain'):
+            if key in fresh:leg[key]=deepcopy(fresh[key])
+    result['margin']=deepcopy(current['margin'])
+    result['submission_eligible']=current['submission_eligible']
+    if current['kind']=='EQUITY':
+        result['minimum_cash_required']=round(current['minimum_cash_required']/current['entry_price']*result['entry_price'],2)
+    return result
+
+
+def _ticket_terms(preview):
+    """Execution terms, excluding changing market/account observation metadata."""
+    instrument=deepcopy(preview['instrument'])
+    for leg in instrument['contracts']:
+        leg.pop('quote',None);leg.pop('chain',None)
+    instrument.get('margin',{}).pop('message',None)
+    protection={k:deepcopy(v) for k,v in (preview.get('protection') or {}).items() if k not in ('calculated_at','implied_volatility')}
+    return {k:deepcopy(preview.get(k)) for k in ('broker','underlying','direction','underlying_invalidation','order_policy','entry_order')}|dict(instrument=instrument,protection=protection)
+
 
 
 def _require_cash_session(now):
@@ -460,6 +491,10 @@ class FyersExecutionService:
         if (quote['ask']-quote['bid']) / ((quote['ask']+quote['bid'])/2) * 100 > MAX_SPREAD_PCT:
             raise FyersExecutionUnavailable('Fresh option bid/ask spread exceeds the liquidity limit.')
         price = _round_tick(quote['ask'], selected['tick_size'])
+        if payload.get('recommended_entry_limit') is not None:
+            requested=_number(payload['recommended_entry_limit'])
+            if requested is None or requested<=0 or abs(_round_tick(requested,selected['tick_size'])-requested)>1e-8:raise ValueError('Exact tick-aligned recommended option entry limit required.')
+            price=requested
         quantity = int(lots) * int(selected['lot_size'])
         premium = round(price * quantity, 2)
         target = _number(proposal.get('target_exit_points'))
@@ -524,6 +559,10 @@ class FyersExecutionService:
             raise FyersExecutionUnavailable(f"FYERS omitted a valid two-sided quote for {symbol}.")
         quote = quotes[symbol]
         limit_price = _round_tick(quote["ask"] if action == "BUY" else quote["bid"], metadata["tick_size"])
+        if payload.get('recommended_entry_limit') is not None:
+            requested=_number(payload['recommended_entry_limit'])
+            if requested is None or requested<=0 or abs(_round_tick(requested,metadata['tick_size'])-requested)>1e-8:raise ValueError('Exact tick-aligned recommended cash entry limit required.')
+            limit_price=requested
         if direction == "BULLISH" and invalidation >= limit_price or direction == "BEARISH" and invalidation <= limit_price:
             raise FyersExecutionUnavailable("The accepted invalidation is no longer on the safe side of the fresh FYERS entry quote.")
         target = _number(proposal.get("target"))
@@ -555,7 +594,7 @@ class FyersExecutionService:
             "submission_eligible": (action == "BUY" or verified_intraday) and exit_plan["mode"] == "FIXED_TARGET",
         }
 
-    def _preflight(self, payload, read_client=None):
+    def _preflight(self, payload, read_client=None, reviewed=None):
         if str(payload.get("broker", "")).lower() != "fyers":
             raise ValueError("FYERS must be explicitly selected for this dashboard's order preview.")
         invalidation = _number(payload.get("invalidation"))
@@ -568,6 +607,20 @@ class FyersExecutionService:
             raise FyersExecutionUnavailable(_message(profile, "FYERS profile/token validation failed."))
         if payload.get("require_market_open") is True:
             _require_cash_session(self.now())
+        if payload.get('handoff_auto') is True:
+            from .handoff_entry_conditions import reached
+            condition=payload.get('entry_condition')
+            if not condition:raise ValueError('Explicit accepted recommendation entry condition required.')
+            fresh=_fresh_depth_quote(client,str(payload.get('underlying') or ''),self.now())
+            provider=float(fresh.get('provider_timestamp') or 0);provider=provider/1000 if provider>1e10 else provider
+            met,reason=reached(condition,dict(symbol=payload['underlying'],price=(fresh['bid']+fresh['ask'])/2,provider_at=provider,received_at=self.now().timestamp(),connected=True),self.now().timestamp())
+            if payload.get('execution_entry_order',{}).get('type')=='STOP_LIMIT':
+                from .handoff_entry_conditions import stop_limit_before_trigger
+                proposal=payload.get('proposal',{});action='BUY' if proposal.get('direction')=='BULLISH' else 'SELL'
+                valid_stop=payload.get('execution_entry_order',{}).get('type')=='STOP_LIMIT' and proposal.get('kind')=='EQUITY' and stop_limit_before_trigger(condition,dict(price=(fresh['bid']+fresh['ask'])/2),payload['underlying'],action,float(self.cm_master.lookup([payload['underlying']])[payload['underlying']]['tick_size']),payload.get('recommended_entry_limit'))
+                if not valid_stop:raise FyersExecutionUnavailable('The resting stop-limit trigger has already crossed or is invalid; no market conversion or chase.')
+            elif not met:raise FyersExecutionUnavailable(reason)
+
         proposal = payload.get("proposal") or {}
         kind = str(proposal.get('kind') or '').upper()
         if proposal.get('source') == 'ANALYSIS_HANDOFF' and kind != 'LONG_OPTION':
@@ -577,11 +630,16 @@ class FyersExecutionService:
                       else self._preflight_option_spread(client, payload, proposal, minimum_rr))
         if payload.get("require_market_open") is True:
             _fresh_market_state(self.now(), instrument)
+        if reviewed is not None:
+            instrument=_reviewed_instrument(instrument,reviewed["instrument"])
         funds_response = client.funds()
         available_balance = available_funds(funds_response)
         positions = _positions(client.positions())
         orders = _orders(client.orderbook())
         open_positions = [item for item in positions if _number(item.get("netQty", item.get("net_qty", 0)), 0) != 0]
+        if matches_exposure(payload.get('underlying'),open_exposures(positions,orders),
+                            [leg['symbol'] for leg in instrument['contracts']]):
+            raise FyersExecutionUnavailable('An open position or pending order already exists for this symbol/underlying; duplicate entry blocked.')
         if enforce_risk_controls and len(open_positions) >= max_positions:
             raise FyersExecutionUnavailable(f"Fresh FYERS state has {len(open_positions)} open position rows, meeting the configured maximum of {max_positions}.")
         if enforce_risk_controls and open_positions and external_open_risk is None:
@@ -604,6 +662,8 @@ class FyersExecutionService:
         if instrument["minimum_cash_required"] > available_balance:
             raise FyersExecutionUnavailable("Fresh FYERS funds do not cover the protection-first premium requirement.")
         option_policy = option_order_policy(instrument["expiry"], self.now().date()) if instrument["kind"] != "EQUITY" else None
+        if payload.get('handoff_product_attempt')==2 and payload.get('handoff_auto') is True and instrument['kind']=='LONG_OPTION':
+            option_policy={**option_policy,'holding_product':'INTRADAY','product_type':'INTRADAY','mapping_note':'Single verified Intraday-only rejection correction.'}
         preview = {
             "broker": "FYERS", "status": "PREVIEW_ONLY",
             "created_at": self.now().astimezone().isoformat(),
@@ -654,9 +714,19 @@ class FyersExecutionService:
                 if not spot:
                     raise FyersExecutionUnavailable('Fresh FYERS underlying quote is required for premium protection.')
                 protection = premium_exits(spot=(spot['bid']+spot['ask'])/2, stop=plan['stop'], target=plan['target'], premium=leg['limit_price'], strike=leg['strike'], expiry=instrument['expiry'], option_type=leg['option_type'], tick=leg['tick_size'], now=self.now())
+            if payload.get('handoff_auto') is True and payload.get('accepted_execution_protection'):
+                accepted=deepcopy(payload['accepted_execution_protection']);stop=accepted.get('stop_loss_price');target=accepted.get('target_price');entry=leg['limit_price']
+                if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>0 for v in (stop,target)) or not (stop<entry<target if leg['action']=='BUY' else target<entry<stop):raise ValueError('Accepted Handoff execution exits no longer bracket the recommended entry.')
+                if any(abs(_round_tick(v,leg['tick_size'])-v)>1e-8 for v in (stop,target)):raise ValueError('Accepted execution exits are not exact contract ticks.')
+                protection=accepted
             preview['protection'] = protection
+            if reviewed is not None and _contract_identity(instrument)==_contract_identity(reviewed['instrument']) and reviewed.get('protection'):
+                preview['protection']=deepcopy(reviewed['protection'])
             preview['order_policy']['mapping_note'] = 'FYERS native linked stop-loss and target offsets in points; broker confirmation remains required.'
             preview['warnings'].append(protection['assumptions'])
+        if payload.get('handoff_auto') is True:
+            from .handoff_entry_conditions import order_fields
+            preview['entry_order']=order_fields(payload,instrument['contracts'][0])
         preview["state_digest"] = hashlib.sha256(json.dumps(preview, sort_keys=True, default=str).encode()).hexdigest()
         return preview
 
@@ -675,7 +745,51 @@ class FyersExecutionService:
         if not path.exists():
             _atomic_private_write(path, json.dumps(evidence, indent=2, default=str) + "\n")
 
+    def _reconciled_protection(self, result):
+        """Read exact owned archived intent and broker state; no broker mutations."""
+        from .fyers_protection import reconcile
+        fallback = dict(protection_confirmed=False, protection_state="UNVERIFIED",
+                        protected_quantity=0, no_order_action=True)
+        try:
+            ident=str(result["preview_id"])
+            if not ident or len(ident)>100 or any(not (c.isalnum() or c in "-_") for c in ident):
+                raise ValueError("Invalid owned preview identity.")
+            path=self.ledger.path.parent/"entry-evidence"/(ident+".json")
+            evidence=json.loads(path.read_text())
+            preflight=evidence["submission_preflight"]
+            items=preflight.get("items") or [preflight]
+            book=_current_client(self.client_factory).orderbook()
+            ids={str(v) for v in result.get("order_ids",[])}
+            rows=book.get("orderBook") or []
+            checks=[]
+            for item in items:
+                if item.get("instrument",{}).get("kind") not in {"EQUITY","LONG_OPTION"}:
+                    checks.append(dict(fallback,reason="Spread protection requires separate leg evidence."))
+                    continue
+                leg=item["instrument"]["contracts"][0]
+                owned=[str(r.get("id")) for r in rows if str(r.get("id")) in ids and r.get("symbol")==leg["symbol"]]
+                checks.append(reconcile(item,owned,book))
+            confirmed=bool(checks) and all(c["protection_confirmed"] for c in checks)
+            return dict(fallback,protection_confirmed=confirmed,
+                        protection_state="BROKER_REGISTERED_FILLED_ENTRY" if confirmed else "AWAITING_BROKER_CONFIRMATION",
+                        protected_quantity=sum(c.get("protected_quantity",0) for c in checks),
+                        protection_checks=checks)
+        except Exception:
+            return dict(fallback,reason="Fresh owned broker protection evidence unavailable; no order was changed.")
+
+    def reconcile_protection(self, preview_id):
+        """Refresh a submitted ticket's protection; never resubmit its entry."""
+        ident=str(preview_id)
+        if not ident or len(ident)>100 or any(not (c.isalnum() or c in "-_") for c in ident):
+            raise ValueError("Invalid owned preview identity.")
+        path=self.ledger.path.parent/"entry-evidence"/(ident+"-result.json")
+        if not path.exists():
+            raise ValueError("Submitted ticket is unavailable in this account.")
+        result=json.loads(path.read_text())["result"]
+        return self._archive_entry_result(result)
+
     def _archive_entry_result(self, result):
+        result={**result, **self._reconciled_protection(result)}
         path = self.ledger.path.parent / "entry-evidence" / (result["preview_id"] + "-result.json")
         record = {"recorded_at": self.now().astimezone().isoformat(), "result": result}
         _atomic_private_write(path, json.dumps(record, indent=2, default=str) + "\n")
@@ -697,9 +811,10 @@ class FyersExecutionService:
         if budget is None or budget <= 0:
             raise ValueError("Enter a positive batch fund allocation.")
         read_client = _PreviewReads(_current_client(self.client_factory))
-        per_stock = budget / len(items)
+        from sector_heatmap.screener_routes import budget_slices
+        slices=budget_slices(items,budget) if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else [budget/len(items)]*len(items)
         previews = []
-        for item in items:
+        for item,per_stock in zip(items,slices):
             try:
                 probe = self._preflight({**item, "quantity": 1, "require_market_open": True}, read_client=read_client)
                 instrument = probe["instrument"]
@@ -731,7 +846,7 @@ class FyersExecutionService:
         if not all(p["submission_eligible"] for p in previews):
             raise FyersExecutionUnavailable("A selected product or exit mode is unavailable for live submission.")
         return {"broker": "FYERS", "status": "BATCH_PREVIEW_ONLY", "items": previews, "excluded": [],
-            "allocation": {"rule": "EQUAL_ALLOCATED_FUNDS", "budget": budget, "per_stock": round(per_stock, 2),
+            "allocation": {"rule": "CONVICTION_WEIGHTED_ALLOCATED_FUNDS" if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else "EQUAL_ALLOCATED_FUNDS", "budget": budget, "per_stock": [round(value,2) for value in slices] if payload.get("allocation_mode")=="CONVICTION_WEIGHTED" else round(per_stock,2),
                 "unspent": round(budget-total_margin-costs, 2)},
             "aggregate": {"order_count": len(previews), "selected_count": len(items), "total_worst_case_risk": round(total_risk, 2),
                 "total_minimum_cash_required": round(total_margin, 2), "estimated_costs": round(costs, 2), "cash_buffer": 0,
@@ -843,6 +958,8 @@ class FyersExecutionService:
         }
 
     def prepare_batch(self, payload):
+        from .handoff_screener import guard_separate_submission
+        guard_separate_submission([r.get('underlying') for r in payload.get('items',[])])
         return self._store_batch_preview(payload, self._batch_preflight(payload))
 
     def _store_batch_preview(self, payload, preview):
@@ -867,6 +984,39 @@ class FyersExecutionService:
             raise ValueError('Linked exits no longer bracket the entry.')
         return {'stopLoss': round(abs(entry-stop), 10), 'takeProfit': round(abs(target-entry), 10), 'legType': 1}
 
+    def _refresh_reviewed_batch(self,payload,reviewed):
+        read_client=_PreviewReads(_current_client(self.client_factory))
+        requested={item['underlying']:item for item in payload['items']}
+        items=[]
+        for old in reviewed['items']:
+            original=requested[old['underlying']]
+            instrument=old['instrument']
+            fixed={**original,'quantity':instrument['quantity'],
+                   'proposal':{**original['proposal'],'quantity':instrument['quantity']}}
+            if instrument['kind']!='EQUITY':fixed['lots']=instrument['lots']
+            if payload.get('allocation_budget') is not None and instrument['kind']=='EQUITY':fixed['require_market_open']=True
+            items.append(self._preflight(fixed,read_client=read_client,reviewed=old))
+        funds=min(item['funds_margin']['available_funds'] for item in items)
+        risk=sum(item['instrument']['worst_case_risk'] for item in items)
+        cash=sum(item['instrument']['minimum_cash_required'] for item in items)
+        limits=[item['daily_risk_ledger']['available_for_new_idea'] for item in items]
+        available=min(v for v in limits if v is not None) if any(v is not None for v in limits) else None
+        reserved=cash+reviewed['aggregate']['estimated_costs']+reviewed['aggregate']['cash_buffer']
+        budget=payload.get('allocation_budget')
+        if reserved>funds+1e-9 or budget is not None and reserved>float(budget)+1e-9:
+            raise FyersExecutionUnavailable('Fresh funds do not cover the reviewed batch; no orders submitted.')
+        if available is not None and risk>available+1e-9:
+            raise FyersExecutionUnavailable('Reviewed batch exceeds fresh aggregate risk capacity; no orders submitted.')
+        for item in items:
+            maximum=item['daily_risk_ledger']['maximum_simultaneous_positions']
+            if maximum is not None and item['fresh_state']['positions_count']+len(items)>maximum:
+                raise FyersExecutionUnavailable('Reviewed batch exceeds the fresh simultaneous-position limit.')
+        result=deepcopy(reviewed);result['items']=items
+        result['aggregate'].update(total_worst_case_risk=round(risk,2),total_minimum_cash_required=round(cash,2),
+                                   cash_reserved=round(reserved,2),available_funds=funds,available_new_risk=available)
+        return result
+
+
     def submit_batch(self, preview_id, confirmation):
         if not self._live_submission_enabled():
             raise PermissionError(f"Live FYERS submission is disabled. Enable {self.live_gate_name}=1 intentionally before submitting a reviewed batch.")
@@ -878,8 +1028,10 @@ class FyersExecutionService:
             raise ValueError("Type the exact confirmation phrase from the current FYERS batch preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
             raise ValueError("This FYERS batch preview expired. Prepare a fresh preview.")
-        refreshed = self._batch_preflight(stored["payload"])
-        if _review_terms(stored["preview"]) != _review_terms(refreshed):
+        from .handoff_screener import guard_separate_submission
+        guard_separate_submission([r.get('underlying') for r in stored['payload'].get('items',[])])
+        refreshed = self._refresh_reviewed_batch(stored['payload'],stored['preview'])
+        if [_ticket_terms(i) for i in stored['preview']['items']] != [_ticket_terms(i) for i in refreshed['items']]:
             raise PreviewChanged(self._store_batch_preview(stored["payload"], refreshed))
         if not refreshed["submission_eligible"] or not all(item["submission_eligible"] for item in refreshed["items"]):
             raise PermissionError("Every batch item must pass fresh submission eligibility.")
@@ -893,6 +1045,8 @@ class FyersExecutionService:
             orders.append({"symbol": leg["symbol"], "qty": leg["quantity"], "type": 1, "side": 1 if leg["action"] == "BUY" else -1,
                            "productType": item["order_policy"]["product_type"], "limitPrice": leg["limit_price"], "stopPrice": 0,
                            "validity": "DAY", "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(item, leg)})
+        with self.lock:
+            if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
         response = client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         status = "PENDING" if len(order_ids) == len(orders) else "EXECUTION_STATUS_UNCERTAIN"
@@ -955,19 +1109,24 @@ class FyersExecutionService:
             raise ValueError("Type the exact confirmation phrase from the current FYERS preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
             raise ValueError("This FYERS preview expired. Prepare a fresh ticket.")
-        refreshed = self._preflight(stored["payload"])
-        if _review_terms(stored["preview"]) != _review_terms(refreshed):
+        refreshed = self._preflight(stored['payload'],reviewed=stored['preview'])
+        if _ticket_terms(stored['preview']) != _ticket_terms(refreshed):
             raise PreviewChanged(self._store_preview(stored["payload"], refreshed))
         if not refreshed["submission_eligible"]:
             raise PermissionError("This FYERS structure lacks exact margin validation and cannot be submitted.")
+        if not getattr(self,'handoff_owned_submission',False):
+            from .handoff_screener import guard_separate_submission
+            guard_separate_submission([stored['payload'].get('underlying')])
         self._archive_entry_evidence(preview_id, stored, refreshed)
         client = _current_client(self.client_factory)
         orders = [{
-            "symbol": leg["symbol"], "qty": leg["quantity"], "type": 1,
+            "symbol": leg["symbol"], "qty": leg["quantity"], **refreshed.get("entry_order",dict(type=1,stopPrice=0)),
             "side": 1 if leg["action"] == "BUY" else -1, "productType": refreshed["order_policy"]["product_type"],
-            "limitPrice": leg["limit_price"], "stopPrice": 0, "validity": "DAY",
+            "limitPrice": leg["limit_price"], "validity": "DAY",
             "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(refreshed, leg),
         } for leg in refreshed["instrument"]["contracts"]]
+        with self.lock:
+            if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
         response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] in {"EQUITY", "LONG_OPTION"} else client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         if not order_ids:
@@ -986,6 +1145,30 @@ class FyersExecutionService:
                     status = "REJECTED"
                 else:
                     status = "PENDING"
+        preliminary=dict(preview_id=preview_id,status=status,order_ids=order_ids,orders=reconciled,protection_requested=bool(refreshed.get('protection')),protection_confirmed=False,actual_product=refreshed['order_policy']['product_type'])
+        if stored['payload'].get('handoff_auto') is True and stored['payload'].get('handoff_product_attempt',1)==1 and status=='REJECTED':
+            from .handoff_product_retry import eligible
+            fresh_book=client.orderbook();fresh_positions=client.positions()
+            if eligible(refreshed,preliminary,fresh_book,fresh_positions):
+                self._archive_entry_result(preliminary)
+                retry_path=self.ledger.path.parent/'entry-evidence'/(preview_id+'-product-retry.json')
+                if retry_path.exists():raise ValueError('Product correction already consumed; reconcile before any further order.')
+                _atomic_private_write(retry_path,json.dumps(dict(state='RESERVED_ONCE',original_order_ids=order_ids,original_product=refreshed['order_policy']['product_type'],fallback_product='INTRADAY',reason='Exact broker-verified Intraday-only rejection; zero fill and no pending exposure.')))
+                alternate=deepcopy(stored['payload']);alternate.update(handoff_product_attempt=2,cash_product='INTRADAY')
+                from .handoff_broker_read import read as read_handoff_exposure
+                exposure=read_handoff_exposure()
+                if exposure.get('daily_loss') is None or exposure['daily_loss']>=10000:raise ValueError('Daily loss cutoff blocks product correction.')
+                corrected=self._preflight(alternate,reviewed=refreshed)
+                old=refreshed['instrument']['contracts'][0];new=corrected['instrument']['contracts'][0]
+                if any(old.get(k)!=new.get(k) for k in ('symbol','quantity','action','limit_price')) or corrected.get('protection')!=refreshed.get('protection') or corrected['order_policy']['product_type']!='INTRADAY':raise ValueError('Intraday correction changed accepted contract, quantity, entry or exits; no retry.')
+                prepared=self._store_preview(alternate,corrected)
+                result=self.submit(prepared['preview_id'],prepared['confirmation_phrase'])
+                result['product_attempts']=[dict(product=refreshed['order_policy']['product_type'],order_ids=order_ids,status='REJECTED',reason='INTRADAY_ONLY_VERIFIED_ZERO_FILL'),dict(product='INTRADAY',order_ids=result.get('order_ids',[]),status=result.get('status'))]
+                result['actual_product']='INTRADAY';result['original_preview_id']=preview_id
+                _atomic_private_write(retry_path,json.dumps(dict(state='ATTEMPTED_ONCE',result_preview_id=result['preview_id'],attempts=result['product_attempts'])))
+                archived=self._archive_entry_result(result)
+                _atomic_private_write(self.ledger.path.parent/'entry-evidence'/(preview_id+'-result.json'),json.dumps(dict(recorded_at=self.now().astimezone().isoformat(),result=archived)))
+                return archived
         if status in {"EXECUTION_STATUS_UNCERTAIN", "REJECTED"} and self.execution_halt:
             self.execution_halt(preview_id, status)
         self.ledger.append({
@@ -996,7 +1179,7 @@ class FyersExecutionService:
         with self.lock:
             self.previews.pop(preview_id, None)
         return self._archive_entry_result({
-            "preview_id": preview_id, "status": status, "order_ids": order_ids, "orders": reconciled,
+            "preview_id": preview_id, "status": status, "order_ids": order_ids, "orders": reconciled, "actual_product": refreshed["order_policy"]["product_type"],
             "protection_requested": bool(refreshed.get("protection")), "protection_confirmed": False,
             "message": "Order status is uncertain; reconcile FYERS orders and do not retry automatically." if status == "EXECUTION_STATUS_UNCERTAIN" else "FYERS rejected or terminated at least one leg; the policy is halted and no retry will occur." if status == "REJECTED" else "Entry fills reconciled; linked stop-loss and target still require broker confirmation." if status == "OPEN" else "Order accepted but not fully filled; monitor FYERS orders before further action.",
         })

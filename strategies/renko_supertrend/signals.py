@@ -49,8 +49,8 @@ def settings(payload):
         c[key]=value
     if c['rsi_bearish_below']>=c['rsi_bullish_above']:raise ValueError('Bearish RSI threshold must be below bullish threshold.')
     if c['rsi_level_mode'] not in ('THRESHOLD','BETWEEN'):raise ValueError('Choose RSI Threshold or Between mode.')
-    if not c['rsi_bearish_min']<c['rsi_bearish_max']<c['rsi_bullish_min']<c['rsi_bullish_max']:
-        raise ValueError('RSI bands must have increasing bounds with bearish band below bullish band.')
+    if not c['rsi_bearish_min']<c['rsi_bearish_max']<=c['rsi_bullish_min']<c['rsi_bullish_max']:
+        raise ValueError('RSI ranges need minimum below maximum; bearish maximum must not exceed bullish minimum.')
     c.update(manual_trend.settings(c))
     validate_indicators(c)
     return c
@@ -91,7 +91,7 @@ def rma(state, key, value, length):
 def ema_setup(state, close, direction, allowed, window, config=None, reversal=None, rsi=None):
     # Pine ta.ema seeds with the first non-na source, then alpha=2/(length+1).
     cfg = {**INDICATOR_DEFAULTS, **(config or {})}
-    for key, length in (('ema10', cfg['ema_fast_length']), ('ema30', cfg['ema_slow_length'])):
+    for key, length in (('ema10', cfg['ema_fast_length']), ('ema30', cfg['ema_slow_length']), ('ema100', cfg['ema_third_length'])):
         old = state.get(key)
         state[key] = close if old is None else (2.0 / (length + 1)) * close + (1 - 2.0 / (length + 1)) * old
     gap = state['ema10'] - state['ema30']
@@ -102,7 +102,7 @@ def ema_setup(state, close, direction, allowed, window, config=None, reversal=No
     aligned = gap > 0 if bullish else gap < 0
     price_ok = close > state['ema10'] if bullish else close < state['ema10']
     widening = len(signed) == window and all(g > 0 for g in signed) and all(a < b for a, b in zip(signed, signed[1:]))
-    selected = qualify_indicators(cfg, close, state['ema10'], state['ema30'], direction, allowed, widening, reversal, rsi)
+    selected = qualify_indicators(cfg, close, state['ema10'], state['ema30'], direction, allowed, widening, reversal, rsi, state['ema100'])
     if config is not None:
         direction, qualified, reason = selected
         bullish = direction < 0
@@ -114,7 +114,7 @@ def ema_setup(state, close, direction, allowed, window, config=None, reversal=No
     state['ema_qualified'] = setup if qualified else None
     if config is None:
         reason = 'QUALIFIED' if qualified else 'WAITING_ADX' if not allowed else 'WAITING_EMA_ALIGNMENT' if not aligned else 'WAITING_CLOSE' if not price_ok else 'WAITING_WIDENING'
-    return dict(selected_direction=setup, ema10=state['ema10'], ema30=state['ema30'], ema_gap=gap, ema_widening=widening,
+    return dict(selected_direction=setup, ema10=state['ema10'], ema30=state['ema30'], ema100=state['ema100'], ema_third_enabled=cfg['ema_third_enabled'], ema_third_length=cfg['ema_third_length'], ema_gap=gap, ema_widening=widening,
                 entry_qualified=qualified, entry_diagnostic=reason, entry_direction=entry,
                 entry_buy_signal=entry == 'BULLISH', entry_sell_signal=entry == 'BEARISH')
 
@@ -172,6 +172,10 @@ class Engine:
             self.chart_higher=[(r['timestamp']+seconds,higher.update(r)) for r in completed((config or {}).get('_chart_higher_rows',[]))]
             self.chart_higher_seconds=seconds
         self.chart_higher_times=[at for at,row in self.chart_higher]
+        self.chart_rsi=None
+        if (config or {}).get('chart_entry_guards'):
+            from . import mtf_rsi
+            if mtf_rsi.enabled(config or {}):self.chart_rsi=mtf_rsi.prepare((config or {}).get('_chart_rsi_rows',{}),config)
 
         self.deadline = (config or {}).get('session_deadline','15:15')
         self.underlying = (config or {}).get('underlying', '')
@@ -254,14 +258,14 @@ class Engine:
         from .rsi_level import apply as level_apply
         level_apply(entry,s,rsi_observation,selected_direction,cfg)
         raw=self.raw_config or {}
-        if raw.get('chart_entry_guards') and any(raw.get(k) for k in ('ema_proximity_enabled','market_structure_enabled','higher_timeframe_enabled')):
+        if raw.get('chart_entry_guards') and (self.chart_rsi is not None or any(raw.get(k) for k in ('ema_proximity_enabled','market_structure_enabled','higher_timeframe_enabled'))):
             from . import ema_proximity
             from bisect import bisect_right
             s['chart_host_rows']=(s.get('chart_host_rows',[])+[c])[-1000:]
             event_at=c['timestamp']+self.host_seconds
             blocked=None
             if entry['entry_qualified'] and raw.get('ema_proximity_enabled'):
-                try:ema_proximity.check(raw,c['close'],entry['ema10'],host_atr)
+                try:ema_proximity.check(raw,c['close'],entry['ema10'],host_atr,{**c,**entry,'direction':selected_direction},selected_direction)
                 except ValueError:blocked='WAITING_EMA_PROXIMITY'
             if entry['entry_qualified'] and raw.get('market_structure_enabled') and not market_structure.check(s['chart_host_rows'],selected_direction,self.host_seconds,event_at)['allowed']:
                 blocked='WAITING_CONFIRMED_STRUCTURE'
@@ -270,10 +274,14 @@ class Engine:
                 higher=self.chart_higher[index] if index>=0 else None
                 if not higher or index<29 or not 0<=event_at-higher[0]<self.chart_higher_seconds or higher[1]['direction']!=selected_direction:
                     blocked='WAITING_HIGHER_TIMEFRAME_AGREEMENT'
+            if self.chart_rsi is not None:
+                from . import mtf_rsi
+                entry['mtf_rsi']=mtf_rsi.assess(self.chart_rsi,raw,selected_direction,min(event_at,raw.get('_chart_observed_at',event_at)))
+                if entry['entry_qualified'] and not entry['mtf_rsi']['allowed']:blocked='WAITING_HIGHER_TIMEFRAME_RSI'
             qualified=entry['entry_qualified'] and not blocked
             entry_direction=selected_direction if qualified and s.get('chart_qualified')!=selected_direction else None
             s['chart_qualified']=selected_direction if qualified else None
-            if blocked:s['ema_qualified']=None
+            if blocked and not raw.get('ema_momentum_enabled'):s['ema_qualified']=None
             entry.update(entry_qualified=qualified,entry_diagnostic=blocked or entry['entry_diagnostic'],entry_direction=entry_direction,entry_buy_signal=entry_direction=='BULLISH',entry_sell_signal=entry_direction=='BEARISH')
         if cfg['manual_trend_enabled']:
             s['manual_trend_rows']=(s.get('manual_trend_rows',[])+[{'timestamp':c['timestamp'],'close':c['close']}])[-cfg['manual_trend_closes']:]
@@ -312,7 +320,7 @@ class Engine:
         else:
             projection = project_lifecycle(s, c['timestamp'], entry['entry_direction'], ('BULLISH' if buy else 'BEARISH' if sell else None) if cfg['supertrend_enabled'] else entry['entry_direction'], self.host_seconds,c['close'],entry['ema10'] if cfg['ema_fast_enabled'] and (self.raw_config or {}).get('ema_exit_enabled',True) else None,self.deadline)
 
-        if not (cfg['ema_fast_enabled'] or cfg['ema_slow_enabled']) and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='CONFIRMED_SELECTED_INDICATORS'
+        if not (cfg['ema_fast_enabled'] or cfg['ema_slow_enabled'] or cfg['ema_third_enabled']) and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='CONFIRMED_SELECTED_INDICATORS'
         if entry.get('retest_signal') and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='EMA10_RETEST_BOUNCE'
         return {**c, **entry, **projection, 'host_atr': host_atr, 'regime_atr': regime_atr, 'low_atr': low_atr, 'volatility_ratio': ratio, 'effective_factor': effective,
                 'auto_box': auto, 'box': box, 'steps': steps, 'synthetic_open': s['ro'], 'synthetic_close': s['rc'], 'synthetic_tr': synthetic_tr,

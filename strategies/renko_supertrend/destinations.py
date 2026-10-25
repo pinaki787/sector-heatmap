@@ -3,10 +3,10 @@
 Missing chart destinations are legacy configurations. Do not add fields to saved
 runner identities merely by loading them; the UI migrates drafts explicitly.
 """
-RULES = ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled',
+RULES = ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled',
          'rsi_level_enabled','rsi_slope_enabled','use_adx','supertrend_exit_enabled','ema_exit_enabled',
          'ema_slow_exit_enabled','rsi_exit_enabled','ema_widening_exit_enabled',
-         'adx_exit_enabled','market_structure_exit_enabled','zone_target_enabled','market_structure_enabled','higher_timeframe_enabled','ema_proximity_enabled','retest_enabled')
+         'adx_exit_enabled','market_structure_exit_enabled','zone_target_enabled','market_structure_enabled','higher_timeframe_enabled','ema_proximity_enabled','ema_momentum_enabled','retest_enabled')
 REVISION = 'strategy-indicator-destinations-v2'
 
 def settings(payload):

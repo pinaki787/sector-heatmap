@@ -1,0 +1,33 @@
+const {JSDOM}=require('/home/trading/sector-heatmap/.private/test-node/node_modules/jsdom');
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const candidate=process.env.RENKO_CANDIDATE||'renko-supertrend.js',code=fs.readFileSync(candidate,'utf8');
+(async()=>{
+ const dom=new JSDOM('<html><head></head><body><button data-view="ema-cross"></button><main class="work"></main></body></html>',{url:'https://example.test/?renkoInstance=fixture',runScripts:'outside-only',pretendToBeVisual:true});
+ const w=dom.window,calls=[],streams=[],errors=[],account={id:'test',broker:'FYERS'};
+ const fields={symbol:'MCX:NATGASMINI26OCTFUT',market:'MCX',timeframe:'5 minutes','brick-mode':'Manual','manual-brick':'0.48','atr-length':'5',factor:'3',mode:'PAPER','manual-brick-reference':JSON.stringify({symbol:'MCX:NATGASMINI26OCTFUT',manual_brick:.48,user_override:true})};
+ const ref={timestamp:1792415400,open:298.4,high:298.9,low:298,close:298.3,direction:'BULLISH',supertrend:289.5,ema10:299.2289627056509,ema30:299.4828591570019};
+ const state={run_id:'fixture',running:true,status:'WATCHING_NO_ENTRY',accepting_entries:true,config:{underlying:fields.symbol,timeframe:'5 minutes',mode:'PAPER',brick_mode:'Manual',manual_brick:11.62,atr_length:5,factor:3,ema_fast_length:10,ema_slow_length:30,rsi_slope_length:14,supertrend_enabled:true,rsi_level_enabled:true,higher_timeframe_enabled:true,supertrend_timeframe:'15 minutes'},initialization_anchor:Date.parse('2026-09-04T03:30:00Z')/1000,last_signal:ref,pnl:{},live_available:false};
+ const before=JSON.stringify(state);
+ w.addEventListener('error',e=>errors.push(String(e.error||e.message)));w.AbortSignal=AbortSignal;w.setInterval=()=>1;w.ResizeObserver=class{observe(){}disconnect(){}};w.EventSource=class{constructor(url){streams.push(url)}addEventListener(){}close(){}};
+ const data=()=>({symbol:fields.symbol,timeframe:'5 minutes',settings:{},rows:[ref],latest:ref,forming:[],history:{analysis_revision:'fixture',display_count:1},initialization_anchor:state.initialization_anchor,data_quality:{analysis_available:true}});
+ w.fetch=async()=>({ok:true,json:async()=>({matches:[]})});
+ w.BrokerForms={ready:Promise.resolve(),accounts:()=>[account],account:()=>account,route:(_k,url)=>url,fetch:async(_k,url,opts)=>{
+  const body=opts?.body?JSON.parse(opts.body):null;calls.push({url,body});let d={items:[],matches:[],instances:[]};
+  if(url.includes('/settings'))d=body?{settings:body.settings,saved_at:Date.now()/1000}:{settings:fields,saved_at:Date.now()/1000};
+  else if(url.includes('/runner'))d=state;else if(url.includes('/chart?'))d=data();else if(url.includes('/journal'))d={trades:[]};
+  return {ok:true,json:async()=>d};
+ }};
+ w.eval(code);await w.RenkoSupertrend.mount('sectors');await new Promise(r=>setTimeout(r,180));
+ const el=id=>w.document.getElementById('renko-'+id);
+ let query=new URL(calls.findLast(c=>c.url.includes('/chart?')).url,'https://example.test').searchParams;
+ assert.equal(query.get('manual_brick'),'11.62');assert.equal(query.get('timeframe'),'5 minutes');assert.equal(query.get('history_preset'),'custom');assert.equal(query.get('history_from'),'2026-09-11'); // fixture anchor corrected below if stale
+ assert.equal(el('manual-brick').value,'0.48');assert.equal(el('chart-basis-note').dataset.basis,'active');
+ assert.equal(el('chart-basis-note').dataset.verified,'true');
+ assert.ok(streams.some(url=>new URL(url,'https://example.test').searchParams.get('manual_brick')==='11.62'));
+ el('chart-basis').value='draft';el('chart-basis').dispatchEvent(new w.Event('change'));await new Promise(r=>setTimeout(r,60));
+ query=new URL(calls.findLast(c=>c.url.includes('/chart?')).url,'https://example.test').searchParams;
+ assert.equal(query.get('manual_brick'),'0.48');assert.equal(el('chart-basis-note').dataset.basis,'draft');assert.match(el('chart-basis-note').textContent,/DRAFT PREVIEW/);
+ assert.equal(JSON.stringify(state),before);assert.deepEqual(errors,[]);assert.equal(calls.some(c=>/\/(start|stop|chart-stop|override-entry|adopt)(?:\?|$)/.test(c.url)),false);
+ dom.window.close();console.log('Mounted active-vs-draft chart, HTTP/stream binding, unchanged draft and no lifecycle calls verified');
+})().catch(e=>{console.error(e);process.exit(1)});
+

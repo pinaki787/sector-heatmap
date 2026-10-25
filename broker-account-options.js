@@ -1,15 +1,28 @@
 /* User-owned account inventory shared by execution forms. No broker mutations. */
 (function(root){
   'use strict';
-  const NAMES={FYERS:'FYERS',DHAN:'Dhan',DELTA_INDIA:'Delta India'};
+  const NAMES={FYERS:'FYERS',DHAN:'Dhan',MOTILAL_OSWAL:'Motilal Oswal',DELTA_INDIA:'Delta India'};
   function choices(accounts,{kind='strategy',currentBroker='FYERS',workspaceId=null}={}){
-    return accounts.map(account=>{
+    return accounts.filter(account=>kind!=='sector'||account.broker!=='DELTA_INDIA').map(account=>{
       const same=!!workspaceId&&account.id===workspaceId;
-      const supported=kind==='parser'?account.broker==='FYERS':kind==='sector'?Object.prototype.hasOwnProperty.call(NAMES,account.broker):kind==='account'?['FYERS','DHAN'].includes(account.broker):['strategy','delta-manual'].includes(kind)?same&&account.broker===currentBroker:(kind==='manual'||['renko','rsi','band','kama'].includes(kind)&&(account.strategy_routes||[]).includes(kind))&&account.broker==='DHAN'||['FYERS','DELTA_INDIA'].includes(account.broker)&&(account.broker===currentBroker||kind==='renko')||same&&account.broker===currentBroker;
+      const supported=account.broker==='MOTILAL_OSWAL'?['renko','sector','screener','manual','account'].includes(kind):kind==='parser'?account.broker==='FYERS':kind==='sector'?Object.prototype.hasOwnProperty.call(NAMES,account.broker):kind==='account'?['FYERS','DHAN'].includes(account.broker):['strategy','delta-manual'].includes(kind)?same&&account.broker===currentBroker:(kind==='manual'||['renko','rsi','band','kama'].includes(kind)&&(account.strategy_routes||[]).includes(kind))&&account.broker==='DHAN'||['FYERS','DELTA_INDIA'].includes(account.broker)&&(account.broker===currentBroker||kind==='renko')||same&&account.broker===currentBroker;
       const reason=!account.configured?'connection settings incomplete':supported?'':account.broker==='DHAN'&&kind!=='manual'?'manual orders only; strategy routing unavailable':account.broker!==currentBroker?'not supported by this form':'open this account workspace to use its credentials';
       return {id:account.id,broker:account.broker,value:kind==='manual'&&account.broker==='DHAN'?'dhan:'+account.id:'account:'+account.id,
         label:(NAMES[account.broker]||account.broker)+' · '+account.label+(reason?' — '+reason:''),disabled:!!reason,same};
     });
+  }
+  function sectorSelection(rows,{requestedId,previousId,previousValue,workspaceId,currentBroker='FYERS'}={}){
+    const available=rows.filter(row=>!row.disabled);
+    const requested=available.find(row=>row.id===requestedId);
+    if(requested)return requested;
+    const previous=available.find(row=>row.id===previousId)||available.find(row=>row.value===previousValue||(row.same&&row.broker===previousValue));
+    if(previous)return previous;
+    // Preserve unavailable explicit selections for review; default only an unset form.
+    if(requestedId||previousId||previousValue)return null;
+    const fyers=available.find(row=>row.broker==='FYERS');
+    if(fyers)return fyers;
+    if(workspaceId)return available.find(row=>row.id===workspaceId)||null;
+    return available.find(row=>row.broker===currentBroker)||(available.length===1?available[0]:null);
   }
   function retryInventory(load,onError,schedule=setTimeout){
     let failures=0;
@@ -19,7 +32,7 @@
     }
     return attempt();
   }
-  if(typeof module!=='undefined'&&module.exports){module.exports={choices,retryInventory};return;}
+  if(typeof module!=='undefined'&&module.exports){module.exports={choices,sectorSelection,retryInventory};return;}
   let accounts=[],context=null,ready=false;
   const registry=new WeakMap();
   function fill(select,kind,currentBroker){
@@ -37,23 +50,24 @@
       option.disabled=row.disabled;option.dataset.savedBrokerAccount=row.id;select.append(option);
     }
     const requested=root.BrokerForms?.initial(kind);
-    const target=rows.find(r=>r.id===(requested||previousId)&&!r.disabled)
+    const target=kind==='sector'?sectorSelection(rows,{requestedId:requested,previousId,previousValue:before,workspaceId:context?.workspace?.id,currentBroker}):(rows.find(r=>r.id===(requested||previousId)&&!r.disabled)
       ||rows.find(r=>r.same&&!r.disabled)
       ||rows.find(r=>r.value===before&&!r.disabled)
       ||(kind==='manual'?rows.find(r=>r.broker==='DHAN'&&!r.disabled):null)
-      ||rows.find(r=>r.broker===currentBroker&&!r.disabled)
-      ||(kind==='sector'?rows.find(r=>['FYERS','DHAN'].includes(r.broker)&&!r.disabled):null);
+      ||rows.find(r=>r.broker===currentBroker&&!r.disabled));
     if(target)select.value=target.same?target.broker:target.value;
-    else{const empty=document.createElement('option');empty.value='';empty.textContent='Select a configured broker account';empty.disabled=true;empty.selected=true;select.prepend(empty);}
+    else{const empty=document.createElement('option');empty.value='';empty.textContent=kind==='sector'?(rows.some(row=>!row.disabled)?'Select an account for Sector Rotation':'Sector Rotation unavailable · no supported configured account'):'Select a configured broker account';empty.disabled=true;empty.selected=true;select.prepend(empty);if(kind==='sector')select.value='';}
+    if(kind==='sector'){const note=select.closest('label')?.querySelector('small');if(note){note.setAttribute('role','status');note.textContent=target?'Sector Rotation uses this data account only. Trading account selections stay unchanged. Motilal native candles require warmup.':rows.some(row=>!row.disabled)?'Select a FYERS, Dhan or Motilal Oswal data account for Sector Rotation. Delta India is not applicable; trading account selections stay unchanged.':'Sector Rotation is unavailable: no supported configured data account. Delta India is not applicable; trading account selections stay unchanged.';}}
     if(requested&&target?.id===requested)select.dataset.initialAccountApplied='true';
     if(!select.dataset.accountsBound){
       select.dataset.accountsBound='true';
       select.addEventListener('change',event=>{
         const saved=accounts.find(a=>select.selectedOptions[0]?.dataset.savedBrokerAccount===a.id);
-        if(saved&&['account','sector','renko','rsi','band','kama','manual','parser'].includes(kind)){
+        if(kind==='sector'&&saved){const note=select.closest('label')?.querySelector('small');if(note)note.textContent='Sector Rotation uses this data account only. Trading account selections stay unchanged. Motilal native candles require warmup.';}
+        if(saved&&['account','sector','screener','renko','rsi','band','kama','manual','parser'].includes(kind)){
           event.stopImmediatePropagation();
           root.BrokerForms.onChange(kind,saved);
-        }else if(['account','sector','rsi','band','kama','manual','parser'].includes(kind)){
+        }else if(['account','sector','screener','rsi','band','kama','manual','parser'].includes(kind)){
           root.BrokerForms.onChange(kind,null);
         }
         if(kind==='manual'){
@@ -66,6 +80,7 @@
   const forms=[
     ['#open-positions','live-feed-broker-account','FYERS','account'],
     ['#sector-filter','sector-broker-account','FYERS','sector'],
+    ['#screener-analysis','screener-analysis-broker-account','FYERS','screener'],
     ['#straddle-options','sensex-broker-account','FYERS','strategy'],
     ['#nifty-straddle-options','nifty-broker-account','FYERS','strategy'],
     ['#ema-band-mode','ema-band-broker-account','FYERS','band'],
@@ -86,7 +101,7 @@
         const label=document.createElement('label');label.className='field broker-account-field';label.textContent=kind==='sector'?'Sector Rotation broker account':'Broker account';
         select=document.createElement('select');select.id=id;select.setAttribute('aria-label','Broker account');
 
-        const note=document.createElement('small');note.textContent=kind==='sector'?'Select FYERS or Dhan for sector market data. Dhan requires an active Data API subscription. Delta India sector data is unavailable.':'Your saved accounts are listed below. Unavailable routes are disabled; choosing a broker never starts a runner.';
+        const note=document.createElement('small');note.textContent=kind==='sector'?'Select your data broker. Motilal uses only its captured native candles and requires warmup. Delta India sector data is unavailable.':'Your saved accounts are listed below. Unavailable routes are disabled; choosing a broker never starts a runner.';
         label.append(select,note);
         if(anchor.tagName==='FORM')anchor.prepend(label);else (anchor.closest('label')||anchor).before(label);
       }
@@ -99,6 +114,9 @@
       const heading=document.createElement('b');heading.textContent='Your broker accounts';panel.append(heading);
       for(const account of accounts){
         const line=document.createElement('div');line.textContent=(NAMES[account.broker]||account.broker)+' · '+account.label+' · '+(account.configured?'settings saved':'setup incomplete');panel.append(line);
+        if(account.broker==='MOTILAL_OSWAL'&&account.configured){
+          const connect=document.createElement('a');connect.textContent='Motilal Oswal connection details';connect.href='/broker-workspace/'+account.id+'/workspace-entry';line.append(' · ',connect);
+        }
         if(account.broker==='DHAN'&&account.configured){
           fetch('/api/dhan/status?account_id='+encodeURIComponent(account.id)).then(async response=>{
             if(!response.ok)throw Error('Connection unverified');
@@ -124,7 +142,7 @@
           if(response.ok)account.strategy_routes=(await response.json()).strategy_routes||[];
         }catch(error){account.strategy_routes=[];}
       }));
-      root.BrokerForms?.setAccounts(accounts);ready=true;apply();root.dispatchEvent(new CustomEvent('broker-accounts-ready'));
+      root.BrokerForms?.setAccounts(accounts,context);ready=true;apply();root.dispatchEvent(new CustomEvent('broker-accounts-ready'));
   }
   new MutationObserver(()=>apply()).observe(document.body,{childList:true,subtree:true});
   retryInventory(load,error=>{

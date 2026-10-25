@@ -42,6 +42,14 @@ def maintain(roots,fetch,now=None):
                 statuses[r]['segments'][segment]=dict(status='FRESH',attempted_at=now,last_success_at=now,error=None)
             except OSError as error:
                 statuses[r]['segments'][segment]=dict(status='REFRESH_FAILED',attempted_at=now,error=str(error)[:300])
+        # Archival failures must not prevent the existing live-master refresh.
+        if roots and segment in ('NSE_FO','BSE_FO','MCX_COM'):
+            try:
+                from strategies.renko_supertrend.historical_lots import archive_master
+                archived=archive_master(roots[0],segment,body,now)
+                statuses[roots[0]].setdefault('historical_archive',{})[segment]=dict(status='SAVED',as_of_date=archived['as_of_date'],sha256=archived['source_sha256'])
+            except Exception:
+                statuses[roots[0]].setdefault('historical_archive',{})[segment]=dict(status='FAILED',message='Live master refreshed; dated research archive unavailable. Historical sizing will remain withheld.')
     for r,status in statuses.items():
         status['healthy']=not any(x.get('status')=='REFRESH_FAILED' for x in status['segments'].values())
         atomic(r/'.private/ema-band-masters/maintenance-status.json',json.dumps(status))

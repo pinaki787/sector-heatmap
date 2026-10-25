@@ -1,8 +1,8 @@
 """Master strategy gates; stored subordinate choices and chart destinations stay independent."""
 FAMILIES={
  'supertrend':('supertrend_enabled','supertrend_exit_enabled','higher_timeframe_enabled'),
- 'ema':('ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','ema_proximity_enabled','retest_enabled','ema_exit_enabled','ema_slow_exit_enabled','ema_widening_exit_enabled'),
- 'rsi':('rsi_level_enabled','rsi_slope_enabled','rsi_exit_enabled'),
+ 'ema':('ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled','ema_proximity_enabled','ema_momentum_enabled','retest_enabled','ema_exit_enabled','ema_slow_exit_enabled','ema_widening_exit_enabled'),
+ 'rsi':('rsi_level_enabled','rsi_slope_enabled','rsi_exit_enabled','rsi_htf_1_enabled','rsi_htf_2_enabled','rsi_htf_3_enabled'),
  'adx':('use_adx','adx_exit_enabled'),
  'structure':('market_structure_enabled','market_structure_exit_enabled'),
  'zones':('zone_target_enabled',),
@@ -28,7 +28,7 @@ def apply(payload):
         value=result.get(key,default)
         if not isinstance(value,bool):raise ValueError('Indicator family switches must be booleans.')
         result[key]=value
-    legacy_on={'supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_widening_enabled','rsi_slope_enabled','supertrend_exit_enabled'}
+    legacy_on={'supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled','rsi_slope_enabled','supertrend_exit_enabled'}
     for family,keys in FAMILIES.items():
         if not result[family+'_family_enabled']:
             for key in keys:result.setdefault(key,key in legacy_on)

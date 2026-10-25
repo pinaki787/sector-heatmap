@@ -15,7 +15,7 @@ from sector_heatmap.indicators import (
 )
 from sector_heatmap.market_calendar import IST, market_session
 from sector_heatmap.sector_service import (
-    CandleHistoryProvider, FyersAuthenticationError, SectorAnalysisService, rank_directional_drivers,
+    CandleHistoryProvider, FyersAuthenticationError, SectorAnalysisService, rank_directional_drivers, completed_weekly,
 )
 from sector_heatmap.sectors import SECTOR_DEFINITIONS
 
@@ -32,6 +32,30 @@ def candles(count=260, start=100.0, step=0.5, timestamp=None):
 def timeframe(score=70, state=1, rs=65, momentum=60, adx=25, quality="DELAYED"):
     return {"score": score, "state": state, "relative_strength_score": rs, "momentum_score": momentum, "adx": adx, "data_quality": quality, "last_updated": "2026-08-29T15:30:00+05:30", "series": []}
 
+
+class CandleBoundaryTests(unittest.TestCase):
+    def test_new_completed_quarter_hour_invalidates_cache_before_ttl(self):
+        moment=[datetime(2026,10,21,9,59,59,tzinfo=IST)]
+        provider=CandleHistoryProvider(None,now=lambda:moment[0])
+        with patch.object(provider,"_download",side_effect=[[{"timestamp":1}],[{"timestamp":2}]]) as download:
+            with patch("sector_heatmap.sector_service.time.monotonic",side_effect=[100,101]):
+                self.assertEqual(provider.get("TEST","15m")[-1]["timestamp"],1)
+                moment[0]=datetime(2026,10,21,10,0,0,tzinfo=IST)
+                self.assertEqual(provider.get("TEST","15m")[-1]["timestamp"],2)
+        self.assertEqual(download.call_count,2)
+    def test_hour_cache_boundary_is_session_anchored_at_quarter_past(self):
+        moment=[datetime(2026,10,21,10,14,59,tzinfo=IST)]
+        provider=CandleHistoryProvider(None,now=lambda:moment[0])
+        with patch.object(provider,"_download",side_effect=[[{"timestamp":1}],[{"timestamp":2}]]) as download:
+            with patch("sector_heatmap.sector_service.time.monotonic",side_effect=[100,101]):
+                provider.get("TEST","1h");moment[0]=datetime(2026,10,21,10,15,0,tzinfo=IST)
+                self.assertEqual(provider.get("TEST","1h")[-1]["timestamp"],2)
+        self.assertEqual(download.call_count,2)
+    def test_daily_completion_does_not_accept_future_dates_after_close(self):
+        now=datetime(2026,10,21,16,0,tzinfo=IST)
+        provider=CandleHistoryProvider(None,now=lambda:now)
+        rows=[{"timestamp":int(datetime(2026,10,d,5,30,tzinfo=IST).timestamp())} for d in (21,22)]
+        self.assertEqual(len(provider._completed_only(rows,"D")),1)
 
 class IndicatorTests(unittest.TestCase):
     def test_ema_alignment_is_strong_bullish_for_ordered_uptrend(self):
@@ -363,6 +387,37 @@ class MarketCalendarTests(unittest.TestCase):
         service = SectorAnalysisService("", now=lambda: current)
         self.assertEqual(market_session(current)["status"], "OPEN")
         self.assertEqual(service._quality("15m", friday_bar), "STALE")
+
+    def test_forming_week_is_not_completed_weekly_evidence(self):
+        bars=[dict(timestamp=int(datetime(2026,10,d,5,30,tzinfo=IST).timestamp()),
+                   open=100,high=102,low=98,close=101,volume=1) for d in (16,19)]
+        rows=completed_weekly(bars,datetime(2026,10,21,10,0,tzinfo=IST))
+        self.assertEqual(len(rows),1)
+        self.assertEqual(datetime.fromtimestamp(rows[0]["timestamp"],IST).day,16)
+
+    def test_week_is_available_after_final_trading_session_close(self):
+        bars=[dict(timestamp=int(datetime(2026,10,23,5,30,tzinfo=IST).timestamp()),
+                   open=100,high=102,low=98,close=101,volume=1)]
+        self.assertEqual(completed_weekly(bars,datetime(2026,10,23,15,29,tzinfo=IST)),[])
+        self.assertEqual(len(completed_weekly(bars,datetime(2026,10,23,15,30,tzinfo=IST))),1)
+
+    def test_first_hour_after_holiday_uses_last_completed_hour(self):
+        current = datetime(2026, 10, 21, 9, 45, tzinfo=IST)
+        bar = [{"timestamp": int(datetime(2026, 10, 19, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("1h", bar), "DELAYED")
+
+    def test_missing_whole_trading_session_is_still_stale(self):
+        current = datetime(2026, 10, 22, 9, 45, tzinfo=IST)
+        bar = [{"timestamp": int(datetime(2026, 10, 19, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("1h", bar), "STALE")
+
+    def test_intraday_feed_gap_still_exceeds_existing_threshold(self):
+        current = datetime(2026, 10, 21, 14, 30, tzinfo=IST)
+        bar = [{"timestamp": int(datetime(2026, 10, 21, 9, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("1h", bar), "STALE")
 
     def test_exchange_holiday_and_special_sunday_are_calendar_aware(self):
         holiday = market_session(datetime(2026, 9, 14, 10, 0, tzinfo=IST))

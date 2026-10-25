@@ -276,8 +276,10 @@ class SensexStraddleService:
             result["message"] = message
         return result
 
-    def stop(self):
+    def stop(self, expected_started_at=None):
         with self.lock:
+            if expected_started_at is not None and expected_started_at != self.started_at:
+                raise ValueError('Runner changed; the replacement run was preserved.')
             self._refresh_process()
             process = self.process
             if process is None:
@@ -289,6 +291,8 @@ class SensexStraddleService:
             process.kill()
             process.wait(timeout=2)
         with self.lock:
+            if self.process is not process:
+                return self.snapshot_unlocked("Previous runner stopped; replacement run preserved.")
             self.last_exit_code = process.returncode
             self.process = None
             mode = self.active_mode or "Strategy"

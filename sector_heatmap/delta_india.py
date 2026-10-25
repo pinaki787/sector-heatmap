@@ -185,7 +185,7 @@ class DeltaIndia:
                 os.chmod(tmp,0o600);f.write('DELTA_MCP_ENV=india_prod\nDELTA_API_KEY='+json.dumps(key)+'\nDELTA_API_SECRET='+json.dumps(secret)+'\n');f.flush();os.fsync(f.fileno())
             os.replace(tmp,mcp_path);return self.status()
     def _private(self,method,path,params=None,body=None,credentials=None):
-        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path))) or (method in ('POST','DELETE') and path=='/v2/orders')
+        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path))) or (method in ('POST','PUT','DELETE') and path=='/v2/orders')
         if not allowed:raise ValueError('Unsupported Delta India authenticated endpoint.')
         c=credentials or self._credentials();key,secret=c.get('DELTA_INDIA_API_KEY'),c.get('DELTA_INDIA_API_SECRET')
         if not key or not secret:raise PermissionError('Delta India is not connected. Enter India API key and secret in Connection settings.')
@@ -834,7 +834,7 @@ class DeltaIndia:
             last=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])['last_completed']
             if not last or last.get('rsi_ma') is None:raise ValueError('Completed RSI/MA history is not warmed up.')
             self.live['runner_config']=deepcopy(cfg);self._save_live()
-            self.runner={'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
+            self.runner={'run_id':secrets.token_hex(16),'running':True,'config':cfg,'product_id':p['id'],'last_candle':last['timestamp'],'message':'Armed for a future completed RSI crossover; no historical replay.','pending':None,'action':None}
             self._record_runner_job(new=True)
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start();return self.status()
     def resume_paper_runner(self,payload=None):
@@ -848,12 +848,14 @@ class DeltaIndia:
             p,_=self._paper_contract(cfg['symbol'])
             snapshot=self.chart(cfg['symbol'],cfg['resolution'],cfg['rsi_length'],cfg['ma_length'],cfg['ma_type'])
             if not snapshot.get('last_completed'):raise ValueError('Completed signal history is unavailable.')
-            self.runner.update(running=True,exit_only=False,config=cfg,product_id=p['id'],last_candle=self.live.get('runner_last_candle') or snapshot['last_completed']['timestamp'],pending=None,action=None,message='Explicitly resumed persisted Paper strategy; retained position will be reconciled against completed signals.')
+            self.runner.update(run_id=secrets.token_hex(16),running=True,exit_only=False,config=cfg,product_id=p['id'],last_candle=self.live.get('runner_last_candle') or snapshot['last_completed']['timestamp'],pending=None,action=None,message='Explicitly resumed persisted Paper strategy; retained position will be reconciled against completed signals.')
             self._record_runner_job(new=True)
             self.stop_event=threading.Event();threading.Thread(target=self._run,args=(self.stop_event,),daemon=True,name='delta-india-runner').start()
             return self.status()
     def stop_runner(self,payload=None):
         with self.lock:
+            if (payload or {}).get('run_id') and payload['run_id']!=self.runner.get('run_id'):
+                raise ValueError('Runner changed; the replacement run was preserved.')
             self.runner['running']=False;self.stop_event.set();self.runner['message']='Stopped intentionally. Held position monitoring will remain stopped across restart.'
             for mode,pos in [('PAPER',self.paper.get('position')),('LIVE',self.live.get('runner_position'))]:
                 if pos:

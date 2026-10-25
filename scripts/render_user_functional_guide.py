@@ -1,36 +1,38 @@
-"""Render the repository's small Markdown functional guide without dependencies."""
-import html
-import re
+"""Build user-facing HTML and contextual-help data from one maintained help catalog."""
+import html,json,re
 from pathlib import Path
-
 ROOT=Path(__file__).resolve().parents[1]
-SOURCE=ROOT/'docs/user-functional-guide.md'
-TARGET=SOURCE.with_suffix('.html')
-
-
-def inline(text):
-    text=html.escape(text)
-    text=re.sub(r'\*\*(.+?)\*\*',r'<strong>\1</strong>',text)
-    text=re.sub(r'`([^`]+)`',r'<code>\1</code>',text)
-    return re.sub(r'\[([^\]]+)\]\(([^)]+)\)',r'<a href="\2">\1</a>',text)
-
-
 def render():
-    sections=[];toc=[]
-    for block in SOURCE.read_text().strip().split('\n\n'):
-        lines=block.splitlines()
-        match=re.match(r'^(#{1,3}) (.+)$',lines[0])
-        if match and len(lines)==1:
-            level=len(match[1]);title=match[2];anchor=re.sub(r'[^a-z0-9]+','-',title.lower()).strip('-')
-            sections.append(f'<h{level} id="{anchor}">{inline(title)}</h{level}>')
-            if level==2:toc.append(f'<a href="#{anchor}">{inline(title)}</a>')
-        elif all(re.match(r'^\d+\. ',line) for line in lines):
-            sections.append('<ol>'+''.join('<li>'+inline(re.sub(r'^\d+\. ','',line))+'</li>' for line in lines)+'</ol>')
-        elif all(line.startswith('- ') for line in lines):
-            sections.append('<ul>'+''.join('<li>'+inline(line[2:])+'</li>' for line in lines)+'</ul>')
-        else:sections.append('<p>'+inline(' '.join(lines))+'</p>')
-    style='''body{margin:0;background:#f3f5f9;color:#243047;font:16px/1.7 system-ui,-apple-system,sans-serif}header{background:#14233d;color:#fff;padding:24px max(24px,calc((100vw - 1000px)/2))}header strong{font-size:22px}nav{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}nav a{color:#b8d9ff;font-size:14px}main{max-width:1000px;margin:32px auto;padding:28px 44px;background:#fff;border:1px solid #dce2ec;border-radius:12px}h1{font-size:34px;line-height:1.25;color:#14233d}h2{margin-top:42px;padding-top:16px;border-top:2px solid #dde8f6;color:#1c416e;font-size:26px}h3{margin-top:30px;font-size:21px;color:#273e60}a{color:#1b5d9e}li{margin:8px 0}strong{font-weight:650}code{background:#edf1f7;padding:2px 5px;border-radius:3px}footer{max-width:1000px;margin:24px auto 40px;color:#64748b;font-size:13px;padding:0 24px}@media(max-width:700px){main{margin:12px;padding:22px}h1{font-size:28px}}'''
-    TARGET.write_text('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sector Pulse User Functional Guide</title><style>'+style+'</style></head><body><header><strong>Sector Pulse · User functional guide</strong><nav>'+''.join(toc)+'</nav></header><main>'+''.join(sections)+'</main><footer>Source: <a href="user-functional-guide.md">user-functional-guide.md</a> · Updated 8 October 2026 · No trading action is performed by this guide.</footer></body></html>')
-    return TARGET
-
+ data=json.loads((ROOT/'docs/dashboard-help-content.json').read_text());escape=html.escape
+ ids=[r['id'] for r in data['parameters']]
+ if len(ids)!=len(set(ids)):raise ValueError('Duplicate help control identity')
+ if any(not r.get('description') for r in data['parameters']):raise ValueError('Missing parameter explanation')
+ groups={}
+ for r in data['parameters']:groups.setdefault(r['group'],[]).append(r)
+ nav=''.join('<a href="#'+s['id']+'">'+escape(s['title'].split(' · ')[0])+'</a>' for s in data['sections'])+'<a href="#parameters">All parameters</a>'
+ sections=''.join('<section class="guide-section" id="'+s['id']+'"><h2>'+escape(s['title'])+'</h2>'+''.join('<p>'+escape(t)+'</p>' for t in s['text'])+'</section>' for s in data['sections'])
+ catalogs=[]
+ for group,rows in groups.items():
+  items=[]
+  for r in rows:
+   bounds=[]
+   for key,label in [('min','Minimum'),('max','Maximum'),('step','Step')]:
+    if r.get(key):bounds.append(label+' '+r[key])
+   options=[o['label'] for o in r.get('options',[]) if o.get('label')]
+   meta=('Options: '+', '.join(options)+'. ' if options else '')+('Form bounds: '+'; '.join(bounds)+'.' if bounds else '')
+   items.append('<article class="parameter" id="help-'+escape(r['id'])+'"><h4>'+escape(r['label'])+'</h4><p>'+escape(r['description'])+'</p>'+('<small>'+escape(meta)+'</small>' if meta else '')+'</article>')
+  catalogs.append('<details class="parameter-group" open><summary>'+escape(group)+' <span>'+str(len(rows))+' controls</span></summary>'+''.join(items)+'</details>')
+ css='''*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:#101b2b;color:#e6edf7;font:16px/1.65 system-ui,sans-serif}a{color:#a8ccff}header{padding:30px max(24px,calc((100vw - 1280px)/2));border-bottom:1px solid #34445c;background:#17253a}header p{max-width:780px;color:#bdcce0}h1{font-size:34px;margin:14px 0;line-height:1.2}h2{font-size:24px;line-height:1.3}h3{font-size:21px}h4{font-size:16px;margin:0 0 6px}p{margin:10px 0}header small,small{color:#b4c2d5}.layout{max-width:1280px;margin:auto;display:grid;grid-template-columns:250px minmax(0,1fr);gap:42px;padding:28px 24px}aside{position:sticky;top:16px;height:calc(100vh - 32px);overflow:auto}nav{display:grid;gap:9px}nav a{text-decoration:none;font-size:14px}main{min-width:0;max-width:920px}.guide-section{padding:8px 0 26px;border-bottom:1px solid #34445c;margin-bottom:20px}.search{display:block;margin:24px 0 12px;max-width:780px}.search input{width:100%;padding:13px 16px;border-radius:8px;border:1px solid #7797bf;background:#0e192a;color:#fff;font-size:17px}.parameter-group{border:1px solid #3b506d;border-radius:8px;margin:18px 0;overflow:hidden}.parameter-group summary{cursor:pointer;font-size:18px;font-weight:600;padding:16px;background:#1d304a}.parameter-group summary span{float:right;color:#b4c2d5;font-size:13px;font-weight:400}.parameter{padding:16px 20px;border-top:1px solid #34445c;scroll-margin-top:24px}.parameter p{margin:4px 0 8px}button{padding:8px 12px;color:#dce9fc;background:#253b59;border:1px solid #6a86a9;border-radius:6px;cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #9ac7ff;outline-offset:3px}[hidden]{display:none!important}#search-status{font-size:14px;color:#c4d6f1}.guide-actions{display:flex;gap:10px;margin:14px 0}.no-results{padding:20px;border:1px solid #9b814c;border-radius:8px}@media(max-width:800px){.layout{display:block;padding:20px}aside{position:static;height:auto;margin-bottom:28px}nav{display:flex;flex-wrap:wrap;gap:12px}h1{font-size:28px}.parameter-group summary span{float:none;display:block}}@media print{aside,.search,.guide-actions{display:none}.layout{display:block}.parameter-group{break-inside:auto}body{background:white;color:black}small{color:#333}}'''
+ script='''const search=document.getElementById('guide-search'),sections=[...document.querySelectorAll('.guide-section')],groups=[...document.querySelectorAll('.parameter-group')];function filter(){const words=search.value.toLowerCase().trim().split(/\\s+/).filter(Boolean);let count=0;for(const section of sections)section.hidden=!words.every(w=>section.textContent.toLowerCase().includes(w));for(const group of groups){let visible=0;for(const row of group.querySelectorAll('.parameter')){row.hidden=!words.every(w=>(group.querySelector('summary').textContent+' '+row.textContent).toLowerCase().includes(w));if(!row.hidden){visible++;count++;}}group.hidden=!visible;if(words.length)group.open=true;}document.getElementById('search-status').textContent=words.length?count+' matching parameters. Matching workflow sections are shown below.':'Search all workflows and '+document.querySelectorAll('.parameter').length+' parameters.';document.getElementById('no-results').hidden=!words.length||!!count||sections.some(s=>!s.hidden);}search.addEventListener('input',filter);document.getElementById('expand-all').onclick=()=>groups.forEach(g=>g.open=true);document.getElementById('collapse-all').onclick=()=>groups.forEach(g=>g.open=false);document.addEventListener('keydown',e=>{if(e.key==='Escape'){search.value='';filter();}});filter();'''
+ page='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sector Pulse · Help and parameter reference</title><style>'+css+'</style></head><body><header><a href="/">← Back to dashboard</a><h1>Help and parameter reference</h1><p>Workflows, strategy rules, controls and recovery in one searchable guide. Setting edits, active jobs, broker orders and confirmed fills are separate states.</p><small>Updated '+data['updated']+' · '+str(len(data['sections']))+' workflow sections · '+str(len(ids))+' documented controls</small><label class="search" for="guide-search">Find a setting or workflow<input id="guide-search" type="search" placeholder="Try quick-loss window, RSI, restart or saved configuration"></label><div id="search-status" role="status" aria-live="polite"></div></header><div class="layout"><aside><nav aria-label="Help contents">'+nav+'</nav></aside><main>'+sections+'<section id="parameters"><h2>Parameter reference</h2><p>Settings apply to the next Start unless a workflow explicitly supports changing the active run. These descriptions do not override unavailable runtime capabilities or broker validation.</p><div class="guide-actions"><button id="expand-all" type="button">Expand all groups</button><button id="collapse-all" type="button">Collapse all groups</button></div>'+''.join(catalogs)+'</section><p id="no-results" class="no-results" hidden>No matches. Try the parameter’s on-screen name or strategy.</p></main></div><script>'+script+'</script></body></html>'
+ for target in [ROOT/'user-guide.html',ROOT/'docs/user-functional-guide.html']:target.write_text(page)
+ md=['# Sector Pulse user guide','Updated '+data['updated']]
+ for s in data['sections']:md+=['## '+s['title']]+s['text']
+ for group,rows in groups.items():
+  md+=['## '+group+' parameters']
+  for r in rows:md+=['### '+r['label'],r['description']]
+ (ROOT/'docs/user-functional-guide.md').write_text('\n\n'.join(md)+'\n')
+ tooltip={r['id'].removeprefix('renko-'):r['description'] for r in data['parameters'] if r['group']=='Renko Supertrend'}
+ (ROOT/'dashboard-help.js').write_text('/* Generated by scripts/render_user_functional_guide.py; edit docs/dashboard-help-content.json. */\n(function(root){\n\'use strict\';\nroot.SectorPulseHelp={parameters:'+json.dumps(tooltip,ensure_ascii=False)+',updated:'+json.dumps(data['updated'])+'};\nif(typeof module!==\'undefined\')module.exports=root.SectorPulseHelp;\n})(typeof window===\'undefined\'?globalThis:window);\n')
+ return ROOT/'user-guide.html'
 if __name__=='__main__':print(render())

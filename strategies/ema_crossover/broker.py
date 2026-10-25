@@ -1,5 +1,7 @@
 """FYERS adapter: current masters, streaming prices and fresh order preflight."""
 import csv
+from datetime import datetime
+from sector_heatmap.market_calendar import IST
 import hashlib
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import math
@@ -154,7 +156,7 @@ class FyersBroker:
                 try:exchange=float(stamp);age=now-exchange if math.isfinite(exchange) else None
                 except (TypeError,ValueError):exchange=age=None
                 freshness[symbol]=dict(type=raw.get('type'),received_age_seconds=now-received,exchange_at=exchange,exchange_age_seconds=age)
-            return dict(connected=self.connected, generation=getattr(self,"connection_epoch",0), error=self.stream_error, subscribed=sorted(self.symbols),freshness=freshness,revision='fyers-topic-recovery-v1')
+            return dict(connected=self.connected, generation=getattr(self,"connection_epoch",0), error=self.stream_error, error_detail=getattr(self,"stream_error_detail",None), subscribed=sorted(self.symbols),freshness=freshness,revision='fyers-topic-recovery-v1')
 
     def subscribe_all(self):
         # The SDK resolves symbols over HTTP without a timeout. Never perform
@@ -224,7 +226,9 @@ class FyersBroker:
             code=message.get('code') if isinstance(message,dict) else None
             code=str(code) if isinstance(code,(int,float)) else 'unavailable'
             with self.lock:
-                self.stream_error='FYERS stream error; code '+code
+                from sector_heatmap.chart_feed_recovery import safe_stream_error
+                self.stream_error_detail=safe_stream_error(message)
+                self.stream_error='FYERS '+self.stream_error_detail['category']+' error; code '+code
             # Subscription errors are not transport closes. Freshness still blocks stale data.
         def on_close(*args):
             if generation != self.stream_generation:
@@ -303,7 +307,10 @@ class FyersBroker:
         if not math.isfinite(spot) or spot<=0:
             raise ValueError('Underlying spot unavailable.')
         segment='MCX_COM' if c['underlying'].startswith('MCX:') else c['underlying'].split(':')[0]+'_FO'
-        result=self.select_atm(self.rows(segment),row[13],direction,spot,time.time())
+        rows=list(self.rows(segment))
+        from sector_heatmap.stock_expiry_policy import stock_symbol,guard_fyers_rows
+        if stock_symbol(c['underlying']):guard_fyers_rows(rows,row[13],datetime.fromtimestamp(time.time(),IST))
+        result=self.select_atm(rows,row[13],direction,spot,time.time())
         return {**result,**self.contract(result['symbol'])}
 
     def order(self,symbol,qty,side,quote):

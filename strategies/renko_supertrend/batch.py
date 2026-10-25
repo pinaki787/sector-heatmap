@@ -49,7 +49,7 @@ class Batch:
                         runner.save_preferences({'settings':visible})
                     row['status']='STARTING';self.save(file,result)
                     state=runner.activate(config,background=background)
-                    row.update(status='STARTED',running=state['running'],mode=state['config']['mode'])
+                    row.update(status='STARTED',running=state['running'],mode=state['config']['mode'],run_id=state.get('run_id'),started_at=state.get('started_at'))
                 except Exception as error:row.update(status='REVIEW_REQUIRED' if row['status']=='STARTING' else 'BLOCKED',error=str(error))
                 self.save(file,result)
             result['complete']=True

@@ -86,6 +86,64 @@ class HistoryRecoveryTests(unittest.TestCase):
         self.initialized();self.b.rows[0]['close']-=1
         with self.assertRaises(HistoryRevision):analysis(self.b.rows,self.r.state['config'],.05,self.r.state['renko_engine'])
 
+    def test_backfilled_completed_candle_rebuilds_without_old_order_or_gate_change(self):
+        # The source was incomplete when first processed, then fills its gap.
+        omitted=self.b.rows.pop(1)
+        self.initialized()
+        self.r.state.update(eligible_since=self.b.now,seen=['CONSUMED'],trades_used=2,run_id='UNCHANGED')
+        original=deepcopy(self.r.state)
+        self.b.rows.insert(1,omitted)
+        rebuilt=self.r.current_analysis(self.b.rows,self.r.state['config'],.05)
+        expected=analysis(self.b.rows,self.r.state['config'],.05)
+        self.assertEqual(rebuilt,expected)
+        for key in ('eligible_since','seen','trades_used','run_id','position','pending','order_history'):
+            self.assertEqual(self.r.state.get(key),original.get(key))
+        self.assertEqual(self.r.state['history_recoveries'][-1]['backfilled_bars'],1)
+        self.assertEqual(self.b.sent,[])
+
+    def test_backfill_older_than_retained_hashes_rebuilds_without_execution_changes(self):
+        from .test_signals import candle
+        rows=[candle(i,100+(i%17)) for i in range(1205)]
+        omitted=rows.pop(30)
+        self.b.rows=rows
+        self.initialized()
+        saved=deepcopy(self.r.state['renko_engine'])
+        self.assertLess(omitted['timestamp'],min(map(float,saved['price_fingerprints'])))
+        self.r.state.update(eligible_since=self.b.now,seen=['CONSUMED'],trades_used=2,run_id='UNCHANGED')
+        original=deepcopy(self.r.state)
+        self.b.rows.insert(30,omitted)
+        with self.assertRaises(HistoryRevision):
+            analysis(self.b.rows,self.r.state['config'],.05,saved)
+        rebuilt=self.r.current_analysis(self.b.rows,self.r.state['config'],.05)
+        self.assertEqual(rebuilt,analysis(self.b.rows,self.r.state['config'],.05))
+        self.assertEqual(rebuilt['state']['count'],1205)
+        for key in ('eligible_since','seen','trades_used','run_id','position','pending','order_history'):
+            self.assertEqual(self.r.state.get(key),original.get(key))
+        self.assertEqual(self.b.sent,[])
+
+    def test_price_revision_before_retained_hashes_rebuilds_at_same_anchor(self):
+        from .test_signals import candle
+        self.b.rows=[candle(i,100+(i%17)) for i in range(1205)]
+        self.initialized()
+        before=deepcopy(self.r.state)
+        self.b.rows[30]['close']-=.5
+        with self.assertRaises(HistoryRevision):
+            analysis(self.b.rows,self.r.state['config'],.05,self.r.state['renko_engine'])
+        rebuilt=self.r.current_analysis(self.b.rows,self.r.state['config'],.05)
+        self.assertEqual(rebuilt,analysis(self.b.rows,self.r.state['config'],.05))
+        self.assertEqual(before.get('order_history'),self.r.state.get('order_history'))
+        self.assertEqual(self.b.sent,[])
+
+    def test_missing_old_candle_stays_blocked_without_reseeding(self):
+        from .test_signals import candle
+        self.b.rows=[candle(i,100+(i%17)) for i in range(1205)]
+        self.initialized()
+        original=deepcopy(self.r.state)
+        self.b.rows.pop(30)
+        with self.assertRaisesRegex(ValueError,'original'):
+            self.r.current_analysis(self.b.rows,self.r.state['config'],.05)
+        self.assertEqual(self.r.state,original)
+
     def other_instrument_lock(self):
         self.initialized();self.r.state['config']['sideways_enabled']=True
         self.r.state['run_id']='NEW'

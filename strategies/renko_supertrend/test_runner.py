@@ -47,7 +47,7 @@ class RenkoLifecycleTests(unittest.TestCase):
         mtf_patch=patch.object(Runner,'supertrend_agreement',return_value=dict(allowed=True,reason='MTF fixture agrees'))
         mtf_patch.start();self.addCleanup(mtf_patch.stop)
         self.c=dict(strategy='RENKO_SUPERTREND_V1',underlying='NSE:NIFTY50-INDEX',timeframe='1 minute',
-                    lots=1,mode='PAPER',atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,
+                    lots=1,mode='PAPER',ema_momentum_enabled=False,atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,
                     exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False,ema_exit_enabled=True)
     def start(self):
         p=self.r.preview(self.c);self.r.start(dict(preview_id=p['id'],confirmation=p['confirmation']),background=False)

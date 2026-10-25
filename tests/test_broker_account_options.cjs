@@ -52,7 +52,7 @@ test('Renko lists configured FYERS and Delta workspaces as selectable accounts',
 
 test('sector rotation allows every configured supported broker account',()=>{
  const result=choices(accounts,{kind:'sector'});
- assert.equal(result[0].disabled,false);assert.equal(result[1].disabled,false);assert.equal(result[2].disabled,false);assert.equal(result[3].disabled,true);
+ assert.equal(result.find(r=>r.id==='f').disabled,false);assert.equal(result.find(r=>r.id==='d').disabled,false);assert.equal(result.some(r=>r.broker==='DELTA_INDIA'),false);assert.equal(result.find(r=>r.id==='u').disabled,true);
 });
 
 test('Live feed enables configured Dhan accounts without enabling Delta',()=>{

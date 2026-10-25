@@ -37,6 +37,21 @@ class DhanHandoff:
             result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+ticker+'-EQ', netQty=row['netQty']))
         return result
 
+    def orders(self):
+        rows=self.client.request('GET','/orders')
+        if not isinstance(rows,list) or any(str(r.get('dhanClientId',self.client.client_id))!=self.client.client_id for r in rows):
+            raise PermissionError('Dhan orders do not match selected account.')
+        masters=self.execution.master.load(datetime.now(IST))
+        lookup={(r['SEM_EXM_EXCH_ID']+{'E':'_EQ','D':'_FNO','M':'_COMM','I':''}.get(r['SEM_SEGMENT'],''),str(r['SEM_SMST_SECURITY_ID'])):r for r in masters}
+        result=[]
+        for row in rows:
+            if row.get('orderStatus') in ('TRADED','CANCELLED','REJECTED','EXPIRED'):continue
+            if row.get('orderStatus') not in ('TRANSIT','PENDING','PART_TRADED'):raise ValueError('Unknown Dhan order status; duplicate entry cannot be excluded.')
+            meta=lookup.get((row.get('exchangeSegment'),str(row.get('securityId'))))
+            if not meta:raise ValueError('Pending Dhan order has no verified native master mapping.')
+            result.append(dict(symbol=meta['SEM_EXM_EXCH_ID']+':'+contract_underlying(meta)+'-EQ',status=row['orderStatus']))
+        return result
+
     def funds(self):
         data=self.client.request('GET','/fundlimit')
         if str(data.get('dhanClientId')) != self.client.client_id:
@@ -69,6 +84,9 @@ class DhanHandoff:
         today=datetime.now(IST).date().isoformat()
         active=sorted(e for e in (expiries or []) if isinstance(e,str) and e>=today)
         if not active:raise ValueError('Dhan has no active option expiry for this underlying.')
+        if meta['exchangeSegment'] in ('NSE_EQ','BSE_EQ'):
+            from .stock_expiry_policy import require_options_allowed
+            require_options_allowed(active,datetime.now(IST))
         expiry=active[0]
         raw=self.client.request('POST','/optionchain',dict(body,Expiry=expiry))
         if raw.get('status')!='success':raise ValueError('Dhan option-chain request failed.')

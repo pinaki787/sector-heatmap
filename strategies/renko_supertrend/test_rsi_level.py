@@ -28,7 +28,7 @@ class RsiLevelTests(unittest.TestCase):
             self.assertEqual(read(path)['settings'],fields)
     def test_level_only_direction(self):
         from .indicator_selection import qualify
-        cfg=settings(dict(supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,rsi_level_enabled=True))
+        cfg=settings(dict(supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,rsi_level_enabled=True))
         self.assertEqual(qualify(cfg,100,100,100,0,True,False,None,{'rsi14':51})[:2],(-1,True))
         self.assertEqual(qualify(cfg,100,100,100,0,True,False,None,{'rsi14':39})[:2],(1,True))
         self.assertFalse(qualify(cfg,100,100,100,0,True,False,None,{'rsi14':45})[1])
@@ -54,7 +54,7 @@ class RsiRangeTests(__import__('unittest').TestCase):
     def test_rsi_only_direction(self):
         from .signals import settings
         from .indicator_selection import qualify
-        c=settings(dict(rsi_level_enabled=True,rsi_level_mode='BETWEEN',supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False))
+        c=settings(dict(rsi_level_enabled=True,rsi_level_mode='BETWEEN',supertrend_enabled=False,ema_fast_enabled=False,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False))
         for value,direction in [(60,-1),(80,-1),(35,1),(40,1),(50,0),(90,0)]:
             self.assertEqual(qualify(c,100,100,100,0,True,True,None,dict(rsi14=value))[0],direction)
     def test_preferences_roundtrip(self):

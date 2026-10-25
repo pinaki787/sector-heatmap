@@ -5,6 +5,9 @@ def evaluate(state,candle,previous,previous_emas,previous_direction,direction,en
     bullish=direction<0;side='BULLISH' if bullish else 'BEARISH'
     before10,before30=previous_emas
     aligned=entry['ema10']>entry['ema30'] if bullish else entry['ema10']<entry['ema30']
+    if (config or {}).get('ema_third_enabled',False):
+        third=entry.get('ema100');prior=entry['ema30'] if config.get('ema_slow_enabled',True) else entry['ema10']
+        aligned=aligned and third is not None and (candle['close']>third and prior>third if bullish else candle['close']<third and prior<third)
     established=previous is not None and previous_direction==direction and before10 is not None and before30 is not None and (before10>before30 if bullish else before10<before30)
     seconds=(config or {}).get('host_seconds')
     if previous and seconds and candle['timestamp']-previous['timestamp']!=seconds:

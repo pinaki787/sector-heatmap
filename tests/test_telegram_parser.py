@@ -15,11 +15,11 @@ class Tests(unittest.TestCase):
  def terms(self,broker='DELTA_INDIA'):
   ticket=self.router.parse(dict(broker=broker,text='ETHUSD BUY ABOVE 2680 SL 2666 TARGET 2700'))
   return dict(ticket_id=ticket['ticket_id'],broker=broker,text=ticket['text'],mode='CONFIRMATION',quantity='1',entry_mode='STOP_LIMIT',trigger_price='2680',limit_price='2680.05',submission_id=str(uuid.uuid4()))
- def test_parse_never_executes_and_selected_broker_routes_only_once(self):
-  p=self.terms();self.delta.submit_discretionary.assert_not_called();self.fyers.assert_not_called()
-  self.router.submit(p);self.router.submit(p);self.assertEqual(self.delta.submit_discretionary.call_count,1);self.fyers.assert_not_called()
-  native=self.delta.submit_discretionary.call_args.args[0];self.assertEqual(native['telegram_stop_price'],'2680');self.assertNotIn('resolution',native)
-  self.router.submit(self.terms('FYERS'));self.assertEqual(self.fyers.call_count,1)
+ def test_legacy_submit_is_retired_for_both_brokers_and_never_calls_live(self):
+  for broker in ('FYERS','DELTA_INDIA'):
+   for mode in ('PAPER','LIVE','CONFIRMATION','AUTO'):
+    with self.assertRaisesRegex(ValueError,'retired'):self.router.submit(self.terms(broker)|dict(mode=mode))
+  self.delta.submit_discretionary.assert_not_called();self.fyers.assert_not_called()
  def test_changed_broker_expired_ticket_and_unresolved_fail_closed(self):
   p=self.terms()
   with self.assertRaises(ValueError):self.router.submit(p|dict(broker='FYERS'))
@@ -44,9 +44,9 @@ class Tests(unittest.TestCase):
   self.poll.ingest([self.update(2),self.update(2)]);self.assertEqual(send.call_count,1)
   self.poll.ingest([self.update(2,text='ETHUSD BUY ABOVE 2700')]);self.assertEqual(send.call_count,1)
   u=self.update(3);u['channel_post']['chat']['id']=-10099999;self.poll.ingest([u]);self.assertEqual(send.call_count,1)
- def test_actual_auto_adapter_routes_without_confirmation(self):
+ def test_legacy_auto_adapter_cannot_bypass_unified_mode(self):
   self.poll.verified=dict(channel_id=-10012345);self.poll.auto=True;self.poll.armed_at=1000;self.poll.execution=dict(broker='DELTA_INDIA',quantity=1);self.poll.auto_submit=self.router.auto
-  self.poll.ingest([self.update(4)]);self.assertEqual(self.delta.submit_discretionary.call_count,1);self.assertEqual(self.poll.status()['queue'][0]['state'],'BROKER_RESPONSE')
+  self.poll.ingest([self.update(4)]);self.delta.submit_discretionary.assert_not_called();self.assertEqual(self.poll.status()['queue'][0]['state'],'BLOCKED_OR_UNCERTAIN')
  def test_restart_stopped_and_credentials_private(self):
   self.poll.configure(dict(token='123:'+('x'*30),channel='-10012345',interval=30));self.assertEqual(self.poll.path.stat().st_mode&0o777,0o600)
   restart=TelegramPolling(self.poll.path);self.assertFalse(restart.running());self.assertFalse(restart.auto);self.assertIsNone(restart.verified)
@@ -68,7 +68,7 @@ class Tests(unittest.TestCase):
   self.poll.verified=dict(channel_id=-10012345);self.poll.ingest([self.update(7)])
   row=self.poll.status()['queue'][0];ticket=self.router.parse(dict(broker='DELTA_INDIA',queue_id=row['id'],revision=row['revision']))
   self.delta.submit_discretionary.return_value={'request_id':'test-request','status':'pending','filled_contracts':0}
-  self.router.submit(self.terms()|dict(ticket_id=ticket['ticket_id']))
+  self.poll.data['queue'][0]['result']={'broker':'DELTA_INDIA','request_id':'test-request','status':'pending','filled_contracts':0}
   self.delta.reconcile.return_value={'status':'closed','filled_contracts':1,'request_id':'test-request'}
   result=self.router.reconcile(dict(queue_id=row['id']))
-  self.assertEqual(result['filled_contracts'],1);self.assertEqual(result['broker'],'DELTA_INDIA');self.assertEqual(self.delta.submit_discretionary.call_count,1)
+  self.assertEqual(result['filled_contracts'],1);self.assertEqual(result['broker'],'DELTA_INDIA');self.delta.submit_discretionary.assert_not_called()

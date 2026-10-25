@@ -17,10 +17,10 @@ import threading
 import time
 
 COOKIE = 'sector_pulse_session'
-BROKERS = {'FYERS', 'DELTA_INDIA', 'DHAN'}
+BROKERS = {'FYERS', 'DELTA_INDIA', 'DHAN', 'MOTILAL_OSWAL'}
 LIVE_KEYS = ('SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_KAMA_LIVE_ORDERS',
              'SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS', 'SECTOR_PULSE_ENABLE_PARSER_PROTECTION',
-             'DELTA_INDIA_ENABLE_LIVE_ORDERS', 'DHAN_ENABLE_LIVE_ORDERS')
+             'DELTA_INDIA_ENABLE_LIVE_ORDERS', 'DHAN_ENABLE_LIVE_ORDERS', 'MOTILAL_ENABLE_LIVE_ORDERS')
 
 
 def password_hash(password, salt):
@@ -51,9 +51,14 @@ class WorkspaceStore:
                 credential_identity TEXT UNIQUE, UNIQUE(broker, account_ref));
             CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS user_features(user_id TEXT NOT NULL,feature TEXT NOT NULL,PRIMARY KEY(user_id,feature));
+            CREATE TABLE IF NOT EXISTS user_notification_emails(user_id TEXT PRIMARY KEY,email TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,enabled_at REAL NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS attempts(username TEXT PRIMARY KEY, failures INTEGER NOT NULL,
                 until REAL NOT NULL);
             ''')
+        with self.db() as db:
+            columns={r[1] for r in db.execute('PRAGMA table_info(user_notification_emails)')}
+            if 'enabled' not in columns:db.execute('ALTER TABLE user_notification_emails ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0')
+            if 'enabled_at' not in columns:db.execute('ALTER TABLE user_notification_emails ADD COLUMN enabled_at REAL NOT NULL DEFAULT 0')
         self.path.chmod(0o600)
 
     def sidebar_visibility(self):
@@ -199,8 +204,25 @@ class WorkspaceStore:
                 raise PermissionError('Only an administrator can open User Master.')
             rows=[]
             for user in db.execute('SELECT id,username,admin FROM users ORDER BY username').fetchall():
-                rows.append({'username':user['username'],'admin':bool(user['admin']),'features':list(FEATURES) if user['admin'] else [r[0] for r in db.execute('SELECT feature FROM user_features WHERE user_id=? ORDER BY feature',(user['id'],))]})
+                notification=db.execute('SELECT email,enabled FROM user_notification_emails WHERE user_id=?',(user['id'],)).fetchone()
+                rows.append({'notification_email':notification['email'] if notification else '', 'notification_email_enabled':bool(notification and notification['enabled']), 'username':user['username'],'admin':bool(user['admin']),'features':list(FEATURES) if user['admin'] else [r[0] for r in db.execute('SELECT feature FROM user_features WHERE user_id=? ORDER BY feature',(user['id'],))]})
             return rows
+
+    def set_notification_email(self, actor, username, email, enabled=False):
+        from .notification_recipients import validate_email
+        address=validate_email(email,allow_empty=True)
+        if type(enabled) is not bool:raise ValueError('Choose whether to send notifications.')
+        if enabled and not address:raise ValueError('Enter an email address before enabling notifications.')
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not actor or not db.execute('SELECT 1 FROM users WHERE id=? AND admin=1',(actor['id'],)).fetchone():
+                raise PermissionError('Only an administrator can set notification email addresses.')
+            user=db.execute('SELECT id,username FROM users WHERE username=?',(str(username).strip().lower(),)).fetchone()
+            if not user:raise ValueError('User does not exist.')
+            old=db.execute('SELECT email,enabled,enabled_at FROM user_notification_emails WHERE user_id=?',(user['id'],)).fetchone()
+            enabled_at=old['enabled_at'] if old and bool(old['enabled'])==enabled and old['email']==address else self.clock()
+            db.execute('INSERT OR REPLACE INTO user_notification_emails(user_id,email,enabled,enabled_at) VALUES(?,?,?,?)',(user['id'],address,int(enabled),enabled_at))
+        return {'username':user['username'],'notification_email':address,'notification_email_enabled':enabled}
 
     def set_features(self, actor, username, features):
         from .section_permissions import FEATURES
@@ -241,7 +263,7 @@ class WorkspaceStore:
 
     def create_account(self, user, broker, label, account_ref):
         if broker not in BROKERS:
-            raise ValueError('Choose FYERS, Dhan or Delta India.')
+            raise ValueError('Choose a supported broker, including Motilal Oswal.')
         label, account_ref = str(label).strip(), str(account_ref).strip().upper()
         if not 1 <= len(label) <= 80 or not re.fullmatch(r'[A-Z0-9_.-]{2,80}', account_ref):
             raise ValueError('Enter a label and broker account reference (2–80 letters/digits).')
@@ -268,7 +290,8 @@ class WorkspaceStore:
         account = self.account(user, aid)
         if not isinstance(live_enabled, bool) or not isinstance(fields, dict):
             raise ValueError('Invalid credential settings.')
-        allowed = {'FYERS': {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'}, 'DHAN': {'DHAN_CLIENT_ID','DHAN_ACCESS_TOKEN','DHAN_API_KEY','DHAN_API_SECRET'}, 'DELTA_INDIA': {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}}[account['broker']]
+        if account['broker']=='MOTILAL_OSWAL':allowed={'MO_CLIENT_ID','MO_API_KEY','MO_API_SECRET'}
+        else:allowed = {'FYERS': {'FYERS_APP_ID','FYERS_SECRET_KEY','FYERS_REDIRECT_URI'}, 'DHAN': {'DHAN_CLIENT_ID','DHAN_ACCESS_TOKEN','DHAN_API_KEY','DHAN_API_SECRET'}, 'DELTA_INDIA': {'DELTA_INDIA_API_KEY','DELTA_INDIA_API_SECRET'}}[account['broker']]
         if set(fields)-allowed:
             raise ValueError('Unsupported credential field.')
         if any(not isinstance(v,str) or len(v)>4096 or any(c in v for c in '\r\n\x00') for v in fields.values()):
@@ -277,7 +300,7 @@ class WorkspaceStore:
         path = folder/'credentials.json'
         prior = json.loads(path.read_text()) if path.exists() else {}
         credentials = {**prior, **{k:v.strip() for k,v in fields.items() if v.strip()}}
-        identity_key = {'FYERS':'FYERS_APP_ID','DHAN':'DHAN_CLIENT_ID','DELTA_INDIA':'DELTA_INDIA_API_KEY'}[account['broker']]
+        identity_key = 'MO_API_KEY' if account['broker']=='MOTILAL_OSWAL' else ({'FYERS':'FYERS_APP_ID','DHAN':'DHAN_CLIENT_ID','DELTA_INDIA':'DELTA_INDIA_API_KEY'}[account['broker']])
         required = allowed-{'FYERS_REDIRECT_URI'}
         if account['broker']=='DHAN':
             required={'DHAN_CLIENT_ID'}
@@ -301,6 +324,13 @@ class WorkspaceStore:
             if selected not in {expected,local,origin+'/callback' if origin else local}:
                 raise ValueError('Use this account callback '+expected+' or its SSH-tunnel callback '+local+'. Register the same URL with FYERS.')
             credentials['FYERS_REDIRECT_URI'] = selected
+        if account['broker']=='MOTILAL_OSWAL':
+            if not re.fullmatch(r'[A-Z0-9_-]{2,15}',credentials['MO_CLIENT_ID'].upper()):
+                raise ValueError('Motilal client code must fit its native 15-character broadcast login.')
+            if credentials['MO_CLIENT_ID'].upper()!=account['account_ref']:
+                raise ValueError('Motilal client code must match this account reference.')
+            from .motilal_service import network_identity
+            credentials.update(network_identity())
         digest = hashlib.sha256((account['broker']+'|'+credentials[identity_key]).encode()).hexdigest()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -329,10 +359,19 @@ def isolated_environment(account, folder, registry, portal_port):
     env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'AppData'),XDG_CONFIG_HOME=str(home/'.config'),
                HEATMAP_PORT=str(account['port']),FYERS_TOKEN_FILE=str(home/'.fyers/token.json'),
                SECTOR_PULSE_WORKSPACE_REGISTRY=str(registry),SECTOR_PULSE_WORKSPACE_ID=account['id'],
-               SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
+               SECTOR_PULSE_WORKSPACE_BROKER=account['broker'],SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
     env.update({k:'0' for k in LIVE_KEYS})
     if account['live_enabled']:
-        env[{'FYERS':'SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS','DHAN':'DHAN_ENABLE_LIVE_ORDERS','DELTA_INDIA':'DELTA_INDIA_ENABLE_LIVE_ORDERS'}[account['broker']]]='1'
+        if account['broker']=='MOTILAL_OSWAL':env['MOTILAL_ENABLE_LIVE_ORDERS']='1'
+        else:env[{'FYERS':'SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS','DHAN':'DHAN_ENABLE_LIVE_ORDERS','DELTA_INDIA':'DELTA_INDIA_ENABLE_LIVE_ORDERS'}[account['broker']]]='1'
+    # Account-scoped, explicitly authorized parser capability survives reloads.
+    permission = folder/'parser-live-permission.json'
+    if account['live_enabled'] and account['broker']=='FYERS' and permission.exists():
+        try:
+            if json.loads(permission.read_text()).get('enabled') is True:
+                env['SECTOR_PULSE_ENABLE_TRADE_PARSER_LIVE_ORDERS']='1'
+        except (OSError, ValueError, AttributeError):
+            pass  # Invalid permission stays disabled.
     source = folder/'source'
     for name, script in [('NIFTY','nifty_straddle.py'),('SENSEX','sensex_straddle.py')]:
         env['SECTOR_PULSE_'+name+'_STRADDLE_SCRIPT']=str(source/'strategies/long_straddle'/script)
@@ -371,7 +410,10 @@ class WorkspaceRuntime:
     def disconnect(self, user, aid):
         with self.lock:
             account = self.store.account(user, aid)
-            if self.running(aid):
+            if account['broker']=='MOTILAL_OSWAL':
+                from .workspace_disconnect import stop_for_disconnect
+                stop_for_disconnect(self,account)
+            elif self.running(aid):
                 raise ValueError('Disconnect blocked: this account dashboard is still running. Stop its dashboard after checking strategies, positions and pending orders. No connection was changed.')
             folder = self.store.folder(account)
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -439,6 +481,23 @@ class WorkspaceRuntime:
         if (self.source/'.git').exists():
             inventory=subprocess.check_output(['git','ls-files','-z'],cwd=self.source).decode().split('\0')
             inventory += ['strategies/renko_supertrend/manual_trend.py','holdings-review.js','sector_heatmap/holdings_analysis.py','sector_heatmap/broker_diagnostics.py','sector_heatmap/screener_paging.py','sector_heatmap/advisory_jobs.py','sector_heatmap/runner_job_history.py','runner-jobs.js','user-guide.html','sector_heatmap/dhan_account_login.py','sector_heatmap/network_policy.py','sitecustomize.py','sector_heatmap/premium_exit_mapping.py','strategies/renko_supertrend/dhan_costs.py','sector_heatmap/dhan_handoff.py','sector_heatmap/dhan_recovery.py','sector_heatmap/dhan_sector_analysis.py','strategies/renko_supertrend/manual_brick.py','sector_heatmap/fyers_transport.py','sector_heatmap/fyers_oauth_routing.py','renko-engine.js','broker-connection-status.js','strategies/renko_engine/__init__.py','strategies/renko_engine/rules.py','strategies/renko_engine/runner.py','strategies/renko_engine/service.py','strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py', 'strategies/renko_supertrend/indicator_families.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js','sector_heatmap/dhan_execution.py','dhan-orders.html','dhan-orders.js','broker-account-options.js', 'broker-form-routing.js', 'sector_heatmap/dhan_form_routes.py', 'sector_heatmap/dhan_indicator_runners.py', 'sector_heatmap/workspace_proxy.py', 'sector_heatmap/dhan_strategy_broker.py', 'sector_heatmap/dhan_mcx.py', 'sector_heatmap/dhan_strategy_service.py', 'dhan-strategies.html', 'dhan-strategies.js','strategies/renko_supertrend/rsi_level.py']
+            inventory += ['sector_heatmap/workspace_bounce.py','strategies/ema_crossover/external_close.py','sector_heatmap/screener_routes.py']
+            inventory += ['motilal-oswal.html','motilal-oswal.js'] + ['sector_heatmap/motilal_'+name+'.py' for name in ['api','feed','history','history_seed','calendar','master','execution','service','server','strategy_broker','strategy_service','analysis','shared_routes','shared_tickets']]
+            inventory += ['sector_heatmap/stock_expiry_policy.py']
+            inventory += ['investment.js','investment.css','sector_heatmap/investment.py','sector_heatmap/investment_rs.py','sector_heatmap/investment_plan.py']
+            inventory += ['sector_heatmap/company_fundamentals.py','sector_heatmap/fundamental_feedback.py','fundamental-report.js']
+            inventory += ['sector_heatmap/combined_sector_worker.py','sector_heatmap/combined_screener_worker.py','sector_heatmap/combined_screener_analysis.py']
+            inventory += ['sector_heatmap/holdings_native_trailing.py','sector_heatmap/holdings_trailing.py','sector_heatmap/holdings_actions.py','sector_heatmap/holdings_sessions.py','sector_heatmap/holdings_chart.py','sector_heatmap/holdings_analysis.py','analysis-trailing.js','holdings-trailing.js','holdings-review-tools.js']
+            inventory += ['sector_heatmap/handoff_product_retry.py']
+            inventory += ['sector_heatmap/handoff_authorization.py']
+            inventory += ['sector_heatmap/handoff_screener.py','sector_heatmap/handoff_priority.py','handoff-screener.js']
+            inventory += ['sector_heatmap/handoff_entry_conditions.py','sector_heatmap/handoff_entry_queue.py']
+            inventory += ['handoff-exit-monitor.js','sector_heatmap/handoff_exit_monitor.py','sector_heatmap/handoff_exit_broker.py']
+            inventory += ['handoff-level-report.js','sector_heatmap/handoff_levels.py','sector_heatmap/handoff_outcomes.py']
+            inventory += ['runner-job-details.js','analysis-jobs.js','market-handoff.js','saved-jobs.css','renko-backtest.js','strategies/renko_supertrend/backtest.py','strategies/renko_supertrend/backtest_data.py','strategies/renko_supertrend/historical_lots.py','strategies/renko_supertrend/nse_contract_lots.py'] + ['sector_heatmap/'+name+'.py' for name in ['persistent_jobs','job_http','exposure_guard','handoff_ai','market_handoff','codex_handoff','runner_job_audit','native_holdings']]
+            inventory += ['dashboard-help.js','resource-restarts.js','resource-monitor.js','sector_heatmap/service_restart.py']
+            inventory += ['strategies/renko_supertrend/mtf_rsi.py']
+            inventory += ['strategies/renko_supertrend/confirmed_feed.py']
             public=[]
             for name in sorted(set(inventory)):
                 path=Path(name)
@@ -465,6 +524,9 @@ class WorkspaceRuntime:
     def start(self,user,aid):
         with self.lock:
             account=self.store.account(user,aid)
+            job=self.store.folder(account)/'bounce-status.json'
+            if job.exists() and json.loads(job.read_text()).get('status') in {'CHECKING','RESTARTING','WAITING'}:
+                raise ValueError('Broker dashboard bounce in progress; wait for readiness before opening it.')
             if (self.store.folder(account)/'disconnected.json').exists():
                 raise ValueError('This broker account is disconnected. Use Reconnect in Accounts first.')
             if not self.running(aid):
@@ -478,7 +540,7 @@ class WorkspaceRuntime:
                 log=folder/'dashboard.log'
                 fd=os.open(log,os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
                 with os.fdopen(fd,'a') as output:
-                    self.processes[aid]=subprocess.Popen([sys.executable,'heatmap_server.py'],cwd=folder/'source',env=env,stdout=output,stderr=subprocess.STDOUT)
+                    self.processes[aid]=subprocess.Popen([sys.executable,'-m','sector_heatmap.motilal_server'] if account['broker']=='MOTILAL_OSWAL' else [sys.executable,'heatmap_server.py'],cwd=folder/'source',env=env,stdout=output,stderr=subprocess.STDOUT)
             import socket
             deadline=time.monotonic()+15
             while time.monotonic()<deadline:

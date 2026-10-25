@@ -102,3 +102,20 @@ input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; padding: 0;
 @media (min-width:601px) and (max-width:850px) { .account .actions { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
 .dashboard-back{display:inline-flex;align-items:center;gap:9px;margin:0 0 18px;padding:10px 16px;border:1px solid #36546d;border-radius:8px;background:#173247;color:#e9f4ff;text-decoration:none;font-weight:600}.dashboard-back:hover{background:#23475f}.dashboard-back:focus-visible{outline:2px solid #78baff;outline-offset:3px}
+
+/* Motilal private connection layout. */
+.motilal-connection .connection-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:16px 0}
+.motilal-connection .connection-actions button,.motilal-connection .connection-actions .button{margin:0;min-height:42px;padding:10px 18px}
+.motilal-connection #saved-login-form,.motilal-connection #otp-form{display:grid;gap:16px;max-width:560px}
+.motilal-connection #saved-login-form>label,.motilal-connection #otp-form>label{display:grid;gap:8px}
+.motilal-connection #saved-login-form>label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:10px;line-height:1.5}
+.motilal-connection #saved-login-form input[type=checkbox]{width:auto;margin-top:4px;flex-shrink:0}
+.motilal-connection #saved-login-form input:disabled{opacity:1;color:var(--muted,#9db0c4)}
+.motilal-connection #saved-login-form input::placeholder{opacity:1}
+.motilal-connection #workflow-links{display:flex;flex-wrap:wrap;gap:12px 20px}
+.motilal-connection #workflow-links br{display:none}
+.motilal-connection [hidden]{display:none!important}
+.motilal-connection .connection-table{width:100%;border-collapse:collapse;margin:20px 0}.motilal-connection .connection-table th,.motilal-connection .connection-table td{text-align:left;padding:12px 16px;border-bottom:1px solid #284359;vertical-align:top}.motilal-connection .connection-table th{width:32%;font-weight:600;color:#adc2d4}.motilal-connection .connection-table td{overflow-wrap:anywhere}
+
+/* Per-user outbound email destination; existing section choices remain independent. */
+.notification-email-form{display:grid;gap:.6rem;min-width:220px;max-width:320px}.notification-email-form input{width:100%;box-sizing:border-box}.notification-email-form small{line-height:1.45;color:var(--muted,#63768b)}.notification-email-form .permission-save{justify-self:start}

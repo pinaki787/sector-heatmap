@@ -273,6 +273,8 @@ class Runner:
             expected = payload.get('run_id')
             if expected and expected != current.get('run_id'):
                 raise ValueError('Run changed. Refresh before stopping.')
+            if payload.get('started_at') is not None and payload['started_at'] != current.get('started_at'):
+                raise ValueError('Run changed. Refresh before stopping.')
             if not (current.get('running') or current.get('position') or current.get('pending')):
                 return current
             self.stop_requested.set()
@@ -462,6 +464,33 @@ class Runner:
         self.state['pending'] = None
         self.event('POSITION_OPEN' if self.state['position'] else 'FLAT', f"{pending['reason']}: confirmed {filled} filled at {price}; quantities reconciled.")
 
+    def reconcile_external_stop(self):
+        """Reconcile an existing broker fill only; this method never submits."""
+        from .external_close import confirmed_close
+        c = self.state.get('config') or {}
+        if c.get('mode') != 'LIVE' or c.get('broker', 'FYERS') != 'FYERS' or not self.state.get('squareoff_requested') or self.state.get('pending') or not self.state.get('position'):
+            return False
+        p = deepcopy(self.state['position'])
+        evidence = confirmed_close(p, self.adapter.positions(), self.adapter.orders())
+        # Re-read broker evidence before mutating local ownership. An intervening
+        # order/position change leaves the original mismatch blocked.
+        verified = confirmed_close(p, self.adapter.positions(), self.adapter.orders())
+        if verified != evidence:
+            raise ValueError('External close evidence changed; reconciliation deferred.')
+        order = dict(symbol=p['symbol'], qty=evidence['quantity'], side=evidence['side'],
+                     productType=evidence['product'], type=2)
+        self.state['pending'] = dict(order=order, tag='EXTERNAL-CLOSE-'+evidence['order_id'],
+            id=evidence['order_id'], position=p, reason='EXTERNAL_BROKER_CLOSE',
+            submitted_at=evidence['filled_at'], cancel_requested=False,
+            reconciliation_only=True, external_close_evidence=evidence)
+        self.save()  # Durable attribution to an existing fill, never a new intent.
+        self.complete_pending(evidence['quantity'], evidence['price'])
+        self.state.setdefault('external_close_reconciliations', []).append(evidence)
+        self.state['accepting_entries'] = False
+        self.event('EXTERNAL_CLOSE_RECONCILED', 'Existing broker exit confirmed; no closing order submitted. Finishing requested Stop.')
+        self.stop()
+        return True
+
     def reconcile(self):
         p = self.state['pending']
         rows = self.adapter.orders()
@@ -524,7 +553,12 @@ class Runner:
                     p.update(exit_requested=True, exit_reason='MANUAL_SQUARE_OFF')
                     self.save()
                 if c['mode'] == 'LIVE':
-                    self.adapter.reconcile_position(p['symbol'], p['quantity']*p.get('entry_side', 1))
+                    try:
+                        self.adapter.reconcile_position(p['symbol'], p['quantity']*p.get('entry_side', 1))
+                    except ValueError:
+                        if self.reconcile_external_stop():
+                            return
+                        raise
                 if not p.get('exit_requested') and p.get('trailing'):
                     try:
                         trail,hit=trailing_advance(p['trailing'],self.adapter.quote(p['symbol']),self.clock())

@@ -106,7 +106,7 @@ function browser(accounts) {
       return {ok:response.status===200,status:response.status,json:async()=>response.body,brokerPaths:response.broker_paths};
     },
   };
-  const context={window,document,location,URL,URLSearchParams,Promise,console,fetch:window.fetch,
+  const context={window,document,location,URL,URLSearchParams,Promise,console,setTimeout,AbortSignal,fetch:window.fetch,
     history:{replaceState(a,b,url){location.search=url.search;}},
     CustomEvent:class {constructor(type,options={}){this.type=type;this.detail=options.detail;}},
     MutationObserver:class {observe(){}},

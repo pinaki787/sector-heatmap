@@ -277,6 +277,16 @@ class DhanExecutionService:
         ips=client.request('GET','/ip/getIP')
         if self.egress() not in (ips.get('primaryIP'),ips.get('secondaryIP')):raise ValueError('This server’s outgoing IP is not whitelisted for this Dhan account.')
         contract=self.master.resolve(payload,now)
+        from .stock_expiry_policy import stock_symbol,require_options_allowed
+        if contract.get('option_type') in ('CE','PE') and contract.get('exchange_segment') in ('NSE_FNO','BSE_FNO'):
+            master_rows=self.master.load(now)
+            selected=next((r for r in master_rows if str(r.get('SEM_SMST_SECURITY_ID'))==str(contract['security_id']) and r.get('SEM_SEGMENT')=='D' and r.get('SEM_EXM_EXCH_ID')==contract['exchange_segment'].split('_',1)[0]),None)
+            is_stock=stock_symbol(payload.get('underlying')) or selected and str(selected.get('SEM_INSTRUMENT_NAME','')).upper()=='OPTSTK'
+            if is_stock:
+                ticker=contract_underlying(selected) if selected else str(payload['underlying']).split(':',1)[1].removesuffix('-EQ')
+                exchange=selected.get('SEM_EXM_EXCH_ID') if selected else str(payload['underlying']).split(':',1)[0]
+                dates=[r.get('SEM_EXPIRY_DATE','')[:10] for r in master_rows if r.get('SEM_SEGMENT')=='D' and r.get('SEM_EXM_EXCH_ID')==exchange and contract_underlying(r)==ticker and r.get('SEM_OPTION_TYPE') in ('CE','PE')]
+                require_options_allowed(dates,now)
         opening,closing=9*60+15,15*60+30
         if contract['exchange_segment']=='MCX_COMM':
             from . import dhan_mcx
@@ -544,3 +554,25 @@ class DhanExecutionService:
                 rows.append({'correlation_id':path.stem,'status':record['status'],'order_id':record.get('order_id')})
             return {'broker':'DHAN','account_id':self.account['id'],'orders':rows,
                     'unresolved':sum(row['status'] in ('UNKNOWN','SUBMITTING') for row in rows)}
+
+    def reconcile_protection(self,preview_id):
+        """Read a durable native Super intent and current book, never resubmit."""
+        ident=str(preview_id)
+        if not ident.startswith("DHAN-") or len(ident)>50 or any(not(c.isalnum() or c=="-") for c in ident):
+            raise ValueError("Invalid owned Dhan preview identity.")
+        record=json.loads((self.folder/"dhan-orders"/(ident+".json")).read_text())
+        if record.get("endpoint")!="/super/orders":
+            raise ValueError("Owned order did not request native linked exits.")
+        ticket=record["ticket"];client=self._client()
+        if str(ticket.get("dhanClientId"))!=client.client_id or ticket.get("correlationId")!=ident:
+            raise PermissionError("Dhan submitted intent owner differs from this account.")
+        rows=self.master.load(self.now())
+        matches=[r for r in rows if str(r["SEM_SMST_SECURITY_ID"])==str(ticket["securityId"]) and
+            r["SEM_EXM_EXCH_ID"]+{"E":"_EQ","D":"_FNO","M":"_COMM","I":""}.get(r["SEM_SEGMENT"],"")==ticket["exchangeSegment"]]
+        ticks={float(r["SEM_TICK_SIZE"])/100 for r in matches}
+        if len(ticks)!=1:raise ValueError("Exact Dhan contract tick unavailable.")
+        from .dhan_protection import reconcile
+        result=reconcile(ticket,record.get("protection"),record.get("order_id"),ident,
+            client.request("GET","/super/orders"),next(iter(ticks)))
+        return dict(result,preview_id=ident,broker="DHAN",account_id=self.account["id"],
+            order_ids=[record["order_id"]] if record.get("order_id") else [])

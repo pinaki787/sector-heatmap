@@ -33,7 +33,7 @@ class NativeFake(FakeBroker):
 
 
 def config(symbol='BTCUSD'):
-    return dict(strategy='RENKO_SUPERTREND_V1',rsi_slope_enabled=False,underlying=symbol,timeframe='1 minute',mode='PAPER',lots=1,max_trades=2,
+    return dict(strategy='RENKO_SUPERTREND_V1',ema_momentum_enabled=False,rsi_slope_enabled=False,underlying=symbol,timeframe='1 minute',mode='PAPER',lots=1,max_trades=2,
                 atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,exit_policy='OPPOSITE_CONFIRMED_SIGNAL',
                 broker='DELTA_INDIA',price_source='PERPETUAL_LAST_TRADE',order_terms='MARKETABLE_LIMIT_IOC',
                 carry_policy='DAILY_SQUARE_OFF',session_deadline='23:30')

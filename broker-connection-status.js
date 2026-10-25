@@ -1,7 +1,15 @@
 /* Selected broker status; read-only, account-bound and stale-response safe. */
 (function(root){
 'use strict';
-let key='',version=0,last=0;
+function connectionSelection({workspace,accounts=[],selectedAccount=null,selectedBroker='FYERS'}={}){
+ if(workspace?.id&&workspace.broker){
+  const account=accounts.find(a=>a.id===workspace.id)||workspace;
+  return {account:account.broker===workspace.broker?account:null,broker:workspace.broker};
+ }
+ return {account:selectedAccount,broker:selectedAccount?.broker||selectedBroker};
+}
+if(typeof window==='undefined'&&typeof module!=='undefined'&&module.exports){module.exports={connectionSelection};return;}
+let key='',version=0,last=0,connectionContext=null,contextRequest=null;
 let dhanPending='';
 const reauthShown=new Set();
 function offerDhanReauthentication(account){
@@ -16,8 +24,10 @@ function offerDhanReauthentication(account){
 }
 
 function selection(){
+ const context=root.BrokerForms?.context?.()||root.SectorPulseWorkspace||connectionContext;
+ if(context?.workspace?.id)return connectionSelection({workspace:context.workspace,accounts:root.BrokerForms?.accounts?.()||[]});
  const view=document.querySelector('.view.active')?.id;
- const kind={ sectors:'sector', handoff:'handoff',broker:'account', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
+ const kind={ sectors:'sector', handoff:'handoff',broker:'account',screener:'screener', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
  let account=view==='renko-engine'?root.RenkoEngine?.selectedAccount?.():kind?root.BrokerForms?.account(kind):null;
  let broker=account?.broker||'FYERS';
  if(kind==='renko'&&view!=='renko-engine')broker=document.getElementById('renko-broker')?.value||broker;
@@ -42,7 +52,11 @@ function fyersConnect(connect,account){
  };
 }
 async function update(){
- const card=document.querySelector('.broker-card');if(!card||!root.BrokerForms)return;
+ const card=document.querySelector('.broker-card');if(!card)return;
+ if(!root.BrokerForms?.context?.()&&!root.SectorPulseWorkspace&&!connectionContext){
+  contextRequest=contextRequest||fetch('/api/workspace-context',{cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('Workspace identity unavailable');return r.json();}).finally(()=>{contextRequest=null;});
+  try{connectionContext=await contextRequest;}catch(error){return;}
+ }
  const {account,broker}=selection(),next=broker+'|'+(account?.id||'');
  if(broker==='DHAN'&&dhanPending===next)return;
  if(next===key&&Date.now()-last<30000)return;key=next;last=Date.now();const generation=++version;
@@ -57,12 +71,16 @@ async function update(){
  let connect=document.getElementById('selected-broker-connect');if(!connect){connect=document.createElement('a');connect.id='selected-broker-connect';connect.className='button';connect.textContent='Connect';panel.after(connect);}connect.hidden=true;connect.href='/accounts';connect.onclick=null;
  panel.hidden=false;
  if(!account){panel.textContent='Select a saved broker account';connect.hidden=false;connect.textContent='Configure broker account';return;}
- const name={DHAN:'Dhan',DELTA_INDIA:'Delta India',FYERS:'FYERS'}[broker]||broker;
+ const name={DHAN:'Dhan',DELTA_INDIA:'Delta India',FYERS:'FYERS',MOTILAL_OSWAL:'Motilal Oswal'}[broker]||broker;
  connect.textContent='Connect to '+name;if(broker==='FYERS')fyersConnect(connect,account);
  panel.textContent=name+' · Checking…';
  try{
   let message;
-  if(broker==='DHAN'&&account){
+  if(broker==='MOTILAL_OSWAL'){
+   connect.href='/broker-workspace/'+account.id+'/workspace-entry';
+   const response=await fetch('/api/motilal/status?account_id='+encodeURIComponent(account.id),{cache:'no-store'});if(!response.ok)throw Error('Native connection unavailable');
+   const data=await response.json();message=data.authenticated?'Connected':'Sign-in required';
+  }else if(broker==='DHAN'&&account){
    dhanPending=next;
    const controller=new AbortController();
    const timeout=setTimeout(()=>controller.abort(),12000);
@@ -86,5 +104,6 @@ root.addEventListener('broker-account-change',()=>{key='';update();});
 root.addEventListener('broker-accounts-ready',update);
 document.addEventListener('change',()=>{if(selection().broker!=='DHAN')key='';update();});
 document.addEventListener('click',()=>queueMicrotask(update));
+update();
 setInterval(update,3000);
-})(window);
+})(typeof window==='undefined'?globalThis:window);

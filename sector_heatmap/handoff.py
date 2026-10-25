@@ -235,6 +235,7 @@ def build_equity_opportunity(candidate, policy):
         "name": candidate.get("name"), "direction": direction,
         "thesis": f"{candidate.get('mtf_alignment')} across completed 15m, 1h, Daily and Weekly bars with {daily.get('relative_strength_state', 'available relative-strength')} evidence.",
         "entry": round(trigger, 2), "entry_trigger": trigger_text, "current_price": live_price,
+        "entry_condition": __import__('sector_heatmap.handoff_entry_conditions',fromlist=['condition']).condition(candidate.get('symbol'),direction,_positive_number(intraday.get('close'))),
         "stop_invalidation": None, "target": None, "reward_to_risk": policy.get("minimum_reward_to_risk"),
         "quantity": None, "estimated_max_loss": None, "estimated_notional": None,
         "invalidation_choices": {
@@ -309,6 +310,12 @@ def apply_invalidation_choice(candidate, opportunity, policy, selection, tick_si
             "estimated_max_loss": round(lots * float(option_proposal["max_loss_per_lot"]), 2),
             "target_exit_points": option_proposal.get("target_exit_points"),
         })
+        if option_proposal.get('kind')=='LONG_OPTION' and option_proposal.get('legs'):
+            from .premium_exit_mapping import premium_stop_from_greeks
+            leg=option_proposal['legs'][0]
+            try:
+                result['premium_stop_estimate']=premium_stop_from_greeks(spot=entry,stop=invalidation,premium=option_proposal['entry_points'],strike=leg['strike'],expiry=option_proposal['expiry_iso'],option_type=leg['option_type'],tick=leg['tick_size'],greeks=leg.get('greeks') or {},now=datetime.now().astimezone())
+            except (ValueError,TypeError,KeyError,OverflowError) as error:result['premium_stop_estimate']=dict(status='UNAVAILABLE',stop_loss_price=None,reason=str(error))
     else:
         sizing = size_equity_candidate({**candidate, "price": entry}, {
             "planning_capital": policy["planning_capital"], "max_loss_value": policy["idea_risk_limit"],
@@ -353,7 +360,7 @@ def evidence_conviction(candidate, opportunity, option_proposal=None):
     if option_proposal:
         legs = option_proposal.get("legs") or []
         if len(legs) == (1 if option_proposal.get("kind") == "LONG_OPTION" else 2) and all(leg.get("validated") for leg in legs):
-            score += 1; reasons.append("option contract evidence passes quote, spread, Greeks, OI and volume gates")
+            score += 1; reasons.append("option contract evidence passes quote, spread, OI and volume gates" + ("; Greeks are not required for this bought ATM route" if option_proposal.get("greeks_required") is False else ", including Greeks"))
         else:
             reasons.append("option evidence is incomplete or illiquid")
     rating = "High" if score >= (6 if option_proposal else 5) else "Moderate" if score >= 3 else "Low"
@@ -417,7 +424,7 @@ class FyersCmMaster(FyersFoMaster):
         super().__init__(cache_path=cache_path, requester=requester, now=now, master_url=FYERS_CM_MASTER_URL)
 
 
-def fetch_fyers_chain(client, underlying_symbol, strike_count=8):
+def fetch_fyers_chain(client, underlying_symbol, strike_count=8, *, now=None):
     """Fetch a fresh nearest-expiry FYERS chain with Greeks; never submits an order."""
     discovery = client.optionchain({"symbol": underlying_symbol, "strikecount": 1, "timestamp": ""})
     if not isinstance(discovery, dict) or discovery.get("s") != "ok":
@@ -426,7 +433,11 @@ def fetch_fyers_chain(client, underlying_symbol, strike_count=8):
     expiries = discovery.get("data", {}).get("expiryData") or []
     if not expiries:
         raise RuntimeError(f"No listed FYERS option expiry is available for {underlying_symbol}.")
-    expiry = expiries[0]
+    from .stock_expiry_policy import stock_symbol,require_options_allowed,expiry_day
+    expiry=expiries[0]
+    if stock_symbol(underlying_symbol):
+        nearest=require_options_allowed([row.get('date') or row.get('expiry') for row in expiries],now)
+        expiry=next(row for row in expiries if expiry_day(row.get('date') or row.get('expiry'))==nearest)
     chain = client.optionchain({
         "symbol": underlying_symbol,
         "strikecount": min(50, max(2, int(strike_count))),
@@ -439,7 +450,7 @@ def fetch_fyers_chain(client, underlying_symbol, strike_count=8):
     return chain, expiry
 
 
-def _leg(chain_item, master):
+def _leg(chain_item, master, *, require_greeks=True):
     bid = _positive_number(chain_item.get("bid"))
     ask = _positive_number(chain_item.get("ask"))
     ltp = _positive_number(chain_item.get("ltp"))
@@ -460,7 +471,7 @@ def _leg(chain_item, master):
     if volume < MIN_VOLUME:
         reasons.append("traded volume is unavailable")
     required_greeks = ("delta", "gamma", "theta", "vega", "iv")
-    if any(greeks.get(key) is None for key in required_greeks):
+    if require_greeks and any(greeks.get(key) is None for key in required_greeks):
         reasons.append("complete Delta/Gamma/Theta/Vega/IV data is unavailable")
     return {
         "symbol": chain_item.get("symbol"),
@@ -678,7 +689,7 @@ def build_defined_risk_spreads(chain_payload, expiry, master_records, direction,
     }
 
 
-def build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None):
+def build_long_option_proposals(chain_payload, expiry, master_records, direction, risk=None, *, require_greeks=True):
     """Analysis Handoff buys one exact ATM Call/Put; never generates a short leg."""
     risk = risk or {}
     if direction not in ('BULLISH', 'BEARISH'):
@@ -698,11 +709,23 @@ def build_long_option_proposals(chain_payload, expiry, master_records, direction
     if not spot or not choices or not expiry_iso:
         return result
     nearest = min(choices, key=lambda r: (abs(float(r['strike_price'])-spot), float(r['strike_price'])))
-    leg = _leg(nearest, master_records.get(nearest.get('symbol')))
-    if not leg['validated'] or str(leg.get('expiry_epoch')) != str(expiry.get('expiry')):
-        return dict(result, reason='Exact ATM option failed contract, expiry, quote, liquidity or Greeks validation.')
-    if not _positive_number(leg.get('lot_size')) or float(leg['lot_size']) != int(leg['lot_size']) or not _positive_number(leg.get('tick_size')):
-        return dict(result, reason='Verified positive whole lot size and tick size are required.')
+    leg = _leg(nearest, master_records.get(nearest.get('symbol')), require_greeks=require_greeks)
+    reasons=list(leg['validation_reasons'])
+    if leg.get('expiry_epoch') is not None and str(leg['expiry_epoch'])!=str(expiry.get('expiry')):
+        reasons.append('contract expiry does not match the selected expiry '+str(expiry_display))
+    if not _positive_number(leg.get('lot_size')) or float(leg['lot_size'])!=int(leg['lot_size']) or not _positive_number(leg.get('tick_size')):
+        reasons.append('verified positive whole lot size and tick size are required')
+    detailed=[]
+    for reason in reasons:
+        if reason.startswith('bid/ask spread') and leg['spread_pct'] is not None:
+            reason=f"bid/ask spread {leg['spread_pct']:.2f}% exceeds {MAX_SPREAD_PCT:.2f}% (bid {leg['bid']:.2f}, ask {leg['ask']:.2f})"
+        if reason.startswith('complete Delta'):
+            missing=[k.upper() if k=='iv' else k.title() for k,v in leg['greeks'].items() if v is None]
+            reason='missing Greeks: '+', '.join(missing)
+        detailed.append(reason)
+    if detailed:
+        rejected=dict(leg,validated=False,validation_reasons=detailed,selected_expiry_epoch=str(expiry.get('expiry')),quote_freshness='Not assessed by chain validation; fresh ticket quote required')
+        return dict(result,rejected_contracts=[rejected],liquidity_rules=dict(max_spread_pct=MAX_SPREAD_PCT,min_open_interest=MIN_OPEN_INTEREST,min_volume=MIN_VOLUME,complete_greeks_required=require_greeks),reason=str(leg['symbol'])+': '+'; '.join(detailed)+'.')
     entry, lot = leg['ask'], int(leg['lot_size'])
     maximum_loss = entry * lot
     rr = _positive_number(risk.get('minimum_reward_to_risk'))
@@ -716,7 +739,7 @@ def build_long_option_proposals(chain_payload, expiry, master_records, direction
     if error:
         return dict(result, reason=error)
     proposal = dict(proposal_id='long-call' if direction == 'BULLISH' else 'long-put',
-                    kind='LONG_OPTION', source='ANALYSIS_HANDOFF', label='Buy ATM Call' if direction == 'BULLISH' else 'Buy ATM Put',
+                    kind='LONG_OPTION', greeks_required=require_greeks, source='ANALYSIS_HANDOFF', label='Buy ATM Call' if direction == 'BULLISH' else 'Buy ATM Put',
                     direction=direction, structure='LONG_OPTION', status='ANALYSIS_ONLY',
                     legs=[dict(leg, action='BUY')], entry_points=entry, lot_size=lot,
                     max_loss_per_lot=round(maximum_loss, 2), max_profit_per_lot=None,
@@ -727,6 +750,12 @@ def build_long_option_proposals(chain_payload, expiry, master_records, direction
                     sizing=dict(status=('SIZED' if lots else 'NO_SIZE_AVAILABLE') if risk.get('enforce_risk_controls') else 'USER_SIZED',
                                 lots=lots, quantity=lots*lot, underlying_invalidation=invalidation,
                                 estimated_max_loss=round(lots*maximum_loss, 2)))
+    from .premium_exit_mapping import premium_stop_from_greeks
+    try:
+        estimate=premium_stop_from_greeks(spot=spot,stop=invalidation,premium=entry,strike=leg['strike'],expiry=expiry_iso,option_type=option_type,tick=leg['tick_size'],greeks=leg['greeks'],now=datetime.now().astimezone())
+    except (ValueError,TypeError,OverflowError) as error:
+        estimate=dict(status='UNAVAILABLE',stop_loss_price=None,reason=str(error))
+    proposal['premium_stop_estimate']=estimate
     return dict(result, status='READY', proposals=[proposal], reason=None)
 
 

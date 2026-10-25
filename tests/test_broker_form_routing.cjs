@@ -49,7 +49,7 @@ test('sector summary and detail use selected private FYERS account, never shared
 });
 test('sector requests fail closed without an owned account',async()=>{
  const {router,window}=setup();let calls=0;window.fetch=async()=>{calls++};
- await assert.rejects(router.fetch('sector','/api/sector-analysis'),/Select a configured broker account/);
+ await assert.rejects(router.fetch('sector','/api/sector-analysis'),/Sector Rotation requires a configured/);
  assert.equal(calls,0);
 });
 
@@ -79,7 +79,7 @@ test('Dhan sector summary and detail use its native account data endpoint',async
 test('Delta cannot use an Indian sector data route',async()=>{
  const {router,controls,window}=setup();let calls=0;window.fetch=async()=>{calls++};
  controls.set('sector-broker-account',{value:'account:delta-owner'});
- await assert.rejects(router.fetch('sector','/api/sector-analysis'),/sector market data is not available/);
+ await assert.rejects(router.fetch('sector','/api/sector-analysis'),/Delta India is not applicable/);
  assert.equal(calls,0);
 });
 

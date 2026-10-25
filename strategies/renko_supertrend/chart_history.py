@@ -39,8 +39,9 @@ def candle_issue(row):
 
 
 class ChartHistory:
-    def __init__(self,path,min_interval=.35):
+    def __init__(self,path,min_interval=.35,tail_provider=None):
         self.path=Path(path);self.lock=threading.RLock();self.memory={}
+        self.tail_provider=tail_provider
         self.key_locks={};self.rate_lock=threading.Lock()
         self.min_interval=min_interval;self.next_request_at=0
 
@@ -80,7 +81,7 @@ class ChartHistory:
                            and not has_forming and entry.get('refresh_bar')==current_bar
                            and entry.get('forming_retry_count',0)<3
                            and now-entry.get('refreshed_at',0)>=10)
-            refresh=not entry.get('complete') or (last==datetime.fromtimestamp(now,IST).date() and entry.get('refresh_bar')!=current_bar) or retry_forming
+            refresh=not entry.get('complete') or (last==datetime.fromtimestamp(now,IST).date() and entry.get('refresh_bar')!=current_bar) or retry_forming or bool(self.tail_provider and entry.get('complete') and last==datetime.fromtimestamp(now,IST).date())
             error=None
             if refresh and now>=entry.get('next_retry',0):
                 if retry_forming:entry['forming_retry_count']=entry.get('forming_retry_count',0)+1
@@ -90,7 +91,12 @@ class ChartHistory:
                     while cursor<=last:
                         stop=min(last,cursor+timedelta(days=2))
                         self.wait_request_slot()
-                        response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
+                        if self.tail_provider and entry.get('complete') and cursor==last and last==datetime.fromtimestamp(now,IST).date():
+                            shared=self.tail_provider(symbol,timeframe)
+                            entry['deferred_completed']={r['timestamp'] for r in shared if r.get('is_forming') and r['timestamp']+seconds<=now}
+                            response={'s':'ok','candles':[[r['timestamp'],r['open'],r['high'],r['low'],r['close'],r.get('volume')] for r in shared if datetime.fromtimestamp(r['timestamp'],IST).date()==last]}
+                        else:
+                            response=bounded_history(client,dict(symbol=symbol,resolution=str(seconds//60),date_format=1,range_from=str(cursor),range_to=str(stop),cont_flag=0,oi_flag=1))
                         if isinstance(response,dict) and response.get('s')=='no_data':response={'s':'ok','candles':[]}
                         if not isinstance(response,dict) or response.get('s')!='ok' or not isinstance(response.get('candles'),list):
                             raise RuntimeError('FYERS chart history unavailable: '+str(response.get('message','invalid response') if isinstance(response,dict) else 'invalid response'))
@@ -136,7 +142,7 @@ class ChartHistory:
                     os.replace(tmp,p)
             error=entry.get('error')
             invalid=[dict(timestamp=int(r[0]),reason=candle_issue(r)) for r in entry.get('rows',[]) if candle_issue(r)]
-            candles=[dict(timestamp=int(r[0]),open=float(r[1]),high=float(r[2]),low=float(r[3]),close=float(r[4]),volume=float(r[5]) if len(r)>5 and r[5] is not None else None,is_forming=int(r[0])+seconds>now) for r in entry.get('rows',[]) if not candle_issue(r)]
+            candles=[dict(timestamp=int(r[0]),open=float(r[1]),high=float(r[2]),low=float(r[3]),close=float(r[4]),volume=float(r[5]) if len(r)>5 and r[5] is not None else None,is_forming=int(r[0])+seconds>now or int(r[0]) in entry.get('deferred_completed',set())) for r in entry.get('rows',[]) if not candle_issue(r)]
             if not candles:raise RuntimeError(error or 'No broker candles available for this contract and date range.')
             # Key all completed values and settings. Any revision/anchor change
             # replays sequentially from the explicitly displayed oldest candle.
@@ -146,7 +152,7 @@ class ChartHistory:
             # A gap resets chart research only. Never bridge unknown OHLC or
             # reseed the execution runner. Keep raw broker evidence in cache.
             warmup=max(int((config or {}).get(k,default)) for k,default in
-                       (('atr_length',5),('ema_fast_length',10),('ema_slow_length',30),('rsi_length',14),('adx_length',14)))
+                       (('atr_length',5),('ema_fast_length',10),('ema_slow_length',30),('ema_third_length',100),('rsi_length',14),('adx_length',14)) if k!='ema_third_length' or (config or {}).get('ema_third_enabled',True))
             recovering=bool(invalid) and sum(not c['is_forming'] for c in usable)>warmup
             available=not invalid or recovering
             if available and entry.get('analysis_key')!=digest:

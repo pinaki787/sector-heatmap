@@ -102,3 +102,20 @@ def market_session(moment=None):
         "last_completed_session_close": last_close.isoformat(),
         "next_open": next_open.isoformat(),
     }
+
+
+def trading_elapsed_seconds(start, end):
+    """Count regular-session time only; closures cannot age an intraday bar."""
+    start, end = _as_ist(start), _as_ist(end)
+    if end <= start:
+        return 0.0
+    total = 0.0
+    day = start.date()
+    while day <= end.date():
+        if is_trading_day(day):
+            opening, closing = NSE_SPECIAL_SESSIONS.get(day, (REGULAR_OPEN, REGULAR_CLOSE))[:2]
+            left = max(start, datetime.combine(day, opening, IST))
+            right = min(end, datetime.combine(day, closing, IST))
+            total += max(0.0, (right - left).total_seconds())
+        day += timedelta(days=1)
+    return total

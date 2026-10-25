@@ -44,6 +44,29 @@ class WorkspaceGuard:
         return user,account
 
     def validate_action(self,account,path,payload):
+        bounce=self.store.folder(account)/'bounce-status.json'
+        if bounce.exists():
+            try:phase=json.loads(bounce.read_text()).get('status')
+            except (OSError,ValueError):raise PermissionError('Dashboard maintenance state is unreadable; refresh after operator review.') from None
+            if phase in {'CHECKING','RESTARTING','WAITING'}:
+                raise PermissionError('Broker dashboard bounce in progress; wait until it is ready.')
+        if path=='/api/investment/analyze':return  # Public research; no broker execution.
+        if account['broker']=='MOTILAL_OSWAL':
+            if not path.startswith('/api/motilal/') or payload.get('broker','MOTILAL_OSWAL')!='MOTILAL_OSWAL':
+                raise PermissionError('This action has no Motilal adapter; it cannot use another broker route.')
+            return
+        if path.startswith('/api/motilal/'):
+            raise PermissionError('Open a Motilal Oswal workspace for this action.')
+        if path.startswith('/api/telegram/'):
+            action=path.rsplit('/',1)[-1]
+            options=action in {'paper-start','paper-stop','paper-settings','option-preview','option-submit','execution-start','execution-stop','execution-settings','execution-preview','execution-submit','parse','submit'}
+            if options and account['broker']!='DELTA_INDIA':
+                raise PermissionError('Open your Delta India account workspace for Telegram option Paper and option tickets. This workspace cannot own Delta entries.')
+            if account['broker'] not in {'FYERS','DELTA_INDIA'}:
+                raise PermissionError('Telegram reception requires a FYERS or Delta India account workspace.')
+            if payload.get('broker') and payload['broker']!=account['broker']:
+                raise PermissionError('Telegram order broker must match this account workspace.')
+            return
         if path.startswith('/api/renko-engine/'):
             parts=path[len('/api/renko-engine/'):].split('/')
             if len(parts)!=2 or parts[0]!=account['id'] or payload.get('account_id')!=account['id'] or payload.get('broker')!=account['broker']:

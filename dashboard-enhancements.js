@@ -39,8 +39,9 @@
   const storedStraddleMarket = (() => {
     try { return localStorage.getItem('sector-pulse:straddle-market') } catch { return null }
   })()
+  window.SectorPulseInvestmentSelected = storedView === 'investment'
   const initialStraddleMarket = new URLSearchParams(location.search).get('straddleMarket') === 'nifty' ? 'nifty' : storedView === 'nifty-straddle' || storedStraddleMarket === 'nifty' ? 'nifty' : 'sensex'
-  const initialView = ({straddle:'straddles',delta:'delta-india',sector:'sectors',rsi:'ema-cross',band:'ema-band',kama:'kama',renko:'renko-supertrend'})[new URLSearchParams(location.search).get('brokerForm')] || (new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'renko-engine', 'delta-india', 'kama', 'screener', 'settings', 'trade-parser'].includes(storedView)
+  const initialView = ({handoff:'handoff',screener:'screener',straddle:'straddles',delta:'delta-india',sector:'sectors',rsi:'ema-cross',band:'ema-band',kama:'kama',renko:'renko-supertrend'})[new URLSearchParams(location.search).get('brokerForm')] || (new URLSearchParams(location.search).has('renkoSymbol') ? 'renko-supertrend' : window.SectorPulseWorkspace?.workspace?.broker === 'DELTA_INDIA' ? 'delta-india' : ['sectors', 'handoff', 'broker', 'straddles', 'ema-band', 'ema-cross', 'renko-supertrend', 'renko-engine', 'delta-india', 'kama', 'screener', 'investment', 'settings', 'trade-parser'].includes(storedView)
     ? storedView
     : ['sensex-straddle', 'nifty-straddle'].includes(storedView) ? 'straddles' : 'sectors')
   let straddleRunnerState = { available: false, running: false }
@@ -56,6 +57,7 @@
     .overview-grid .metric strong{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.4}
     @media(max-width:1200px){.components{grid-template-columns:repeat(3,1fr)}}
     @media(max-width:950px){.desk{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--border);padding:14px 18px;gap:12px}.brand{padding:0}.nav{grid-template-columns:repeat(4,minmax(0,1fr))}.nav button{text-align:center}.broker-card{margin-top:0}.work{padding:18px}.detail-grid,.split{grid-template-columns:1fr}}
+    #handoff .analysis-board{grid-template-columns:minmax(0,1fr);min-width:0}#handoff .opportunity-card{min-width:0;max-width:100%;box-sizing:border-box}#handoff .decision-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}#handoff .decision-metrics>div{min-width:0;overflow-wrap:anywhere}#handoff .leg-scroll{width:100%;min-width:0;overflow-x:auto}#handoff .leg-scroll table{min-width:640px}#handoff .proposal-copy{overflow-wrap:anywhere}@media(max-width:640px){#handoff .decision-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#handoff .opportunity-head{flex-wrap:wrap}#handoff .opportunity-card{padding:14px}#handoff .proposal-actions button{flex:1}}
     .handoff-banner{display:grid;grid-template-columns:auto 1fr;gap:13px;margin:0 0 16px;padding:16px;border:1px solid #3b6588;border-radius:14px;background:linear-gradient(120deg,#102b45,#102237)}.handoff-banner strong,.handoff-banner span{display:block}.handoff-banner span{margin-top:4px;color:#afc3d9;font-size:12px;line-height:1.5}.handoff-mark{width:38px;height:38px;border:1px solid #72b9ed;border-radius:11px;display:grid;place-items:center;color:#bce4ff;font-weight:900}.handoff-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);gap:15px}.step-title{display:flex;justify-content:space-between;gap:12px;align-items:start}.step-title h2{font-size:17px}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field{display:grid;gap:6px;color:var(--muted);font-size:11px}.field input,.field select,.field textarea,.confirmation-input{width:100%;border:1px solid #31506f;border-radius:8px;background:#081525;color:var(--text);padding:10px}.field textarea{min-height:76px;resize:vertical}.choice-row{display:flex;gap:8px;flex-wrap:wrap}.choice{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid #294766;border-radius:9px;background:#0b1728;color:#c4d2e2;font-size:12px}.choice input{accent-color:#60dca9}.candidate-list{display:grid;gap:8px;margin-top:12px;max-height:420px;overflow:auto}.candidate-card{display:grid;grid-template-columns:auto minmax(0,1fr) 150px;gap:10px;align-items:center;padding:11px;border:1px solid #28425f;border-radius:10px;background:#0b1728}.candidate-card b,.candidate-card small{display:block}.candidate-card small{color:var(--muted);margin-top:3px}.candidate-card.bullish{box-shadow:inset 3px 0 0 var(--positive)}.candidate-card.bearish{box-shadow:inset 3px 0 0 var(--negative)}.candidate-card input[type=number]{width:100%;border:1px solid #31506f;border-radius:7px;background:#071322;color:var(--text);padding:8px}.analysis-panel{margin-top:15px}.analysis-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:13px;margin-top:13px}.opportunity-card{position:relative;overflow:hidden;border:1px solid #294966;border-radius:14px;background:linear-gradient(145deg,#0d1c2d,#091522);padding:15px 15px 15px 19px}.opportunity-card:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--positive)}.opportunity-card.bearish:before{background:var(--negative)}.opportunity-head{display:flex;justify-content:space-between;gap:10px}.opportunity-head small,.proposal-copy{color:var(--muted);font-size:11px;line-height:1.5}.conviction{border:1px solid #42627d;border-radius:999px;padding:4px 8px;height:max-content;font-size:10px;text-transform:uppercase}.decision-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:11px 0}.decision-metrics div{padding:8px;border-radius:8px;background:#071322}.decision-metrics b,.decision-metrics small{display:block}.decision-metrics small{color:var(--muted);font-size:9px;margin-top:2px}.invalidation-picker{display:grid;gap:6px;margin:10px 0}.invalidation-option{display:grid;grid-template-columns:auto 1fr 92px;gap:7px;align-items:center;padding:7px;border:1px solid #29445f;border-radius:8px;font-size:11px}.invalidation-option input[type=number]{width:100%;background:#071322;color:var(--text);border:1px solid #31506f;border-radius:6px;padding:6px}.leg-table{width:100%;font-size:10px;border-collapse:collapse;margin:9px 0}.leg-table td,.leg-table th{padding:5px;border-bottom:1px solid #263d55;text-align:left}.proposal-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.excluded-list{margin-top:10px;color:var(--muted);font-size:11px}.privacy-gate{margin-top:10px;padding:11px;border:1px dashed #4a6b8b;border-radius:10px}.privacy-gate .choice+.choice{margin-top:7px}.packet-panel,.ticket-panel,.automation-panel{margin-top:15px}.packet-actions{display:flex;gap:8px;flex-wrap:wrap}.packet-preview{max-height:520px;overflow:auto;white-space:pre-wrap;word-break:break-word;padding:14px;border:1px solid #263f5c;border-radius:10px;background:#071321;color:#cfe0f1;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.button.secondary{background:#17314a;color:#c9e4f7;border:1px solid #3c6687}.button.danger{background:#8f3142}.button:disabled{cursor:not-allowed;opacity:.45}.handoff-status{margin-top:10px;color:#b7c8d9;font-size:12px}.handoff-status.error{color:#ffb1bb}.risk-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.risk-strip div{padding:10px;border:1px solid #2b465f;border-radius:9px;background:#0b1728}.risk-strip b,.risk-strip small{display:block}.risk-strip small{color:var(--muted);margin-top:3px}.ticket-warning{padding:11px;border-left:3px solid var(--neutral);background:#2a2619;color:#e3d6a8;font-size:12px;line-height:1.5}.automation-panel summary{cursor:pointer;font-weight:800;font-size:16px}.automation-panel details[open] summary{margin-bottom:14px}.screen-reader-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
     .screener-source{display:block}.screener-source-head{display:flex;justify-content:space-between;align-items:start;gap:12px}.screener-source-actions{display:flex;align-items:end;gap:7px;flex-wrap:wrap;justify-content:flex-end}.screener-refresh-setting{display:grid;gap:4px;color:var(--muted);font-size:10px}.screener-refresh-setting select{border:1px solid #31506f;border-radius:8px;background:#081525;color:var(--text);padding:9px}.screener-schedule{display:block;margin-top:5px;color:var(--muted);font-size:10px}.screener-schedule.paused{color:var(--neutral)}.screener-results{margin-top:11px;border-top:1px solid #28425f;padding-top:10px}.screener-results summary{cursor:pointer;color:#c9e4f7;font-size:12px;font-weight:800}.screener-visible-count{display:block;padding:9px 0;color:var(--muted);font-size:11px}.screener-result-table{max-height:340px;overflow:auto;margin-top:5px;border:1px solid #28425f;border-radius:9px}.screener-result-table table{min-width:1500px}.screener-result-table th,.screener-result-table td{padding:8px 10px}.screener-result-table th:first-child,.screener-result-table td:first-child{position:static}.screener-sort{border:0;background:transparent;color:inherit;padding:0;font:inherit;font-weight:800;text-transform:uppercase;cursor:pointer}.screener-sort:hover{color:#fff}.screener-header-filter{display:grid;grid-template-columns:repeat(2,minmax(70px,1fr));gap:4px;margin-top:6px;text-transform:none}.screener-header-filter.single{grid-template-columns:minmax(110px,1fr)}.screener-header-filter label{display:grid;gap:2px;color:#8299b5;font-size:8px}.screener-header-filter input,.screener-header-filter select{min-width:0;width:100%;border:1px solid #31506f;border-radius:6px;background:#081525;color:var(--text);padding:5px;font-size:10px}.screener-validation{margin-top:9px;color:var(--neutral);font-size:10px;line-height:1.45}
     @media(max-width:1100px){.handoff-grid{grid-template-columns:1fr}.risk-strip{grid-template-columns:repeat(2,1fr)}}
@@ -86,7 +88,7 @@
       <section id="broker" class="view ${initialView === 'broker' ? 'active' : ''}">
         <header class="head"><div><span class="label">LIVE FEED & POSITIONS</span><h1>Broker dashboard</h1></div><div id="account-state" class="status" role="status">Loading account</div></header>
         <div class="metric-grid"><article class="metric"><small>Gross live P&L</small><strong id="live-pnl">—</strong><em class="muted">Before charges</em></article><article class="metric"><small>Estimated charges</small><strong id="estimated-charges">—</strong><em class="muted" id="estimated-charges-note">From executed fills</em></article><article class="metric"><small>Estimated net P&L</small><strong id="estimated-net-pnl">—</strong><em class="muted">Gross less estimated charges</em></article><article class="metric"><small>Open positions</small><strong id="open-count">—</strong></article><article class="metric"><small>Available funds</small><strong id="funds">—</strong></article><article class="metric"><small id="closed-pnl-label">Daily closed P&L</small><strong id="closed-pnl">—</strong></article></div>
-        <div class="split"><section class="panel"><span class="label">OPEN POSITIONS</span><h2>Current broker positions</h2><div class="row header"><span>Instrument</span><span>Quantity</span><span>Average</span><span>Live P&L</span></div><div id="open-positions"></div></section><section class="panel"><span class="label">CLOSED POSITIONS</span><h2>Realised P&L</h2><div class="period-tabs" aria-label="Realised P and L period">${periods.map((period, index) => `<button type="button" data-period="${period}" class="${index === 0 ? 'active' : ''}" aria-pressed="${index === 0}">${period[0].toUpperCase() + period.slice(1)}</button>`).join('')}</div><div class="row header"><span>Instrument</span><span>Buy / sell</span><span>Quantity</span><span>Realised P&L</span></div><div id="closed-positions"></div><div id="closed-summary" class="row closed-summary" aria-live="polite">Loading closed-position summary…</div></section></div>
+        <div class="split"><section class="panel"><span class="label">OPEN POSITIONS</span><h2>Current broker positions</h2><div class="row header"><span>Instrument</span><span>Quantity</span><span>Average</span><span>Live P&L</span></div><div id="open-positions"></div></section><section class="panel"><span class="label">CLOSED POSITIONS</span><h2>Realised P&L</h2><div class="period-tabs" aria-label="Realised P and L period">${periods.map((period, index) => `<button type="button" data-period="${period}" class="${index === 0 ? 'active' : ''}" aria-pressed="${index === 0}">${period[0].toUpperCase() + period.slice(1)}</button>`).join('')}</div><div id="closed-positions"></div><div id="closed-summary" class="row closed-summary" aria-live="polite">Loading closed-position summary…</div></section></div>
       </section>
       <section id="straddles" class="view ${initialView === 'straddles' ? 'active' : ''}">
         <header class="head straddle-hero panel"><div><span class="label">MANAGED STRATEGIES · INDEPENDENT RUNNERS</span><h1>Long Straddles</h1><small class="muted">Choose a market to inspect its own controls, position state, premium chart, runner output and journal.</small></div><div class="straddle-switch" role="tablist" aria-label="Long straddle market"><button type="button" role="tab" id="sensex-straddle-tab" aria-controls="sensex-straddle" aria-selected="${initialStraddleMarket === 'sensex'}" class="${initialStraddleMarket === 'sensex' ? 'active' : ''}" data-straddle-market="sensex">SENSEX</button><button type="button" role="tab" id="nifty-straddle-tab" aria-controls="nifty-straddle" aria-selected="${initialStraddleMarket === 'nifty'}" class="${initialStraddleMarket === 'nifty' ? 'active' : ''}" data-straddle-market="nifty">NIFTY</button></div></header>
@@ -169,7 +171,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('#screener .status').textContent = '1 source configured'
 
   document.querySelector('#screener .panel').innerHTML = `<span class="label">MANAGED SOURCES · LOCAL ONLY</span><h2>Chartink screeners</h2><div class="field-grid"><label class="field">Friendly label (optional)<input id="screener-label" placeholder="My daily scan"></label><label class="field">Chartink screener URL<input id="screener-url" type="url" placeholder="https://chartink.com/screener/..."></label></div><div class="packet-actions" style="margin-top:10px"><button type="button" class="button" id="add-screener">Add source</button><button type="button" class="button secondary" id="refresh-screeners">Refresh all</button><button type="button" class="button secondary" id="analyze-screeners" disabled>Analyze selected symbols (0)</button></div><div id="screener-status" class="handoff-status"></div><div id="screener-sources" class="candidate-list"></div><section id="screener-analysis" class="analysis-panel" hidden><div class="step-title"><div><span class="label">READ-ONLY ADVISORY</span><h2>Screener candidate analysis</h2></div></div><div id="screener-analysis-status" class="handoff-status"></div><div id="screener-bulk-selection" class="packet-actions" style="margin:12px 0"><button type="button" class="button secondary" id="screener-select-all">Select all high-conviction equities</button><button type="button" class="button secondary" id="screener-clear-selection">Clear selection</button><span id="screener-selected-count" class="status" aria-live="polite">0 selected</span></div><div id="screener-analysis-results" class="analysis-board"></div><div class="packet-actions"><button type="button" class="button secondary" id="screener-analysis-next" hidden>Analyze next 12</button></div></section><div class="ticket-warning">Source auto-refresh can only update Chartink membership and read-only quote fields; it never analyzes, selects, prepares, or submits an order. Select source candidates first: analysis uses only those selected symbols.</div>`
-  document.querySelector('#screener .panel').insertAdjacentHTML('beforeend', `<section id="screener-order" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN BROKER PREVIEW</span><h2>Consolidated FYERS batch preview</h2><small class="muted">Selected High-Conviction plans and the aggregate batch must pass fresh validation.</small></div><div class="status">FYERS is the default broker</div></div><div class="field-grid" style="margin-top:12px"><label class="field">Broker account<select id="screener-order-broker" class="order-account"><option value="fyers">FYERS · existing account</option></select></label><label class="field">Cash product<select id="screener-order-product"><option value="INTRADAY">Intraday</option><option value="CNC">Delivery (CNC)</option></select></label><label class="field">Declared external open risk (₹)<input id="screener-order-external-risk" type="number" min="0" step="100" placeholder="Required when the selected broker has existing exposure"></label></div><div id="screener-batch-selection" class="handoff-status" style="margin-top:12px">No High-Conviction plans selected.</div><button type="button" class="button" id="prepare-screener-order" style="margin-top:12px">Prepare broker batch preview</button><div id="screener-order-status" class="handoff-status" role="status" aria-live="polite">No plans selected. No broker action has occurred.</div><div id="screener-order-review" hidden><pre id="screener-order-preview" class="packet-preview"></pre><label class="field" style="margin-top:10px">Exact fresh confirmation phrase<input id="screener-order-confirmation" class="confirmation-input" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="submit-screener-order" disabled style="margin-top:10px">Submit confirmed FYERS batch</button></div></section>`)
+  document.querySelector('#screener .panel').insertAdjacentHTML('beforeend', `<section id="screener-order" class="panel ticket-panel" hidden><div class="step-title"><div><span class="label">MULTI-PLAN BROKER PREVIEW</span><h2>Consolidated FYERS batch preview</h2><small class="muted">Selected High-Conviction plans and the aggregate batch must pass fresh validation.</small></div><div class="status">FYERS is the default broker</div></div><div class="field-grid" style="margin-top:12px"><label class="field">Broker account<select id="screener-order-broker" class="order-account"><option value="fyers">FYERS · existing account</option></select></label><label class="field">Cash product<select id="screener-order-product"><option value="INTRADAY">Intraday</option><option value="CNC">Delivery (CNC)</option></select></label><label class="field">Declared external open risk (₹)<input id="screener-order-external-risk" type="number" min="0" step="100" placeholder="Required when the selected broker has existing exposure"></label></div><div id="screener-batch-selection" class="handoff-status" style="margin-top:12px">No High-Conviction plans selected.</div><button type="button" class="button" id="prepare-screener-order" style="margin-top:12px">Prepare broker batch preview</button><div id="screener-order-status" class="handoff-status" role="status" aria-live="polite">No plans selected. No broker action has occurred.</div><div id="screener-order-review" hidden><pre id="screener-order-preview" class="packet-preview"></pre><label hidden><input type="hidden" id="screener-order-confirmation" autocomplete="off"></label><button type="button" class="button danger" id="submit-screener-order" disabled style="margin-top:10px">Submit FYERS batch</button></div></section>`)
+  $('screener-batch-selection').insertAdjacentHTML('beforebegin', '<label class="field">Amount to allocate to selected stocks (₹)<input id="screener-allocation-budget" type="number" min="1" step="100" placeholder="Enter total allocation"></label><button type="button" class="button secondary" id="allocate-screener-selected">Allocate selected eligible stocks</button>')
+  $('screener-order-preview').insertAdjacentHTML('afterend', '<div id="screener-route-preview-groups"></div>')
   $('stop-straddle').insertAdjacentHTML('afterend', '<button type="button" class="button danger" id="squareoff-straddle">Stop &amp; square off</button>')
   $('straddle-action-status').insertAdjacentHTML('afterend', '<section id="straddle-squareoff-review" class="automation-panel" hidden><pre id="straddle-squareoff-preview" class="packet-preview"></pre><label class="field">Exact exit confirmation<input id="straddle-squareoff-confirmation" autocomplete="off" spellcheck="false"></label><button type="button" class="button danger" id="confirm-straddle-squareoff" disabled>Confirm stop &amp; square off</button></section>')
   $('stop-nifty-straddle').insertAdjacentHTML('afterend', '<button type="button" class="button danger" id="squareoff-nifty-straddle">Stop &amp; square off</button>')
@@ -182,7 +186,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   document.querySelector('input[name="straddle-exit"][value="supertrend"]').closest('.option-card').querySelector('small').innerHTML = '<code>--supertrend-trail</code> · 7,3 after +10 · 15-point hard stop.'
   document.querySelector('input[name="straddle-exit"][value="fixed"]').closest('.option-card').querySelector('small').innerHTML = '<code>--fixed-target</code> · 30 target · 15-point hard stop.'
   document.querySelector('input[name="straddle-exit"][value="trail"]').closest('.option-card').querySelector('small').innerHTML = '<code>--trail-profit</code> · trail 10 after +30 · 15-point hard stop.'
-  $('screener-analysis-next').textContent = 'Cancel analysis'
+  $('screener-analysis-next').textContent = 'Stop analysis job'
   $('screener-analysis-results').insertAdjacentHTML('afterend', `<section id="screener-watchlist" style="margin-top:18px"><div class="step-title"><div><span class="label">SECONDARY · NON-ACTIONABLE</span><h3>Watchlist</h3><small class="muted">Candidates needing stronger alignment or evidence. No live-order path is available here.</small></div><span class="status">Advisory only</span></div><div id="screener-watchlist-results" class="analysis-board"></div></section>`)
   $('screener-analysis-results').insertAdjacentHTML('afterend', `<section id="screener-options" style="margin-top:18px"><div class="step-title"><div><span class="label">STOCK OPTIONS · DEFINED RISK</span><h3>High-Conviction option spreads</h3><small class="muted">Built only from the High-Conviction equity underlyings using fresh FYERS chain, contract and liquidity evidence.</small></div><button type="button" class="button secondary" id="analyze-screener-options">Refresh option spreads</button></div><div id="screener-options-status" class="handoff-status">Complete the equity analysis to screen stock options.</div><div id="screener-options-results" class="analysis-board"></div></section>`)
   document.querySelector('.work').insertAdjacentHTML('beforeend', `<section id="settings" class="view ${initialView === 'settings' ? 'active' : ''}"><header class="head"><div><span class="label">OPTIONAL PREFERENCES</span><h1>Risk Guardrails</h1><small class="muted">Safe defaults apply automatically. Adjustments refresh and recalculate the next plan.</small></div></header><div id="settings-content"></div></section>`)
@@ -242,7 +246,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     handoffCollectionPanel.prepend(handoffBrokerField);
   }
   const previewAccounts = new Map()
+  const moPreviewAccounts = new Map()
   const postJson = async (url, payload) => {
+    if (/\/analysis-handoff\/(analyze|preview)$/.test(url)) payload={...payload,...(window.HandoffAIProvider?.payload()||{ai_provider:'RULES_ONLY',recipient:'codex'})}
+    if(url.startsWith('/api/trade-ticket/')&&payload.preview_id?.startsWith('MO-')){const id=moPreviewAccounts.get(payload.preview_id);if(!id)throw Error('Motilal review account context is missing. Prepare again.');payload={...payload,broker:'MOTILAL_OSWAL',account_id:id};}
+
     if (url.startsWith('/api/trade-ticket/') && payload.preview_id?.startsWith('DHAN-')) {
       const accountId=previewAccounts.get(payload.preview_id)
       if (!accountId) throw Error('Dhan account context is missing; prepare a fresh account-bound preview.')
@@ -250,7 +258,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }
 
     if(url.includes("/start")&&!window.BrokerForms.account(window.BrokerForms.kind(url)))await window.PaperCapital?.ensure(payload.mode)
-    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    const response = await window.BrokerForms.fetch(window.BrokerForms.kind(url),url, { method: 'POST', headers: { 'Content-Type': 'application/json',...(url.endsWith('/analysis-handoff/analyze')?{'X-Job-Return-Accepted':'1'}:{}) }, body: JSON.stringify(payload) })
     const contentType = response.headers.get('content-type') || ''
     const data = contentType.includes('application/json')
       ? await response.json().catch(() => ({ error: `The server returned invalid JSON (HTTP ${response.status}).` }))
@@ -261,6 +269,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       error.payload = data
       throw error
     }
+    if(data.preview_id&&data.broker==='MOTILAL_OSWAL'&&data.account_id)moPreviewAccounts.set(data.preview_id,data.account_id);
     if (data.preview_id && data.broker === 'DHAN' && data.account_id) previewAccounts.set(data.preview_id,data.account_id)
     if (data.replacement_preview?.broker === 'DHAN') previewAccounts.set(data.replacement_preview.preview_id,data.replacement_preview.account_id)
     return data
@@ -682,8 +691,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   let screenerAnalysisDiagnostics = { analyzed: 0, watchlist: 0, rejected: 0 }
   const screenerSelectedPlans = new Map()
   let screenerOrderPreview = null
+  const screenerOptionChoices = new Map()
+  const screenerClassifications = new Map()
   let screenerAnalysisRunning = false
   let screenerAnalysisCancelled = false
+  let screenerActiveJob = null, screenerStopSent = false
   let screenerSchedulerTimer = null
   const screenerReadySymbols = () => new Set(screenerSources.flatMap(source => source.result?.status === 'READY' && Array.isArray(source.result.candidates) ? source.result.candidates : []).map(symbol => String(symbol).trim()).filter(Boolean))
   const screenerCandidateSelections = new Set()
@@ -928,6 +940,63 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     updateScreenerScheduleLabels()
     screenerSchedulerTimer = setTimeout(runScreenerScheduler, 1000)
   }
+  const requestScreenerJobStop = async () => {
+    if (!screenerActiveJob || screenerStopSent) return
+    screenerStopSent = true
+    try {await window.SectorPulseJobs.client.cancel(screenerActiveJob.base, screenerActiveJob.job.job_id)}
+    catch (error) {screenerStopSent = false; $('screener-analysis-status').textContent = error.message; $('screener-analysis-next').disabled = false}
+  }
+  window.addEventListener('sector-pulse-job-submitted', event => {
+    const {job,base} = event.detail || {}
+    if (job?.feature !== 'screener' || job.kind !== 'ANALYSIS' || job.request?.account_id !== window.BrokerForms?.account('screener')?.id || job.terminal) return
+    if (job.request?.path?.split('?')[0].endsWith('/chartink/analyze-options') && screenerAnalysisRunning) return
+    screenerActiveJob = {job,base}; screenerStopSent = false
+    $('screener-analysis-next').hidden = false; $('screener-analysis-next').disabled = false
+    if (screenerAnalysisCancelled) requestScreenerJobStop()
+  })
+  window.addEventListener('sector-pulse-job-update', event => {
+    const {job} = event.detail || {}
+    if (job?.job_id !== screenerActiveJob?.job.job_id) return
+    if (Array.isArray(job.output?.results) && job.status !== 'COMPLETED') {
+      screenerAnalysisDiagnostics = {analyzed:0,watchlist:0,rejected:0}
+      renderSavedScreenerAnalysis(job.output, true)
+    }
+    if (job.terminal) {$('screener-analysis-next').hidden = true; screenerActiveJob = null}
+  })
+  window.addEventListener('broker-account-change', event => {
+    if (event.detail?.kind === 'screener') {screenerActiveJob = null; screenerStopSent = false; $('screener-analysis-next').hidden = true}
+  })
+  const renderSavedScreenerAnalysis = (data, reset) => {
+      const qualified = data.results.filter(item => item.decision === 'PASS' && item.conviction?.rating === 'High')
+      const watchlist = data.results.filter(item => item.decision === 'WATCHLIST')
+      screenerAnalysisResults = reset ? qualified : screenerAnalysisResults.concat(qualified)
+      screenerWatchlistResults = reset ? watchlist : screenerWatchlistResults.concat(watchlist)
+      screenerAnalysisDiagnostics.analyzed += data.analyzed
+      screenerAnalysisDiagnostics.watchlist += data.results.filter(item => item.decision === 'WATCHLIST').length
+      screenerAnalysisDiagnostics.rejected += data.results.filter(item => item.decision === 'REJECT' || (item.decision === 'PASS' && item.conviction?.rating !== 'High')).length
+      $('screener-analysis-status').textContent = `${screenerAnalysisResults.length} high-conviction recommendation(s) shown first · ${screenerAnalysisDiagnostics.analyzed} analyzed of ${data.total} · ${screenerAnalysisDiagnostics.watchlist} watchlist shown separately · ${screenerAnalysisDiagnostics.rejected} rejected/deferred hidden.`
+      const cards = qualified.map(item => { const projectedPoints = Math.abs(Number(item.target) - Number(item.entry)); const projectedPct = Number(item.entry) > 0 ? projectedPoints / Number(item.entry) * 100 : null; return `<article class="opportunity-card ${item.direction === 'BEARISH' ? 'bearish' : ''}"><div class="opportunity-head"><div><b>${escapeHtml(item.symbol)}</b><small>${escapeHtml(item.alignment)}</small></div><span class="conviction">HIGH CONVICTION</span></div>${horizonLegends(item)}<p class="proposal-copy">${escapeHtml(item.reason)}</p><div class="decision-metrics"><div><small>Entry</small><b>${money(item.entry)}</b></div><div><small>Stop</small><b>${money(item.stop)}</b></div><div><small>Target</small><b>${money(item.target)}</b></div><div><small>R:R</small><b>1:${escapeHtml(item.reward_to_risk)}</b></div></div><p class="proposal-copy"><b>Rule-based evidence:</b> ${escapeHtml(item.conviction?.rationale)}</p><p class="proposal-copy"><b>Projection if target is reached:</b> ${money(projectedPoints)} per share${projectedPct == null ? '' : ` · ${percent(projectedPct)}`}. This is conditional, not guaranteed.</p><small class="muted">Completed candles only · read-only advisory · no automatic selection or order authority.</small></article>` }).join('')
+      if (reset) $('screener-analysis-results').innerHTML = cards || '<div class="empty">No candidate currently clears the established high-conviction gates. No recommendation is shown.</div>'; else if (cards) { const empty = $('screener-analysis-results').querySelector('.empty'); if (empty) empty.remove(); $('screener-analysis-results').insertAdjacentHTML('beforeend', cards) }
+      const watchCards = watchlist.map(item => `<article class="opportunity-card"><div class="opportunity-head"><div><b>${escapeHtml(item.symbol)}</b><small>${escapeHtml(item.alignment)}</small></div><span class="conviction">WATCHLIST · ADVISORY</span></div>${horizonLegends(item)}<p class="proposal-copy">${escapeHtml(item.reason)}</p><small class="muted">Non-actionable · no selection, ticket, or live-order path.</small></article>`).join('')
+      if (reset) $('screener-watchlist-results').innerHTML = watchCards || '<div class="empty">No watchlist candidates in the analyzed batch.</div>'; else if (watchCards) { const empty = $('screener-watchlist-results').querySelector('.empty'); if (empty) empty.remove(); $('screener-watchlist-results').insertAdjacentHTML('beforeend', watchCards) }
+      document.querySelectorAll('#screener-analysis-results .opportunity-card').forEach((card, index) => {
+        const plan = screenerAnalysisResults.find(item => item.symbol === card.querySelector('.opportunity-head b')?.textContent.trim())
+        if (plan?.decision !== 'PASS' || card.querySelector('.screener-plan-select')) return
+        card.insertAdjacentHTML('beforeend', `<label class="choice"><input type="checkbox" class="screener-plan-select" value="${escapeHtml(plan.symbol)}" ${screenerSelectedPlans.has(plan.symbol) ? 'checked' : ''}> Select for FYERS batch</label>`)
+        card.querySelector('.screener-plan-select').addEventListener('change', event => selectScreenerOrderPlan(plan, event.target.checked, event.target))
+      })
+      syncScreenerRouteControls()
+      $('screener-selected-count').textContent = `${screenerSelectedPlans.size} selected`
+      $('screener-clear-selection').disabled = screenerSelectedPlans.size === 0
+      $('screener-select-all').disabled = screenerAnalysisResults.length === 0 || screenerSelectedPlans.size === screenerAnalysisResults.length
+  }
+  window.addEventListener('sector-pulse-screener-selection-request',()=>{
+    const symbols=[...screenerCandidateSelections];
+    if(!symbols.length){window.dispatchEvent(new CustomEvent('sector-pulse-screener-selection',{detail:{error:'Select source symbols before replacing the saved Handoff selection. Your current saved selection is unchanged.'}}));return;}
+    const sources=screenerSources.filter(s=>s.result?.status==='READY').map(s=>({id:s.id,label:s.label,url:s.url,symbols:symbols.filter(x=>(s.result.candidates||[]).includes(x))})).filter(s=>s.symbols.length);
+    if(!sources.length){window.dispatchEvent(new CustomEvent('sector-pulse-screener-selection',{detail:{error:'Refresh the selected source before including it in Handoff.'}}));return;}
+    window.dispatchEvent(new CustomEvent('sector-pulse-screener-selection',{detail:{symbols,sources}}));
+  });
   const analyzeScreenerCandidates = async reset => {
     const readySources = screenerSources.filter(item => item.result?.status === 'READY')
     if (!readySources.length) { $('screener-status').textContent = 'Refresh a Chartink source before analysis.'; return }
@@ -938,9 +1007,11 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       if (!screenerAnalysisSymbols.length) { $('screener-status').textContent = 'Select at least one screener symbol before analysis.'; syncScreenerCandidateSelectionUi(); return }
       screenerAnalysisRunning = true
       screenerAnalysisCancelled = false
+      screenerActiveJob = null; screenerStopSent = false
       syncScreenerCandidateSelectionUi()
       screenerAnalysisOffset = 0
       screenerSelectedPlans.clear()
+      screenerOptionChoices.clear();screenerClassifications.clear()
       screenerAnalysisResults = []
       screenerWatchlistResults = []
       screenerAnalysisDiagnostics = { analyzed: 0, watchlist: 0, rejected: 0 }
@@ -965,27 +1036,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         if (window.BrokerForms.account(window.BrokerForms.kind('/api/chartink/analyze')) !== analysisAccount) throw Error('Broker account changed. Start a new analysis for the selected account.')
         data = await postJson('/api/chartink/analyze', { analysis_job: data.analysis_job })
       }
-      const qualified = data.results.filter(item => item.decision === 'PASS' && item.conviction?.rating === 'High')
-      const watchlist = data.results.filter(item => item.decision === 'WATCHLIST')
-      screenerAnalysisResults = reset ? qualified : screenerAnalysisResults.concat(qualified)
-      screenerWatchlistResults = reset ? watchlist : screenerWatchlistResults.concat(watchlist)
-      screenerAnalysisDiagnostics.analyzed += data.analyzed
-      screenerAnalysisDiagnostics.watchlist += data.results.filter(item => item.decision === 'WATCHLIST').length
-      screenerAnalysisDiagnostics.rejected += data.results.filter(item => item.decision === 'REJECT' || (item.decision === 'PASS' && item.conviction?.rating !== 'High')).length
-      $('screener-analysis-status').textContent = `${screenerAnalysisResults.length} high-conviction recommendation(s) shown first · ${screenerAnalysisDiagnostics.analyzed} analyzed of ${data.total} · ${screenerAnalysisDiagnostics.watchlist} watchlist shown separately · ${screenerAnalysisDiagnostics.rejected} rejected/deferred hidden.`
-      const cards = qualified.map(item => { const projectedPoints = Math.abs(Number(item.target) - Number(item.entry)); const projectedPct = Number(item.entry) > 0 ? projectedPoints / Number(item.entry) * 100 : null; return `<article class="opportunity-card ${item.direction === 'BEARISH' ? 'bearish' : ''}"><div class="opportunity-head"><div><b>${escapeHtml(item.symbol)}</b><small>${escapeHtml(item.alignment)}</small></div><span class="conviction">HIGH CONVICTION</span></div>${horizonLegends(item)}<p class="proposal-copy">${escapeHtml(item.reason)}</p><div class="decision-metrics"><div><small>Entry</small><b>${money(item.entry)}</b></div><div><small>Stop</small><b>${money(item.stop)}</b></div><div><small>Target</small><b>${money(item.target)}</b></div><div><small>R:R</small><b>1:${escapeHtml(item.reward_to_risk)}</b></div></div><p class="proposal-copy"><b>Rule-based evidence:</b> ${escapeHtml(item.conviction?.rationale)}</p><p class="proposal-copy"><b>Projection if target is reached:</b> ${money(projectedPoints)} per share${projectedPct == null ? '' : ` · ${percent(projectedPct)}`}. This is conditional, not guaranteed.</p><small class="muted">Completed candles only · read-only advisory · no automatic selection or order authority.</small></article>` }).join('')
-      if (reset) $('screener-analysis-results').innerHTML = cards || '<div class="empty">No candidate currently clears the established high-conviction gates. No recommendation is shown.</div>'; else if (cards) { const empty = $('screener-analysis-results').querySelector('.empty'); if (empty) empty.remove(); $('screener-analysis-results').insertAdjacentHTML('beforeend', cards) }
-      const watchCards = watchlist.map(item => `<article class="opportunity-card"><div class="opportunity-head"><div><b>${escapeHtml(item.symbol)}</b><small>${escapeHtml(item.alignment)}</small></div><span class="conviction">WATCHLIST · ADVISORY</span></div>${horizonLegends(item)}<p class="proposal-copy">${escapeHtml(item.reason)}</p><small class="muted">Non-actionable · no selection, ticket, or live-order path.</small></article>`).join('')
-      if (reset) $('screener-watchlist-results').innerHTML = watchCards || '<div class="empty">No watchlist candidates in the analyzed batch.</div>'; else if (watchCards) { const empty = $('screener-watchlist-results').querySelector('.empty'); if (empty) empty.remove(); $('screener-watchlist-results').insertAdjacentHTML('beforeend', watchCards) }
-      document.querySelectorAll('#screener-analysis-results .opportunity-card').forEach((card, index) => {
-        const plan = screenerAnalysisResults[index]
-        if (plan?.decision !== 'PASS' || card.querySelector('.screener-plan-select')) return
-        card.insertAdjacentHTML('beforeend', `<label class="choice"><input type="checkbox" class="screener-plan-select" value="${escapeHtml(plan.symbol)}" ${screenerSelectedPlans.has(plan.symbol) ? 'checked' : ''}> Select for FYERS batch</label>`)
-        card.querySelector('.screener-plan-select').addEventListener('change', event => selectScreenerOrderPlan(plan, event.target.checked, event.target))
-      })
-      $('screener-selected-count').textContent = `${screenerSelectedPlans.size} selected`
-      $('screener-clear-selection').disabled = screenerSelectedPlans.size === 0
-      $('screener-select-all').disabled = screenerAnalysisResults.length === 0 || screenerSelectedPlans.size === screenerAnalysisResults.length
+      renderSavedScreenerAnalysis(data, reset)
       screenerAnalysisOffset += data.analyzed
       if (data.has_more && !screenerAnalysisCancelled) {
         $('screener-analysis-status').textContent = `${screenerAnalysisOffset}/${data.total} complete · queuing the next safe batch of up to ${data.operational_limits.batch_size}…`
@@ -1008,31 +1059,175 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('screener-analysis-status').className = 'handoff-status error'; $('screener-analysis-status').textContent = `Analysis stopped after ${screenerAnalysisOffset}/${screenerAnalysisSymbols.length}: ${error.message}`
     }
   }
+  const screenerRouteLabel = route => ({EQUITY:'Equity',LONG_OPTION:'Stock Options · Naked Buy',OPTION_SPREAD:'Stock Options · Spread'}[route] || route)
+  const screenerRouteInfo = plan => {
+    const route = plan.execution_route || 'EQUITY'
+    if (route === 'EQUITY') return {route, unit: Number(plan.entry), proposal: null}
+    const option = screenerOptionChoices.get(`${plan.symbol}:${route}`)
+    if (!option) throw new Error(`${plan.symbol}: ${screenerRouteLabel(route)} lacks a fresh eligible proposal.`)
+    const proposal = option.proposal
+    const protectivePremium = (proposal.legs || []).filter(leg => leg.action === 'BUY').reduce((sum,leg) => sum + Number(leg.ask || leg.ltp || 0) * Number(proposal.lot_size || leg.lot_size || 0),0)
+    const unit = Math.max(Number(proposal.minimum_cash_required || 0),Number(proposal.max_loss_per_lot || 0),protectivePremium)
+    if (!Number.isFinite(unit) || unit <= 0) throw new Error(`${plan.symbol}: verified per-lot funding is unavailable.`)
+    return {route, unit, proposal, expiry:option.expiry_iso}
+  }
+  const syncScreenerRouteControls = () => {
+    const board = $('screener-analysis-results')
+    for (const card of board.querySelectorAll('.opportunity-card')) {
+      const symbol = card.querySelector('.opportunity-head b')?.textContent.trim()
+      const plan = screenerAnalysisResults.find(item => item.symbol === symbol)
+      if (!plan) continue
+      card.dataset.symbol = symbol
+      const classification = screenerClassifications.get(symbol)
+      if (!card.querySelector('.screener-execution-route')) {
+        card.insertAdjacentHTML('beforeend', `<label class="field">Execution choice<select class="screener-execution-route" aria-label="Execution choice for ${escapeHtml(symbol)}"><option value="EQUITY">Equity</option><option value="LONG_OPTION" disabled>Stock Options · Naked Buy ${plan.direction === 'BEARISH' ? 'Put' : 'Call'}</option><option value="OPTION_SPREAD" disabled>Stock Options · Applicable Spread</option></select></label><small class="screener-route-status muted"></small>`)
+        card.querySelector('.screener-execution-route').addEventListener('change',event => {
+          plan.execution_route = event.target.value
+          delete plan.suggested_quantity; delete plan.allocation_budget
+          syncScreenerSelectionUi('Execution choice changed. Allocate selected candidates and prepare fresh previews.')
+        })
+      }
+      const picker = card.querySelector('.screener-execution-route')
+      for (const route of ['LONG_OPTION','OPTION_SPREAD']) {
+        const option = picker.querySelector(`option[value="${route}"]`)
+        option.disabled = !screenerOptionChoices.has(`${symbol}:${route}`)
+        option.title = classification?.routes?.[route]?.reason || (option.disabled ? 'Fresh contract and liquidity validation pending.' : '')
+      }
+      if (plan.execution_route && picker.querySelector(`option[value="${plan.execution_route}"]`)?.disabled) {
+        plan.execution_route = 'EQUITY';delete plan.suggested_quantity;delete plan.allocation_budget
+      }
+      picker.value = plan.execution_route || 'EQUITY'
+      const reasons = ['LONG_OPTION','OPTION_SPREAD'].map(route => classification?.routes?.[route]?.reason).filter(Boolean)
+      card.querySelector('.screener-route-status').textContent = `${classification?.classification || 'Checking option eligibility'} · Score ${Number(plan.conviction?.score || 0)}${reasons.length ? ' · ' + [...new Set(reasons)].join(' · ') : ''}`
+    }
+    const cards = [...board.querySelectorAll('.opportunity-card')]
+    cards.sort((a,b) => Number(screenerAnalysisResults.find(p => p.symbol === b.dataset.symbol)?.conviction?.score || 0) - Number(screenerAnalysisResults.find(p => p.symbol === a.dataset.symbol)?.conviction?.score || 0) || a.dataset.symbol.localeCompare(b.dataset.symbol))
+    cards.forEach(card => board.append(card))
+  }
   const analyzeScreenerOptionPlans = async () => {
+    screenerAnalysisCancelled = false
     const button = $('analyze-screener-options')
-    if (!screenerAnalysisResults.length) { $('screener-options-status').textContent = 'No High-Conviction equity underlyings are available for option screening.'; return }
+    if (!screenerAnalysisResults.length) return
     button.disabled = true
-    $('screener-options-status').className = 'handoff-status'
-    $('screener-options-status').textContent = 'Refreshing FYERS option chains, exact contracts, two-sided quotes, Greeks, open interest, volume and spread liquidity…'
+    screenerOptionChoices.clear();screenerClassifications.clear()
+    for (const plan of screenerSelectedPlans.values()) { delete plan.suggested_quantity;delete plan.allocation_budget }
+    invalidateScreenerOrderPreview('Refreshing option evidence; earlier execution previews were cleared.')
+    $('screener-options-status').textContent = 'Verifying active option contracts, naked buys and applicable spreads for every analyzed stock…'
     try {
-      const data = await postJson('/api/chartink/analyze-options', { candidates: screenerAnalysisResults.slice(0, 12) })
-      $('screener-options-status').textContent = data.message
-      $('screener-options-results').innerHTML = (data.plans || []).map(item => {
-        const proposal = item.proposal || {}, sizing = proposal.sizing || {}, legs = proposal.legs || []
-        const legRows = legs.map(leg => `<tr><td>${escapeHtml(leg.action)}</td><td>${escapeHtml(leg.symbol)}</td><td>${money(leg.bid)} / ${money(leg.ask)}</td><td>${escapeHtml(leg.open_interest ?? '—')}</td><td>${escapeHtml(leg.volume ?? '—')}</td></tr>`).join('')
-        return `<article class="opportunity-card ${item.direction === 'BEARISH' ? 'bearish' : ''}"><div class="opportunity-head"><div><b>${escapeHtml(item.symbol)}</b><small>${escapeHtml(proposal.label || 'Defined-risk spread')} · expiry ${escapeHtml(item.expiry || '—')}</small></div><span class="conviction">HIGH CONVICTION · OPTIONS</span></div>${horizonLegends(item)}<div class="decision-metrics"><div><small>Entry</small><b>${number(proposal.entry_points, ' pts')}</b></div><div><small>Max loss / lot</small><b>${money(proposal.max_loss_per_lot)}</b></div><div><small>R:R</small><b>1:${number(proposal.reward_to_risk)}</b></div><div><small>Supported size</small><b>${escapeHtml(sizing.lots || 0)} lot(s)</b></div></div><table class="leg-table"><thead><tr><th>Side</th><th>Contract</th><th>Bid / ask</th><th>OI</th><th>Volume</th></tr></thead><tbody>${legRows}</tbody></table><p class="proposal-copy"><b>Rule-based evidence:</b> ${escapeHtml(item.conviction?.rationale)}</p><small class="muted">Fresh FYERS evidence · defined risk · decision support only · not selected for the cash-equity batch.</small></article>`
-      }).join('') || `<div class="empty">No stock-option spread currently passes every contract, liquidity, sizing and conviction gate.</div>`
-      if ((data.excluded || []).length) $('screener-options-results').insertAdjacentHTML('beforeend', `<details class="excluded-list"><summary>${data.excluded.length} option candidate(s) excluded</summary>${data.excluded.map(item => `<p><b>${escapeHtml(item.symbol)}</b> · ${escapeHtml(item.reason)}</p>`).join('')}</details>`)
-    } catch (error) {
-      $('screener-options-status').className = 'handoff-status error'
-      $('screener-options-status').textContent = error.message
-    } finally { button.disabled = false }
+      let count = 0;const excluded = []
+      for (let offset=0;offset<screenerAnalysisResults.length;offset+=12) {
+        const data = await postJson('/api/chartink/analyze-options',{candidates:screenerAnalysisResults.slice(offset,offset+12),risk_policy:policyPayload(riskPolicyInputs())})
+        if (data.status==='MARKET_CLOSED') throw new Error(data.message)
+        if (!Array.isArray(data.classifications)) throw new Error('Three-route backend update is not loaded yet. Equity remains available; option choices await the safe backend reload.')
+        for (const classification of data.classifications) screenerClassifications.set(classification.symbol,classification)
+        for (const plan of data.plans || []) { screenerOptionChoices.set(`${plan.symbol}:${plan.route}`,plan);count++ }
+        excluded.push(...(data.excluded || []));syncScreenerRouteControls()
+      }
+      $('screener-options-status').textContent = `${count} eligible naked-buy / spread proposals. Choose Equity, Naked Buy or Spread on each stock card. Disabled choices show the failed check.`
+      $('screener-options-results').innerHTML = excluded.length ? `<details class="excluded-list"><summary>${excluded.length} option checks did not pass</summary>${excluded.map(item => `<p><b>${escapeHtml(item.symbol)}</b> · ${escapeHtml(item.route || '')} · ${escapeHtml(item.reason)}</p>`).join('')}</details>` : ''
+    } catch (error) { $('screener-options-status').textContent = error.message }
+    finally { syncScreenerRouteControls();button.disabled=false }
+  }
+  const screenerFunds = async () => {
+    const chosen=typeof orderAccount==='function'?orderAccount('screener-order-broker'):{broker:'fyers'}
+    if (typeof window!=='undefined' && window.BrokerForms?.route && chosen.account_id) {
+      const account=window.BrokerForms.accounts().find(item=>item.id===chosen.account_id)
+      if (!account) throw new Error('Selected broker account is unavailable.')
+      const response=await window.fetch(window.BrokerForms.route('account','/api/account',account),{cache:'no-store'})
+      const result=await response.json()
+      if (!response.ok) throw new Error(result.error || 'Selected broker funds are unavailable.')
+      if (orderAccount('screener-order-broker').account_id!==chosen.account_id) throw new Error('Broker account changed; allocate again.')
+      return result
+    }
+    return fetchJson('/api/account')
+  }
+  const allocateScreenerPlansByFunds = async () => {
+    if (!screenerSelectedPlans.size) throw new Error('Select the stocks to fund before allocating.')
+    const budget = Number($('screener-allocation-budget').value)
+    if (!Number.isFinite(budget) || budget <= 0) throw new Error('Enter the total amount to allocate to your selected stocks.')
+    const account = await screenerFunds()
+    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error('Fresh broker funds are unavailable.')
+    if (budget > Number(account.available_funds)) throw new Error('Allocated amount exceeds current available funds.')
+    const selected = [...screenerSelectedPlans.values()].filter(plan => plan.decision === 'PASS').sort((a,b) => Number(b.conviction?.score || 0)-Number(a.conviction?.score || 0) || a.symbol.localeCompare(b.symbol))
+    const totalWeight = selected.reduce((sum,plan) => sum+Math.max(1,Number(plan.conviction?.score || 1)),0)
+    const groups = new Set(selected.map(plan => plan.execution_route || 'EQUITY'))
+    let remaining = Math.max(0,budget-Math.max(500,budget*.05)*groups.size)
+    const eligible=[];const excluded=[]
+    for (const plan of selected) {
+      plan.suggested_quantity=0;plan.allocation_budget=0
+      try {
+        const info=screenerRouteInfo(plan)
+        const legs=info.proposal?.legs?.length || 1
+        const unitCost=info.unit*1.002+20*legs
+        if (remaining>=unitCost) {plan.suggested_quantity=1;remaining-=unitCost;eligible.push({plan,info,unitCost})}
+        else excluded.push(`${plan.symbol}: insufficient funds for one ${info.route==='EQUITY'?'share':'lot'}`)
+      } catch (error) {excluded.push(error.message)}
+    }
+    const distributable=remaining
+    for (const {plan,unitCost} of eligible) {
+      const extra=Math.floor((distributable*Math.max(1,Number(plan.conviction?.score || 1))/totalWeight)/unitCost)
+      plan.suggested_quantity+=extra;remaining-=extra*unitCost
+    }
+    const reserve=budget-eligible.reduce((sum,{plan,unitCost})=>sum+plan.suggested_quantity*unitCost,0)
+    const fundedWeight=eligible.reduce((sum,{plan})=>sum+Math.max(1,Number(plan.conviction?.score || 1)),0)
+    for (const {plan,unitCost} of eligible) plan.allocation_budget=plan.suggested_quantity*unitCost+reserve*Math.max(1,Number(plan.conviction?.score || 1))/fundedWeight
+    syncScreenerSelectionUi(`Allocated ${money(budget)} only across selected eligible stocks, highest score first. ${excluded.join(' · ')} Fresh previews determine executable quantities and reserve costs.`)
+  }
+  const prepareScreenerOrder = async () => {
+    const button=$('prepare-screener-order');button.disabled=true
+    try {
+      const selected=[...screenerSelectedPlans.values()]
+      if (!selected.length) throw new Error('Select candidates before preparing orders.')
+      if (selected.some(plan => plan.suggested_quantity == null)) throw new Error('Allocate the selected candidates first.')
+      const funded=selected.filter(plan => plan.suggested_quantity>0).sort((a,b)=>Number(b.conviction?.score || 0)-Number(a.conviction?.score || 0))
+      if (!funded.length) throw new Error('The allocation cannot fund one eligible share or option lot.')
+      const policy=riskPolicyInputs(),external=$('screener-order-external-risk').value
+      const grouped=new Map()
+      for (const plan of funded) {
+        const info=screenerRouteInfo(plan),quantity=plan.suggested_quantity
+        const account=typeof orderAccount==='function'?orderAccount('screener-order-broker'):{broker:'fyers'}
+        if(info.route!=='EQUITY'&&String(info.proposal?.broker||'FYERS').toUpperCase()!==String(account.broker).toUpperCase())throw new Error('Option evidence belongs to a different broker. Analyze with the selected execution broker.');
+        const proposal=info.proposal || {kind:'EQUITY',direction:plan.direction,quantity,entry:plan.entry,target:plan.target}
+        const item={...account,underlying:`NSE:${plan.symbol}-EQ`,proposal,quantity,...(info.route==='EQUITY'?{cash_product:$('screener-order-product').value}:{lots:quantity,expiry:info.expiry}),invalidation:Number(plan.stop),
+          daily_loss_limit:policy.dailyLossLimit,idea_risk_limit:policy.ideaRiskLimit,risk_reserve:policy.riskReserve,max_simultaneous_positions:policy.maxPositions,minimum_reward_to_risk:policy.minimumRewardToRisk,enforce_risk_controls:policy.enforceRiskControls,enforce_minimum_reward_to_risk:policy.minimumRewardToRisk>0,order_type:policy.orderType,external_open_risk:external===''?null:Number(external),require_market_open:true,allocation_weight:Math.max(1,Number(plan.conviction?.score || 1))}
+        if (!grouped.has(info.route)) grouped.set(info.route,{route:info.route,items:[],budget:0})
+        const group=grouped.get(info.route);group.items.push(item);group.budget+=Number(plan.allocation_budget)
+      }
+      const groups=[]
+      for (const group of grouped.values()) {
+        if (group.route!=='EQUITY' && group.items.length>10) throw new Error('Select at most ten option stocks per execution route.')
+        const preview=await postJson('/api/trade-ticket/prepare-batch',{items:group.items,allocation_budget:group.budget,allocation_mode:'CONVICTION_WEIGHTED'})
+        if (Number(preview.aggregate?.cash_reserved)>group.budget+.01) throw new Error('Fresh broker preview exceeds its allocated group budget. Reduce selection or refresh allocation.')
+        groups.push({...group,preview})
+      }
+      screenerOrderPreview={groups}
+      $('screener-order-preview').textContent=JSON.stringify(groups.map(group=>({route:screenerRouteLabel(group.route),allocated:group.budget,preview:group.preview})),null,2)
+      $('screener-order-review').hidden=false
+      $('screener-order-confirmation').closest('label').hidden=true;$('submit-screener-order').hidden=true
+      $('screener-route-preview-groups').innerHTML=groups.map((group,index)=>`<section class="panel"><b>${escapeHtml(screenerRouteLabel(group.route))}</b><p>Allocated ${money(group.budget)} · reserved ${money(group.preview.aggregate.cash_reserved)} · ${group.preview.aggregate.order_count} orders. Review exact contracts and exclusions above.</p><button type="button" class="button danger screener-group-submit" data-group-index="${index}" ${group.preview.live_submission_enabled && group.preview.submission_eligible ? '' : 'disabled'}>Submit ${escapeHtml(screenerRouteLabel(group.route))} batch</button><p class="screener-group-status"></p></section>`).join('')
+      for (const submit of $('screener-route-preview-groups').querySelectorAll('.screener-group-submit')) submit.addEventListener('click',async()=>{
+        const group=groups[Number(submit.dataset.groupIndex)],panel=submit.closest('section')
+        if (group.consumed) return
+        group.consumed=true
+        // One explicit group per click. Never continue other legs/groups on uncertainty.
+        for (const control of $('screener-route-preview-groups').querySelectorAll('button,input')) control.disabled=true
+        screenerOrderPreview=null
+        try {
+          const result=await postJson('/api/trade-ticket/submit-batch',{preview_id:group.preview.preview_id,confirmation:group.preview.confirmation_phrase})
+          panel.querySelector('.screener-group-status').textContent=`${result.status}: ${result.message}`
+        } catch (error) {panel.querySelector('.screener-group-status').textContent=`Submission requires reconciliation: ${error.message}. No automatic retry.`}
+        $('screener-order-status').textContent='Check broker order status. Other group previews are now invalid; prepare fresh previews before any further submission.'
+      })
+      $('screener-order-status').textContent='Separate reviewed previews are ready for each execution route. Click Submit on the group you want to send. No order has been submitted.'
+    } catch (error) {invalidateScreenerOrderPreview(error.message)}
+    finally {button.disabled=false}
   }
   const invalidateScreenerOrderPreview = message => {
     screenerOrderPreview = null
     $('screener-order-review').hidden = true
     $('screener-order-confirmation').value = ''
     $('submit-screener-order').disabled = true
+    $('screener-route-preview-groups').replaceChildren()
     if (message) $('screener-order-status').textContent = message
   }
   const syncScreenerSelectionUi = (message, scroll = false) => {
@@ -1041,80 +1236,23 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('screener-clear-selection').disabled = count === 0
     $('screener-select-all').disabled = screenerAnalysisResults.length === 0 || count === screenerAnalysisResults.length
     $('screener-order').hidden = count === 0
-    const allocation = [...screenerSelectedPlans.values()].map(plan => `${plan.symbol} × ${plan.suggested_quantity || 1}`).join(', ')
-    $('screener-batch-selection').textContent = `${count} plan(s) selected: ${allocation || 'none'}. Quantities are allocated from fresh FYERS funds and conviction, then remain editable in the reviewed ticket.`
+    const allocation = [...screenerSelectedPlans.values()].map(plan => `${plan.symbol} · ${screenerRouteLabel(plan.execution_route || 'EQUITY')} × ${plan.suggested_quantity ?? 'not allocated'}`).join(', ')
+    $('screener-batch-selection').textContent = `${count} plan(s) selected: ${allocation || 'none'}. Choose a route per stock and allocate only your entered budget. Review final shares or whole option lots in the fresh broker previews.`
     document.querySelectorAll('#screener-analysis-results .screener-plan-select').forEach(control => { control.checked = screenerSelectedPlans.has(control.value) })
     invalidateScreenerOrderPreview(message || 'Selection changed. Prepare a new consolidated FYERS preview; no broker action has occurred.')
     if (scroll && count) $('screener-order').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
   }
   const selectScreenerOrderPlan = (plan, selected, control) => {
+    delete plan.suggested_quantity;delete plan.allocation_budget
     if (selected) screenerSelectedPlans.set(plan.symbol, plan); else screenerSelectedPlans.delete(plan.symbol)
+    for (const chosen of screenerSelectedPlans.values()) { delete chosen.suggested_quantity;delete chosen.allocation_budget }
     syncScreenerSelectionUi(null, true)
-  }
-  const allocateScreenerPlansByFunds = async () => {
-    const account = await fetchJson('/api/account')
-    if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'FYERS available funds are unavailable for allocation.')
-    let remaining = Number(account.available_funds)
-    const ranked = [...screenerAnalysisResults].filter(plan => plan.decision === 'PASS' && Number(plan.entry) > 0).sort((left, right) => {
-      const a = Number(left.conviction?.score || 0); const b = Number(right.conviction?.score || 0)
-      return b - a || Number(left.entry) - Number(right.entry) || String(left.symbol).localeCompare(String(right.symbol))
-    })
-    for (const plan of ranked) {
-      const entry = Number(plan.entry)
-      const score = Math.max(1, Number(plan.conviction?.score || 1))
-      plan.suggested_quantity = remaining >= entry ? 1 : 0
-      plan.allocation_notional = plan.suggested_quantity * entry
-      plan.allocation_weight = score
-      if (plan.suggested_quantity) remaining -= entry
-    }
-    const funded = ranked.filter(plan => plan.suggested_quantity > 0)
-    const totalWeight = funded.reduce((sum, plan) => sum + plan.allocation_weight, 0)
-    for (const plan of funded) {
-      const extra = Math.floor((remaining * plan.allocation_weight / totalWeight) / Number(plan.entry))
-      if (extra > 0) {
-        plan.suggested_quantity += extra
-        plan.allocation_notional += extra * Number(plan.entry)
-        remaining -= extra * Number(plan.entry)
-      }
-    }
-    screenerSelectedPlans.clear()
-    funded.forEach(plan => screenerSelectedPlans.set(plan.symbol, plan))
-    syncScreenerSelectionUi(`Allocated from fresh FYERS available funds of ${money(account.available_funds)} by conviction. Higher-conviction plans receive priority; suggested quantities remain editable.`)
-  }
-  const prepareScreenerOrder = async () => {
-    const button = $('prepare-screener-order')
-    try {
-      if (!screenerSelectedPlans.size) throw new Error('Select at least one High-Conviction plan before requesting a FYERS batch preview.')
-      const policy = riskPolicyInputs()
-      button.disabled = true; button.textContent = 'Refreshing selected broker preflight…'
-      $('screener-order-status').className = 'handoff-status'
-      $('screener-order-status').textContent = 'Validating FYERS auth, security master, live two-sided quote, market state, product, side, quantity, funds, positions, orders and risk ledger.'
-      const external = $('screener-order-external-risk').value
-      const items = [...screenerSelectedPlans.values()].map(plan => {
-        const quantity = Math.max(1, Math.floor(Number(plan.suggested_quantity || 1)))
-        return {
-        ...orderAccount('screener-order-broker'), underlying: `NSE:${plan.symbol}-EQ`, proposal: { kind: 'EQUITY', label: `Screener ${plan.direction === 'BULLISH' ? 'long' : 'short'} limit`, direction: plan.direction, quantity, entry: plan.entry, target: plan.target },
-        invalidation: Number(plan.stop), quantity, cash_product: $('screener-order-product').value,
-        daily_loss_limit: policy.dailyLossLimit, idea_risk_limit: policy.ideaRiskLimit, risk_reserve: policy.riskReserve,
-        max_simultaneous_positions: policy.maxPositions, minimum_reward_to_risk: policy.minimumRewardToRisk,
-        enforce_risk_controls: policy.enforceRiskControls, enforce_minimum_reward_to_risk: policy.minimumRewardToRisk > 0, order_type: policy.orderType,
-        external_open_risk: external === '' ? null : Number(external), require_market_open: true,
-      }})
-      const preview = await postJson('/api/trade-ticket/prepare-batch', { items })
-      screenerOrderPreview = preview
-      $('screener-order-preview').textContent = JSON.stringify(preview, null, 2)
-      $('screener-order-review').hidden = false
-      $('screener-order-confirmation').value = ''
-      $('submit-screener-order').disabled = true
-      $('screener-order-status').textContent = `Exact ${preview.broker || "broker"} batch preview ${preview.preview_id} prepared · ${preview.aggregate.order_count} orders · ${money(preview.aggregate.total_worst_case_risk)} total risk · ${money(preview.aggregate.cash_reserved)} cash reserved. Review every item and exclusion.`
-    } catch (error) { $('screener-order-status').className = 'handoff-status error'; $('screener-order-status').textContent = error.message }
-    finally { button.disabled = false; button.textContent = 'Prepare broker batch preview' }
   }
   const submitScreenerOrder = async () => {
     if (!screenerOrderPreview) return
     const button = $('submit-screener-order'); button.disabled = true
     try {
-      const result = await postJson('/api/trade-ticket/submit-batch', { preview_id: screenerOrderPreview.preview_id, confirmation: $('screener-order-confirmation').value })
+      const result = await postJson('/api/trade-ticket/submit-batch', { preview_id: screenerOrderPreview.preview_id, confirmation: screenerOrderPreview.confirmation_phrase })
       $('screener-order-preview').textContent = JSON.stringify(result, null, 2)
       $('screener-order-status').textContent = `${result.status}: ${result.message}`
       screenerOrderPreview = null
@@ -1229,7 +1367,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       <div class="mode-tabs" aria-label="Detail timeframe" style="margin-top:12px">${timeframeOrder.map(tf => `<button type="button" data-detail-timeframe="${tf}" class="${selectedTimeframe === tf ? 'active' : ''}" aria-pressed="${selectedTimeframe === tf}">${tf}</button>`).join('')}</div>
       <div class="detail-grid"><div><article class="chart-card"><h3>${escapeHtml(sector.name)} ${escapeHtml(selectedTimeframe)} · Price and EMA structure</h3>${priceChart(state)}</article><div class="explanation"><b>${escapeHtml(state.label || 'Unavailable')} · Trend ${number(state.score)}/100</b><ul>${(state.reasons || []).map(reason => `<li>${escapeHtml(reason)}</li>`).join('') || '<li>No explanation is available because candle data is missing.</li>'}</ul></div><div class="chart-grid" style="margin-top:12px">${lineChart('Sector score history', history, 'overall_score')}${lineChart('Rank history', history, 'rank', true)}${lineChart('Relative strength history', history, 'relative_strength_score')}${lineChart('Momentum history', history, 'momentum_score')}${lineChart('Breadth history', history, 'breadth_score')}</div></div>
       <aside><article class="chart-card"><h3>Multi-timeframe summary</h3>${timeframeOrder.map(tf => { const item = sector.timeframe_states?.[tf] || {}; return `<div class="row" style="grid-template-columns:70px 1fr 70px"><b>${tf}</b><span class="${stateClass(item.state)}" title="${escapeHtml(qualityText(item.data_quality || 'Unavailable'))}">${escapeHtml(item.label || 'Unavailable')}</span><strong>${number(item.score)}</strong></div>` }).join('')}</article><article class="chart-card" style="margin-top:12px"><h3>Rotation history</h3><div class="rotation-list">${history.length ? history.slice().reverse().map(point => `<div><span>${time(point.timestamp)}</span><b>${escapeHtml(point.rotation_state || 'NEUTRAL')}</b><span>${point.rank ? `#${point.rank}` : '—'} · ${number(point.overall_score)}</span></div>`).join('') : '<div class="chart-empty">Waiting for persisted snapshots.</div>'}</div></article><article class="chart-card" style="margin-top:12px"><h3>Data quality</h3><p>${escapeHtml(qualityText(sector.data_quality))}</p><p class="muted">Latest completed bar: ${time(sector.last_updated)}</p><p class="muted">Missing: ${escapeHtml((sector.missing_components || []).join(', ') || 'none')}</p><p class="muted">Weights: ${escapeHtml(Object.entries(sector.component_weights || {}).map(([key, value]) => `${key} ${value}%`).join(' · '))}</p></article></aside></div>
-      <section id="constituent-workflow" class="chart-card" style="margin-top:12px"><h3>Sector → stock prioritization</h3><p class="muted">Contributions use unrounded ${escapeHtml(analysis?.provider === 'DHAN' ? 'Dhan' : 'FYERS')} stock moves multiplied by the official published weight. They are analytical only and do not place orders. ${escapeHtml(attributionScope)}.</p><div class="movers"><div><b>Strongest current contributors</b><ul class="mover-list">${strongest.length ? strongest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div><div><b>Weakest current contributors</b><ul class="mover-list">${weakest.length ? weakest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div></div></section>`
+      <section id="constituent-workflow" class="chart-card" style="margin-top:12px"><h3>Sector → stock prioritization</h3><p class="muted">Contributions use unrounded ${escapeHtml(analysis?.provider === 'MOTILAL_OSWAL' ? 'Motilal Oswal' : analysis?.provider === 'DHAN' ? 'Dhan' : 'FYERS')} stock moves multiplied by the official published weight. They are analytical only and do not place orders. ${escapeHtml(attributionScope)}.</p><div class="movers"><div><b>Strongest current contributors</b><ul class="mover-list">${strongest.length ? strongest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div><div><b>Weakest current contributors</b><ul class="mover-list">${weakest.length ? weakest.map(item => `<li><span>${escapeHtml(item.ticker)} · ${number(item.weight, '%')} · ${percent(item.change)}</span><strong class="${stateClass(item.contribution)}">${percentagePoints(item.contribution)}</strong></li>`).join('') : '<li>Live constituent data unavailable</li>'}</ul></div></div></section>`
     document.querySelectorAll('[data-detail-timeframe]').forEach(button => button.addEventListener('click', () => loadDetail(sector.sector_id, button.dataset.detailTimeframe)))
     $('strongest-stocks').addEventListener('click', () => $('constituent-workflow').scrollIntoView({ behavior: scrollBehavior, block: 'start' }))
   }
@@ -1241,16 +1379,31 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     for(const [node,left,top] of positions){node.scrollLeft=left;node.scrollTop=top;}
     window.scrollTo({left:x,top:y,behavior:'instant'});
   };
+  let sectorDetailRequest=0
   const loadDetail = async (sectorId, timeframe = 'daily', scroll = true) => {
+    const requestRevision=++sectorDetailRequest
+    const requestAccount=window.BrokerForms?.account('sector')?.id
     selectedSector = sectorId
     selectedTimeframe = timeframe
     $('sector-detail').hidden = false
     if(scroll)$('sector-detail').innerHTML = '<div class="empty">Loading explainable sector detail…</div>'
     try {
-      const data = await fetchJson(`/api/sector-analysis/detail?mode=${encodeURIComponent(mode)}&sector=${encodeURIComponent(sectorId)}`)
+      let data
+      if(requestAccount&&window.BrokerForms?.account('sector')?.broker==='FYERS'&&window.SectorDetailClient){
+        data=await window.SectorDetailClient.read(requestAccount,sectorId,mode)
+      }else{
+        try{
+          data=await fetchJson(`/api/sector-analysis/detail?mode=${encodeURIComponent(mode)}&sector=${encodeURIComponent(sectorId)}`)
+        }catch(originalError){
+          if(!requestAccount||!window.SectorDetailClient)throw originalError
+          data=await window.SectorDetailClient.read(requestAccount,sectorId,mode)
+        }
+      }
+      if(requestRevision!==sectorDetailRequest||selectedSector!==sectorId||window.BrokerForms?.account('sector')?.id!==requestAccount)return
       if(scroll)renderDetail(data.sector);else preserveSectorViewport(()=>renderDetail(data.sector));
       if(scroll)$('sector-detail').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
     } catch (error) {
+      if(requestRevision!==sectorDetailRequest||selectedSector!==sectorId||window.BrokerForms?.account('sector')?.id!==requestAccount)return
       $('sector-detail').innerHTML = `<div class="empty error">${escapeHtml(error.message)}</div>`
     }
   }
@@ -1302,15 +1455,21 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       $('broker-dot').classList.toggle('ok', data.connected === true); $('broker-state').textContent = data.connected === true ? (data.broker === 'DHAN' ? 'Dhan connected' : 'FYERS connected') : (data.error || 'Selected broker disconnected'); $('account-state').textContent = data.connected === true ? (data.broker==='DHAN'?'Dhan account API connected':'Broker feed connected') : (data.error || 'Broker feed unavailable'); setAuthenticationControl(data.connected === true)
     } catch (error) { $('account-state').textContent = error.message; $('broker-state').textContent = 'FYERS status delayed'; $('broker-dot').classList.remove('ok'); setAuthenticationControl(false); $('reauth-help').textContent = 'Broker status request failed. Authentication expiry is not confirmed; retrying the status check.' }
   }
+  let closedRequest = 0
   const refreshClosed = async () => {
     if(document.hidden || !document.querySelector('#broker.active'))return;
     try {
-      const data = await fetchJson(`/api/realized-pnl?period=${period}`)
-      const summary = data.summary || {}; const records = data.records || []; const reportedTotal = Number(summary.net_pnl); const total = Number.isFinite(reportedTotal) ? reportedTotal : records.reduce((sum, item) => sum + Number(item.pnl || 0), 0)
+      const requestId = ++closedRequest; const selectedPeriod = period
+      const data = await fetchJson(`/api/realized-pnl?period=${selectedPeriod}`)
+      if (requestId !== closedRequest || selectedPeriod !== period) return
+      const summary = data.summary || {}; const records = data.records || []; const reportedTotal = summary.net_pnl == null ? NaN : Number(summary.net_pnl); const total = Number.isFinite(reportedTotal) ? reportedTotal : records.reduce((sum, item) => sum + Number(item.pnl || 0), 0)
       $('closed-pnl').textContent = data.supported === false ? '—' : money(total); $('closed-pnl').className = data.supported === false ? 'neutral' : stateClass(total)
-      const periodName = `${period[0].toUpperCase() + period.slice(1)}`; const pnlBasis=data.broker==='DHAN'?'gross P&L':'net P&L'; $('closed-pnl-label').textContent = `${periodName} ${pnlBasis}`
-      $('closed-summary').innerHTML = data.supported === false ? `<span class="muted">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</span>` : `<b>${periodName} ${pnlBasis}</b><span aria-hidden="true"></span><span aria-hidden="true"></span><strong class="${stateClass(total)}">${money(total)}</strong>`
+      const periodName = `${period[0].toUpperCase() + period.slice(1)}`; const pnlBasis=summary.net_pnl != null?'net P&L':'gross P&L'; $('closed-pnl-label').textContent = `${periodName} ${pnlBasis}`
+      $('closed-summary').innerHTML = data.supported === false ? `<span class="muted">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</span>` : `<b>${periodName} ${pnlBasis} · all segments</b><span aria-hidden="true"></span><span aria-hidden="true"></span><strong class="${stateClass(total)}">${money(total)}</strong>`
+      if (!window.ClosedPnl || data.supported === false) {
       $('closed-positions').innerHTML = data.supported === false ? `<p class="empty">${escapeHtml(data.message || 'Realised P&L history is unavailable from FYERS.')}</p>` : records.length ? records.map(item => `<div class="row"><b>${escapeHtml(item.symbol)}</b><span>${escapeHtml(item.buy_rate)} / ${escapeHtml(item.sell_rate)}</span><span>${escapeHtml(item.buy_qty)} / ${escapeHtml(item.sell_qty)}</span><strong class="${stateClass(item.pnl)}">${money(item.pnl)}</strong></div>`).join('') : '<p class="empty">No closed positions in this period.</p>'
+      }
+      if (data.supported !== false && window.ClosedPnl) window.ClosedPnl.render($('closed-positions'), data, selectedPeriod, fetchJson)
     } catch (error) { $('closed-pnl-label').textContent = 'Closed P&L'; $('closed-summary').textContent = 'Closed-position summary unavailable.'; $('closed-positions').innerHTML = `<p class="empty error">${escapeHtml(error.message)}</p>` }
   }
 
@@ -1318,6 +1477,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
 
   window.addEventListener('broker-account-change',event=>{
     if(event.detail.kind!=='account')return;
+    closedRequest++;
     for(const id of ['live-pnl','estimated-charges','estimated-net-pnl','open-count','funds','closed-pnl'])$(id).textContent='—';
     $('open-positions').textContent='Loading selected broker positions…';
     $('closed-positions').textContent='Loading selected broker history…';
@@ -1669,15 +1829,16 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const allocationCopy = !hasOption ? (analysisRun?.exclusions?.find(item=>item.candidate_key===candidate.key)?.reason || 'No validated option contract for this broker.') : Number.isInteger(suggestedQuantity) && suggestedQuantity > 0
         ? `Funds-weighted suggestion: ${suggestedQuantity} ${candidate.kind === 'stock' ? 'shares' : 'lots'} · ₹${number(candidate.allocation.estimated_notional)}`
         : candidate.allocation?.reason || 'Quantity is set when you rank selected candidates by selected-broker funds.'
-      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${eligible ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small><small>${escapeHtml(allocationCopy)}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
+      return `<div class="candidate-card ${candidate.direction.toLowerCase()}"><input class="candidate-select" aria-label="Select ${escapeHtml(candidate.name)}" type="checkbox" value="${escapeHtml(candidate.key)}" ${eligible ? '' : 'disabled'}><span><b>${escapeHtml(candidate.name)}</b><small>${escapeHtml(candidate.kind.toUpperCase())} · ${escapeHtml(candidate.mtf_alignment)}</small><small>${escapeHtml(candidate.source_summary || detail)} · ${escapeHtml(qualityText(candidate.data_quality))}</small><small>${escapeHtml(allocationCopy)}</small></span><label class="field">Stop / thesis invalidation<input class="candidate-invalidation" data-candidate-key="${escapeHtml(candidate.key)}" data-derived="${derivedReady ? 'true' : 'false'}" type="number" min="0.01" step="0.05" ${derivedReady ? `value="${escapeHtml(derived.price)}"` : 'disabled placeholder="Unavailable"'}><small>${stopCopy}</small></label></div>`
     }).join('') : '<div class="empty">No sectors or scanned stocks currently meet exact full alignment.</div>'
     document.querySelectorAll('.candidate-select').forEach(input => {
-      input.addEventListener('change', () => {
+      input.addEventListener('change', event => {
         const selected = [...document.querySelectorAll('.candidate-select:checked')].map(item => item.value)
         $('analysis-board').querySelectorAll('.opportunity-card').forEach(card => { card.hidden = !selected.includes(card.dataset.candidateKey) })
         $('candidate-batch-actions').hidden = selected.length === 0
         $('candidate-status').textContent = `${selected.length} recommendation(s) selected. A batch preview revalidates all of them together before any confirmation is possible.`
         $('analysis-panel').hidden = false
+        if(selected.length&&event?.isTrusted&&typeof window!=='undefined')window.HandoffLevelReport?.reveal($('analysis-panel'))
       })
     })
     document.querySelectorAll('.candidate-invalidation').forEach(input => { input.readOnly = true })
@@ -1693,7 +1854,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   const selectedInstrumentRoute = () => document.querySelector('input[name="instrument-route"]:checked')?.value || ''
   const rankCandidatesForSelection = async () => {
     if (!candidateCollection || !analysisRun) throw new Error('Collect fresh candidates before ranking them.')
-    const fundingAccount=orderAccount('ticket-broker'); const account = await fetchJson(fundingAccount.broker === 'DHAN' ? '/api/dhan/account?account_id='+encodeURIComponent(fundingAccount.account_id) : '/broker-workspace/'+encodeURIComponent(fundingAccount.account_id)+'/api/account')
+    const fundingAccount=orderAccount('ticket-broker');const savedFunding=window.BrokerForms.accounts().find(a=>a.id===fundingAccount.account_id);const account=await fetchJson(window.BrokerForms.route('account','/api/account',savedFunding))
     if (!account?.connected || !Number.isFinite(Number(account.available_funds))) throw new Error(account?.error || 'Selected broker funds are unavailable for ranking.')
     const availableFunds = Number(account.available_funds)
     const byKey = new Map((analysisRun.cards || []).map(card => [card.candidate_key, card]))
@@ -1771,6 +1932,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const current=orderAccount('ticket-broker'); const saved=stored[current.account_id+':'+route]||(!route?Object.values(stored).filter(item=>item.account_id===current.account_id&&item.broker===current.broker).sort((a,b)=>b.savedAt-a.savedAt)[0]:null)
       if(!saved?.analysisRun||!saved.candidateCollection)return
       handoffCurrentRoute=saved.route
+      $('collect-candidates').textContent=`Collect ${saved.route==='stock_options'?'stock option':'cash equity'} matches`
       document.querySelector(`input[name="instrument-route"][value="${saved.route}"]`).checked=true
       for(const [id,value] of Object.entries(saved.inputs||{})){const input=$(id);if(!input)continue;if(input.type==='checkbox')input.checked=value===true;else if(value!=null)input.value=value}
       analysisRun=saved.analysisRun;candidateCollection=saved.candidateCollection
@@ -1819,22 +1981,29 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     }).join('')
   }
   const renderAnalysisCards = () => {
+    const planNumber=value=>value==null?'—':new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(Number(value))
     if (!analysisRun) return
     $('analysis-panel').hidden = false
     $('ai-review-state').textContent = analysisRun.ai_review?.message || 'External AI review is unavailable; local evidence proposals are shown.'
+    if(analysisRun.ai_review?.summary){const summary=document.createElement('p');summary.textContent=analysisRun.ai_review.summary;$('ai-review-state').append(summary)}
+    for(const row of analysisRun.ai_review?.recommendations||[]){const line=document.createElement('p');line.textContent=`${row.symbol}: ${row.decision} · ${row.confidence} · ${row.rationale} ${(row.risks||[]).join(' · ')}`;$('ai-review-state').append(line)}
     $('analysis-board').innerHTML = (analysisRun.cards || []).map(card => {
       const a = card.analysis; const c = card.candidate; const p = a.proposal; const proposed = a.proposed_sizing || p?.sizing || {}
-      const legs = p?.legs?.length ? `<table class="leg-table"><thead><tr><th>Action</th><th>Contract</th><th>Strike</th><th>Bid / ask</th><th>OI · volume</th><th>Lot · tick</th><th>Delta · IV</th></tr></thead><tbody>${p.legs.map(leg => `<tr><td>${escapeHtml(leg.action)}</td><td>${escapeHtml(leg.symbol)}</td><td>${number(leg.strike)}</td><td>${number(leg.bid)} / ${number(leg.ask)}</td><td>${number(leg.open_interest)} · ${number(leg.volume)}</td><td>${number(leg.lot_size)} · ${number(leg.tick_size)}</td><td>${number(leg.greeks?.delta)} · ${number(leg.greeks?.iv)}</td></tr>`).join('')}</tbody></table>` : ''
+      const legs = p?.legs?.length ? `<div class="leg-scroll" tabindex="0" role="region" aria-label="Option contract quote details"><table class="leg-table"><thead><tr><th>Action</th><th>Contract</th><th>Strike</th><th>Bid / ask</th><th>OI · volume</th><th>Lot · tick</th><th>Delta · IV</th></tr></thead><tbody>${p.legs.map(leg => `<tr><td>${escapeHtml(leg.action)}</td><td>${escapeHtml(leg.symbol)}</td><td>${planNumber(leg.strike)}</td><td>${planNumber(leg.bid)} / ${planNumber(leg.ask)}</td><td>${planNumber(leg.open_interest)} · ${planNumber(leg.volume)}</td><td>${planNumber(leg.lot_size)} · ${planNumber(leg.tick_size)}</td><td>${planNumber(leg.greeks?.delta)} · ${planNumber(leg.greeks?.iv)}</td></tr>`).join('')}</tbody></table></div>` : ''
       const optionGate = p ? '<p class="proposal-copy"><b>Option gates passed:</b> exact selected-broker contract and expiry, master lot/tick, two-sided quote, spread, OI, volume, complete Greeks and defined maximum loss.</p>' : ''
       const target = p ? p.target_exit_points : proposed.target || a.target
       const quantity = p ? `${proposed.lots || '—'} lot · ${proposed.quantity || '—'}` : proposed.quantity || '—'
       const maxLoss = p ? proposed.estimated_max_loss || p.max_loss_per_lot : proposed.estimated_max_loss
-      const entry = p ? `${p.entry_points} pts ${p.structure}` : money(a.entry)
-      return `<article class="opportunity-card ${String(c.direction).toLowerCase()}" data-card-id="${escapeHtml(card.card_id)}"><div class="opportunity-head"><div><span class="label">${escapeHtml(p ? 'STOCK OPTIONS' : 'CASH EQUITY')} · ${escapeHtml(c.direction)}</span><h3>${escapeHtml(c.name)}</h3><small>${escapeHtml(a.thesis || p?.scenario || '')}</small></div><span class="conviction">${escapeHtml(a.conviction?.rating || 'Low')} conviction</span></div><p class="proposal-copy"><b>Why:</b> ${escapeHtml(a.conviction?.rationale || 'Insufficient evidence')} ${escapeHtml(a.conviction?.advisory || '')}</p><div class="decision-metrics"><div><b>${escapeHtml(entry)}</b><small>Entry / trigger</small></div><div><b>${a.recommended_invalidation?.price ? money(a.recommended_invalidation.price) : '—'}</b><small>Proposed stop</small></div><div><b>${target != null ? number(target) : '—'}</b><small>Target / exit</small></div><div><b>1:${number(p?.reward_to_risk || a.reward_to_risk)}</b><small>Reward:risk</small></div><div><b>${escapeHtml(quantity)}</b><small>${p ? 'Lots · quantity' : 'Shares'}</small></div><div><b>${money(maxLoss)}</b><small>Max loss</small></div><div><b>${p ? escapeHtml(p.expiry || '—') : money(proposed.estimated_notional)}</b><small>${p ? 'Expiry' : 'Cash notional'}</small></div><div><b>${p ? escapeHtml(p.label) : escapeHtml(a.market_status || 'WATCH')}</b><small>Plan</small></div></div>${legs}${optionGate}<p class="proposal-copy"><b>Proposed invalidation:</b> ${escapeHtml(a.recommended_invalidation?.rationale || '')}</p><div class="invalidation-picker">${invalidationRows(card)}</div><div class="proposal-actions"><button type="button" class="button accept-analysis">Accept / recompute</button><button type="button" class="button secondary reject-analysis">Reject</button><button type="button" class="button prepare-analysis-ticket" disabled>Prepare FYERS order</button></div><div class="handoff-status card-status">Proposal not accepted. Sizing shown is advisory and has no order authority.</div></article>`
+      const entry = p ? `${planNumber(p.entry_points)} pts ${p.structure}` : money(a.entry)
+      const premiumStop=a.active_invalidation?.premium_stop_estimate||p?.premium_stop_estimate; const underlyingStop=a.active_invalidation?.price??a.recommended_invalidation?.price; const stopEstimated=premiumStop?.status==='ESTIMATED'&&Number.isFinite(premiumStop.stop_loss_price)
+      const premiumStopNote=p?`<details class="proposal-copy"><summary>Existing order-plan premium stop calculation</summary><p>${escapeHtml(stopEstimated?premiumStop.assumptions:premiumStop?.reason||'No premium-stop estimate was retained in this saved plan. Run analysis again for a new estimate.')}</p>${stopEstimated?`<p>Underlying ${money(premiumStop.underlying_entry)} → ${money(premiumStop.underlying_stop)} · Entry premium ${money(premiumStop.premium_entry)} · Delta ${planNumber(premiumStop.greeks?.delta)} · Gamma ${planNumber(premiumStop.greeks?.gamma)} · IV ${planNumber(premiumStop.greeks?.iv)}%</p>`:''}</details>`:''
+      const levelDisplay=(typeof window!=='undefined'&&window.HandoffLevelReport?.html(card))||`<div class="decision-metrics"><div><b>${escapeHtml(entry)}</b><small>Entry / trigger</small></div><div><b>${underlyingStop ? money(underlyingStop) : '—'}</b><small>${p?'Stop · underlying':'Stop'}${a.active_invalidation?'':' · proposed'}</small></div>${p?`<div><b>${stopEstimated?money(premiumStop.stop_loss_price):'Unavailable'}</b><small>Premium stop · estimated</small></div>`:''}<div><b>${target != null ? planNumber(target) : '—'}</b><small>${p?'Target · option premium':'Target / exit'}</small></div><div><b>1:${planNumber(p?.reward_to_risk || a.reward_to_risk)}</b><small>${p?'Target R:R · full premium risk':'Reward:risk'}</small></div><div><b>${escapeHtml(quantity)}</b><small>${p ? 'Lots · quantity' : 'Shares'}</small></div><div><b>${money(maxLoss)}</b><small>${p?'Full premium at risk':'Max loss'}</small></div><div><b>${p ? escapeHtml(p.expiry || '—') : money(proposed.estimated_notional)}</b><small>${p ? 'Expiry' : 'Cash notional'}</small></div><div><b>${p ? escapeHtml(p.label) : escapeHtml(a.market_status || 'WATCH')}</b><small>Plan</small></div></div>`
+      return `<article class="opportunity-card ${String(c.direction).toLowerCase()}" data-card-id="${escapeHtml(card.card_id)}"><div class="opportunity-head"><div><span class="label">${escapeHtml(p ? 'STOCK OPTIONS' : 'CASH EQUITY')} · ${escapeHtml(c.direction)}</span><h3>${escapeHtml(c.name)}</h3><small>${escapeHtml(c.source_summary || c.parent_sector || 'Sector rotation')}</small><small>${escapeHtml(a.thesis || p?.scenario || '')}</small></div><span class="conviction">${escapeHtml(a.conviction?.rating || 'Low')} conviction</span></div><p class="proposal-copy"><b>Why:</b> ${escapeHtml(a.conviction?.rationale || 'Insufficient evidence')} ${escapeHtml(a.conviction?.advisory || '')}</p>${levelDisplay}${(typeof window!=='undefined'&&window.CompanyFundamentalsReport?.html(a.fundamentals,analysisRun.ai_provider==='CODEX_CHATGPT'))||''}${legs}${premiumStopNote}${optionGate}<p class="proposal-copy"><b>Proposed invalidation:</b> ${escapeHtml(a.recommended_invalidation?.rationale || '')}</p><div class="invalidation-picker">${invalidationRows(card)}</div><div class="proposal-actions"><button type="button" class="button accept-analysis">Accept / recompute</button><button type="button" class="button secondary reject-analysis">Reject</button><button type="button" class="button prepare-analysis-ticket" disabled>Prepare FYERS order</button></div><div class="handoff-status card-status">Proposal not accepted. Sizing shown is advisory and has no order authority.</div></article>`
     }).join('') || '<div class="empty">No fresh opportunity passed the alignment and evidence gates.</div>'
     const optionExclusions = (analysisRun.exclusions || []).filter(item => item.kind === 'OPTIONS')
     const optionDecision = optionExclusions.length ? `<div class="ticket-warning"><b>No option strategy recommended</b><br>${optionExclusions.map(item => `${escapeHtml(item.name || 'Option candidate')}: ${escapeHtml(item.reason)}`).join('<br>')}</div>` : ''
     $('analysis-exclusions').innerHTML = optionDecision + (analysisRun.exclusions?.length ? `<details ${optionExclusions.length ? 'open' : ''}><summary>${analysisRun.exclusions.length} excluded or deferred opportunities</summary>${analysisRun.exclusions.map(item => `<p>${escapeHtml(item.name || item.kind || 'Opportunity')}: ${escapeHtml(item.reason)}</p>`).join('')}</details>` : '')
+    if(typeof window!=='undefined'&&window.HandoffLevelReport)for(const row of optionExclusions)$('analysis-exclusions').insertAdjacentHTML('beforeend',window.HandoffLevelReport.rejectionHtml(row))
     $('analysis-board').querySelectorAll('.opportunity-card').forEach(element => {
       const card = analysisRun.cards.find(item => item.card_id === element.dataset.cardId)
       element.dataset.candidateKey = card.candidate.key
@@ -1846,7 +2015,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const target = card.analysis.proposal?.target_exit_points ?? card.analysis.proposed_sizing?.target ?? card.analysis.target
       const rr = card.analysis.proposal?.reward_to_risk ?? card.analysis.reward_to_risk
       const why = element.querySelector('.proposal-copy')
-      why.innerHTML = `<b>Why ${escapeHtml(String(card.analysis.conviction?.rating || 'this').toLowerCase())} conviction?</b> ${escapeHtml(card.candidate.mtf_alignment)} across completed 15m, 1H, Daily and Weekly candles; ${dailyAdx != null ? `Daily ADX ${number(dailyAdx)}; ` : ''}${escapeHtml(relativeStrength)}; data quality ${escapeHtml(qualityText(card.candidate.data_quality))}; structural stop ${stop != null ? money(stop) : 'unavailable'}, target ${target != null ? number(target) : 'unavailable'}, reward:risk ${rr != null ? `1:${number(rr)}` : 'unavailable'}. This is a rule-based evidence grade, not a profit guarantee.`
+      why.innerHTML = `<b>Why ${escapeHtml(String(card.analysis.conviction?.rating || 'this').toLowerCase())} conviction?</b> ${escapeHtml(card.candidate.mtf_alignment)} across completed 15m, 1H, Daily and Weekly candles; ${dailyAdx != null ? `Daily ADX ${planNumber(dailyAdx)}; ` : ''}${escapeHtml(relativeStrength)}; data quality ${escapeHtml(qualityText(card.candidate.data_quality))}; ${card.analysis.proposal?'existing order-plan underlying stop':'structural stop'} ${stop != null ? money(stop) : 'unavailable'}, ${card.analysis.proposal?'premium target':'target'} ${target != null ? planNumber(target) : 'unavailable'}, ${card.analysis.proposal?'full-premium risk R:R':'reward:risk'} ${rr != null ? `1:${planNumber(rr)}` : 'unavailable'}. This is a rule-based evidence grade, not a profit guarantee.`
       if (!card.analysis.proposal) {
         const plannedQuantity = Number(card.analysis.proposed_sizing?.quantity || card.analysis.quantity || 0)
         const plannedEntry = Number(card.analysis.entry)
@@ -1880,6 +2049,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       element.querySelector('.accept-analysis').addEventListener('click', () => acceptAnalysisCard(card, element))
       element.querySelector('.prepare-analysis-ticket').addEventListener('click', () => prepareAnalysisTicket(card, element))
     })
+    if(typeof window!=='undefined')window.HandoffLevelReport?.complete($('analysis-panel'),{key:orderAccount('ticket-broker').account_id+':stock:'+selectedInstrumentRoute(),label:'Completed stock analysis · '+(analysisRun.cards||[]).length+' plan(s) · expand output'})
     $('ai-review-state').textContent = 'Select one candidate above to see its automatically populated plan.'
   }
   const acceptAnalysisCard = async (card, element) => {
@@ -1918,9 +2088,10 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('ticket-panel').hidden = false; invalidateTicketPreview('Proposal loaded. Refresh FYERS to create the exact ticket preview.')
     $('ticket-panel').scrollIntoView({ behavior: scrollBehavior, block: 'start' })
   }
-  const collectCandidates = async () => {
+  const collectCandidates = async options => {
     const button = $('collect-candidates')
     analysisRun=null;candidateCollection=null;ticketProposals=[];
+    $('analysis-panel').hidden=true;
     $('candidate-list').replaceChildren();$('analysis-board').replaceChildren();
     invalidateTicketPreview('Collecting fresh selected-broker evidence.');
     button.disabled = true; button.textContent = 'Scanning completed bars…'
@@ -1931,7 +2102,9 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const instrumentRoute = selectedInstrumentRoute()
       if (!instrumentRoute) throw new Error('Choose Cash equity or Stock options before collecting matches.')
       const policy = riskPolicyInputs()
-      analysisRun = await postJson('/api/analysis-handoff/analyze', { mode, recipient, instrument_route: instrumentRoute, risk_policy: policyPayload(policy) })
+      const submitted = await postJson('/api/analysis-handoff/analyze', { mode, recipient, instrument_route: instrumentRoute, handoff_automation_intermediate: options?.researchOnly === true, risk_policy: policyPayload(policy), report_lots: Number($('handoff-option-lots')?.value) })
+      if(submitted.job_accepted){$('candidate-status').textContent='Analysis job accepted. You can continue using the dashboard; output will appear automatically and remain in Saved jobs.';return;}
+      analysisRun = submitted
       candidateCollection = { candidates: analysisRun.candidates || [], scope: analysisRun.scope, updated_at: analysisRun.source?.analysis_updated_at }
       renderCandidates()
       renderAnalysisCards()
@@ -1975,6 +2148,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   }
   $('prepare-handoff-batch').insertAdjacentHTML('beforebegin', '<label class="field" style="min-width:220px"><span id="handoff-budget-label">Funds to allocate (₹)</span><input id="handoff-allocation-budget" type="number" min="1" step="1" placeholder="Enter batch budget"></label>')
   $('handoff-allocation-budget').closest('label').insertAdjacentHTML('afterend','<label class="field" id="handoff-option-lots-field" hidden>Lots per stock<input id="handoff-option-lots" type="number" min="1" step="1" value="1"></label>')
+  $('handoff-option-lots').addEventListener('change',()=>{if(analysisRun?.cards?.some(c=>c.analysis?.report_levels))$('candidate-status').textContent='Lots per stock changed. The displayed report retains its captured quantity; collect stock option matches again to save recalculated profit, loss and fees.'})
   const updateHandoffBatchDefaults = () => {
     const options=selectedInstrumentRoute()==='stock_options'
     $('handoff-option-lots-field').hidden=!options
@@ -2100,7 +2274,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
         include_funds: includeFunds, funds_confirmed: includeFunds && $('confirm-funds').checked,
       })
       renderPacket(packet)
-      $('packet-status').textContent = `Local ${action} ready · ${packet.candidates.length} candidates · transmitted: no.`
+      $('packet-status').textContent = `Local ${action} ready · ${packet.candidates.length} candidates · full packet transmitted: no. ${packet.ai_review?.message || ''}`
     } catch (error) {
       $('packet-status').className = 'handoff-status error'; $('packet-status').textContent = error.message
     } finally { button.disabled = false; button.textContent = 'Prepare local preview' }
@@ -2126,13 +2300,13 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
       const capability = await fetchJson('/api/trade-ticket/capabilities?' + query)
       if (revision !== ticketCapabilityRevision) return
       ticketCapabilities = capability
-      const broker = String(capability.selected_broker || selected.broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
-      const configured = broker === 'Dhan' ? capability.dhan_configured : capability.fyers_configured
+      const broker = String(capability.selected_broker || selected.broker).toUpperCase() === 'MOTILAL_OSWAL' ? 'Motilal Oswal' : String(capability.selected_broker || selected.broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
+      const configured = broker === 'Motilal Oswal' ? capability.motilal_configured : broker === 'Dhan' ? capability.dhan_configured : capability.fyers_configured
       $('ticket-capability').textContent = capability.live_submission_enabled ? `${broker} live path enabled · Review required before submission` : configured ? `${broker} preview ready · live path disabled` : `${broker} setup required`
     } catch (error) { if (revision === ticketCapabilityRevision) $('ticket-capability').textContent = error.message }
   }
   const updateManualBrokerPresentation = account => {
-    const broker = (account?.broker || orderAccount('ticket-broker').broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
+    const broker = (account?.broker || orderAccount('ticket-broker').broker).toUpperCase() === 'MOTILAL_OSWAL' ? 'Motilal Oswal' : (account?.broker || orderAccount('ticket-broker').broker).toUpperCase() === 'DHAN' ? 'Dhan' : 'FYERS'
     const heading = document.querySelector('#handoff header .status')
     if (heading) heading.textContent = `${broker} data · ${broker} execution selected`
     const warning = document.querySelector('#ticket-panel > .ticket-warning')
@@ -2899,6 +3073,7 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('sector-filter').addEventListener('change', renderTable)
   $('sector-sort').addEventListener('change', renderTable)
   $('collect-candidates').addEventListener('click', collectCandidates)
+  window.addEventListener('sector-pulse-handoff-source-review',()=>void collectCandidates({researchOnly:true}));
   $('select-all-candidates').addEventListener('click', async () => {
     const button = $('select-all-candidates')
     try {
@@ -2914,9 +3089,6 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     $('candidate-batch-actions').hidden = true; $('candidate-status').textContent = 'Selection cleared. No broker action occurred.'
   })
   $('prepare-handoff-batch').addEventListener('click', prepareHandoffBatch)
-  $('handoff-batch-confirmation').addEventListener('input', event => {
-    $('submit-handoff-batch').disabled = !handoffBatchPreview?.live_submission_enabled || !handoffBatchPreview?.submission_eligible || event.target.value !== handoffBatchPreview?.confirmation_phrase
-  })
   $('submit-handoff-batch').addEventListener('click', submitHandoffBatch)
   document.querySelectorAll('input[name="instrument-route"]').forEach(input => input.addEventListener('change', resetInstrumentRouteResults))
   document.querySelectorAll('input[name="cash-product"]').forEach(input => input.addEventListener('change', () => invalidateTicketPreview('Cash product changed. Select the candidate and refresh the exact preview.')))
@@ -2930,9 +3102,6 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('copy-packet').addEventListener('click', copyPacket)
   $('download-packet').addEventListener('click', downloadPacket)
   $('prepare-ticket').addEventListener('click', prepareTicket)
-  $('ticket-confirmation').addEventListener('input', event => {
-    $('submit-ticket').disabled = !ticketPreview?.live_submission_enabled || !ticketPreview?.submission_eligible || event.target.value !== ticketPreview?.confirmation_phrase
-  })
   $('submit-ticket').addEventListener('click', submitTicket)
   $('add-screener').addEventListener('click', () => {
     try {
@@ -2947,16 +3116,29 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
   $('screener-analysis-next').addEventListener('click', () => {
     screenerAnalysisCancelled = true
     $('screener-analysis-next').disabled = true
-    $('screener-analysis-status').textContent = `Cancellation requested · finishing the current safe batch (${screenerAnalysisOffset} complete).`
+    $('screener-analysis-status').textContent = 'Stop requested; the server will retain partial analysis output.'
+    requestScreenerJobStop()
   })
   $('prepare-screener-order').addEventListener('click', prepareScreenerOrder)
   $('analyze-screener-options').addEventListener('click', analyzeScreenerOptionPlans)
+  $('allocate-screener-selected').addEventListener('click', async () => {
+    try { await allocateScreenerPlansByFunds() } catch (error) { $('screener-order-status').textContent=error.message }
+  })
+  $('screener-order-broker').addEventListener('change', () => {
+    for (const plan of screenerSelectedPlans.values()) { delete plan.suggested_quantity;delete plan.allocation_budget }
+    invalidateScreenerOrderPreview('Broker account changed. Allocate from that account’s fresh funds before preparing orders.')
+  })
+  $('screener-allocation-budget').addEventListener('input', () => {
+    for (const plan of screenerSelectedPlans.values()) { delete plan.suggested_quantity;delete plan.allocation_budget }
+    invalidateScreenerOrderPreview('Allocation changed. Reallocate selected candidates before preparing previews.')
+  })
   $('submit-screener-order').addEventListener('click', submitScreenerOrder)
   $('screener-select-all').addEventListener('click', async () => {
     const button = $('screener-select-all')
     try {
-      button.disabled = true; button.textContent = 'Allocating with FYERS funds…'
-      await allocateScreenerPlansByFunds()
+      button.disabled = true; button.textContent = 'Selecting eligible stocks…'
+      for (const plan of screenerAnalysisResults) if (plan.decision==='PASS') screenerSelectedPlans.set(plan.symbol,plan)
+      syncScreenerSelectionUi('Eligible candidates selected. Enter an allocation amount and allocate the selected stocks.')
     } catch (error) { $('screener-analysis-status').className = 'handoff-status error'; $('screener-analysis-status').textContent = error.message }
     finally { button.disabled = false; button.textContent = 'Select all eligible' }
   })
@@ -2965,9 +3147,6 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     syncScreenerSelectionUi('Selection cleared. No analysis or broker action has occurred.')
   })
   ;['screener-order-product', 'screener-order-external-risk'].forEach(id => $(id).addEventListener('input', () => invalidateScreenerOrderPreview('Order input changed. Request a new exact FYERS preview.')))
-  $('screener-order-confirmation').addEventListener('input', event => {
-    $('submit-screener-order').disabled = !screenerOrderPreview?.live_submission_enabled || !screenerOrderPreview?.submission_eligible || event.target.value !== screenerOrderPreview?.confirmation_phrase
-  })
   $('screener-sources').addEventListener('click', event => {
     const refresh = event.target.closest('.refresh-screener')
     const stop = event.target.closest('.stop-screener-refresh')
@@ -3106,6 +3285,57 @@ Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGN
     if (!document.hidden) runScreenerScheduler()
   })
 
+  let latestHandoffStatusCreated=0
+  const handoffJobStatus=job=>{
+    if(job?.feature!=='handoff'||!job.request?.path?.endsWith('/analysis-handoff/analyze'))return
+    const selected=orderAccount('ticket-broker')?.account_id
+    if(job.request.account_id&&job.request.account_id!=='dashboard'&&job.request.account_id!==selected)return
+    if(job.created<latestHandoffStatusCreated)return
+    latestHandoffStatusCreated=job.created
+    const status=$('candidate-status')
+    if(job.terminal){
+      $('collect-candidates').disabled=false
+      if(job.status==='COMPLETED'){
+        const count=job.output?.cards?.length||0
+        status.className='handoff-status'
+        status.textContent=count?('Analysis completed · '+count+' recommendations saved. Review the plans below.'):'Analysis completed · no eligible recommendations passed the alignment and evidence gates.'
+      }else{
+        status.className='handoff-status error'
+        status.textContent='Analysis '+String(job.status||'failed').toLowerCase()+': '+(job.error||job.message||'Open Saved jobs for details.')
+      }
+    }else{
+      status.className='handoff-status'
+      status.textContent=job.message||'Analysis is running; results will be saved.'
+    }
+  }
+  for(const name of ['sector-pulse-job-submitted','sector-pulse-job-update'])window.addEventListener(name,event=>handoffJobStatus(event.detail?.job))
+  window.addEventListener('sector-pulse-jobs-refreshed',()=>{
+    latestHandoffStatusCreated=0
+    for(const record of [...(window.SectorPulseJobs?.records.values()||[])].sort((a,b)=>a.job.created-b.job.created))handoffJobStatus(record.job)
+  })
+
+  window.addEventListener('sector-pulse-job-output', event => {
+    const {job,output,path} = event.detail || {}
+    if (!output || !path) return
+    if (path.endsWith('/chartink/analyze')) {
+      if (job.request?.account_id !== window.BrokerForms?.account('screener')?.id) return
+      screenerSelectedPlans.clear()
+      screenerAnalysisDiagnostics = {analyzed:0,watchlist:0,rejected:0}
+      $('screener-analysis').hidden = false
+      renderSavedScreenerAnalysis(output, true)
+      syncScreenerSelectionUi('Restored saved research. Prepare a fresh broker preview to trade.')
+      return
+    }
+    if (!path.endsWith('/analysis-handoff/analyze')) return
+    const selected = orderAccount('ticket-broker')?.account_id
+    if (job.request?.account_id && job.request.account_id !== 'dashboard' && selected !== job.request.account_id) return
+    analysisRun = output
+    candidateCollection = {candidates:output.candidates || [],scope:output.scope,updated_at:output.source?.analysis_updated_at}
+    invalidateTicketPreview()
+    renderCandidates()
+    renderAnalysisCards()
+    saveHandoffResults()
+  })
   window.addEventListener('pagehide',saveHandoffResults)
   document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',saveHandoffResults))
   $('handoff').addEventListener('change',saveHandoffResults)

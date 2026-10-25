@@ -60,3 +60,12 @@ test('saved same-candle execution blocker survives WATCHING status and replaces 
  const a=assessment(s,view,now);assert.match(a.reason,/Blocked at runner preflight: Entry too far/);assert.equal(a.tone,'blocked');assert.ok(a.checks.some(x=>x.startsWith('BLOCKED · Entry too far')));assert.ok(!a.checks.some(x=>x.startsWith('PENDING · Proximity')));
  s.execution_signals[0].timestamp=1200;assert.match(assessment(s,view,now).reason,/Entry signal eligible/);
 });
+
+test('split policy explains active caps without replacing the baseline setting',()=>{
+ const s=base();s.config.ema_momentum_enabled=true;
+ const a=assessment(s,view,now);
+ assert.ok(a.checks.some(x=>x.includes('first completed momentum qualification ≤ 1.5 ATR')&&x.includes('≤ 0.25 ATR')));
+ assert.match(a.rules,/retest 0.5 ATR \/ first momentum 1.5 ATR/);
+ s.execution_signals=[{run_id:'current',underlying:'BTCUSD',timestamp:1500,status:'BLOCKED',reason:'Momentum entry chased beyond signal close: maximum 0.25 completed ATR.'}];
+ assert.ok(assessment(s,view,now).checks.some(x=>x.startsWith('BLOCKED · Momentum')));
+});

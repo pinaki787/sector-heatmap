@@ -40,6 +40,8 @@ class TelegramSubscriber(TelegramPolling):
    if isinstance(e,ValueError):raise
    raise ValueError('Subscriber operation failed or timed out; check connection and retry locally.') from None
  async def connect(self):
+  binding=self.data.get('owner_binding') or {}
+  if binding and binding.get('account_id')!=os.getenv('SECTOR_PULSE_WORKSPACE_ID'):raise ValueError('This subscriber session belongs to a different account workspace.')
   if not self.client:
    if self.dependency() not in ('READY','TEST'):raise ValueError('Install the pinned optional Telegram subscriber dependency first.')
    if not self.data.get('api_id') or not self.data.get('api_hash'):raise ValueError('Save subscriber application credentials first.')
@@ -119,21 +121,28 @@ class TelegramSubscriber(TelegramPolling):
    if not self.receiving:break
    try:
     messages=[m async for m in self.client.iter_messages(self.entity,min_id=self.reconciled_id,limit=201)]
-    if len(messages)>200:self.error='More than 200 missed posts; reception stopped for explicit review.';self.receiving=False;break
+    if len(messages)>200:self.error='More than 200 missed posts; reception stopped for explicit review.';self.receiving=False;self.lifecycle.record('STOPPED','MISSED_POST_LIMIT',self.error);break
     for m in reversed(messages):self.ingest_message(m,missed=True)
     self.reconciled_id=max([self.reconciled_id]+[m.id for m in messages])
-    self.error=None
-   except Exception:self.error='Subscriber reception interrupted; missed posts require review after reconnection.'
+    self.error=None;self.lifecycle.heartbeat()
+   except Exception:
+    self.error='Subscriber reception interrupted; missed posts require review after reconnection.';self.lifecycle.record('RUNNING','RECEPTION_ERROR',self.error)
  async def start_async(self,p):
+  try:return await self._start_async(p)
+  except Exception as exc:
+   message=str(exc) if isinstance(exc,ValueError) else 'Subscriber could not start; verify the account session, channel membership and reader dependency.'
+   self.lifecycle.record('RUNNING' if self.receiving else 'STOPPED','START_REJECTED',message)
+   raise ValueError(message) from None
+ async def _start_async(self,p):
   if self.receiving:return self.status()
   if p.get('auto'):raise ValueError('Subscriber reception never supports Auto submission.')
   await self.verify_async()
   latest=await self.client.get_messages(self.entity,limit=1)
   self.watermark=latest[0].id if latest else 0;self.baseline=self.watermark;self.reconciled_id=self.watermark;self.data['watermark']=self.watermark;self.save()
-  self.receiving=True;self.auto=False;self.armed_at=self.clock();self.reconcile_task=self.loop.create_task(self.reconcile_loop());return self.status()
+  self.receiving=True;self.auto=False;self.armed_at=self.clock();self.reconcile_task=self.loop.create_task(self.reconcile_loop());self.lifecycle.record('RUNNING','EXPLICIT_START','Subscriber reception explicitly started; new posts only.');self.lifecycle.heartbeat();return self.status()
  def start(self,p=None):return self.call(self.start_async(p or {}))
  def stop(self):
-  self.receiving=False;self.auto=False
+  self.receiving=False;self.auto=False;self.lifecycle.record('STOPPED','USER_STOP','Subscriber reception explicitly stopped.')
   if self.reconcile_task and self.loop:self.loop.call_soon_threadsafe(self.reconcile_task.cancel)
   self.reconcile_task=None;return self.status()
  async def disconnect_async(self):
@@ -145,6 +154,7 @@ class TelegramSubscriber(TelegramPolling):
 class TelegramConnections:
  def __init__(self,path):
   self.selection_path=Path(path).with_name('telegram-connection-route.json')
+  self.ownership_path=Path(path).with_name('telegram-reader-ownership.json')
   self.bot=TelegramPolling(path);self.subscriber=TelegramSubscriber(Path(path).with_name('telegram-subscriber.json'));self.route='BOT';self.auto_submit=None
   if self.selection_path.exists():
    import json
@@ -165,6 +175,11 @@ class TelegramConnections:
   if self.active().running():raise ValueError('Stop reception before changing route.')
   if p.get('route') not in ('BOT','SUBSCRIBER'):raise ValueError('Choose connection route.')
   self.route=p['route'];self.save_route();return self.status()
- def start(self,p=None):self.bot.auto_submit=self.auto_submit;return self.active().start(p)
+ def start(self,p=None):
+  if self.ownership_path.exists():
+   import json
+   binding=json.loads(self.ownership_path.read_text())
+   if binding.get('account_id')!=os.getenv('SECTOR_PULSE_WORKSPACE_ID'):raise ValueError('Reader belongs to its restored Delta account workspace. Open that workspace; this legacy context cannot start reception.')
+  self.bot.auto_submit=self.auto_submit;return self.active().start(p)
  def stop(self):self.bot.stop();self.subscriber.stop();return self.status()
  def __getattr__(self,name):return getattr(self.active(),name)

@@ -1,4 +1,5 @@
 """FYERS-backed candle caching and bounded sector rotation snapshot service."""
+from .persistent_jobs import checkpoint
 from copy import deepcopy
 from datetime import datetime, time as clock_time, timedelta
 import json
@@ -21,7 +22,7 @@ from .analysis_config import (
 )
 from .config import _atomic_private_write
 from .indicators import resample_weekly
-from .market_calendar import IST, market_session
+from .market_calendar import IST, market_session, trading_elapsed_seconds, is_trading_day, NSE_SPECIAL_SESSIONS, REGULAR_CLOSE
 from .market_data import is_token_error
 from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import BENCHMARK_SYMBOL, SECTOR_BY_ID, SECTOR_DEFINITIONS, equity_symbol
@@ -30,6 +31,20 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_STATE_FILE = Path(os.getenv("SECTOR_ANALYSIS_STATE_FILE", Path.home() / ".fyers" / "sector-heatmap" / "analysis-history.json")).expanduser()
 HISTORY_REQUEST_MIN_INTERVAL_SECONDS = 0.35
 HISTORY_RATE_LIMIT_RETRIES = 3
+
+
+def completed_weekly(candles, current):
+    """Exclude a week until its final calendar trading session has closed."""
+    result=[]
+    for candle in resample_weekly(candles):
+        stamp=datetime.fromtimestamp(int(candle["timestamp"]),IST)
+        monday=stamp.date()-timedelta(days=stamp.weekday())
+        sessions=[monday+timedelta(days=i) for i in range(7) if is_trading_day(monday+timedelta(days=i))]
+        if not sessions:continue
+        last=sessions[-1]
+        close=NSE_SPECIAL_SESSIONS.get(last,(None,REGULAR_CLOSE))[1]
+        if datetime.combine(last,close,IST)<=current:result.append(candle)
+    return result
 
 
 class FyersAuthenticationError(RuntimeError):
@@ -74,15 +89,21 @@ class CandleHistoryProvider:
         cache_timeframe = "weekly" if timeframe == "weekly" else timeframe
         key = (symbol, cache_timeframe)
         current = time.monotonic()
+        moment=self.now()
+        if config["resolution"] in {"15","60"}:
+            opening=moment.replace(hour=9,minute=15,second=0,microsecond=0)
+            window=(moment.date().isoformat(),int((moment-opening).total_seconds()//(int(config["resolution"])*60)))
+        else:
+            window=(moment.date().isoformat(),moment.time()>=clock_time(15,30))
         with self.lock:
             cached = self.cache.get(key)
-            if cached and current - cached[0] < config["ttl_seconds"]:
+            if cached and len(cached)>2 and cached[2]==window and current - cached[0] < config["ttl_seconds"]:
                 return deepcopy(cached[1])
         candles = self._download(symbol, config["resolution"], config["lookback_days"])
         if config.get("derive") == "weekly":
-            candles = resample_weekly(candles)
+            candles = completed_weekly(candles, self.now())
         with self.lock:
-            self.cache[key] = (current, deepcopy(candles))
+            self.cache[key] = (current, deepcopy(candles),window)
         return candles
 
     def _download(self, symbol, resolution, lookback_days):
@@ -92,6 +113,7 @@ class CandleHistoryProvider:
         candles_by_timestamp = {}
         cursor = start
         while cursor <= end:
+            checkpoint("Collecting "+symbol+" broker history chunk.")
             chunk_end = min(end, cursor + timedelta(days=chunk_days - 1))
             payload = {"symbol": symbol, "resolution": resolution, "date_format": 1, "range_from": cursor.isoformat(), "range_to": chunk_end.isoformat(), "cont_flag": 1}
             response = None
@@ -129,7 +151,7 @@ class CandleHistoryProvider:
         current = self.now()
         if resolution == "D":
             market_closed = current.time() >= clock_time(15, 30)
-            return [candle for candle in candles if datetime.fromtimestamp(candle["timestamp"], IST).date() < current.date() or market_closed]
+            return [candle for candle in candles if datetime.fromtimestamp(candle["timestamp"], IST).date() < current.date() or (datetime.fromtimestamp(candle["timestamp"], IST).date()==current.date() and market_closed)]
         minutes = int(resolution)
         return [candle for candle in candles if datetime.fromtimestamp(candle["timestamp"], IST) + timedelta(minutes=minutes) <= current]
 
@@ -354,16 +376,18 @@ class SectorAnalysisService:
     def _timeframe_candles(self, symbol):
         result = {}
         for timeframe in ("15m", "1h"):
+            checkpoint("Collecting "+symbol+" "+timeframe+" history.")
             try:
                 result[timeframe] = self.provider.get(symbol, timeframe)
             except FyersAuthenticationError:
                 raise
             except Exception as error:
                 LOGGER.warning("%s history failed for %s: %s", timeframe, symbol, error)
+        checkpoint("Collecting "+symbol+" daily history.")
         try:
             daily_source = self.provider.get(symbol, "daily")
             result["daily"] = daily_source
-            result["weekly"] = resample_weekly(daily_source)
+            result["weekly"] = completed_weekly(daily_source, self.now())
         except FyersAuthenticationError:
             raise
         except Exception as error:
@@ -379,7 +403,7 @@ class SectorAnalysisService:
         last_session = datetime.fromisoformat(session["last_completed_session"]).date()
         if session["status"] == "CLOSED" and last.date() >= last_session:
             return "MARKET CLOSED"
-        age = (current - last).total_seconds()
+        age = trading_elapsed_seconds(last, current) if timeframe in {"15m", "1h"} else (current - last).total_seconds()
         return "STALE" if age > TIMEFRAMES[timeframe]["stale_seconds"] else "DELAYED"
 
     def snapshot(self, mode="intraday", sector_id=None):
@@ -499,6 +523,15 @@ class SectorAnalysisService:
                 "sector_rule": "Exact FULL BULLISH ALIGNMENT or FULL BEARISH ALIGNMENT on completed 15m, 1h, Daily and Weekly states.",
                 "stock_universe": f"Up to {max_stocks_per_sector} strongest direction-matching live moves from the official-weight constituents of each fully aligned sector.",
                 "stock_selection_rule": "Directional percentage move ranks the bounded stock scan; official index weight and contribution are retained only as attribution evidence.",
+                "eligible_sectors": len(aligned_sectors),
+                "sector_exclusions": [
+                    dict(sector_id=item.get("sector_id"), name=item.get("name"),
+                         alignment=item.get("mtf_alignment"), data_quality=item.get("data_quality"),
+                         reason=("Completed-candle sector evidence is unavailable or stale."
+                                 if item.get("data_quality") in {"STALE","UNAVAILABLE","INSUFFICIENT DATA"}
+                                 else "All four completed timeframes do not share full directional alignment."))
+                    for item in snapshot.get("sectors", []) if item not in aligned_sectors
+                ],
                 "scanned_stocks": scanned_stocks,
                 "matched_stocks": len(deduplicated_stocks),
                 "duplicate_recommendations_eliminated": len(stock_candidates) - len(deduplicated_stocks),

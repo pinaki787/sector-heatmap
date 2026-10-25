@@ -3,6 +3,8 @@ import hashlib,json,os,re,threading,time,uuid
 from pathlib import Path
 import requests
 
+from .telegram_lifecycle import Lifecycle
+
 DEFAULT_CHANNEL_LABEL = "Doctor Devendra’s Crypto Advisory"
 
 class TelegramPolling:
@@ -10,13 +12,14 @@ class TelegramPolling:
   self.path=Path(path);self.requester=requester;self.clock=clock;self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.verified=None;self.error=None;self.auto=False;self.auto_submit=None;self.execution={};self.armed_at=None
   self.data=json.loads(self.path.read_text()) if self.path.exists() else dict(token='',channel='',channel_label=DEFAULT_CHANNEL_LABEL,interval=30,offset=0,queue=[])
   self.data.setdefault('channel_label',DEFAULT_CHANNEL_LABEL)
+  self.lifecycle=Lifecycle(self.path.with_suffix('.lifecycle.json'),clock)
  def save(self):
   self.path.parent.mkdir(parents=True,exist_ok=True);temp=self.path.with_suffix('.tmp');fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
   with os.fdopen(fd,'w') as f:json.dump(self.data,f)
   os.replace(temp,self.path);os.chmod(self.path,0o600)
  def running(self):return bool(self.thread and self.thread.is_alive() and not self.stop_event.is_set())
  def status(self):
-  with self.lock:return dict(running=self.running(),configured=bool(self.data['token'] and self.data['channel']),channel=self.data['channel'],channel_label=self.data.get('channel_label',DEFAULT_CHANNEL_LABEL),interval=self.data['interval'],connection='VERIFIED' if self.verified else 'NOT_VERIFIED',verified=self.verified,error=self.error,queue=[dict(r,expired=self.clock()-r['timestamp']>300) for r in reversed(self.data['queue'][-100:])],mode='AUTO' if self.auto else 'CONFIRMATION',auto_available=True,execution=self.execution,message='Auto submits fresh new posts only while explicitly started.' if self.auto else 'Polling starts stopped. Each recommendation requires a fresh Submit order. Bot API receives new channel posts, not arbitrary past channel history.')
+  with self.lock:return dict(lifecycle=self.lifecycle.status(),running=self.running(),configured=bool(self.data['token'] and self.data['channel']),channel=self.data['channel'],channel_label=self.data.get('channel_label',DEFAULT_CHANNEL_LABEL),interval=self.data['interval'],connection='VERIFIED' if self.verified else 'NOT_VERIFIED',verified=self.verified,error=self.error,queue=[dict(r,expired=self.clock()-r['timestamp']>300) for r in reversed(self.data['queue'][-100:])],mode='AUTO' if self.auto else 'CONFIRMATION',auto_available=True,execution=self.execution,message='Auto submits fresh new posts only while explicitly started.' if self.auto else 'Polling starts stopped. Each recommendation requires a fresh Submit order. Bot API receives new channel posts, not arbitrary past channel history.')
  def configure(self,p):
   with self.lock:
    if self.running():raise ValueError('Stop polling before changing Telegram configuration.')
@@ -80,6 +83,12 @@ class TelegramPolling:
    if not self.verified:raise ValueError('Verify Telegram channel access first.')
    self.ingest(self.api('getUpdates',dict(offset=self.data['offset'],timeout=0,limit=100,allowed_updates=['channel_post','edited_channel_post'])))
  def start(self,p=None):
+  try:return self._start(p)
+  except Exception as exc:
+   message=str(exc) if isinstance(exc,ValueError) else 'Telegram reception could not start; verify configuration and connectivity.'
+   self.lifecycle.record('RUNNING' if self.running() else 'STOPPED','START_REJECTED',message)
+   raise ValueError(message) from None
+ def _start(self,p=None):
   with self.lock:
    if self.running():return self.status()
    self.verify();p=p or {};auto=p.get('auto',False)
@@ -95,10 +104,11 @@ class TelegramPolling:
     self.ingest(updates,baseline=True)
     if len(updates)<100:break
    self.execution=dict(broker=p.get('broker','DELTA_INDIA'),quantity=quantity);self.armed_at=self.clock();self.auto=auto
-   self.stop_event=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True,name='telegram-review-polling');self.thread.start();return self.status()
+   self.stop_event=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True,name='telegram-review-polling');self.thread.start();self.lifecycle.record('RUNNING','EXPLICIT_START','New-post reception explicitly started.');self.lifecycle.heartbeat();return self.status()
  def loop(self):
   while not self.stop_event.is_set():
-   try:self.poll();self.error=None
-   except Exception as e:self.error=str(e)
+   try:self.poll();self.error=None;self.lifecycle.heartbeat()
+   except Exception:
+    self.error='Telegram read failed; check channel access and connectivity.';self.lifecycle.record('RUNNING','RECEPTION_ERROR',self.error)
    self.stop_event.wait(self.data['interval'])
- def stop(self):self.stop_event.set();self.auto=False;return self.status()
+ def stop(self):self.stop_event.set();self.auto=False;self.lifecycle.record('STOPPED','USER_STOP','Reception explicitly stopped.');return self.status()

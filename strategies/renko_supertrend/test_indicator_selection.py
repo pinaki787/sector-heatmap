@@ -4,7 +4,7 @@ from .signals import series, settings
 from .test_signals import candle
 from .preferences import write, read
 BASE=dict(atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,rsi_slope_enabled=False)
-PURE={**BASE,'ema_fast_enabled':False,'ema_slow_enabled':False,'ema_widening_enabled':False}
+PURE={**BASE,'ema_fast_enabled':False,'ema_slow_enabled':False,'ema_third_enabled':False,'ema_widening_enabled':False}
 class IndependentIndicators(unittest.TestCase):
  def test_supertrend_only_enters_on_reversals_without_ema_delay(self):
   rows=series([candle(i,p) for i,p in enumerate([100,110,120,100,80,90,120])],PURE)
@@ -15,7 +15,7 @@ class IndependentIndicators(unittest.TestCase):
   self.assertFalse(series(bars,{**BASE,'widening_window':3})[1]['entry_qualified'])
   self.assertTrue(series(bars,{**BASE,'ema_widening_enabled':False})[1]['entry_qualified'])
  def test_ema_only_does_not_wait_for_opposing_supertrend(self):
-  rows=series([candle(i,p) for i,p in enumerate([100,101,102,103])],dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,manual_brick=100,brick_mode='Manual'))
+  rows=series([candle(i,p) for i,p in enumerate([100,101,102,103])],dict(supertrend_enabled=False,ema_fast_enabled=True,ema_slow_enabled=False,ema_third_enabled=False,ema_widening_enabled=False,rsi_slope_enabled=False,manual_brick=100,brick_mode='Manual'))
   self.assertEqual(rows[1]['entry_direction'],'BULLISH');self.assertEqual(rows[1]['direction'],'BULLISH');self.assertIsNone(rows[1]['cross_direction'])
  def test_no_indicators_is_candles_only_without_entries(self):
   rows=series([candle(i,p) for i,p in enumerate([100,110,120])],{**PURE,'supertrend_enabled':False})

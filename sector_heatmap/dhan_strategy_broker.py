@@ -182,6 +182,9 @@ class Broker:
             pairs=dhan_mcx.paired_options(series)
             rows=[r for r in series if r['SEM_OPTION_TYPE']==kind and (r['SEM_EXPIRY_DATE'],Decimal(r['SEM_STRIKE_PRICE'])) in pairs and self.clock()<dhan_mcx.entry_cutoff(r)]
         if not rows: raise ValueError('No current Dhan option for this direction.')
+        if host['SEM_SEGMENT']=='E':
+            from .stock_expiry_policy import require_options_allowed
+            require_options_allowed([r['SEM_EXPIRY_DATE'][:10] for r in rows],datetime.fromtimestamp(self.clock(),IST))
         expiry=min(r['SEM_EXPIRY_DATE'] for r in rows)
         candidates=[r for r in rows if r['SEM_EXPIRY_DATE']==expiry]
         strike=min(abs(float(r['SEM_STRIKE_PRICE'])-spot) for r in candidates)

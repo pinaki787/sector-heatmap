@@ -1,4 +1,5 @@
 """Read-only portfolio review. Deterministic hypotheses, never an order interface."""
+from .persistent_jobs import checkpoint
 from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -68,6 +69,8 @@ def review(row, candles, expected_session, now=None):
               'limitations': ['Technical swing hypothesis; not backtested or calibrated.',
                               'P&L excludes taxes, fees, dividends and corporate-action adjustments.',
                               'No existing stop, target, strategy ownership or personal risk budget is assumed.']}
+    if row.get('holding_type') == 'MTF funded equity':
+        result['limitations'].append('MTF funded holding: gross P&L excludes financing interest, margin requirements and liquidation risk.')
     qty, cost, price = (number(row.get(k)) for k in ('quantity', 'average_price', 'price'))
     if qty and cost and price and qty > 0 and cost > 0 and price > 0:
         result.update(gross_pnl=round(qty * (price - cost), 2), gross_return_pct=round((price / cost - 1) * 100, 2))
@@ -105,6 +108,8 @@ def review(row, candles, expected_session, now=None):
     except (ValueError, TypeError, OverflowError, OSError) as error:
         result['reasons'] = [str(error)]
         return result
+    from .holdings_chart import chart_evidence
+    result['chart'] = chart_evidence(rows)
     result['evidence'] = {**{k: round(v, 4) for k, v in info.items()}, 'completed_session': expected_session,
                           'quote_timestamp': datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
                           'price_basis': 'Recent quote' if session['status'] == 'OPEN' else 'Last completed session quote'}
@@ -165,6 +170,8 @@ def review_linear(row, candles, now):
         if info['atr14'] <= 0: raise ValueError('Positive contract ATR is unavailable.')
     except (ValueError, TypeError, OSError, OverflowError) as error:
         base['reasons'] = [str(error)]; return base
+    from .holdings_chart import chart_evidence
+    base['chart'] = chart_evidence(rows)
     pnl = qty * units * (price - cost)
     side = 1 if qty > 0 else -1
     close, e20, e50, atr, rsi = (info[k] for k in ('close', 'ema20', 'ema50', 'atr14', 'rsi14'))
@@ -214,6 +221,7 @@ class FyersHoldings:
                            'average_price': number(raw.get('costPrice')), 'price': None, 'quote_timestamp': None,
                            'kind': 'DELIVERY_EQUITY' if symbol.startswith(('NSE:', 'BSE:')) and symbol.endswith('-EQ') else 'OTHER_HOLDING',
                            'holding_type': raw.get('holdingType'), 'currency': 'INR',
+                           'native_identity':dict(securityId=symbol,exchangeSegment=symbol.split(':')[0]+'_EQ') if symbol.endswith('-EQ') else None,
                            'review_reason': 'This holding does not have a supported exchange equity series; manual product-specific review is required.'})
         return result
 
@@ -271,7 +279,7 @@ class DeltaHoldings:
                 if product.get('contract_type') not in ('perpetual_futures', 'futures') or product.get('notional_type') != 'vanilla' or product.get('is_quanto') is not False or product.get('contract_unit_currency') != product.get('underlying') or product.get('quoting_currency') != product.get('settlement_currency'):
                     continue
                 quote = self.delta.ticker(row['symbol'])
-                row.update(kind='LINEAR_FUTURE', contract_value=number(product.get('contract_value')),
+                row.update(native_identity=dict(securityId=str(product['id']),exchangeSegment='DELTA_24X7'),holding_type='Linear futures position',kind='LINEAR_FUTURE', contract_value=number(product.get('contract_value')),
                            price=number(quote.get('bid' if (row['quantity'] or 0) > 0 else 'ask')),
                            quote_timestamp=number(quote.get('exchange_at')), currency=product.get('settlement_currency'))
                 expiry = product.get('settlement_time')
@@ -337,6 +345,7 @@ class HoldingsAnalysis:
                     diagnostics.call(adapter.broker, "holdings.current_quotes", adapter.enrich, pending)
             except Exception: enrichment_error = 'Current broker quote snapshot unavailable. Retry with a new analysis after checking authentication.'
             for row in pending:
+                checkpoint("Reviewing holding "+row["symbol"]+".")
                 candles, failure = [], enrichment_error
                 if row['kind'] in ('DELIVERY_EQUITY', 'LINEAR_FUTURE') and not failure:
                     cache_key = (key, row['symbol'], capture['session'])
@@ -368,9 +377,9 @@ class HoldingsAnalysis:
                     'next_offset': end if end < len(capture['rows']) else None,
                     'rows': [capture['results'][i] for i in range(offset, end)],
                     'summary': dict(Counter(r['action'] for r in all_results)),
-                    'portfolio': {'priced_holdings_value': round(value, 2) if priced else None, 'currency': 'INR' if adapter.broker == 'FYERS' else None,
+                    'portfolio': {'priced_holdings_value': round(value, 2) if priced else None, 'currency': 'INR' if adapter.broker != 'DELTA_INDIA' else None,
                                   'priced_rows': len(priced), 'reviewed_rows': len(all_results), 'complete': len(all_results) == len(capture['rows']),
                                   'weight_basis': 'Priced delivery holdings only; provisional until every row is analysed. Derivatives excluded.'},
-                    'scope': 'Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding',
+                    'scope': getattr(adapter,'scope',None) or ('Delivery holdings, including separate T1/demat records' if adapter.broker == 'FYERS' else 'Open derivative positions; wallet cash is not an equity holding'),
                     'policy': 'Advisory only · swing horizon assumed · completed daily/prior-week evidence · no orders or stop modifications',
                     'limitations': ['No fundamental, news, tax or portfolio suitability model.', 'Quotes and holdings are broker snapshots; quantities must be rechecked before any trade.']}

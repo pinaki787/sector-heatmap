@@ -54,3 +54,60 @@ body::after {
 .desk .account-signout { color: #91a7c4; }
 @media (min-width: 951px) { .desk > .side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; gap: 16px; } .desk .side > .nav { flex: 1; min-height: 120px; overflow-y: auto; align-content: start; } .desk .side > .brand, .desk .side > .broker-card, .desk .account-dock { flex-shrink: 0; } .desk .side > .broker-card { margin-top: 0; } }
 @media (max-width: 950px) { .desk .account-dock { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; } .desk .account-identity { margin: 0; } }
+
+/* Navigation polish: clear hierarchy, stable targets, and quiet motion. */
+.desk > .side { background: #0d192a; border-right: 1px solid #263b54; padding: 24px 16px; }
+.desk .nav { gap: 5px; padding: 3px; }
+.desk .nav button[data-view] { position: relative; width: 100%; min-height: 42px; padding: 11px 14px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #aebed1; text-align: left; font-size: 13px; font-weight: 550; line-height: 1.4; transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease; }
+.desk .nav button[data-view]:hover { background: #182c43; color: #f0f6ff; border-color: #2c4560; }
+.desk .nav button[data-view].active,.desk .nav button[data-view][aria-pressed="true"] { background: #183b51; border-color: #2b6177; color: #ddfaf6; box-shadow: inset 3px 0 #61cbb8; }
+.desk .nav button[data-view]:focus-visible { outline: 2px solid #85c8ff; outline-offset: 2px; }
+.desk .nav .trading-strategies-nav { gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #243950; }
+.desk .nav .trading-strategies-heading { padding: 8px 14px; color: #7f9ab6; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.desk .broker-card { border: 1px solid #29425b; border-radius: 12px; background: #11243a; padding: 14px; }
+.desk .work > .view.active { animation: pulse-view-enter 180ms ease-out both; }
+.desk .panel { border-radius: 12px; border: 1px solid #2a4059; box-shadow: 0 4px 16px #06101c30; }
+.desk .nav-sound-toggle { margin: 8px 10px 2px; padding: 7px 9px; border: 1px solid #29425b; border-radius: 7px; background: transparent; color: #91aac4; font-size: 11px; cursor: pointer; }
+.desk .nav-sound-toggle:hover { color: #e3f1ff; background: #182c43; }
+@keyframes pulse-view-enter { from { opacity: .45; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width:950px) { .desk > .side { padding: 16px 12px; } .desk .nav button[data-view] { min-height: 44px; } }
+@media (prefers-reduced-motion:reduce) { .desk .work > .view.active { animation: none; } .desk .nav button[data-view] { transition: none; } }
+
+/* Shared layout corrections across analysis, execution forms and dialogs. */
+.desk .work { min-width: 0; }
+.desk .view > .panel + .panel { margin-top: 18px; }
+.desk .view > .panel { padding: 20px; }
+.desk .field-grid { gap: 16px; }
+.desk .field-grid > *, .desk .field, .desk .panel { min-width: 0; }
+.desk .field input, .desk .field select, .desk .field textarea { max-width: 100%; box-sizing: border-box; }
+.desk .packet-actions, .desk .actions, dialog .job-toolbar, dialog .job-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.desk .button, dialog .button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; max-width: 100%; padding: 9px 14px; line-height: 1.4; white-space: normal; vertical-align: middle; box-sizing: border-box; height: auto; }
+.desk .button + .button, dialog .button + .button { margin-left: 6px; }
+.desk .panel > .button, dialog > .button, dialog .panel > .button { margin-top: 8px; margin-bottom: 8px; }
+.desk .packet-actions .button, .desk .actions .button { margin: 0; }
+.desk details > summary { padding: 10px 0; line-height: 1.5; cursor: pointer; }
+.desk .panel p, .desk .panel small { overflow-wrap: anywhere; }
+.desk label:has(> input[type="checkbox"]) { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.desk input[type="checkbox"], .desk input[type="radio"] { width: 16px !important; height: 16px !important; min-width: 16px; flex: 0 0 16px; margin: 3px 0 0; }
+dialog { box-sizing: border-box; max-width: calc(100vw - 32px); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border-radius: 14px; }
+dialog .panel { margin-top: 14px; padding: 16px; overflow-wrap: anywhere; }
+dialog::backdrop { background: #030c18a8; }
+@media (max-width:700px) {
+ .desk .field-grid { grid-template-columns: minmax(0,1fr) !important; }
+ .desk .view > .panel { padding: 16px; }
+ .desk .head { flex-wrap: wrap; gap: 12px; }
+ .desk .packet-actions > .button { flex: 1 1 140px; }
+ dialog { padding: 16px; }
+}
+
+.desk [hidden], dialog [hidden] { display: none !important; }
+.desk #renko-supertrend .renko-setting-row { grid-template-columns: minmax(120px,.85fr) minmax(0,1fr) 30px; align-items: center; gap: 10px; }
+.desk #renko-supertrend .renko-setting-row > .renko-setting-name { grid-column: 1; grid-row: 1; }
+.desk #renko-supertrend .renko-setting-row > :is(input,select,textarea) { grid-column: 2; grid-row: 1; min-width: 0; }
+.desk #renko-supertrend .renko-setting-row > .renko-parameter-help { grid-column: 3; grid-row: 1; margin: 0 !important; }
+.desk .renko-parameter-help { flex-shrink: 0; }
+@media(max-width:700px) {
+ .desk #renko-supertrend .renko-setting-row { grid-template-columns: minmax(0,1fr) 30px; }
+ .desk #renko-supertrend .renko-setting-row > :is(input,select,textarea) { grid-column: 1 / -1; grid-row: 2; }
+ .desk #renko-supertrend .renko-setting-row > .renko-parameter-help { grid-column: 2; }
+}

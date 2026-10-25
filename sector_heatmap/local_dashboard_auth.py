@@ -109,7 +109,7 @@ class LocalDashboardAuth:
                 if relative and all(not part.startswith('.') for part in relative.parts) and candidate.is_file() and candidate.suffix in ('.js','.css','.svg','.png','.woff','.woff2','.ico'):
                     return True
             if not user['admin']:
-                if path in {'/dhan-orders.html','/dhan-orders.js','/dhan-strategies.html','/dhan-strategies.js','/workspace-bootstrap.js','/api/workspace-context'} or path.startswith(('/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+                if path in {'/dhan-orders.html','/dhan-orders.js','/dhan-strategies.html','/dhan-strategies.js','/workspace-bootstrap.js','/api/workspace-context'} or path.startswith(('/api/investment/','/api/jobs','/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
                     from .section_permissions import allowed
                     if path=='/api/workspace-context' or not path.startswith('/api/') or allowed(user,path):return True
                 if not mutation and path in {'/','/index.html','/workspace-entry'}:
