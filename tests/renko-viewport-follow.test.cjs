@@ -25,11 +25,25 @@ test('mounted reset resolves the latest time on the actual mixed-series axis',()
 });
 test('refresh follows the true axis index, not the smaller Renko row count',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),src=fs.readFileSync('renko-supertrend.js','utf8');
- const a=src.indexOf('if(previousRange&&same&&Number.isFinite(previousLastLogical))'),b=src.indexOf('if(!viewport.follow',a);
+ const a=src.indexOf('if(previousRange&&same&&Number.isFinite(previousLastLogical))'),b=src.indexOf('}else if(plotted.length)',a)+1;
  const ctx={previousRange:{from:900,to:1020},same:true,previousLastLogical:1000,previousVisible:{from:1},previousLeftLogical:900,plotted:[{time:2}],logicalAt:t=>t===2?1001:901,viewport:{}};
  vm.createContext(ctx);vm.runInContext(src.slice(a,b),ctx);
  assert.equal(ctx.viewport.follow,true);assert.equal(ctx.viewport.range.from,901);assert.equal(ctx.viewport.range.to,1021);
  ctx.previousRange={from:400,to:500};ctx.previousLeftLogical=400;ctx.logicalAt=t=>t===2?1001:395;ctx.viewport={};
  vm.runInContext(src.slice(a,b),ctx);
  assert.equal(ctx.viewport.follow,false);assert.equal(ctx.viewport.range.from,395);assert.equal(ctx.viewport.range.to,495);
+});
+
+test('study axis changes cannot feed an old viewport back into the price chart',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),src=fs.readFileSync('renko-supertrend.js','utf8');
+ const a=src.indexOf('          const sync=(source,target)=>'),b=src.indexOf('          rsiChart.subscribeCrosshairMove',a);
+ const primaryCallbacks=[],studyCallbacks=[],primarySets=[],studySets=[];
+ const primary={subscribeVisibleLogicalRangeChange:fn=>primaryCallbacks.push(fn),setVisibleLogicalRange:r=>primarySets.push(r)};
+ const study={subscribeVisibleLogicalRangeChange:fn=>studyCallbacks.push(fn),setVisibleLogicalRange:r=>studySets.push(r)};
+ const ctx={chart:{timeScale:()=>primary},rsiChart:{timeScale:()=>study},rsiSync:false,positionAssessment(){}};
+ vm.runInNewContext(src.slice(a,b),ctx);
+ const range={from:80,to:120};for(const fn of primaryCallbacks)fn(range);
+ assert.deepEqual(studySets,[range]);
+ for(const fn of studyCallbacks)fn({from:75,to:115});
+ assert.deepEqual(primarySets,[]);
 });
