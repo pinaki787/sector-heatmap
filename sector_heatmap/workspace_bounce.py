@@ -21,6 +21,26 @@ def stopped_states(source):
     return stopped_state_paths(source)
 
 
+def reload_states(source,broker):
+    """Broker-scoped reload permits only proven Paper Stop handoff; main restart stays strict."""
+    from .service_restart import runtime_states
+    from strategies.renko_supertrend.stop_recovery import paper_stop_identity
+    source=Path(source).resolve();paths=runtime_states(source);drains={}
+    for path in paths:
+        if path.stat().st_size>4000000:raise ValueError('Oversized current state blocks broker reload.')
+        try:state=json.loads(path.read_text())
+        except (OSError,ValueError):raise ValueError('Unreadable current state blocks broker reload.') from None
+        if not isinstance(state,dict):raise ValueError('Invalid current state blocks broker reload.')
+        active=any(state.get(k) for k in ('running','accepting_entries','position','positions','pending','active','loop_running'))
+        if not active:continue
+        relative=path.resolve().relative_to(source).parts
+        canonical=relative==('.private','renko-delta-state.json') or (len(relative)==4 and relative[:2]==('.private','renko-delta-instances') and relative[3]=='renko-delta-state.json')
+        if broker!='DELTA_INDIA' or not canonical or state.get('active') or state.get('loop_running'):
+            raise ValueError('Broker reload blocked by active runtime outside the identified Paper Stop.')
+        drains[path]=paper_stop_identity(state)
+    return paths,drains
+
+
 def _account(store, user, aid):
     if not user.get('admin'):
         raise PermissionError('Only an administrator can bounce a broker dashboard.')
@@ -47,7 +67,7 @@ def begin(store, runtime, user, aid):
             return current
         if _active_account is not None:
             raise ValueError('Another broker bounce is in progress; wait for readiness before bouncing the next broker.')
-        stopped_states(folder/'source')
+        paths,drains=reload_states(folder/'source',account['broker'])
         if account['broker']=='MOTILAL_OSWAL':
             from .motilal_service import Service
             from decimal import Decimal
@@ -71,9 +91,9 @@ def begin(store, runtime, user, aid):
         pid = int(json.loads((folder/'dashboard-owner.lock').read_text())['pid'])
         if (Path('/proc')/str(pid)/'cwd').resolve() != (folder/'source').resolve():
             raise ValueError('Dashboard owner identity could not be verified.')
-        state = dict(status='CHECKING',label=account['label'],broker=account['broker'],
-                     tag='Broker rolling bounce',started_at=time.time(),updated_at=time.time(),
-                     message='Checking stopped runner state; no trading will be activated.')
+        state = dict(status='CHECKING',label=account['label'],broker=account['broker'],requested_by=user.get('username'),
+                     tag='Paper Stop recovery reload' if drains else 'Broker rolling bounce',started_at=time.time(),updated_at=time.time(),
+                     message='Checking retained Paper Stop identity; entries remain disabled.' if drains else 'Checking stopped runner state; no trading will be activated.',paper_stop_recovery=bool(drains))
         private_write(folder/'bounce-status.json',json.dumps(state))
         thread = threading.Thread(target=_bounce,args=(store,runtime,account,pid,state),daemon=True,name='broker-dashboard-bounce')
         _active_account = aid
@@ -98,10 +118,18 @@ def _bounce(store, runtime, account, pid, initial):
         from .file_lock import lock_file
         # Hold the existing durable runner locks throughout handoff. An old page
         # cannot race a Start between the stopped-state check and termination.
-        for path in stopped_states(source):
+        paths,drains=reload_states(source,account['broker'])
+        if drains:
+            audit=folder/'paper-stop-reloads'/str(time.time_ns());audit.mkdir(parents=True,mode=0o700)
+            for path,identity in drains.items():
+                private_write(audit/(path.parent.name+'-before.json'),path.read_text())
+            private_write(audit/'handoff.json',json.dumps({str(p.relative_to(source)):v for p,v in drains.items()}))
+        for path in paths:
+            if path in drains:continue
             handle=open(path.with_suffix('.lock'),'a')
             lock_file(handle.fileno(),blocking=False);handles.append(handle)
-        stopped_states(source)
+        _,current_drains=reload_states(source,account['broker'])
+        if current_drains!=drains:raise ValueError('Paper Stop identity changed before broker reload; no handoff.')
         if (Path('/proc')/str(pid)/'cwd').resolve()!=source.resolve():
             raise ValueError('Owner changed before handoff.')
         env=isolated_environment(account,folder,store.path,runtime.portal_port)
@@ -122,7 +150,7 @@ if __import__('os').environ.get('SECTOR_PULSE_WORKSPACE_BROKER')=='MOTILAL_OSWAL
  runpy.run_module('sector_heatmap.motilal_server',run_name='__main__')
 else:runpy.run_path('heatmap_server.py',run_name='__main__')
 '''
-        report('RESTARTING','Replacing this broker dashboard; runners remain stopped.')
+        report('RESTARTING','Reloading this broker to finish its existing Paper Stop; entries remain disabled.' if drains else 'Replacing this broker dashboard; runners remain stopped.')
         with open(folder/'dashboard.log','a') as output:
             replacement=subprocess.Popen([sys.executable,'-c',wrapper],cwd=source,env=env,stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
         time.sleep(.2)
@@ -147,7 +175,7 @@ else:runpy.run_path('heatmap_server.py',run_name='__main__')
                         serving=response.code in (401,403)
                     if serving:
                         stopped_states(source)
-                        report('READY','Broker dashboard is ready. All strategy runners remain stopped.')
+                        report('READY','Existing Paper Stop completed: flat, no pending order, all runners stopped.' if drains else 'Broker dashboard is ready. All strategy runners remain stopped.')
                         return
             except (OSError,ValueError,KeyError):
                 pass
@@ -164,3 +192,22 @@ else:runpy.run_path('heatmap_server.py',run_name='__main__')
     finally:
         for handle in handles:handle.close()
         with _lock:_active_account = None
+
+def main():
+    """Local operator entry to the same reviewed broker reload policy; no force mode."""
+    import argparse
+    from .workspaces import WorkspaceStore,WorkspaceRuntime
+    parser=argparse.ArgumentParser(description="Reload one owned broker through the dashboard handoff policy.")
+    parser.add_argument("--registry",required=True);parser.add_argument("--account",required=True);parser.add_argument("--admin",required=True);parser.add_argument("--portal-port",type=int,default=8079)
+    args=parser.parse_args();store=WorkspaceStore(args.registry)
+    with store.db() as db:row=db.execute("SELECT id,username,admin FROM users WHERE username=?",(args.admin,)).fetchone()
+    if not row or not row["admin"]:raise PermissionError("A registered administrator is required.")
+    user=dict(row);runtime=WorkspaceRuntime(store,Path(__file__).resolve().parents[1],args.portal_port)
+    current=begin(store,runtime,user,args.account);last=None;deadline=time.monotonic()+80
+    while True:
+        if current!=last:print(json.dumps(current),flush=True);last=dict(current)
+        if current["status"] not in _ACTIVE:return 0 if current["status"]=="READY" else 1
+        if time.monotonic()>deadline:raise RuntimeError("Reload status did not settle; no second reload was sent.")
+        time.sleep(1);current=status(store,user,args.account)
+
+if __name__=="__main__":raise SystemExit(main())

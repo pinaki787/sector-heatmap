@@ -46,6 +46,8 @@ class Service:
         self.owners=lambda:local_owners()|set(self.external_owners())
         self.adoptions=Manager(state_root/'renko-delta-adoptions',factory,factory(),account,self.owners,runner_type=DeltaAdoptedRunner)
         self.adoptions.guard(self.runner)
+        # This honors a durable prior Stop only; ordinary saved runs stay inert.
+        self.runner.recover_requested_paper_stop()
 
     def chart_config(self, query):
         raw={k:(query[k][0].lower()=='true' if isinstance(default,bool) else query[k][0]) for k,default in settings({}).items() if k in query}

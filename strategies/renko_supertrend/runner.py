@@ -764,6 +764,41 @@ class Runner(BaseRunner):
             self.event('WATCHING',armed_message)
             return self.snapshot()
 
+    def recover_requested_paper_stop(self, background=True):
+        """Continue durable Paper stop intent after code reload; never arm entries."""
+        from .stop_recovery import eligible,paper_stop_identity
+        if not eligible(self.state):return False
+        import fcntl
+        with self.lock:
+            if self.file_lock or (self.thread and self.thread.is_alive()):return False
+            handle=open(self.path.with_suffix('.lock'),'a')
+            try:
+                fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                saved=json.loads(self.path.read_text())
+                if paper_stop_identity(saved)!=paper_stop_identity(self.state):
+                    raise ValueError('Paper Stop ownership changed during recovery.')
+                context=self.adapter.validate_config(self.state['config'])
+                if context.get('account_identity')!=self.state.get('account_identity'):
+                    raise ValueError('Paper Stop account identity changed; recovery blocked.')
+                self.file_lock=handle
+                if hasattr(self.adapter,'subscribe'):
+                    self.adapter.subscribe(self.state['config']['underlying'])
+                    self.adapter.subscribe(self.state['position']['symbol'])
+                self.adapter.start()
+                self.state.update(running=True,accepting_entries=False,management_only=True)
+                self.stop_requested.set()
+                self.event('DRAINING','Existing Paper Stop resumed after code reload; normal exit processing only, new entries disabled.')
+                if background:
+                    self.thread=threading.Thread(target=self.loop,name='renko-paper-stop-recovery',daemon=True)
+                    self.thread.start()
+                return True
+            except Exception as error:
+                if self.file_lock is handle:self.release()
+                else:handle.close()
+                self.state.update(running=False,accepting_entries=False)
+                self.event('STOP_RECOVERY_BLOCKED',str(error))
+                return False
+
     def resume_position(self, payload, background=True):
         """Explicit recovery manages saved exposure only; never authorizes entries."""
         with self.lock:

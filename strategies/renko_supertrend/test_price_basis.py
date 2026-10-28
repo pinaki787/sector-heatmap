@@ -213,3 +213,36 @@ class ActualPaperStopTests(unittest.TestCase):
     self.assertEqual(runner.state['order_history'][-1]['reason'],'MANUAL_SQUARE_OFF')
     self.assertEqual(runner.state['order_history'][-1]['mode'],'PAPER')
    finally:runner.release()
+
+class DurablePaperStopRecoveryTests(unittest.TestCase):
+ def test_reload_continues_only_existing_paper_stop_without_rearming(self):
+  import tempfile
+  from pathlib import Path
+  from copy import deepcopy
+  from .runner import Runner
+  from .test_runner import FakeBroker
+  with tempfile.TemporaryDirectory() as directory:
+   broker=FakeBroker();path=Path(directory)/'state.json';r=Runner(broker,path,lambda:broker.now)
+   config=dict(strategy='RENKO_SUPERTREND_V1',underlying='NSE:NIFTY50-INDEX',timeframe='1 minute',lots=1,mode='PAPER',ema_momentum_enabled=False,atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False,ema_exit_enabled=True)
+   preview=r.preview(config);r.start(dict(preview_id=preview['id'],confirmation=preview['confirmation']),background=False);r.state['run_id']='DURABLE-STOP-TEST';r.state['eligible_since']=broker.now-10;r.step()
+   r.state['config'].update(broker='DELTA_INDIA',strategy_basis='RENKO',renko_confirmation='PRICE')
+   r.stop();before=deepcopy(r.state);r.release()
+   restored=Runner(broker,path,lambda:broker.now)
+   try:
+    self.assertFalse(restored.state['running']);self.assertTrue(restored.recover_requested_paper_stop(background=False));self.assertFalse(restored.state['accepting_entries'])
+    for key in ('run_id','started_at','trades_used','seen','position','config'):
+     self.assertEqual(restored.state[key],before[key])
+    for _ in range(5):
+     if not restored.state['running']:break
+     restored.step()
+    self.assertFalse(restored.state['running']);self.assertIsNone(restored.state['position']);self.assertIsNone(restored.state['pending']);self.assertFalse(restored.state['accepting_entries']);self.assertEqual(broker.sent,[])
+    self.assertEqual(restored.state['order_history'][-1]['reason'],'MANUAL_SQUARE_OFF')
+   finally:restored.release()
+ def test_saved_ordinary_run_never_automatically_recovers_or_arms(self):
+  import tempfile
+  from pathlib import Path
+  from .runner import Runner
+  from .test_runner import FakeBroker
+  with tempfile.TemporaryDirectory() as directory:
+   r=Runner(FakeBroker(),Path(directory)/'state.json')
+   self.assertFalse(r.recover_requested_paper_stop());self.assertFalse(r.state['running']);self.assertFalse(r.state['accepting_entries'])

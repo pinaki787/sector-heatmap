@@ -51,3 +51,24 @@ class BounceTests(unittest.TestCase):
         with patch.object(Path,'resolve',return_value=self.source),patch.object(bounce.subprocess,'Popen',return_value=proc),patch.object(bounce.os,'kill') as kill,patch.object(bounce.time,'sleep'):
             bounce._bounce(self.store,self.runtime,self.account,54321,dict(status='CHECKING'))
         kill.assert_not_called();self.assertEqual(bounce.status(self.store,self.user,'account')['status'],'FAILED')
+
+    def test_paper_stop_handoff_preserves_audit_and_ready_requires_normal_flat_result(self):
+        from .test_paper_stop_reload import state
+        self.state.unlink();self.state=self.private/'renko-delta-instances/test/renko-delta-state.json';self.state.parent.mkdir(parents=True);saved=state();self.state.write_text(json.dumps(saved))
+        self.account['broker']='DELTA_INDIA'
+        proc=Mock(pid=12345);proc.poll.return_value=None
+        def launched(*args,**kwargs):
+            self.assertEqual(json.loads(self.state.read_text()),saved)
+            (self.folder/'dashboard-owner.lock').write_text(json.dumps({'pid':proc.pid}));return proc
+        def normal_replacement_worker(*args):
+            completed={**saved,'running':False,'position':None,'status':'STOPPED'};self.state.write_text(json.dumps(completed))
+        original_resolve=Path.resolve
+        def resolve(path,*args,**kwargs):
+            if str(path).startswith('/proc/'):return self.source
+            return original_resolve(path,*args,**kwargs)
+        with patch.object(Path,'resolve',resolve),patch.object(bounce.subprocess,'Popen',side_effect=launched),patch.object(bounce.os,'kill',side_effect=normal_replacement_worker),patch.object(bounce.time,'sleep'),patch.object(bounce,'urlopen') as opening:
+            opening.return_value.__enter__.return_value.status=200
+            bounce._bounce(self.store,self.runtime,self.account,54321,dict(status='CHECKING'))
+        result=bounce.status(self.store,self.user,'account');self.assertEqual(result['status'],'READY');self.assertIn('Paper Stop completed',result['message'])
+        captures=list((self.folder/'paper-stop-reloads').glob('*/test-before.json'));self.assertEqual(len(captures),1);self.assertEqual(json.loads(captures[0].read_text()),saved)
+        self.runtime.start.assert_not_called();self.runtime.provision.assert_not_called()
