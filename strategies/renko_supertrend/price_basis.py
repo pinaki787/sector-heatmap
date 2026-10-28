@@ -147,7 +147,13 @@ def run_step(runner):
     import threading
     with runner.lock:
         if not runner.state.get('running'):return
-        if runner.stop_requested.is_set():return runner.stop()
+        if runner.stop_requested.is_set() or runner.state.get('squareoff_requested'):
+            # Stop first disables entries and marks owned exposure for exit. It
+            # cannot complete the drain itself: the normal order-management step
+            # must cancel/reconcile pending intent and close filled quantity.
+            if not runner.state.get('squareoff_requested'):runner.stop()
+            if runner.state.get('running'):return runner._candle_step()
+            return
         config=runner.state['config'];now=runner.clock()
         if not getattr(runner,'_price_test_producer',False) and (not getattr(runner,'price_thread',None) or not runner.price_thread.is_alive()):
             runner.price_thread=threading.Thread(target=producer,args=(runner,runner.state['run_id']),name='confirmed-price-renko',daemon=True)
@@ -175,7 +181,10 @@ def run_step(runner):
                 runner._price_filter_bucket=bucket
             host=runner._price_filter_rows
         for row in events:
-            if runner.stop_requested.is_set():return runner.stop()
+            if runner.stop_requested.is_set():
+                runner.stop()
+                if runner.state.get('running'):return runner._candle_step()
+                return
             if not 0<=runner.clock()-row['market_event_at']<=15:
                 runner.record_entry_assessment(row,False,'STALE_PRICE_EVENT','Price event expired during execution preflight; no replay.')
                 continue

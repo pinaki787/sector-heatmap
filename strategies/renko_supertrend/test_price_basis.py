@@ -157,3 +157,59 @@ class IndependentPricePublicationTests(unittest.TestCase):
    self.assertEqual(runner._confirmed_publication['latest']['close'],220)
    self.assertEqual(runner.confirmed_price_events.qsize(),3)
    self.assertTrue((Path(tmp)/'price-confirmed-history.json').exists())
+
+class StopDrainTests(unittest.TestCase):
+ def runner(self,*,pending=False,squareoff=False):
+  import threading
+  from types import SimpleNamespace
+  calls=[]
+  r=SimpleNamespace(lock=threading.RLock(),stop_requested=threading.Event(),state=dict(running=True,position=None if pending else {'quantity':1},pending={'tag':'owned'} if pending else None,squareoff_requested=squareoff,accepting_entries=False),recovery=SimpleNamespace(beat=lambda:None))
+  def stop():
+   calls.append('stop');r.state['squareoff_requested']=True
+   if not r.state['position'] and not r.state['pending']:r.state['running']=False
+  def manage():calls.append('manage');return 'drain'
+  r.stop=stop;r._candle_step=manage;r.stop_requested.set()
+  return r,calls
+ def test_stop_request_reaches_owned_position_management_without_new_price(self):
+  from .price_basis import run_step
+  r,calls=self.runner()
+  self.assertEqual(run_step(r),'drain');self.assertEqual(calls,['stop','manage'])
+  self.assertFalse(r.state['accepting_entries'])
+ def test_existing_drain_does_not_reissue_stop_or_starve_pending_reconciliation(self):
+  from .price_basis import run_step
+  r,calls=self.runner(pending=True,squareoff=True)
+  self.assertEqual(run_step(r),'drain');self.assertEqual(calls,['manage'])
+ def test_flat_stop_finishes_without_entry_or_management(self):
+  from .price_basis import run_step
+  r,calls=self.runner();r.state['position']=None
+  run_step(r);self.assertFalse(r.state['running']);self.assertEqual(calls,['stop'])
+ def test_persisted_squareoff_is_honoured_even_after_in_memory_event_is_lost(self):
+  from .price_basis import run_step
+  r,calls=self.runner(squareoff=True);r.stop_requested.clear()
+  self.assertEqual(run_step(r),'drain');self.assertEqual(calls,['manage'])
+
+class ActualPaperStopTests(unittest.TestCase):
+ def test_normal_stop_drains_existing_paper_position_without_new_prices_or_broker_orders(self):
+  import tempfile
+  from pathlib import Path
+  from .runner import Runner
+  from .test_runner import FakeBroker
+  with tempfile.TemporaryDirectory() as directory:
+   broker=FakeBroker();runner=Runner(broker,Path(directory)/'state.json',lambda:broker.now)
+   try:
+    config=dict(strategy='RENKO_SUPERTREND_V1',underlying='NSE:NIFTY50-INDEX',timeframe='1 minute',lots=1,mode='PAPER',ema_momentum_enabled=False,atr_length=1,factor=.1,brick_mode='Manual',manual_brick=10,exit_policy='OPPOSITE_CONFIRMED_SIGNAL',rsi_slope_enabled=False,ema_exit_enabled=True)
+    preview=runner.preview(config);runner.start(dict(preview_id=preview['id'],confirmation=preview['confirmation']),background=False)
+    runner.state['eligible_since']=broker.now-10;runner.step()
+    self.assertIsNotNone(runner.state['position'])
+    runner.state['config'].update(strategy_basis='RENKO',renko_confirmation='PRICE')
+    runner.request_stop()
+    # Both synchronous and asynchronous request paths lead to the same durable drain.
+    if not runner.state.get('squareoff_requested'):runner.stop()
+    for _ in range(5):
+     if not runner.state['running']:break
+     runner.step()
+    self.assertFalse(runner.state['running']);self.assertIsNone(runner.state['position']);self.assertIsNone(runner.state['pending'])
+    self.assertFalse(runner.state['accepting_entries']);self.assertEqual(broker.sent,[])
+    self.assertEqual(runner.state['order_history'][-1]['reason'],'MANUAL_SQUARE_OFF')
+    self.assertEqual(runner.state['order_history'][-1]['mode'],'PAPER')
+   finally:runner.release()
