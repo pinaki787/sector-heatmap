@@ -21,7 +21,8 @@
 
   function runnerChartContext(fields,state,preview=false,now=Date.now()){
     const draft=chartSettings(fields),c=state?.config;
-    const bound=!preview&&!!(state?.running||state?.position||state?.pending)&&c?.underlying===fields.symbol&&c?.timeframe===fields.timeframe&&!!state?.run_id;
+    const retainedPrice=state?.confirmed_feed_revision==='shared-confirmed-live-v1'&&c?.strategy_basis==='RENKO'&&c?.renko_confirmation==='PRICE'&&state?.last_signal?.confirmation_basis==='ORDERED_LIVE_PRICE';
+    const bound=!preview&&!!(state?.running||state?.position||state?.pending||retainedPrice)&&c?.underlying===fields.symbol&&c?.timeframe===fields.timeframe&&!!state?.run_id;
     if(!bound)return {basis:'draft',settings:draft,history:{},differences:[],label:'SELECTED INSTRUMENT · live chart · form settings; no trading change'};
     const settings={...draft,strategy_basis:c.strategy_basis||'LEGACY',renko_brick_exit_enabled:c.renko_brick_exit_enabled===true};
     // A recorded legacy runner never acquires a newly defaulted entry rule.
@@ -45,8 +46,8 @@
       else history={history_preset:'custom',history_from:first,history_to:last};
     }else error='Runner history anchor unavailable; matching calculations cannot be verified.';
     if(settings.confirmed_run_id){history={};error=null;}
-    const basis='active';
-    return {basis,settings,history,differences,error,runId:state.run_id,anchor,label:(basis==='active'?'ACTIVE RUNNER':'LAST RUN · STOPPED')+' · '+c.timeframe+' · brick '+(state.confirmed_indicators?.latest?.box??state.last_signal?.box??c.manual_brick)+(differences.length?' · draft differs; not applied':(c.renko_confirmation==='PRICE'?' · price-confirmed bricks · timeframe sizes Auto':' · captured Start settings'))};
+    const basis=state.running||state.position||state.pending?'active':'recorded';
+    return {basis,settings,history,differences,error,runId:state.run_id,anchor,label:(basis==='active'?'ACTIVE RUNNER':'LAST RECORDED RUN · STOPPED · '+c.mode)+' · '+c.timeframe+' · brick '+(state.confirmed_indicators?.latest?.box??state.last_signal?.box??c.manual_brick)+(differences.length?' · draft differs; not applied':(c.renko_confirmation==='PRICE'?' · price-confirmed bricks · timeframe sizes Auto':' · captured Start settings'))};
   }
   function runnerChartAlignment(context,state,data){
     if(context.basis==='draft')return {verified:false,blocked:false,reason:'Draft preview; historical signals are not runner decisions.'};
@@ -241,6 +242,51 @@
   function studyHoverValue(points,latest,time){const value=time===null?latest?.value:points.get(Math.floor(time));return {value,available:Number.isFinite(value),hovered:time!==null};}
 
 
+  function mountChartHistoryNavigation({chart,host,latestTime}){
+    const document=host.ownerDocument,wrap=document.createElement('div'),label=document.createElement('small'),rail=document.createElement('div'),spacer=document.createElement('div'),track=document.createElement('div'),thumb=document.createElement('div');
+    wrap.id=host.id+'-history-navigation';wrap.className='renko-history-navigation';rail.id=host.id+'-history-scrollbar';rail.className='renko-history-scrollbar';rail.tabIndex=0;
+    rail.setAttribute('role','scrollbar');rail.setAttribute('aria-label','Chart history navigation');rail.setAttribute('aria-orientation','horizontal');rail.setAttribute('aria-controls',host.id);
+    track.className='renko-history-track';thumb.className='renko-history-thumb';thumb.setAttribute('aria-hidden','true');spacer.style.height='1px';rail.append(spacer);track.append(rail,thumb);wrap.append(label,track);host.after(wrap);
+    let origin=0,pixelsPerBar=1,ignoreLeft=null,drag=null;
+    function paintThumb(){const width=rail.clientWidth,total=rail.scrollWidth||width;thumb.style.width=Math.max(24,width*width/total)+'px';thumb.style.left=(rail.scrollLeft/total*width)+'px';}
+    track.addEventListener('pointerdown',event=>{
+      if(event.button!==0)return;event.preventDefault();rail.focus();
+      if(event.target===thumb){drag={x:event.clientX,left:rail.scrollLeft};track.setPointerCapture(event.pointerId);}
+      else{const rect=track.getBoundingClientRect(),size=Math.max(24,rail.clientWidth*rail.clientWidth/rail.scrollWidth);rail.scrollLeft=(event.clientX-rect.left-size/2)*rail.scrollWidth/rail.clientWidth;}
+    });
+    track.addEventListener('pointermove',event=>{if(drag)rail.scrollLeft=drag.left+(event.clientX-drag.x)*rail.scrollWidth/rail.clientWidth;});
+    const release=()=>{drag=null;};track.addEventListener('pointerup',release);track.addEventListener('pointercancel',release);
+
+    function sync(){
+      const scale=chart.timeScale(),range=scale.getVisibleLogicalRange(),width=rail.clientWidth;
+      if(!range||!width||!(range.to>range.from))return;
+      const x=scale.timeToCoordinate(latestTime()),logical=Number.isFinite(x)?scale.coordinateToLogical(x):null;
+      if(!Number.isFinite(logical))return;
+      const latest=Math.round(logical),span=range.to-range.from;origin=Math.min(0,range.from);
+      const end=Math.max(latest+Math.max(20,span*.2),range.to),total=end-origin;
+      pixelsPerBar=width/span;spacer.style.width=Math.max(width,total*pixelsPerBar)+'px';
+      ignoreLeft=(range.from-origin)*pixelsPerBar;rail.scrollLeft=ignoreLeft;paintThumb();
+      rail.setAttribute('aria-valuemin',String(origin));rail.setAttribute('aria-valuemax',String(end-span));rail.setAttribute('aria-valuenow',String(range.from));
+      label.textContent=range.to>=latest-2?'Live edge · drag the scrollbar to browse history':'History view · Latest bars returns to live';
+    }
+    function onScroll(){
+      paintThumb();
+      if(ignoreLeft!==null&&Math.abs(rail.scrollLeft-ignoreLeft)<1)return;
+      const range=chart.timeScale().getVisibleLogicalRange();if(!range)return;
+      const from=origin+rail.scrollLeft/pixelsPerBar;ignoreLeft=rail.scrollLeft;
+      chart.timeScale().setVisibleLogicalRange({from,to:from+range.to-range.from});
+    }
+    rail.addEventListener('scroll',onScroll);
+    track.addEventListener('wheel',event=>{const delta=event.deltaX||event.deltaY;if(delta){event.preventDefault();rail.scrollLeft+=delta;}},{passive:false});
+    rail.addEventListener('keydown',event=>{
+      const step=event.key==='ArrowLeft'?-40:event.key==='ArrowRight'?40:event.key==='PageUp'?-rail.clientWidth:event.key==='PageDown'?rail.clientWidth:null;
+      if(step!==null){event.preventDefault();rail.scrollLeft+=step;}
+      else if(event.key==='Home'||event.key==='End'){event.preventDefault();rail.scrollLeft=event.key==='Home'?0:rail.scrollWidth;}
+    });
+    const schedule=()=>requestAnimationFrame(sync);chart.timeScale().subscribeVisibleLogicalRangeChange(schedule);
+    const observer=new ResizeObserver(schedule);observer.observe(rail);schedule();
+    return {sync:schedule,element:rail,destroy(){observer.disconnect();chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedule);wrap.remove();}};
+  }
   function priceChartNeedsRefresh(context,runner,rows,snapshotFresh=true){
     const signal=runner?.last_signal,latest=rows?.at(-1);
     return snapshotFresh&&context?.basis!=='draft'&&!!context?.runId&&context.runId===runner?.run_id&&runner?.config?.renko_confirmation==='PRICE'&&signal?.confirmation_basis==='ORDERED_LIVE_PRICE'&&Number.isFinite(signal.timestamp)&&Number.isFinite(latest?.timestamp)&&signal.timestamp>latest.timestamp;
@@ -356,17 +402,29 @@
     chart.subscribeClick(event=>{sync();if(mode.value==='cursor'||!event.point)return;const price=candles.coordinateToPrice(event.point.y);if(!Number.isFinite(price)||price<=0)return;if(drawings.length>=100){status('Maximum 100 drawings · undo or clear a drawing');return;}if(mode.value==='horizontal'){drawings.push({kind:'horizontal',price});save();status('Horizontal line at '+formatPrice(price)+' · saved');}else{const time=typeof event.time==='number'?event.time:chart.timeScale().coordinateToTime(event.point.x);if(!Number.isFinite(time)){status('Choose a point within the candle history');return;}const point={time,value:price};if(!anchor){anchor=point;status('First point selected · click the second point');return;}if(anchor.time===time){status('Choose a different candle for the second point');return;}drawings.push({kind:'trend',points:[anchor,point].sort((a,b)=>a.time-b.time)});anchor=null;save();}mode.value='cursor';host.style.cursor='';});sync();return {sync};
   }
 
-  function candleInspection({time,symbol,timeframe,settings={},state,rows=[],forming=false}){
+  function candleInspection({time,brick=null,symbol,timeframe,settings={},state,rows=[],forming=false}){
     const matching=state?.config?.underlying===symbol&&state.config.timeframe===timeframe;
     const active=matching&&!!(state.running||state.position||state.pending);
     const records=[...(state?.entry_assessments||[]),state?.latest_entry_assessment].filter(Boolean);
-    const record=matching?records.findLast(r=>r.run_id===state.run_id&&r.underlying===symbol&&r.timeframe===timeframe&&r.timestamp===time&&!!r.signal?.provisional===forming):null;
+    const evidenceTime=brick?.indicator_timestamp??brick?.source_timestamp??time;
+    const sameBrick=q=>{
+      if(!brick)return true;
+      if(!q)return false;
+      for(const key of ['source_timestamp','source_event_index','source_sequence','source_generation'])if(brick[key]!=null&&q[key]!=null&&brick[key]!==q[key])return false;
+      // An exact source event can produce several different bricks. Body identity is
+      // required too; an aggregate/final-brick assessment cannot describe its siblings.
+      return Number.isFinite(brick.open)&&Number.isFinite(brick.close)&&q.open===brick.open&&q.close===brick.close;
+    };
+    const record=matching?records.findLast(r=>r.run_id===state.run_id&&r.underlying===symbol&&r.timeframe===timeframe&&r.timestamp===evidenceTime&&!!r.signal?.provisional===forming&&sameBrick(r.signal)):null;
     const c=effectiveFamilySettings((record||active)?state.config:settings);
-    const reconstructed=rows.flatMap(r=>[r,...(r.brick_events||[])]).find(r=>r.timestamp===time);
+    const sourceRow=rows.find(r=>r.timestamp===evidenceTime);
+    const reconstructed=brick?(sourceRow?.brick_events||[]).find(sameBrick)||brick:rows.flatMap(r=>[r,...(r.brick_events||[])]).find(r=>r.timestamp===time);
     const q=record?.signal||reconstructed||{};
+    const execution=record?(state.order_history||[]).filter(o=>o.run_id===record.run_id&&o.underlying_symbol===symbol&&o.entry_event_at===(record.event_at??record.timestamp)).map(o=>({side:o.side,is_entry:o.is_entry,status:o.status,filled:o.filled,average_price:o.average_price,filled_at:o.filled_at??o.first_fill_confirmed_at,mode:o.mode,reason:o.reason,symbol:o.symbol,quote_currency:o.quote_currency})):[];
+
     const n=v=>Number.isFinite(v)?Number(v.toFixed(2)).toString():'unavailable';
     const text=v=>v==null?'unavailable':typeof v==='number'?n(v):typeof v==='boolean'?(v?'on':'off'):typeof v==='object'?Object.entries(v).map(([k,x])=>k.replaceAll('_',' ')+' '+text(x)).join(' · '):String(v);
-    const result={time,forming,source:record?'Recorded runner assessment':forming?'Forming chart preview':'Historical chart reconstruction',configSource:record?'Recorded runner Start settings':active?'Active runner Start settings':'Chart settings',mode:(record||active)?c.mode:null,reason:record?(record.code+' · '+record.reason):forming?'Forming display only; no completed-candle decision.':'No matching recorded assessment. These checks reconstruct chart conditions; they do not establish a live rejection.',checks:[],settings:[]};
+    const result={time:brick?.source_timestamp??evidenceTime,displayTime:time,execution,indicatorUnit:c.broker==='DELTA_INDIA'?((state?.pnl_currency||execution.find(o=>o.quote_currency)?.quote_currency||'Native broker price')+' · native indicator prices'):null,forming,source:record?'Recorded runner assessment':forming?'Forming chart preview':'Historical chart reconstruction',configSource:record?'Recorded runner Start settings':active?'Active runner Start settings':'Chart settings',mode:(record||active)?c.mode:null,reason:record?(record.code+' · '+record.reason):forming?'Forming display only; no completed-candle decision.':'No matching recorded assessment. These checks reconstruct chart conditions; they do not establish a live rejection.',checks:[],settings:[]};
     const add=(name,on,pass,rule,observed,reason)=>on&&result.checks.push({name,status:!on?'DISABLED':pass===true?'PASS':pass===false?'FAIL':pass==='WAIT'?'WAIT':pass==='INFO'?'INFO':'UNAVAILABLE',rule,observed,reason:!on?'Not selected for entry.':reason||(pass==null?'Candle-specific evidence unavailable.':!record?'Reconstructed from this candle only.':'Evidence saved for this candle.')});
     const bull=q.direction==='BULLISH',bear=q.direction==='BEARISH',directional=bull||bear;
     const compare=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&directional?(bull?a>b:a<b):null;
@@ -520,7 +578,7 @@
   }
 
   function chartCandles(data,view){
-    if(view==='synthetic'){if(!chartAnalysisAvailable(data))return [];if(data.settings?.strategy_basis==='RENKO'){return data.rows.flatMap(r=>(r.brick_events||[]).map((b,i,a)=>({time:r.timestamp+(i+1)/(a.length+2),indicator_timestamp:r.timestamp,source_timestamp:b.source_timestamp??r.timestamp,source_close:r.host_close??r.close,open:b.open,high:b.high,low:b.low,close:b.close,box:b.box,supertrend:b.supertrend,ema10:b.ema10,ema30:b.ema30,ema_exit:b.ema_exit,lifecycle_event:b.lifecycle_event})));}const box=data.settings?.brick_mode==='Manual'?Number(data.settings.manual_brick):Number(data.rows.at(-1)?.box);return uniformRenkoBricks(data.rows,box);}
+    if(view==='synthetic'){if(!chartAnalysisAvailable(data))return [];if(data.settings?.strategy_basis==='RENKO'){return data.rows.flatMap(r=>(r.brick_events||[]).map((b,i,a)=>({time:r.timestamp+(i+1)/(a.length+2),indicator_timestamp:r.timestamp,source_timestamp:b.source_timestamp??r.timestamp,source_event_index:b.source_event_index??r.source_event_index,source_sequence:b.source_sequence??r.source_sequence,source_generation:b.source_generation??r.source_generation,brick_event_index:i,brick_count:a.length,source_close:r.host_close??r.close,open:b.open,high:b.high,low:b.low,close:b.close,box:b.box,supertrend:b.supertrend,ema10:b.ema10,ema30:b.ema30,ema_exit:b.ema_exit,lifecycle_event:b.lifecycle_event})));}const box=data.settings?.brick_mode==='Manual'?Number(data.settings.manual_brick):Number(data.rows.at(-1)?.box);return uniformRenkoBricks(data.rows,box);}
     const rows=(view==='synthetic'?data.rows:[...data.rows,...(data.forming||[])]).map(c=>view==='synthetic'?{time:c.timestamp,open:c.synthetic_open,high:Math.max(c.synthetic_open,c.synthetic_close),low:Math.min(c.synthetic_open,c.synthetic_close),close:c.synthetic_close}:{time:c.timestamp,open:c.host_open??c.open,high:c.host_high??c.high,low:c.host_low??c.low,close:c.host_close??c.close});
     if(view!=='synthetic')for(const gap of data.data_quality?.gaps||[])rows.push({time:gap.timestamp});
     return rows.sort((a,b)=>a.time-b.time);
@@ -705,7 +763,7 @@
     if(pageParams.has('renkoBroker')){for(const node of document.querySelectorAll('.view.active'))node.classList.remove('active');for(const node of document.querySelectorAll('[data-view].active')){node.classList.remove('active');node.setAttribute('aria-pressed','false');}}
     document.querySelector('[data-view="ema-cross"]').insertAdjacentHTML('beforebegin',`<button type="button" data-view="renko-supertrend" class="${active?'active':''}" aria-pressed="${active}">Renko Supertrend</button>`);
     document.querySelector('.work').insertAdjacentHTML('beforeend',`<section id="renko-supertrend" class="view ${active?'active':''}">
-      <header class="head"><div><span class="label">PINAKI RENKO ST AUTO RESEARCH</span><h1>Renko Supertrend Strategy</h1><small class="muted">Default: Renko Supertrend + slope · EMA and other filters optional</small></div><div id="renko-state" class="status">STOPPED</div></header>
+      <header class="head"><div><span class="label">PINAKI RENKO ST AUTO RESEARCH</span><h1>Renko Supertrend Strategy</h1><small class="muted">Default: Renko Supertrend + slope · EMA and other filters optional</small></div><div id="renko-state" class="status">Loading runner…</div></header>
       <section class="panel"><div class="step-title"><div><span class="label">SIGNAL SETTINGS</span><h2>Renko & Supertrend</h2></div><span class="badge">COMPLETED CANDLES</span></div>
       <div class="field-grid" style="margin-top:14px">
       <label class="field">Strategy basis<select id="renko-strategy-basis"><option value="RENKO">Renko bricks</option><option value="CANDLESTICK">Candlestick</option><option value="LEGACY">Legacy synthetic · saved setups</option></select><small>Renko uses confirmed bricks; Candlestick uses confirmed candles. Chart view is display only.</small></label>
@@ -746,8 +804,8 @@
       <label class="field">Hard target · underlying price (optional)<input id="renko-spot-target" type="number" min="0.01" step="any" placeholder="Blank disables target"></label>
       <label class="field">Hard stop-loss · underlying price (optional)<input id="renko-spot-stop" type="number" min="0.01" step="any" placeholder="Blank disables stop"></label>
       <label class="field">Daily loss budget (₹, optional)<input id="renko-daily-budget" type="number" min="1" placeholder="No budget"></label></div>
-      <div class="packet-actions" style="margin-top:12px"><button id="renko-toggle" class="button">Start Runner</button><button id="renko-reconcile-close" class="button secondary" type="button" hidden>Reconcile broker closure</button></div>
-      <div id="renko-runner-message" class="handoff-status" role="status">No Renko runner has been started.</div>
+      <div class="packet-actions" style="margin-top:12px"><button id="renko-toggle" class="button" disabled>Loading runner…</button><button id="renko-reconcile-close" class="button secondary" type="button" hidden>Reconcile broker closure</button></div>
+      <div id="renko-runner-message" class="handoff-status" role="status">Loading the current server state…</div>
       <div id="renko-action-error" role="alert" style="color:#ff8585" hidden></div>
       <div id="renko-pnl"></div><p id="renko-paper-funds" class="renko-small"></p><div id="renko-trailing-status" aria-live="polite"></div><div id="renko-orders" style="overflow-x:auto"></div><h3>Runner entry assessment audit</h3><p>First tick assessment and eventual owned fill are separate. These rows identify the exact candle behind the chart labels.</p><div id="renko-entry-audit" style="overflow-x:auto"></div></section></section>`);
     const el=id=>document.getElementById('renko-'+id),section=document.getElementById('renko-supertrend');
@@ -1563,8 +1621,8 @@
       #renko-chart-rail>details.renko-chart-fold{flex:1 1 190px;font-size:12px}
       #renko-chart-rail>details.renko-chart-fold[open]{flex-basis:100%}
       #renko-chart-stack .renko-study-canvas{height:120px;margin:0}
-      #renko-chart-stack:fullscreen{display:flex!important;flex-direction:column!important;gap:6px;padding:8px!important;box-sizing:border-box;overflow:hidden!important}
-      #renko-chart-stack:fullscreen #renko-chart-toolbar{gap:5px;margin:0;flex:none;align-items:center;max-height:132px;overflow:auto;font-size:11px;padding:4px!important;flex-wrap:wrap}
+      #renko-chart-stack:fullscreen{display:flex!important;flex-direction:column!important;gap:6px;padding:8px!important;box-sizing:border-box;overflow-y:scroll!important;overflow-x:hidden!important;scrollbar-gutter:stable;padding-bottom:48px!important}
+      #renko-chart-stack:fullscreen #renko-chart-toolbar{position:static!important;top:auto!important;gap:5px;margin:0;flex:none;align-items:center;max-height:none;overflow:visible;font-size:11px;padding:4px!important;flex-wrap:wrap}
       #renko-chart-stack:fullscreen #renko-full-chart{display:inline-flex}
       #renko-chart-stack:fullscreen #renko-override-note:empty{display:none}
       #renko-chart-stack:fullscreen #renko-stream-status{font-size:12px;padding:4px 8px;line-height:1.3}
@@ -1574,10 +1632,10 @@
       #renko-chart-stack:fullscreen #renko-chart-toolbar button,#renko-chart-stack:fullscreen #renko-chart-toolbar select{min-height:28px!important;height:28px!important;padding:3px 7px!important;font-size:11px!important}
       #renko-chart-stack:fullscreen #renko-chart-toolbar select{max-width:250px}
       #renko-chart-stack:fullscreen #renko-chart-basis-note,#renko-chart-stack:fullscreen #renko-feed-health,#renko-chart-stack:fullscreen #renko-recovery-status{flex:1 1 380px!important;width:auto!important;margin:0!important;padding:3px 6px!important;font-size:11px;line-height:1.3}
-      #renko-chart-stack:fullscreen #renko-chart-scroll-body{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
-      #renko-chart-stack:fullscreen #renko-chart-rail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;max-height:90px;min-height:30px;overflow:auto;order:4;margin:0;padding:0;flex:none}
-      #renko-chart-stack:fullscreen #renko-chart-rail>details{min-width:0;max-height:85px;overflow:auto}
-      #renko-chart-stack:fullscreen #renko-chart{flex:1 1 auto!important;min-height:45vh!important;height:auto!important;margin:0!important}
+      #renko-chart-stack:fullscreen #renko-chart-scroll-body{display:flex;flex-direction:column;flex:1 0 auto;min-height:0;overflow:visible}
+      #renko-chart-stack:fullscreen #renko-chart-rail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;max-height:none;min-height:30px;overflow:visible;order:4;margin:0;padding:0;flex:none}
+      #renko-chart-stack:fullscreen #renko-chart-rail>details{min-width:0;max-height:none;overflow:visible}
+      #renko-chart-stack:fullscreen #renko-chart{flex:none!important;min-height:360px!important;height:65vh!important;margin:0!important}
       #renko-chart-stack:fullscreen #renko-candle-readout{margin:3px 0!important;font-size:11px;padding:3px 6px!important;min-height:20px;height:auto!important;flex:none;line-height:1.3;white-space:normal;overflow-wrap:anywhere}
       #renko-chart-stack:fullscreen .renko-drawing-tools{padding:3px 6px!important;margin:2px 0!important;gap:4px;font-size:11px}
       #renko-chart-stack:fullscreen .renko-drawing-tools button,#renko-chart-stack:fullscreen .renko-drawing-tools select{min-height:28px!important;height:28px!important;padding:3px 7px!important;font-size:11px!important}
@@ -1585,7 +1643,21 @@
       #renko-chart-stack:fullscreen #renko-rsi-chart,#renko-chart-stack:fullscreen .renko-study-canvas{height:clamp(75px,10vh,110px)!important;margin:0!important}
       #renko-chart-stack:fullscreen .renko-study-body>small{display:none}
       @media(max-width:650px){#renko-chart-stack .renko-chart-fold>summary{flex-wrap:wrap;gap:5px}}
-      @media(max-width:700px){#renko-chart-stack:fullscreen #renko-chart-rail{grid-template-columns:repeat(2,minmax(0,1fr));max-height:105px}#renko-chart-stack:fullscreen #renko-chart-toolbar{max-height:200px}#renko-chart-stack:fullscreen #renko-chart-scroll-body{overflow:auto}}
+      @media(max-width:700px){#renko-chart-stack:fullscreen #renko-chart-rail{grid-template-columns:repeat(2,minmax(0,1fr));max-height:none}#renko-chart-stack:fullscreen #renko-chart-toolbar{max-height:none}#renko-chart-stack:fullscreen #renko-chart-scroll-body{overflow:visible}#renko-chart-stack:fullscreen #renko-chart{height:60vh!important;min-height:320px!important}}
+      .renko-history-navigation{box-sizing:border-box;padding:4px 8px;background:#172132;border:1px solid #334154;border-radius:5px;color:#a7bad4;flex:none;margin:4px 0}
+      .renko-history-navigation>small{display:block;font:11px/1.3 Arial;margin-bottom:3px}
+      .renko-history-track{position:relative;height:16px;background:#263449;border:1px solid #415976;border-radius:5px;touch-action:none}
+      .renko-history-scrollbar{position:absolute;inset:0;height:16px;overflow-x:scroll;overflow-y:hidden;scrollbar-width:none;outline-offset:2px}
+      .renko-history-thumb{position:absolute;top:2px;bottom:2px;min-width:24px;background:#719fe8;border:1px solid #a7c8ff;border-radius:4px;cursor:grab;touch-action:none}
+      .renko-history-thumb:active{cursor:grabbing}
+      .renko-history-scrollbar::-webkit-scrollbar{display:none}
+      .renko-history-scrollbar::-webkit-scrollbar-thumb{background:#719fe8;border:2px solid #263449;border-radius:6px}
+      #renko-chart-stack:fullscreen .renko-candle-inspection{max-width:100%}
+      #renko-chart-stack:fullscreen .renko-inspection-body{max-height:none;overflow:visible}
+      #renko-chart-stack:fullscreen{scrollbar-color:#719fe8 #263449}
+      #renko-chart-stack:fullscreen::-webkit-scrollbar{width:12px;background:#263449}
+      #renko-chart-stack:fullscreen::-webkit-scrollbar-thumb{background:#719fe8;border:2px solid #263449;border-radius:6px}
+      #renko-chart-stack:fullscreen .renko-history-navigation{position:fixed;left:8px;right:20px;bottom:4px;z-index:55;margin:0;box-shadow:0 -2px 8px #0006}
     `;document.head.append(chartLayoutStyle);
     const supertrendVisuals=document.createElement('details');supertrendVisuals.id='renko-supertrend-visuals';supertrendVisuals.innerHTML='<summary>Visuals · Supertrend labels</summary><div style="display:flex;gap:20px;flex-wrap:wrap;padding:10px 0"><label><input type="checkbox" id="renko-show-one-minute-label"> <span id="renko-primary-label-caption">Execution-timeframe Supertrend label</span></label><label><input type="checkbox" id="renko-show-five-minute-label"> Optional higher-timeframe Supertrend label</label></div>';el('chart-stack').before(supertrendVisuals);
     const pointerPreferencesKey='sector-pulse:supertrend-label-visuals-v1';
@@ -1646,7 +1718,7 @@
     new ResizeObserver(()=>{if(lastRunner)paintAssessment();}).observe(el('chart'));
     setInterval(()=>{if(lastRunner)paintAssessment();paintChartControls();paintSupertrendPointers();},1000);
     let journalRows=[];
-    let sessionBreaks=null,runnerStartPointer=null;
+    let sessionBreaks=null,runnerStartPointer=null,chartHistoryNavigation=null;
     let historyRows=[],historyKey='',historyRevision='',lastLoadAt=0,eventPage=0,allEvents=[],currentPlotted=[];
     let runnerStatusFresh=false,overrideBusy=false,overrideAttempt=null,toggleBusy=false,owned=false,version=0,busy=false,chart,candles,volumeSeries,line,liveSupertrendLine,fiveMinuteLine,ema10Line,ema30Line,ema100Line,syntheticLine,lastKey='',running=false,searchTimer,searchVersion=0,prefsSavedAt=0,prefsTimer,latestSignalIndex=null,plottedCount=0;
     const zoneSeries=[];let zoneBands,visibleZones={supply:null,demand:null};let zoneRows=[],zoneError="Five-minute zones awaiting source history";
@@ -1861,7 +1933,7 @@
     let chartBasisPreview=false,chartBasisKey='',chartParity=null,confirmedRevision=null;
     const basisLabel=document.createElement('label');basisLabel.className='field';basisLabel.textContent='Chart calculation source';
     const basisSelect=document.createElement('select');basisSelect.id='renko-chart-basis';basisSelect.setAttribute('aria-label','Chart calculation source');
-    basisSelect.add(new Option('Selected instrument · active runner when matching','runner'));basisSelect.add(new Option('Draft preview · no execution','draft'));basisLabel.append(basisSelect);
+    basisSelect.add(new Option('Selected instrument · active or last recorded run','runner'));basisSelect.add(new Option('Draft preview · no execution','draft'));basisLabel.append(basisSelect);
     const basisNote=document.createElement('div');basisNote.id='renko-chart-basis-note';basisNote.setAttribute('role','status');basisNote.style.cssText='flex-basis:100%;padding:8px 10px;border:1px solid #789bc5;border-radius:5px;color:#d1d4dc;font-size:12px';
     const healthNote=document.createElement('div');healthNote.id='renko-feed-health';healthNote.setAttribute('role','status');healthNote.style.cssText='flex-basis:100%;font-size:12px;color:#a9bbcd;padding:6px 0';
     el('chart-toolbar').append(basisLabel,basisNote,healthNote);
@@ -1913,6 +1985,8 @@
       }catch(error){timeframeNote.textContent='Timeframe change not applied: '+error.message;el('action-error').textContent=error.message;el('action-error').hidden=false;}
       finally{timeframeBusy=false;chartTimeframe.disabled=false;}
     });
+    function chartWheelPolicy(){const pageScroll=!!document.fullscreenElement;chart?.applyOptions({handleScale:{mouseWheel:!pageScroll},handleScroll:{mouseWheel:!pageScroll,vertTouchDrag:!pageScroll}});chartHistoryNavigation?.sync();}
+    document.addEventListener('fullscreenchange',chartWheelPolicy);
     el('reset-chart').onclick=()=>{if(chart)el('readable-chart').onclick();};el('readable-chart').onclick=()=>{if(!chart||!plottedCount)return;const view=readableChartViewport(el('chart').clientWidth,el('chart').clientHeight,plottedCount);chart.applyOptions({width:el('chart').clientWidth,height:el('chart').clientHeight});chart.priceScale('right').applyOptions({autoScale:true,scaleMargins:view.scaleMargins});chart.timeScale().applyOptions({rightOffset:view.rightOffset,barSpacing:view.spacing});const range=isMotilal?{from:Math.min(view.range.from,plottedCount-Math.ceil(el("chart").clientWidth/view.spacing)),to:view.range.to}:view.range;const latestTime=currentPlotted.at(-1)?.time,x=Number.isFinite(latestTime)?chart.timeScale().timeToCoordinate(latestTime):null,latest=Number.isFinite(x)?Math.round(chart.timeScale().coordinateToLogical(x)):null;if(Number.isFinite(latest)){const shift=latest-(plottedCount-1);range.from+=shift;range.to+=shift;}chart.timeScale().setVisibleLogicalRange(range);rsiChart?.timeScale().setVisibleLogicalRange(range);positionAssessment();};el('fit-chart').onclick=()=>chart?.timeScale().fitContent();el('full-chart').onclick=()=>{const target=el('chart-stack');if(document.fullscreenElement)document.exitFullscreen();else target.requestFullscreen();};
     let inspectionCard=null,inspectionCardKey='',inspectionPinnedTime=null;
     function renderCandleInspection(time){
@@ -1922,7 +1996,7 @@
       const plotted=currentPlotted.find(c=>c.time===time),preview=statusFrame?.display_analysis;
       const forming=plotted?.source_timestamp!=null?false:time>(historyRows.filter(r=>!r.is_forming).at(-1)?.timestamp??Infinity);
       const evidenceRows=forming&&plotted?[...historyRows,{...plotted,...(preview?.timestamp===time?preview:{}),timestamp:time,rsi14:rsiPoints.get(time),provisional:true}]:historyRows;
-      const model=candleInspection({time,symbol:el('symbol').value,timeframe:chartControl('timeframe').value,settings:context.settings,state:context.basis==='draft'?null:lastRunner,rows:evidenceRows,forming});
+      const model=candleInspection({time,brick:plotted?.source_timestamp!=null?plotted:null,symbol:el('symbol').value,timeframe:chartControl('timeframe').value,settings:context.settings,state:context.basis==='draft'?null:lastRunner,rows:evidenceRows,forming});
       const key=JSON.stringify(model);if(key===inspectionCardKey)return;inspectionCardKey=key;
       if(!inspectionCard){
         inspectionCard=document.createElement('details');inspectionCard.className='renko-candle-inspection';inspectionCard.id='renko-candle-inspection';
@@ -1936,9 +2010,14 @@
         }
       }
       inspectionCard.hidden=false;
-      inspectionCard.querySelector('summary').textContent='Candle inspection · '+stamp(time)+' IST · '+(forming?'forming':'completed')+' · '+(model.source.startsWith('Recorded')?'runner record':'reconstructed');
+      inspectionCard.querySelector('summary').textContent='Candle inspection · '+stamp(model.time)+' IST · '+(forming?'forming':'completed')+' · '+(model.source.startsWith('Recorded')?'runner record':'reconstructed');
       const body=inspectionCard.querySelector('.renko-inspection-body');body.replaceChildren();
-      const contextLabel=document.createElement('div');contextLabel.className='renko-inspection-context';contextLabel.textContent=model.configSource+(model.mode?' · '+model.mode:'')+' · '+model.source+'\n'+model.reason;body.append(contextLabel);
+      const contextLabel=document.createElement('div');contextLabel.className='renko-inspection-context';contextLabel.textContent=model.configSource+(model.mode?' · '+model.mode:'')+' · '+model.source+(model.indicatorUnit?'\n'+model.indicatorUnit:'')+'\n'+model.reason;body.append(contextLabel);
+      if(model.execution.length){
+        const execution=document.createElement('div');execution.className='renko-inspection-context';execution.style.whiteSpace='pre-line';
+        execution.textContent=model.execution.map(o=>(o.mode==='PAPER'?'PAPER simulated':'LIVE recorded')+' '+(o.is_entry?'entry':'exit')+' · '+o.side+' '+o.status+' · '+o.filled+' '+(Number(o.filled)===1?'contract':'contracts')+(o.filled_at?' · '+stamp(o.filled_at)+' IST':'')+(Number.isFinite(o.average_price)?' · quoted premium '+price(o.average_price):'')+' · '+o.reason).join('\n');
+        body.append(execution);
+      }
       const checks=document.createElement('div');checks.className='renko-inspection-checks';body.append(checks);
       for(const check of model.checks){
         const row=document.createElement('article');row.className='renko-inspection-rule';
@@ -2169,7 +2248,7 @@ el('ema-momentum-enabled').disabled=lastRunner?.entry_momentum_revision!=='split
           el('chart-description').textContent+=' Solid '+query.timeframe+' Supertrend · dashed '+higherFrame+' Supertrend (completed candles only).';
           el('provisional-status').textContent+=' · Higher timeframe check '+(lastRunner?.config?.higher_timeframe_enabled?'ON · '+lastRunner.config.supertrend_timeframe:'OFF in runner');}
         }catch(error){if(seq!==version)return;zoneError=zoneRows.length?'':'Five-minute overlay unavailable: '+error.message;el('history-health').textContent+=' · Five-minute overlay refresh delayed'+(zoneRows.length?' · previous completed snapshot retained':'');}
-        paintZones(zoneRows,plotted.at(-1)?.time);currentPlotted=plotted;if(!drawingPriceSurface)drawingPriceSurface=chart.addLineSeries({color:"transparent",lineVisible:false,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,autoscaleInfoProvider:()=>null});drawingPriceSurface.setData(plotted.filter(c=>Number.isFinite(c.close)).slice(-1).map(c=>({time:c.time,value:c.close})));if(!drawingTools)drawingTools=mountChartDrawings({chart,candles:drawingPriceSurface,host:el("chart"),scope:()=>[pageParams.get("renkoBroker")||selectedBroker,pageParams.get("renkoAccount")||pageParams.get("brokerAccount")||dhanAccount,el("symbol").value,el("chart-view").value].join(":"),formatPrice:price,storage:root.localStorage});drawingTools.sync();if(!sessionBreaks)sessionBreaks=mountSessionBreaks({chart,host:el('chart'),toolbar:el('chart').previousElementSibling,storage:root.localStorage,scope:()=>[selectedBroker,dhanAccount,el('symbol').value].join(':')});sessionBreaks.set(plotted,d.session_policy||{});if(!runnerStartPointer)runnerStartPointer=mountRunnerStartPointer({chart,host:el('chart'),before:el('candle-readout')});if(!el('chart-view').closest('.renko-drawing-tools')){const styleLabel=el('chart-view').closest('label');styleLabel.firstChild.textContent='Chart ';styleLabel.style.maxWidth='';el('chart-view').setAttribute('aria-label','Chart type');el('chart-view').closest('label').title='Display only. Renko uses equal-sized completed-close bricks and two-box reversals.';el('chart').previousElementSibling.prepend(styleLabel);}paintPriceStyle();paintSelectedIndicators();paintEntryPrice();paintAssessment();el('chart').renkoViewportSnapshot=()=>({range:chart.timeScale().getVisibleLogicalRange(),spacing:chart.timeScale().options().barSpacing,latest:currentPlotted.at(-1)?.time,visible:chart.timeScale().getVisibleRange()});if(inspectedCandleTime!==null){const inspected=plotted.find(c=>c.time===inspectedCandleTime);if(inspected)chart.setCrosshairPosition(inspected.close,inspected.time,candles);}if(inspectionPinnedTime!==null)renderCandleInspection(inspectionPinnedTime);allEvents=events.slice().reverse();if(!same)eventPage=0;eventPage=Math.min(eventPage,Math.max(0,Math.ceil(allEvents.length/20)-1));eventTable();
+        paintZones(zoneRows,plotted.at(-1)?.time);currentPlotted=plotted;if(!drawingPriceSurface)drawingPriceSurface=chart.addLineSeries({color:"transparent",lineVisible:false,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,autoscaleInfoProvider:()=>null});drawingPriceSurface.setData(plotted.filter(c=>Number.isFinite(c.close)).slice(-1).map(c=>({time:c.time,value:c.close})));if(!drawingTools)drawingTools=mountChartDrawings({chart,candles:drawingPriceSurface,host:el("chart"),scope:()=>[pageParams.get("renkoBroker")||selectedBroker,pageParams.get("renkoAccount")||pageParams.get("brokerAccount")||dhanAccount,el("symbol").value,el("chart-view").value].join(":"),formatPrice:price,storage:root.localStorage});drawingTools.sync();if(!sessionBreaks)sessionBreaks=mountSessionBreaks({chart,host:el('chart'),toolbar:el('chart').previousElementSibling,storage:root.localStorage,scope:()=>[selectedBroker,dhanAccount,el('symbol').value].join(':')});sessionBreaks.set(plotted,d.session_policy||{});if(!runnerStartPointer)runnerStartPointer=mountRunnerStartPointer({chart,host:el('chart'),before:el('candle-readout')});if(!chartHistoryNavigation)chartHistoryNavigation=mountChartHistoryNavigation({chart,host:el('chart'),latestTime:()=>currentPlotted.at(-1)?.time});chartHistoryNavigation.sync();chartWheelPolicy();if(!el('chart-view').closest('.renko-drawing-tools')){const styleLabel=el('chart-view').closest('label');styleLabel.firstChild.textContent='Chart ';styleLabel.style.maxWidth='';el('chart-view').setAttribute('aria-label','Chart type');el('chart-view').closest('label').title='Display only. Renko uses equal-sized completed-close bricks and two-box reversals.';el('chart').previousElementSibling.prepend(styleLabel);}paintPriceStyle();paintSelectedIndicators();paintEntryPrice();paintAssessment();el('chart').renkoViewportSnapshot=()=>({range:chart.timeScale().getVisibleLogicalRange(),spacing:chart.timeScale().options().barSpacing,latest:currentPlotted.at(-1)?.time,visible:chart.timeScale().getVisibleRange()});if(inspectedCandleTime!==null){const inspected=plotted.find(c=>c.time===inspectedCandleTime);if(inspected)chart.setCrosshairPosition(inspected.close,inspected.time,candles);}if(inspectionPinnedTime!==null)renderCandleInspection(inspectionPinnedTime);allEvents=events.slice().reverse();if(!same)eventPage=0;eventPage=Math.min(eventPage,Math.max(0,Math.ceil(allEvents.length/20)-1));eventTable();
       }catch(e){if(seq===version){historyDelay(e);if(historyKey&&chartAnalysisReady)paintRsi(null,false,false);if(!historyKey){chartAnalysisReady=false;el('status').textContent=(isMotilal&&/No completed Renko host candles|history is warming up/i.test(e.message)?'Motilal history warming up: ':'Chart history unavailable: ')+e.message;} }}finally{busy=false;if(seq!==version)load();}}
     el('timeframe').addEventListener('change',()=>{
       const paired={'1 minute':'5 minutes','5 minutes':'15 minutes'}[el('timeframe').value];
@@ -2358,5 +2437,5 @@ el('ema-momentum-enabled').disabled=lastRunner?.entry_momentum_revision!=='split
     const count=Math.max(12,Math.min(160,Math.floor(Math.max(120,Number(width)-80-gutter)/spacing)));
     return {range:{from:Math.max(0,total-count),to:total+rightOffset},rightOffset,spacing,scaleMargins:{top:.12,bottom:.20}};
   }
-  if(typeof module!=='undefined')module.exports={priceChartNeedsRefresh,refreshChartViewport,runnerStartContext,chartSessionBreaks,provisionalRenkoBricks,universalStrategyDefaults,activeRunnerFields,uniformRenkoBricks,renkoStudyPoints,ANTI_CHOP_DEFAULTS,antiChopSettings,mountChartDrawings,FAMILY_RULES,familySettings,effectiveFamilySettings,effectiveChartChoice,candleInspection,testedNiftyDefaults,chartDisplaySelection,migrateAtrProfile,entryDecisionText,assessedHigherRows,configurationComparisonRows,mergeChartRows,chartHistoricalEvents,runnerChartContext,runnerChartAlignment,studyHoverValue,coalescedHover,chartSettingsFailure,inheritRsiHtfFields,rsiHtfSettings,rsiHtfSummary,requireRsiHtfSupport,chartSelectionForInstrument,stopAllRenko,DESTINATION_RULES,migrateDestinations,chartSettings,ownedEntryPrice,feedPresentation,feedHealthSummary,lastKnownIndicator,readableChartViewport,deleteConfiguration,configurationLibrary,chooseConfiguration,storeConfiguration,restoredConfigurationFields,fiveMinuteSupertrendPoints,chartControlState,overrideState,costPnlValues,configurationText,hostZones,zoneBandRect,fiveMinuteZoneRows,signalSettings,volumePoints,chartCandles,chartAnalysisAvailable,chartStreamStatus,chartStreamHealth,toggleState,renderTradeTable,pnlValues,executionMarkers,rsiStep,rsiHistory,rsiSma,rsiZone,STRATEGY};
+  if(typeof module!=='undefined')module.exports={mountChartHistoryNavigation,priceChartNeedsRefresh,refreshChartViewport,runnerStartContext,chartSessionBreaks,provisionalRenkoBricks,universalStrategyDefaults,activeRunnerFields,uniformRenkoBricks,renkoStudyPoints,ANTI_CHOP_DEFAULTS,antiChopSettings,mountChartDrawings,FAMILY_RULES,familySettings,effectiveFamilySettings,effectiveChartChoice,candleInspection,testedNiftyDefaults,chartDisplaySelection,migrateAtrProfile,entryDecisionText,assessedHigherRows,configurationComparisonRows,mergeChartRows,chartHistoricalEvents,runnerChartContext,runnerChartAlignment,studyHoverValue,coalescedHover,chartSettingsFailure,inheritRsiHtfFields,rsiHtfSettings,rsiHtfSummary,requireRsiHtfSupport,chartSelectionForInstrument,stopAllRenko,DESTINATION_RULES,migrateDestinations,chartSettings,ownedEntryPrice,feedPresentation,feedHealthSummary,lastKnownIndicator,readableChartViewport,deleteConfiguration,configurationLibrary,chooseConfiguration,storeConfiguration,restoredConfigurationFields,fiveMinuteSupertrendPoints,chartControlState,overrideState,costPnlValues,configurationText,hostZones,zoneBandRect,fiveMinuteZoneRows,signalSettings,volumePoints,chartCandles,chartAnalysisAvailable,chartStreamStatus,chartStreamHealth,toggleState,renderTradeTable,pnlValues,executionMarkers,rsiStep,rsiHistory,rsiSma,rsiZone,STRATEGY};
 })(typeof window==='undefined'?globalThis:window);
