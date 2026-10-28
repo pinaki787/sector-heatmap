@@ -40,7 +40,7 @@ class Broker:
         self.generation = 0; self.stream_error = None; self.account_identity = None
         self.ticks = {}; self.quotes = {}; self.forming_bars = {}; self.frame_seconds = {}
         self.symbols = set(); self.on_tick = on_tick
-        self.history_lock = HISTORY_LOCK; self.history_cache = {}; self.resolved_contracts={}
+        self.history_lock = HISTORY_LOCK; self.history_cache = {}; self.resolved_contracts={};self.paper_stop_contracts={}
 
     def live_enabled(self): return self.delta._gate()
 
@@ -79,7 +79,23 @@ class Broker:
         if not math.isfinite(tick) or tick<=0: raise ValueError('Verified Delta host tick required.')
         return tick
 
-    def contract(self, symbol): return contract_metadata(self.delta.product(symbol),self.delta.clock())
+    def contract(self, symbol):
+        if symbol in self.paper_stop_contracts:return deepcopy(self.paper_stop_contracts[symbol])
+        return contract_metadata(self.delta.product(symbol),self.delta.clock())
+
+    def validate_saved_paper_stop(self,config,position):
+        # Called only after durable Paper entry/Stop ownership has been verified.
+        # Closing that exact simulated contract must not refetch a whole catalog.
+        if config.get('mode')!='PAPER' or config.get('broker')!='DELTA_INDIA' or config.get('execution_route','OPTIONS')!='OPTIONS' or position.get('product')!=PRODUCT:
+            raise ValueError('Saved-contract recovery is restricted to an existing Paper options Stop.')
+        for key in ('tick_size','quantity_multiplier','lot_size','product_id','expiry_epoch'):
+            value=position.get(key)
+            if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:raise ValueError('Saved Paper contract metadata is incomplete.')
+        if not position.get('symbol') or not position.get('quote_currency') or not position.get('settlement_currency'):
+            raise ValueError('Saved Paper contract identity is incomplete.')
+        self.paper_stop_contracts[position['symbol']]=deepcopy(position)
+        return dict(account_identity='PAPER-PUBLIC-DELTA-INDIA')
+
 
     def route_availability(self, config):
         asset = self.underlying(config['underlying'])[13]
@@ -93,6 +109,7 @@ class Broker:
                     message='Delta nearest-expiry ATM long Call/Put; no perpetual execution fallback.')
 
     def validate_config(self, config):
+        self.paper_stop_contracts={}  # Every new activation returns to fresh broker validation.
         self.session_policy(config)
         if not (config.get('renko_confirmation')=='PRICE' and config.get('mode')=='PAPER') and not self.route_availability(config)['available']:raise ValueError('No currently listed Delta Call/Put pair for this signal instrument; no perpetual execution fallback.')
         if config.get('mode')=='PAPER':

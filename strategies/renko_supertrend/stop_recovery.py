@@ -4,11 +4,11 @@ from copy import deepcopy
 def paper_stop_identity(state):
     c=state.get("config") or {};p=state.get("position") or {}
     if not (state.get("schema")==1 and state.get("run_id") and state.get("account_identity")
-            and state.get("status") in ("DRAINING","RECOVERY_REQUIRED")
+            and state.get("status") in ("DRAINING","RECOVERY_REQUIRED","STOP_RECOVERY_BLOCKED","BLOCKED")
             and state.get("squareoff_requested") is True and state.get("accepting_entries") is False
             and not state.get("pending") and not state.get("positions")
             and c.get("mode")=="PAPER" and c.get("broker")=="DELTA_INDIA"
-            and c.get("strategy_basis")=="RENKO" and c.get("renko_confirmation")=="PRICE"
+            and c.get("execution_route","OPTIONS")=="OPTIONS" and c.get("strategy_basis")=="RENKO" and c.get("renko_confirmation")=="PRICE"
             and p.get("exit_requested") is True and p.get("exit_reason")=="MANUAL_SQUARE_OFF"
             and p.get("run_id")==state["run_id"] and p.get("underlying_symbol")==c.get("underlying")
             and isinstance(p.get("quantity"),(int,float)) and not isinstance(p.get("quantity"),bool)

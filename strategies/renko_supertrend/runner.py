@@ -777,7 +777,7 @@ class Runner(BaseRunner):
                 saved=json.loads(self.path.read_text())
                 if paper_stop_identity(saved)!=paper_stop_identity(self.state):
                     raise ValueError('Paper Stop ownership changed during recovery.')
-                context=self.adapter.validate_config(self.state['config'])
+                context=self.adapter.validate_saved_paper_stop(self.state['config'],self.state['position']) if hasattr(self.adapter,'validate_saved_paper_stop') else self.adapter.validate_config(self.state['config'])
                 if context.get('account_identity')!=self.state.get('account_identity'):
                     raise ValueError('Paper Stop account identity changed; recovery blocked.')
                 self.file_lock=handle
