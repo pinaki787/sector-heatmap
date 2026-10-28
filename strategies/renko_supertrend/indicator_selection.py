@@ -44,5 +44,5 @@ def qualify(c, close, fast, slow, direction, allowed, widening, reversal, rsi, t
         if not (close>third if bullish else close<third) or prior is not None and not (prior>third if bullish else prior<third):return direction,False,'WAITING_EMA_THIRD'
     if c['ema_widening_enabled'] and not widening:return direction,False,'WAITING_WIDENING'
     if c['supertrend_enabled'] and not c['ema_fast_enabled'] and not c['ema_slow_enabled'] and not third_enabled and not c['ema_widening_enabled']:
-        if reversal != ('BULLISH' if bullish else 'BEARISH'):return direction,False,'WAITING_SUPERTREND_REVERSAL'
+        if not c.get('supertrend_slope_enabled') and reversal != ('BULLISH' if bullish else 'BEARISH'):return direction,False,'WAITING_SUPERTREND_REVERSAL'
     return direction,True,'QUALIFIED'

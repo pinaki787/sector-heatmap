@@ -48,8 +48,8 @@ class Service:
         self.adoptions.guard(self.runner)
 
     def chart_config(self, query):
-        raw={k:query[k][0] for k in settings({}) if k in query}
-        for key,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        raw={k:(query[k][0].lower()=='true' if isinstance(default,bool) else query[k][0]) for k,default in settings({}).items() if k in query}
+        for key,default in [('renko_brick_exit_enabled','false'),('anti_chop_enabled','false'),('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
         carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
         if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
         deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
@@ -60,7 +60,7 @@ class Service:
         exits=indicator_exit_settings({key:(query.get(key) or [str(default)])[0].lower()=='true' for key,default in exit_defaults.items()})
         route=(query.get('execution_route') or ['OPTIONS'])[0]
         if route not in ('OPTIONS','DELTA_PERPETUAL'):raise ValueError('Choose Delta options or perpetual futures explicitly.')
-        config=dict(execution_route=route,**settings(raw),**exits,**exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]}),underlying=(query.get('symbol') or [''])[0],timeframe=(query.get('timeframe') or ['5 minutes'])[0],session_deadline=deadline,carry_policy=carry,broker='DELTA_INDIA')
+        config=dict(execution_route=route,**{**settings(raw),**exits},**exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]}),underlying=(query.get('symbol') or [''])[0],timeframe=(query.get('timeframe') or ['5 minutes'])[0],session_deadline=deadline,carry_policy=carry,broker='DELTA_INDIA')
         if self.instrument and config['underlying']!=self.instrument:raise ValueError('Select this instance instrument or create another instance.')
         from .chart_destinations import query_settings
         config.update(query_settings({**query,'broker':[self.execution.account['broker'] if hasattr(self,'execution') else 'DELTA_INDIA']}))
@@ -83,7 +83,40 @@ class Service:
         return dict(calculate(rows,spec,300,now),symbol=symbol,
                     source='Selected account broker completed OHLC; Wilder ATR reference sizing')
 
+    def confirmed_chart(self, query, requested_run):
+        from .confirmed_feed import bind_confirmed
+        symbol=(query.get('symbol') or [''])[0]
+        timeframe=(query.get('timeframe') or ['5 minutes'])[0]
+        if self.instrument and symbol!=self.instrument:
+            raise ValueError('Select this instance instrument or create another instance.')
+        source=bind_confirmed(self.runner,requested_run,symbol,timeframe)
+        rows=source.pop('rows')
+        if not rows:
+            raise ValueError('Confirmed runner history unavailable; previous chart retained.')
+        engine=source.pop('_engine'); config=source.pop('_config')
+        history=dict(requested_from='runner anchor',requested_to='recorded candle',
+            display_oldest=rows[0]['timestamp'],display_latest=rows[-1]['timestamp'],
+            display_count=len(rows),initialization_bars=max(0,source['count']-len(rows)),
+            source='Shared confirmed runner indicator snapshot · retained window',
+            anchor_policy='Confirmed recurrence and OHLC published by the runner owner.',
+            intrabar_history='Provisional live previews never change confirmed state.',
+            analysis_revision=source['revision'],history_error=None,
+            data_quality={'analysis_available':True})
+        return dict(symbol=symbol,timeframe=timeframe,settings={k:v for k,v in config.items() if not k.startswith('_chart')},
+            tick_size=self.chart_broker.host_tick_size(symbol),rows=rows,incremental=False,
+            history=history,latest=rows[-1],initialization_anchor=engine['anchor'],
+            host_bar_count=engine['state']['count'],forming=[],history_error=None,
+            data_quality=history['data_quality'],confirmed_source=source,
+            session_policy=self.chart_broker.session_policy(config),
+            option_route=dict(available=None,message='Execution preflight verifies current product availability separately from confirmed price chart publication.'),
+            squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',
+            parity='Recorded runner confirmed indicators.',intrabar_entries=bool(config.get('intrabar_entries')),
+            provisional_candidate=None,provisional_error=None)
+
     def chart(self, query):
+        requested_run=(query.get('confirmed_run_id') or [''])[0]
+        if requested_run:
+            return self.confirmed_chart(query,requested_run)
         config=self.chart_config(query); now=time.time(); tz=ZoneInfo('Asia/Kolkata')
         today=datetime.fromtimestamp(now,tz).date(); preset=(query.get('history_preset') or ['45'])[0]
         if preset=='custom':
@@ -108,14 +141,25 @@ class Service:
             for frame in mtf_rsi.frames(config):
                 try:config['_chart_rsi_rows'][frame]=self.chart_broker.candles(dict(config,timeframe=frame,history_start=begin))
                 except Exception:config['_chart_rsi_rows'][frame]=[]  # Missing native evidence blocks the enabled slot.
-        result=analysis(candles,config,tick,retain=None)
+        context_key=json.dumps(self.chart_config(query),sort_keys=True)
+        # Serialize identical chart calculations and continue the same confirmed
+        # recurrence. Bound display payloads, not initialization history.
+        with self.lock:
+            if not hasattr(self,'chart_calculation_lock'):self.chart_calculation_lock=threading.RLock()
+            calculation_lock=self.chart_calculation_lock
+        with calculation_lock:
+            with self.lock:previous=self.context.get(context_key)
+            saved=previous[0] if previous and candles and previous[0]['anchor']==candles[0]['timestamp'] else None
+            result=analysis(candles,config,tick,saved=saved,retain=5000)
+            with self.lock:
+                self.context[context_key]=(result,config,tick)
+                for old in list(self.context)[:-2]:self.context.pop(old,None)
         display_start=datetime.combine(first,datetime.min.time(),tz).timestamp()
         rows=[r for r in result['rows'] if r['timestamp']>=display_start]
         forming=[c for c in candles if c.get('is_forming')]
         revision=hashlib.sha256(json.dumps([config,rows],sort_keys=True).encode()).hexdigest()
-        with self.lock: self.context[json.dumps(self.chart_config(query),sort_keys=True)]=(result,config,tick)
         self.chart_broker.start()
-        history=dict(requested_from=first.isoformat(),requested_to=last.isoformat(),display_oldest=rows[0]['timestamp'] if rows else None,display_latest=rows[-1]['timestamp'] if rows else None,display_count=len(rows),initialization_bars=sum(c['timestamp']<display_start for c in candles),source='Delta India public REST OHLCV; backend public WebSocket forming candles.',anchor_policy='Replay selected history from explicit warmup anchor.',intrabar_history='Forming candles are provisional; no historical replay into execution.',analysis_revision=revision,history_error=None)
+        history=dict(requested_from=first.isoformat(),requested_to=last.isoformat(),display_oldest=rows[0]['timestamp'] if rows else None,display_latest=rows[-1]['timestamp'] if rows else None,display_count=len(rows),initialization_bars=sum(c['timestamp']<display_start for c in candles),source='Delta India public REST OHLCV; backend public WebSocket forming candles.',anchor_policy='Full selected history initializes indicators; chart displays at most the latest 5,000 completed source candles. Choose a narrower custom range to inspect older periods.',intrabar_history='Forming candles are provisional; no historical replay into execution.',analysis_revision=revision,history_error=None)
         return dict(symbol=config['underlying'],timeframe=config['timeframe'],settings={k:v for k,v in config.items() if not k.startswith('_chart')},tick_size=tick,rows=rows,incremental=False,history=history,latest=rows[-1] if rows else None,initialization_anchor=result['anchor'],host_bar_count=result['state']['count'],forming=forming,history_error=None,session_policy=self.chart_broker.session_policy(config),option_route=self.chart_broker.route_availability(config),squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',parity='Shared supplied Renko engine; broker candle sources differ.',intrabar_entries=(query.get('intrabar_entries') or ['false'])[0]=='true',provisional_candidate=None,provisional_error=None)
 
     def get(self, handler, path):

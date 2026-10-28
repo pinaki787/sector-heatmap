@@ -94,14 +94,14 @@ class Broker:
 
     def validate_config(self, config):
         self.session_policy(config)
-        if not self.route_availability(config)['available']:raise ValueError('No currently listed Delta Call/Put pair for this signal instrument; no perpetual execution fallback.')
+        if not (config.get('renko_confirmation')=='PRICE' and config.get('mode')=='PAPER') and not self.route_availability(config)['available']:raise ValueError('No currently listed Delta Call/Put pair for this signal instrument; no perpetual execution fallback.')
         if config.get('mode')=='PAPER':
             identity='PAPER-PUBLIC-DELTA-INDIA'
         else:
             identity = self.execution.authenticate(); self.account_identity = identity
             self.positions(); self.orders()
         self.subscribe(config['underlying'],TIMEFRAMES[config['timeframe']])
-        self.warm_options(config)
+        if not (config.get('renko_confirmation')=='PRICE' and config.get('mode')=='PAPER'):self.warm_options(config)
         return dict(broker='DELTA_INDIA',account_identity=identity,underlying=config['underlying'],
                     execution='Exact perpetual LONG/SHORT' if config.get('execution_route')==FUTURES_ROUTE else 'Nearest-expiry ATM long Call/Put',order_type='Marketable LIMIT IOC',
                     product=FUTURES_PRODUCT if config.get('execution_route')==FUTURES_ROUTE else PRODUCT,price_source='Perpetual last-trade candles',

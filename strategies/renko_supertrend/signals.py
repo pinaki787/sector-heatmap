@@ -1,4 +1,5 @@
-from . import exit_indicators, market_structure, indicator_families, manual_trend
+from . import anti_chop
+from . import exit_indicators, market_structure, indicator_families, manual_trend, calibrated, zone_entry
 """Sequential port of source.pine, including Pine-style missing-value warm-up."""
 from copy import deepcopy
 from .retest import evaluate as retest_evaluate
@@ -9,12 +10,15 @@ from zoneinfo import ZoneInfo
 
 from .indicator_selection import DEFAULTS as INDICATOR_DEFAULTS, validate as validate_indicators, qualify as qualify_indicators
 
-DEFAULTS = dict(**manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
+DEFAULTS = dict(supertrend_slope_enabled=False, supertrend_slope_bars=1, supertrend_slope_min_atr=0.0, strategy_basis='LEGACY', renko_brick_exit_enabled=False, **anti_chop.DEFAULTS, **zone_entry.DEFAULTS, **calibrated.DEFAULTS, **manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
                 use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, rsi_level_enabled=False, rsi_level_mode='THRESHOLD', rsi_bullish_min=60.0, rsi_bullish_max=80.0, rsi_bearish_min=35.0, rsi_bearish_max=40.0, rsi_bullish_above=50.0, rsi_bearish_below=40.0, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
 
 
 def settings(payload):
     payload=indicator_families.restore(payload)
+    if payload.get('strategy_basis','LEGACY') not in ('LEGACY','RENKO','CANDLESTICK'):raise ValueError('Choose Renko bricks or Candlestick strategy basis.')
+    if not isinstance(payload.get('renko_brick_exit_enabled',False),bool):raise ValueError('Renko brick exit must be a boolean.')
+    if payload.get('strategy_basis')=='RENKO' and payload.get('intrabar_entries'):raise ValueError('Renko strategy requires completed bricks; turn off intrabar entries.')
     c = {key: payload.get(key, default) for key, default in DEFAULTS.items()}
     c=indicator_families.apply(c)
     for key in ('atr_length', 'adx_length', 'adx_smoothing', 'widening_window'):
@@ -51,9 +55,44 @@ def settings(payload):
     if c['rsi_level_mode'] not in ('THRESHOLD','BETWEEN'):raise ValueError('Choose RSI Threshold or Between mode.')
     if not c['rsi_bearish_min']<c['rsi_bearish_max']<=c['rsi_bullish_min']<c['rsi_bullish_max']:
         raise ValueError('RSI ranges need minimum below maximum; bearish maximum must not exceed bullish minimum.')
+    if not isinstance(c['supertrend_slope_enabled'],bool):raise ValueError('Supertrend slope switch must be boolean.')
+    raw=c['supertrend_slope_bars']
+    try:
+        bars=int(raw)
+        if isinstance(raw,bool) or float(raw)!=bars or not 1<=bars<=100:raise ValueError()
+    except (ValueError,TypeError,OverflowError):raise ValueError('Supertrend slope lookback must be 1 to 100 completed observations.') from None
+    c['supertrend_slope_bars']=bars
+    raw=c['supertrend_slope_min_atr']
+    try:
+        value=float(raw)
+        if isinstance(raw,bool) or not math.isfinite(value) or not 0<=value<=100:raise ValueError()
+    except (ValueError,TypeError,OverflowError):raise ValueError('Minimum Supertrend slope must be 0 to 100 ATR.') from None
+    c['supertrend_slope_min_atr']=value
+    c.update(anti_chop.settings(c))
     c.update(manual_trend.settings(c))
+    c.update(calibrated.settings(c))
+    c.update(zone_entry.settings(c))
     validate_indicators(c)
     return c
+
+
+def supertrend_slope_observe(state, config, value, direction, atr):
+    """Causal slope per completed basis observation; flip jumps never qualify."""
+    bars=config['supertrend_slope_bars']
+    history=state.setdefault('supertrend_slope_history',[])
+    reference=history[-bars] if len(history)>=bars else None
+    valid=value is not None and atr is not None and atr>0
+    delta=value-reference[0] if valid and reference and reference[0] is not None else None
+    same=bool(reference and all(row[1]==direction for row in history[-bars:]))
+    normalized=delta/(atr*bars) if delta is not None else None
+    minimum=config['supertrend_slope_min_atr']
+    bullish=direction<0
+    allowed=bool(normalized is not None and same and (normalized>minimum if bullish else normalized < -minimum))
+    gate=dict(enabled=config['supertrend_slope_enabled'],allowed=allowed,slope_atr=normalized,
+              delta=delta,lookback=bars,minimum_atr=minimum,
+              reason='PASS' if allowed else 'WAITING_SUPERTREND_SLOPE_HISTORY' if normalized is None else 'WAITING_SUPERTREND_SLOPE')
+    history.append([value,direction]);state['supertrend_slope_history']=history[-100:]
+    return gate
 
 
 def completed(candles):
@@ -119,7 +158,7 @@ def ema_setup(state, close, direction, allowed, window, config=None, reversal=No
                 entry_buy_signal=entry == 'BULLISH', entry_sell_signal=entry == 'BEARISH')
 
 
-def project_lifecycle(state, timestamp, entry_direction, reversal_direction, seconds=300, close=None, ema10=None, deadline='15:15'):
+def project_lifecycle(state, timestamp, entry_direction, reversal_direction, seconds=300, close=None, ema10=None, deadline='15:15', reset_qualification=True):
     """Historical signal projection, never evidence of an actual broker fill."""
     position = state.get('projected_position')
     event = None
@@ -146,7 +185,7 @@ def project_lifecycle(state, timestamp, entry_direction, reversal_direction, sec
         position = dict(direction=entry_direction, entry_timestamp=timestamp)
         event = 'BUY' if entry_direction == 'BULLISH' else 'SELL'
         reason = 'CONFIRMED_EMA_QUALIFICATION'
-    if event and event.endswith('EXIT'):
+    if reset_qualification and event and event.endswith('EXIT'):
         state['ema_qualified'] = None  # Exit consumes this bar; a later flat-state setup can re-arm.
     state['projected_position'] = position
     return dict(lifecycle_event=event, lifecycle_reason=reason, lifecycle_event_at=(deadline_at if reason and reason.startswith('TIMED_') and not overdue else timestamp+seconds) if event else None, projected_position=deepcopy(position),
@@ -158,9 +197,11 @@ class Engine:
         config=indicator_families.apply(config or {})
         self.raw_config = dict(config)
         self.config = settings(config or {})
+        anti_chop.compatible({**(config or {}),**self.config})
+        if not config.get('chart_entry_guards'):anti_chop.standalone_rules({**config,**self.config})
         self.chart_zone_rows=(config or {}).get('_chart_zone_rows',[])
         self.chart_zone_timeline=[]
-        if (config or {}).get('chart_zone_target_enabled'):
+        if (config or {}).get('chart_zone_target_enabled') or (config or {}).get('chart_zone_entry_filter'):
             from . import zone_target
             zone_target.zones(self.chart_zone_rows,self.chart_zone_timeline)
         self.chart_zone_times=[r['timestamp']+300 for r in self.chart_zone_rows]
@@ -186,6 +227,12 @@ class Engine:
         self.state = deepcopy(state) if state is not None else dict(rc=None, ro=None, synthetic_atr=None, upper=None, lower=None, st=None, direction=1, previous=None, count=0)
 
     def update(self, candle):
+        if self.raw_config.get("strategy_basis") == "RENKO":
+            from .brick_basis import update
+            return update(self, candle)
+        return self._update_candle(candle)
+
+    def _update_candle(self, candle):
         rows = completed([candle])
         if not rows:
             return None
@@ -215,11 +262,18 @@ class Engine:
         if steps >= 1:
             s['ro'] = previous_rc
             s['rc'] += (1 if delta > 0 else -1 if delta < 0 else 0) * steps * box
-        rh, rl = max(s['ro'], s['rc']), min(s['ro'], s['rc'])
+        direct = self.raw_config.get('strategy_basis') == 'CANDLESTICK'
+        if direct:
+            s['ro'], s['rc'] = c['open'], c['close']
+            steps = 1
+        rh, rl = (c['high'],c['low']) if direct else (max(s['ro'], s['rc']), min(s['ro'], s['rc']))
         synthetic_tr = max(rh - rl, abs(rh - previous_rc), abs(rl - previous_rc))
         atr = synthetic_tr if s['synthetic_atr'] is None else s['synthetic_atr'] + (synthetic_tr - s['synthetic_atr']) / cfg['atr_length']
+        if direct:
+            atr = host_atr
+            effective = cfg['factor']
         midpoint = (rh + rl) / 2
-        basic_upper, basic_lower = midpoint + effective * atr, midpoint - effective * atr
+        basic_upper, basic_lower = midpoint + effective * (atr or 0), midpoint - effective * (atr or 0)
         pu, pl, pst, pd = s['upper'], s['lower'], s['st'], s['direction']
         upper = basic_upper if pu is None or basic_upper < pu or previous_rc > pu else pu
         lower = basic_lower if pl is None or basic_lower > pl or previous_rc < pl else pl
@@ -240,7 +294,7 @@ class Engine:
         dx = abs(pdi - mdi) / (1 if total == 0 else total) if total is not None else None
         adx_rma = rma(s, 'adx', dx, cfg['adx_smoothing'])
         adx = adx_rma * 100 if adx_rma is not None else None
-        allowed = not cfg['use_adx'] or adx is not None and adx > cfg['adx_threshold']
+        allowed = (not direct or atr is not None) and (not cfg['use_adx'] or adx is not None and adx > cfg['adx_threshold'])
         buy = allowed and direction < 0 and pd > 0
         sell = allowed and direction > 0 and pd < 0
         s.update(rc=s['rc'], ro=s['ro'], synthetic_atr=atr, upper=upper, lower=lower, st=st, direction=direction, previous=c, count=s['count'] + 1)
@@ -286,6 +340,58 @@ class Engine:
         if cfg['manual_trend_enabled']:
             s['manual_trend_rows']=(s.get('manual_trend_rows',[])+[{'timestamp':c['timestamp'],'close':c['close']}])[-cfg['manual_trend_closes']:]
             manual_trend.apply(entry,manual_trend.check(s['manual_trend_rows'],cfg,selected_direction,self.host_seconds))
+        if cfg.get('calibrated_enabled'):
+            s['calibrated_rows']=(s.get('calibrated_rows',[])+[c])[-cfg['calibrated_overlap_pairs']-1:]
+            gate=calibrated.check(s['calibrated_rows'],cfg,self.host_seconds)
+            entry['calibrated_filter']=gate
+            if not gate['allowed']:
+                entry.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic=gate['reason'])
+                s['ema_qualified']=None
+        if cfg.get('zone_entry_enabled') and raw.get('chart_zone_entry_filter') and entry.get('entry_direction'):
+            from bisect import bisect_right
+            j=bisect_right(self.chart_zone_times,c['timestamp']+self.host_seconds)-1
+            known=self.chart_zone_timeline[j] if j>=0 else {}
+            decision=zone_entry.check_known(known,cfg,entry['entry_direction'],c['close'],host_atr)
+            entry['zone_entry_filter']=decision
+            if not decision['allowed']:
+                entry.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic=decision['reason'])
+                if cfg['zone_entry_rearm']:s['ema_qualified']=None;s['chart_qualified']=None
+        if cfg.get('anti_chop_enabled'):
+            gate=anti_chop.observe(s,c,{**cfg,'timeframe':self.raw_config.get('timeframe'),'intrabar_entries':self.raw_config.get('intrabar_entries',False)},selected_direction,self.host_seconds)
+            if cfg.get('anti_chop_role')=='Entry':
+                anti_chop.generate_entry(entry,gate,s)
+                selected_direction=gate.get('direction','NEUTRAL')
+            else:anti_chop.apply(entry,gate)
+            if not gate['allowed']:s['ema_qualified']=None;s['chart_qualified']=None
+        external=raw.get('_external_anti_chop') or {}
+        if external:
+            gate=external.get(selected_direction) or external['BULLISH']
+            if raw.get('_external_anti_role')=='Entry':
+                anti_chop.generate_entry(entry,gate,s)
+                selected_direction=gate.get('direction','NEUTRAL')
+            else:anti_chop.apply(entry,gate)
+            if not gate['allowed']:s['ema_qualified']=None
+        external_manual=(raw.get('_external_manual') or {}).get(selected_direction)
+        if external_manual:manual_trend.apply(entry,external_manual)
+        external_calibrated=raw.get('_external_calibrated')
+        if external_calibrated:
+            entry['calibrated_filter']=external_calibrated
+            if not external_calibrated['allowed']:
+                entry.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic=external_calibrated['reason'])
+                s['ema_qualified']=None
+        if raw.get('_brick_input') and cfg['supertrend_enabled'] and ((c['close']>c['open']) != (direction<0)):
+            entry.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic='WAITING_BRICK_SUPERTREND_ALIGNMENT')
+            s['ema_qualified']=None
+        slope_gate=supertrend_slope_observe(s,cfg,st,direction,atr)
+        entry['supertrend_slope_filter']=slope_gate
+        if cfg['supertrend_slope_enabled'] and not slope_gate['allowed']:
+            entry.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic=slope_gate['reason'])
+            s['ema_qualified']=None;s['chart_qualified']=None
+        # Projection bookkeeping must not change executable indicator qualification.
+        projected_entry = (selected_direction if raw.get('_brick_input') and entry['entry_qualified']
+                           else entry['entry_direction'])
+        if raw.get('_suppress_projection_entry'):
+            projected_entry = None
         if any(key in raw for key in exit_indicators.DEFAULTS):
             held=s.get('projected_position')
             exit_signal={**c,**entry,**rsi_observation,'adx':adx,'exit_previous_ema_gap':prior_gap,'supertrend_cross_direction':'BULLISH' if direction<0 and pd>0 else 'BEARISH' if direction>0 and pd<0 else None}
@@ -293,6 +399,8 @@ class Engine:
                 s['exit_structure_rows']=(s.get('exit_structure_rows',[])+[c])[-1000:]
                 if held:exit_signal['exit_market_structure']=market_structure.check(s['exit_structure_rows'],held['direction'],self.host_seconds,c['timestamp']+self.host_seconds)
             exit_reason=exit_indicators.reason({**cfg,**raw},exit_signal,held['direction']) if held else None
+            if held and raw.get('_brick_input') and raw.get('renko_brick_exit_enabled') and ((c['close']<c['open']) if held['direction']=='BULLISH' else (c['close']>c['open'])):
+                exit_reason='OPPOSITE_RENKO_BRICK_CLOSE'
             zone_event_at=None
             if held and raw.get('chart_zone_target_enabled') and not exit_reason:
                 from . import zone_target
@@ -312,13 +420,13 @@ class Engine:
             period=raw.get('ema_exit_length',10)
             previous_exit=s.get('projection_exit_ema')
             s['projection_exit_ema']=c['close'] if previous_exit is None else 2/(period+1)*c['close']+(1-2/(period+1))*previous_exit
-            projection=project_lifecycle(s,c['timestamp'],entry['entry_direction'],reversal,self.host_seconds,c['close'],s['projection_exit_ema'] if raw.get('ema_exit_enabled',False) else None,self.deadline)
+            projection=project_lifecycle(s,c['timestamp'],projected_entry,reversal,self.host_seconds,c['close'],s['projection_exit_ema'] if raw.get('ema_exit_enabled',False) else None,self.deadline,reset_qualification=not raw.get('_brick_input'))
             if projection.get('lifecycle_reason')=='OPPOSITE_CONFIRMED_SUPERTREND':
                 projection['lifecycle_reason']=exit_reason
                 if zone_event_at is not None:projection['lifecycle_event_at']=zone_event_at
             if projection.get('lifecycle_reason')=='EMA10_CONFIRMED_BREACH':projection['lifecycle_reason']='EMA'+str(period)+'_CONFIRMED_BREACH'
         else:
-            projection = project_lifecycle(s, c['timestamp'], entry['entry_direction'], ('BULLISH' if buy else 'BEARISH' if sell else None) if cfg['supertrend_enabled'] else entry['entry_direction'], self.host_seconds,c['close'],entry['ema10'] if cfg['ema_fast_enabled'] and (self.raw_config or {}).get('ema_exit_enabled',True) else None,self.deadline)
+            projection = project_lifecycle(s, c['timestamp'], projected_entry, ('BULLISH' if buy else 'BEARISH' if sell else None) if cfg['supertrend_enabled'] else entry['entry_direction'], self.host_seconds,c['close'],entry['ema10'] if cfg['ema_fast_enabled'] and (self.raw_config or {}).get('ema_exit_enabled',True) else None,self.deadline,reset_qualification=not raw.get('_brick_input'))
 
         if not (cfg['ema_fast_enabled'] or cfg['ema_slow_enabled'] or cfg['ema_third_enabled']) and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='CONFIRMED_SELECTED_INDICATORS'
         if entry.get('retest_signal') and projection.get('lifecycle_event') in ('BUY','SELL'):projection['lifecycle_reason']='EMA10_RETEST_BOUNCE'

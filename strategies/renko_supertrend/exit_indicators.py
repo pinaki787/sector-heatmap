@@ -1,5 +1,5 @@
 """Opt-in completed-candle exit criteria independent of entry selections."""
-DEFAULTS = dict(supertrend_exit_enabled=True, ema_slow_exit_enabled=False,
+DEFAULTS = dict(renko_brick_exit_enabled=False, supertrend_exit_enabled=True, ema_slow_exit_enabled=False,
                 rsi_exit_enabled=False, ema_widening_exit_enabled=False,
                 adx_exit_enabled=False, market_structure_exit_enabled=False)
 
@@ -15,6 +15,11 @@ def reason(config,sig,direction):
     # Any selected exit can close a position; unselected entry rules cannot.
     opposite='BEARISH' if direction=='BULLISH' else 'BULLISH'
     if sig.get('is_forming'):return None
+    if config.get('strategy_basis')=='RENKO':
+        for event in sig.get('brick_exit_events',[]):
+            if config.get('supertrend_exit_enabled',True) and event.get('raw_supertrend_cross_direction')==opposite:return 'RENKO_ST_EXIT'
+            if config.get('renko_brick_exit_enabled') and event.get('brick_direction')==opposite:return 'OPPOSITE_RENKO_BRICK_CLOSE'
+        if not sig.get('has_completed_brick'):return None
     if config.get('supertrend_exit_enabled',True) and sig.get('supertrend_cross_direction')==opposite:
         return 'RENKO_ST_EXIT'
     close=sig.get('close');slow=sig.get('ema30')

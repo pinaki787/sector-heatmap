@@ -6,9 +6,9 @@ test('host candles preserve exact broker wicks, prices and opening timestamp',()
  const d={rows:[{...bar,high:22570.125,low:22520.075}],forming:[{...bar,timestamp:bar.timestamp+300}]};
  assert.deepEqual(chartCandles(d,'host'),d.rows.concat(d.forming).map(c=>({time:c.timestamp,open:c.open,high:c.high,low:c.low,close:c.close})));
 });
-test('synthetic bodies remain separate and exclude forming host bars',()=>{
- const bars=chartCandles({rows:[bar],forming:[{...bar,timestamp:bar.timestamp+300}]},'synthetic');
- assert.equal(bars.length,1);assert.equal(bars[0].open,bar.synthetic_open);assert.equal(bars[0].close,bar.synthetic_close);assert.equal(bars[0].high,bar.synthetic_close);assert.equal(bars[0].low,bar.synthetic_open);
+test('Renko builds fixed-size close-based bricks and excludes forming bars',()=>{
+ const d={settings:{brick_mode:'Manual',manual_brick:10},rows:[bar,{...bar,timestamp:bar.timestamp+300,close:22585.75}],forming:[{...bar,timestamp:bar.timestamp+600,close:23000}]};
+ const bars=chartCandles(d,'synthetic');assert.equal(bars.length,3);assert.ok(bars.every(b=>b.high-b.low===10));assert.equal(bars.at(-1).close,22580);assert.ok(bars.every(b=>b.source_timestamp===bar.timestamp+300));
 });
 const {toggleState}=require('../renko-supertrend.js');
 const {pnlValues}=require('../renko-supertrend.js');
@@ -17,7 +17,7 @@ test('research BUY and actual runner BUY have distinct evidence and status',()=>
  const historical=[{time:1,text:'BUY',position:'belowBar',shape:'arrowUp',color:'green'}];
  const state={config:{underlying:'BSE:SENSEX-INDEX',timeframe:'1 minute'},execution_signals:[{timestamp:2,direction:'BULLISH',mode:'PAPER',status:'BLOCKED'}]};
  const markers=executionMarkers(historical,state,'BSE:SENSEX-INDEX','1 minute');
- assert.equal(markers[0].text,'');assert.equal(markers.length,1);
+ assert.equal(markers[0].text,'BUY');assert.equal(markers.length,1);
  state.execution_signals.push({timestamp:3,direction:'BULLISH',mode:'PAPER',status:'FILLED'});
  assert.equal(executionMarkers(historical,state,'BSE:SENSEX-INDEX','1 minute')[1].text,'BUY · PAPER · FILLED');
  assert.equal(executionMarkers(historical,state,'NSE:NIFTY50-INDEX','1 minute').length,1);
@@ -63,7 +63,7 @@ test('chart status reports forming-candle failure separately from broker and run
 
 test('actual EMA exit markers use local fill candle and recorded applied period, not current chart lines',()=>{
  const s={config:{underlying:'MCX:TEST',timeframe:'1 minute',mode:'PAPER'},order_history:[{tag:'EXIT1',is_entry:false,filled_at:901,underlying_symbol:'MCX:TEST',status:'FILLED',mode:'PAPER',reason:'EMA10_CONFIRMED_BREACH',submitted_at:900,indicator_snapshot:{settings:{ema_exit_length:10},indicators:{timestamp:600,direction:'BEARISH',ema10:100,ema30:200}}}]};
- const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'EXIT · PAPER · EMA10 · FILLED');
+ const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'SELL EXIT · PAPER · EMA10 · FILLED');
  s.order_history[0].status='PENDING';assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]);
 });
 

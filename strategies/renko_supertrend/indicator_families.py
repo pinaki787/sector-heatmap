@@ -1,6 +1,6 @@
 """Master strategy gates; stored subordinate choices and chart destinations stay independent."""
 FAMILIES={
- 'supertrend':('supertrend_enabled','supertrend_exit_enabled','higher_timeframe_enabled'),
+ 'supertrend':('supertrend_slope_enabled','supertrend_enabled','supertrend_exit_enabled','higher_timeframe_enabled'),
  'ema':('ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled','ema_proximity_enabled','ema_momentum_enabled','retest_enabled','ema_exit_enabled','ema_slow_exit_enabled','ema_widening_exit_enabled'),
  'rsi':('rsi_level_enabled','rsi_slope_enabled','rsi_exit_enabled','rsi_htf_1_enabled','rsi_htf_2_enabled','rsi_htf_3_enabled'),
  'adx':('use_adx','adx_exit_enabled'),
