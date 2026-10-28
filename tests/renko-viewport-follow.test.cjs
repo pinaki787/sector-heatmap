@@ -47,3 +47,14 @@ test('study axis changes cannot feed an old viewport back into the price chart',
  for(const fn of studyCallbacks)fn({from:75,to:115});
  assert.deepEqual(primarySets,[]);
 });
+
+test('price-confirmed chart refreshes from fresh runner brick events without waiting for host close',()=>{
+ const {priceChartNeedsRefresh}=require('../renko-supertrend.js');
+ const context={basis:'runner',runId:'run'},runner={run_id:'run',config:{renko_confirmation:'PRICE'},last_signal:{confirmation_basis:'ORDERED_LIVE_PRICE',timestamp:130}},rows=[{timestamp:100}];
+ assert.equal(priceChartNeedsRefresh(context,runner,rows),true);
+ assert.equal(priceChartNeedsRefresh(context,runner,[{timestamp:130}]),false);
+ assert.equal(priceChartNeedsRefresh(context,runner,rows,false),false);
+ assert.equal(priceChartNeedsRefresh({...context,basis:'draft'},runner,rows),false);
+ assert.equal(priceChartNeedsRefresh({...context,runId:'other'},runner,rows),false);
+ assert.equal(priceChartNeedsRefresh(context,{...runner,last_signal:{timestamp:130}},rows),false);
+});
