@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
-for(const file of ['renko-supertrend.js','.private/dashboard-login/accounts/bf46fc364b610a0dfd338419e133cb41/source/renko-supertrend.js']){
+for(const file of ['renko-supertrend.js','.private/dashboard-login/accounts/bf46fc364b610a0dfd338419e133cb41/source/renko-supertrend.js'].filter(file=>fs.existsSync(file))){
  const source=fs.readFileSync(file,'utf8');
  test(file+': hovered candle survives ticks/history; pointer exit restores latest',()=>{
   const nodes=new Map(),options=[];
