@@ -58,12 +58,13 @@ test('same-source multi-bricks cannot borrow the final sibling assessment',()=>{
  assert.notEqual(bricks[0].time,bricks[1].time);
 });
 
-test('stopped price run uses immutable recorded history while explicit draft remains editable',()=>{
+test('stopped run audit remains immutable while selected timeframe history is recalculated',()=>{
  const {runnerChartContext}=require('../renko-supertrend.js');
  const state={running:false,run_id:'old',confirmed_feed_revision:'shared-confirmed-live-v1',config:{underlying:'BTCUSD',timeframe:'5 minutes',mode:'PAPER',strategy_basis:'RENKO',renko_confirmation:'PRICE',lots:1},last_signal:{confirmation_basis:'ORDERED_LIVE_PRICE',box:56.5}};
  const fields={symbol:'BTCUSD',timeframe:'5 minutes',lots:10,mode:'PAPER'};
  const before=JSON.stringify(state),c=runnerChartContext(fields,state);
- assert.equal(c.basis,'recorded');assert.equal(c.settings.confirmed_run_id,'old');assert.deepEqual(c.history,{});assert.match(c.label,/LAST RECORDED RUN.*STOPPED.*PAPER/);
+ assert.equal(c.basis,'draft');assert.equal(c.settings.confirmed_run_id,undefined);assert.deepEqual(c.history,{});assert.match(c.label,/SELECTED TIMEFRAME/);
+ for(const timeframe of ['30 minutes','5 minutes','1 minute']){const selected=runnerChartContext({...fields,timeframe},state);assert.equal(selected.basis,'draft');assert.equal(selected.settings.confirmed_run_id,undefined);assert.match(selected.label,new RegExp(timeframe));}
  assert.equal(runnerChartContext(fields,state,true).basis,'draft');
  assert.equal(runnerChartContext({...fields,symbol:'ETHUSD'},state).basis,'draft');
  assert.equal(runnerChartContext(fields,{...state,last_signal:{}}).basis,'draft');

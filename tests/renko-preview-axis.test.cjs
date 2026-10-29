@@ -19,7 +19,7 @@ test('preview viewport restoration runs after the chart rebuilds provisional axi
  const start=src.indexOf('    function paintBrickPreview('),end=src.indexOf("      el('brick-preview-status').hidden",start);
  let range={from:20,to:60};const frames=[],host={},scale={getVisibleLogicalRange:()=>({...range}),setVisibleLogicalRange:r=>{range={...r}},options:()=>({barSpacing:12})};
  const chart={uniformRenkoRows:[{time:100,source_timestamp:100,open:90,close:100,box:10}],timeScale:()=>scale,addCandlestickSeries:()=>({setData:()=>{}})};
- const context={chart,chartPreviewPolicy:require('../renko-supertrend.js').chartPreviewPolicy,boundChartContext:()=>({basis:'active'}),historyFailures:0,el:id=>id==='chart'?host:id==='chart-view'?{value:'synthetic'}:{},lastRunner:{config:{renko_confirmation:'PRICE'}},statusFrame:{},provisionalRenkoBricks,requestAnimationFrame:fn=>frames.push(fn),Date,Number,Math};
+ const context={chart,chartPreviewPolicy:require('../renko-supertrend.js').chartPreviewPolicy,boundChartContext:()=>({basis:'active'}),historyFailures:0,chartAnalysisReady:true,el:id=>id==='chart'?host:id==='chart-view'?{value:'synthetic'}:{},lastRunner:{config:{renko_confirmation:'PRICE'}},statusFrame:{},provisionalRenkoBricks,requestAnimationFrame:fn=>frames.push(fn),Date,Number,Math};
  vm.createContext(context);vm.runInContext('let previewBrickSeries=null,previewBrickFillSeries=null,previewViewportVersion=0,previewAxisAnchor=null,previewAxisTimes=[];'+src.slice(start,end)+'}paintBrickPreview({timestamp:101,close:105});',context);
  assert.equal(frames.length,1);
  // Lightweight Charts applies its queued data-axis change on the browser frame.
