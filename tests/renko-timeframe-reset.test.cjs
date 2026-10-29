@@ -15,3 +15,10 @@ test('unready timeframe with live ticks cannot draw provisional bricks',()=>{
  assert.equal(chartPreviewPolicy({basis:'draft'},0,true),null);
  assert.match(chartPreviewPolicy({basis:'draft'},1,true),/withheld/);
 });
+test('selected historical chart shows one computed signal set; active chart uses only actual fills',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');const src=fs.readFileSync(require.resolve('../renko-supertrend.js'),'utf8');
+ const start=src.indexOf('    function paintMarkers()'),end=src.indexOf('    function paintPnl(',start);
+ let plotted,basis='draft';const context={chart:{},historicalMarkers:[{time:1,text:'SELL',shape:'arrowDown',position:'aboveBar'}],lastRunner:{config:{underlying:'BTCUSD',timeframe:'1 minute'},execution_signals:[{timestamp:1,direction:'BEARISH',status:'FILLED'}]},paintEntryPrice:()=>{},boundChartContext:()=>({basis}),executionMarkers:require('../renko-supertrend.js').executionMarkers,mapExecutionMarkers:require('../renko-supertrend.js').mapExecutionMarkers,el:id=>({value:id==='symbol'?'BTCUSD':'1 minute'}),candles:{setMarkers:m=>plotted=m}};
+ vm.createContext(context);vm.runInContext(src.slice(start,end)+'paintMarkers();',context);assert.deepEqual(plotted,context.historicalMarkers);
+ basis='active';vm.runInContext('paintMarkers()',context);assert.deepEqual(plotted,[]);
+});
