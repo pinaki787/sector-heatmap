@@ -15,10 +15,13 @@
     result.provisional=provisional;
     result.timestamp=finite(q?.timestamp)?q.timestamp:null;
     result.close=finite(q?.close)?q.close:null;
-    const expected=seconds?Math.floor(now/seconds)*seconds-(provisional?0:seconds):null;
+    const ordered=c.renko_confirmation==='PRICE'&&q?.confirmation_basis==='ORDERED_LIVE_PRICE';
+    result.price_confirmed=ordered;result.assessed_at=decision?.observed_at??null;
+    result.event_age=finite(q?.timestamp)?Math.max(0,Math.floor(now-q.timestamp)):null;
+    const expected=ordered?s.confirmed_indicators?.latest?.timestamp:seconds?Math.floor(now/seconds)*seconds-(provisional?0:seconds):null;
     const tickFresh=!provisional||finite(q?.market_event_at)&&now-q.market_event_at>=0&&now-q.market_event_at<=15;
     result.age=finite(s.updated_at)?Math.max(0,Math.floor(now-s.updated_at)):null;
-    result.fresh=connected&&s.stream?.connected!==false&&result.age!==null&&now-s.updated_at>=0&&result.age<=15&&result.timestamp===expected&&tickFresh;
+    result.fresh=connected&&s.stream?.connected!==false&&result.age!==null&&now-s.updated_at>=0&&result.age<=15&&result.timestamp===expected&&tickFresh&&(!ordered||(!!decision&&q.timestamp<=now&&finite(decision.observed_at)&&decision.observed_at<=now&&s.price_confirmation_health?.error==null&&s.price_confirmation_health?.source?.run_id===s.run_id&&finite(s.price_confirmation_health?.source?.last_exchange_at)&&now-s.price_confirmation_health.source.last_exchange_at>=0&&now-s.price_confirmation_health.source.last_exchange_at<=15));
     if(!s.running){result.title=s.position?'Monitoring stopped · position remains':'Runner stopped';result.reason=s.position?'Owned position remains; entry assessment is inactive.':'No entries assessed while stopped.';return result;}
     if(s.pending){result.title='Order reconciliation';result.reason='Owned order is pending; no new entry assessment.';return result;}
     if(s.position){result.title='Position management';result.reason=`Holding ${s.position.symbol}; managing configured exits, not a new entry.`;return result;}
@@ -27,12 +30,13 @@
     if(!result.fresh){result.reason=s.status==='BLOCKED'&&s.message?'Entry data unavailable: '+s.message+' Last saved assessment is not current.':'Latest assessment stale / unavailable; saved conditions are not a current entry decision.';return result;}
     const lock=s.sideways_status?.lock;
     if(lock?.active){result.title='Quick-loss range lock';result.reason='Recorded after-cost loss lock: strict breakout required. This does not classify the market as sideways.';result.tone='blocked';return result;}
-    const observed=provisional?q.market_event_at:q.timestamp+seconds;
+    const observed=ordered?q.market_event_at??q.timestamp:provisional?q.market_event_at:q.timestamp+seconds;
     const beforeEligibility=finite(s.eligible_since)&&observed<=s.eligible_since;
     const recovery=(s.history_recoveries||[]).at(-1);
     const legacyRecovery=!decision&&beforeEligibility&&recovery?.at===s.eligible_since;
     result.assessed_at=decision?.observed_at??null;
     result.history_revised_at=decision?.history_revised_at??s.history_revised_at??recovery?.at??null;
+    if(ordered&&finite(s.started_at)&&result.history_revised_at<s.started_at)result.history_revised_at=null;
     const bullish=q.direction==='BULLISH',bearish=q.direction==='BEARISH';
     if((c.ema_fast_enabled!==false||c.ema_slow_enabled!==false)&&(bullish||bearish)&&finite(q.ema10)&&finite(q.ema30)&&finite(q.close)){
       const fast=c.ema_fast_enabled!==false,slow=c.ema_slow_enabled!==false;const aligned=(!fast||(bullish?q.close>q.ema10:q.close<q.ema10))&&(!slow||(bullish?q.close>q.ema30:q.close<q.ema30))&&(!(fast&&slow)||(bullish?q.ema10>q.ema30:q.ema10<q.ema30));
@@ -66,7 +70,7 @@
     else if(q.entry_qualified===true&&!q.cross_direction&&!q.entry_direction)result.reason='Setup passes; waiting for a fresh entry event. Qualification alone does not authorize another entry.';
     else if(decision?.eligible||event?.eligible)result.reason='Entry signal eligible; execution preflight / fill not yet confirmed.';
     else result.reason='Latest snapshot available; exact execution decision not recorded yet.';
-    result.title=provisional?'Latest assessment · provisional':'Latest assessment · completed candle';
+    result.title=ordered?'Latest assessment · completed brick':provisional?'Latest assessment · provisional':'Latest assessment · completed candle';
     result.link=result.fresh&&result.timestamp!==null&&result.close!==null;
     return result;
   }
