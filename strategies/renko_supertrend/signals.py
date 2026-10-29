@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .indicator_selection import DEFAULTS as INDICATOR_DEFAULTS, validate as validate_indicators, qualify as qualify_indicators
 
-DEFAULTS = dict(supertrend_slope_enabled=False, supertrend_slope_bars=1, supertrend_slope_min_atr=0.0, strategy_basis='LEGACY', renko_brick_exit_enabled=False, **anti_chop.DEFAULTS, **zone_entry.DEFAULTS, **calibrated.DEFAULTS, **manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, brick_mode='Auto', manual_brick=12.8,
+DEFAULTS = dict(supertrend_slope_enabled=False, supertrend_slope_bars=1, supertrend_slope_min_atr=0.0, strategy_basis='LEGACY', renko_brick_exit_enabled=False, **anti_chop.DEFAULTS, **zone_entry.DEFAULTS, **calibrated.DEFAULTS, **manual_trend.DEFAULTS, **indicator_families.DEFAULTS, **INDICATOR_DEFAULTS, atr_length=5, factor=3.0, auto_sizing_policy='legacy-history-seed-v1', brick_mode='Auto', manual_brick=12.8,
                 use_adx=False, adx_threshold=20.0, adx_length=14, adx_smoothing=14, widening_window=2, rsi_slope_enabled=True, rsi_level_enabled=False, rsi_level_mode='THRESHOLD', rsi_bullish_min=60.0, rsi_bullish_max=80.0, rsi_bearish_min=35.0, rsi_bearish_max=40.0, rsi_bullish_above=50.0, rsi_bearish_below=40.0, retest_enabled=False,retest_engulfing=True,retest_harami=True,retest_star=True)
 
 
@@ -21,6 +21,8 @@ def settings(payload):
     if payload.get('strategy_basis')=='RENKO' and payload.get('intrabar_entries'):raise ValueError('Renko strategy requires completed bricks; turn off intrabar entries.')
     c = {key: payload.get(key, default) for key, default in DEFAULTS.items()}
     c=indicator_families.apply(c)
+    from .session_auto import selected as session_auto_selected
+    session_auto_selected(c)
     for key in ('atr_length', 'adx_length', 'adx_smoothing', 'widening_window'):
         raw = c[key]
         try:

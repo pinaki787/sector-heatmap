@@ -1,5 +1,6 @@
 """Delta Renko HTTP component: shared chart math, isolated execution ownership."""
 from datetime import datetime, timedelta
+from copy import deepcopy
 from zoneinfo import ZoneInfo
 import hashlib
 from .stream import browser_snapshot, browser_managers
@@ -14,6 +15,7 @@ from .delta_runner import DeltaRunner, DeltaAdoptedRunner
 from .adoption import Manager
 from .runner import analysis, provisional
 from .signals import settings
+from . import session_auto
 from strategies.ema_crossover.runner import TIMEFRAMES
 
 PREFIX='/api/renko-delta/'
@@ -104,7 +106,7 @@ class Service:
             intrabar_history='Provisional live previews never change confirmed state.',
             analysis_revision=source['revision'],history_error=None,
             data_quality={'analysis_available':True})
-        return dict(symbol=symbol,timeframe=timeframe,settings={k:v for k,v in config.items() if not k.startswith('_chart')},
+        return dict(session_auto=deepcopy(engine["state"].get("session_auto")),symbol=symbol,timeframe=timeframe,settings={k:v for k,v in config.items() if not k.startswith('_')},
             tick_size=self.chart_broker.host_tick_size(symbol),rows=rows,incremental=False,
             history=history,latest=rows[-1],initialization_anchor=engine['anchor'],
             host_bar_count=engine['state']['count'],forming=[],history_error=None,
@@ -130,7 +132,8 @@ class Service:
         begin=datetime.combine(first-timedelta(days=7),datetime.min.time(),tz).timestamp()
         end=datetime.combine(last+timedelta(days=1),datetime.min.time(),tz).timestamp()
         config.update(self.chart_broker.session_policy(config))
-        candles=self.chart_broker.candles(dict(config,history_start=begin))
+        config['history_start']=begin
+        candles=self.chart_broker.candles(config)
         candles=[c for c in candles if begin<=c['timestamp']<end]
         tick=self.chart_broker.host_tick_size(config['underlying'])
         if config.get('chart_zone_target_enabled'):
@@ -155,14 +158,14 @@ class Service:
             result=analysis(candles,config,tick,saved=saved,retain=5000)
             with self.lock:
                 self.context[context_key]=(result,config,tick)
-                for old in list(self.context)[:-2]:self.context.pop(old,None)
+                for old in list(self.context)[:-6]:self.context.pop(old,None)
         display_start=datetime.combine(first,datetime.min.time(),tz).timestamp()
         rows=[r for r in result['rows'] if r['timestamp']>=display_start]
         forming=[c for c in candles if c.get('is_forming')]
         revision=hashlib.sha256(json.dumps([config,rows],sort_keys=True).encode()).hexdigest()
         self.chart_broker.start()
         history=dict(requested_from=first.isoformat(),requested_to=last.isoformat(),display_oldest=rows[0]['timestamp'] if rows else None,display_latest=rows[-1]['timestamp'] if rows else None,display_count=len(rows),initialization_bars=sum(c['timestamp']<display_start for c in candles),source='Delta India public REST OHLCV; backend public WebSocket forming candles.',anchor_policy='Full selected history initializes indicators; chart displays at most the latest 5,000 completed source candles. Choose a narrower custom range to inspect older periods.',intrabar_history='Forming candles are provisional; no historical replay into execution.',analysis_revision=revision,history_error=None)
-        return dict(symbol=config['underlying'],timeframe=config['timeframe'],settings={k:v for k,v in config.items() if not k.startswith('_chart')},tick_size=tick,rows=rows,incremental=False,history=history,latest=rows[-1] if rows else None,initialization_anchor=result['anchor'],host_bar_count=result['state']['count'],forming=forming,history_error=None,session_policy=self.chart_broker.session_policy(config),option_route=self.chart_broker.route_availability(config),squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',parity='Shared supplied Renko engine; broker candle sources differ.',intrabar_entries=(query.get('intrabar_entries') or ['false'])[0]=='true',provisional_candidate=None,provisional_error=None)
+        return dict(session_auto=session_auto.for_observation(config,now,tick),symbol=config['underlying'],timeframe=config['timeframe'],settings={k:v for k,v in config.items() if not k.startswith('_')},tick_size=tick,rows=rows,incremental=False,history=history,latest=rows[-1] if rows else None,initialization_anchor=result['anchor'],host_bar_count=result['state']['count'],forming=forming,history_error=None,session_policy=self.chart_broker.session_policy(config),option_route=self.chart_broker.route_availability(config),squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',parity='Shared supplied Renko engine; broker candle sources differ.',intrabar_entries=(query.get('intrabar_entries') or ['false'])[0]=='true',provisional_candidate=None,provisional_error=None)
 
     def get(self, handler, path):
         if not path.startswith(PREFIX): return False

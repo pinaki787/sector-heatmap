@@ -237,6 +237,7 @@ def provisional(confirmed, forming, config, tick_size, now):
 
 
 def configuration(payload):
+    auto_policy_explicit='auto_sizing_policy' in payload
     from . import indicator_families
     family_explicit=any(key in payload for key in indicator_families.DEFAULTS)
     payload=indicator_families.apply(payload)
@@ -281,6 +282,10 @@ def configuration(payload):
     result=indicator_families.apply(result)
     if not family_explicit:
         for key in (*indicator_families.DEFAULTS,'indicator_family_choices','indicator_family_applied'):result.pop(key,None)
+    if not auto_policy_explicit:result.pop('auto_sizing_policy',None)
+    elif result.get('auto_sizing_policy')=='session-atr-scaled-v1' and payload.get('_session_auto_references'):
+        result['_session_auto_references']=deepcopy(payload['_session_auto_references'])
+        if payload.get('_session_auto_instrument_identity'):result['_session_auto_instrument_identity']=payload['_session_auto_instrument_identity']
     return result
 
 
@@ -689,11 +694,11 @@ class Runner(BaseRunner):
         c=self.state.get('config') or {}
         engine=self.state.get('renko_engine') or {}
         return dict(schema_version=1,captured_at=self.clock(),reason=reason,
-            settings=deepcopy(c),settings_revision=self.runtime_revision,
+            settings=deepcopy({k:v for k,v in c.items() if not k.startswith('_')}) if c.get('auto_sizing_policy')=='session-atr-scaled-v1' else deepcopy(c),settings_revision=self.runtime_revision,
             initialization_anchor=engine.get('anchor'),host_bar_count=(engine.get('state') or {}).get('count'),
             observation_mode='INTRABAR' if sig.get('provisional') else 'CONFIRMED' if sig else 'WALL_CLOCK / INDICATORS_UNAVAILABLE',
             market_event_at=sig.get('market_event_at'),
-            indicators={k:deepcopy(sig.get(k)) for k in ('anti_chop','timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max','rsi_level_enabled','rsi_level_pass','rsi_level_diagnostic','rsi_bullish_above','rsi_bearish_below','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','mtf_rsi','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
+            indicators={k:deepcopy(sig.get(k)) for k in ('session_auto','anti_chop','timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max','rsi_level_enabled','rsi_level_pass','rsi_level_diagnostic','rsi_bullish_above','rsi_bearish_below','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','mtf_rsi','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
             confirmed_gap_history=deepcopy((engine.get('state') or {}).get('ema_gaps',[])),
             confirmed_indicator_reference=deepcopy(engine.get('last')),
             provenance='Captured at strategy event; missing observations remain unknown. Confirmation and broker fill times are separate.')
@@ -703,6 +708,8 @@ class Runner(BaseRunner):
             return preferences.write(self.path.with_name('renko-supertrend-settings.json'),payload,self.clock())
 
     def preview(self,payload):
+        if payload.get('auto_sizing_policy')=='session-atr-scaled-v1' and (self.state.get('position') or self.state.get('pending')) and (self.state.get('config') or {}).get('auto_sizing_policy')=='session-atr-scaled-v1':
+            payload={**payload,**{k:deepcopy(v) for k,v in self.state['config'].items() if k.startswith('_session_auto_')}}
         payload=ema_proximity.new_entry_defaults(payload)
         p=super().preview(payload)
         if hasattr(self.adapter,'session_policy'):
@@ -737,7 +744,8 @@ class Runner(BaseRunner):
                 old=deepcopy(self.state)
                 expected=self.configure(old['config'])
                 if hasattr(self.adapter,'session_policy'):expected.update(self.adapter.session_policy(expected))
-                if payload['resume_run_id']!=old.get('run_id') or expected!=p['config'] or p['config']['mode']!='PAPER' or p['context'].get('account_identity')!=old.get('account_identity'):
+                comparable=lambda c:{k:v for k,v in c.items() if not k.startswith('_')} if c.get('auto_sizing_policy')=='session-atr-scaled-v1' else c
+                if payload['resume_run_id']!=old.get('run_id') or comparable(expected)!=comparable(p['config']) or p['config']['mode']!='PAPER' or p['context'].get('account_identity')!=old.get('account_identity'):
                     raise ValueError('Guarded recovery requires the identical saved Paper run and account.')
                 super().start(dict(preview_id=p['id'],confirmation=p['confirmation']),False)
                 for key in ('run_id','trades_used','realized_pnl','started_at','last_exit_bar','rearm_after_exit','seen','losses','sideways_lock','sideways_events','execution_signals','order_history'):
@@ -1001,6 +1009,10 @@ class Runner(BaseRunner):
         result['indicator_selection_revision']='independent-indicators-v1'
         result['strategy_basis_revision']='confirmed-brick-basis-v1'
         result['price_renko_revision']='ordered-price-renko-v1'
+        from . import session_auto
+        result['session_auto_revision']=session_auto.REVISION
+        result['session_auto']=deepcopy(((self.state.get('renko_engine') or {}).get('state') or {}).get('session_auto'))
+        result['auto_sizing_policy']=(self.state.get('config') or {}).get('auto_sizing_policy',session_auto.LEGACY)
         result['renko_confirmation']=(result.get('config') or {}).get('renko_confirmation','CLOSE')
         result['price_confirmation_health']={'error':getattr(self,'price_producer_error',None),'queued_execution_events':self.confirmed_price_events.qsize(),'source':deepcopy(((self.state.get('renko_engine') or {}).get('state') or {}).get('price_renko'))}
         result['anti_chop_revision']=anti_chop.REVISION
@@ -1848,3 +1860,7 @@ class Runner(BaseRunner):
         publish_confirmed(self)
         self.save()
         return sig
+
+# One account-local reference path is shared by chart and execution adapters.
+from .session_auto import candle_source as _session_auto_candle_source
+Broker.candles = _session_auto_candle_source(Broker.candles)

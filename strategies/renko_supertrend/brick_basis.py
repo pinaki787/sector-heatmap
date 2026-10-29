@@ -21,9 +21,15 @@ def update(engine,candle):
     regime=rma(s,'brick_regime',tr,15);low=rma(s,'brick_low',tr,9)
     ratio=atr/regime if atr is not None and regime else 1
     auto=atr5/12 if str(engine.underlying).upper().startswith(('NSE:','BSE:')) and atr5 is not None else (atr*1.5 if ratio>1.2 and atr is not None else low*.7 if ratio<.8 and low is not None else atr)
-    if cfg['brick_mode']=='Manual':s['brick_box']=cfg['manual_brick']
+    from . import session_auto
+    session_reference=session_auto.apply_observation(s,engine.raw_config,c['timestamp'],engine.tick_size) if session_auto.selected(engine.raw_config) else None
+    if session_auto.selected(engine.raw_config):
+        box=session_reference['box'] if session_reference else None
+        if session_reference:auto=box
+    elif cfg['brick_mode']=='Manual':s['brick_box']=cfg['manual_brick']
     elif s.get('brick_box') is None and auto is not None:s['brick_box']=max(engine.tick_size,auto)
-    box=s.get('brick_box');events=[]
+    if not session_auto.selected(engine.raw_config):box=s.get('brick_box')
+    events=[]
     if box is not None:
         if s.get('brick_level') is None:s['brick_level']=math.floor(c['close']/box);s['brick_direction']=0
         target=c['close']/box;level=s['brick_level'];direction=s.get('brick_direction',0)
@@ -92,6 +98,7 @@ def update(engine,candle):
     last.update(timestamp=c['timestamp'],host_open=c['open'],host_high=c['high'],host_low=c['low'],host_close=c['close'],host_atr=atr,box=box,auto_box=auto,brick_events=[{k:r.get(k) for k in ('timestamp','open','high','low','close','box','supertrend','pine_direction','direction','ema10','ema30','ema100','ema_exit','rsi14','rsi14_slope','entry_direction','entry_qualified','entry_diagnostic','supertrend_slope_filter','lifecycle_event','lifecycle_reason','lifecycle_event_at','brick_direction','source_timestamp','source_close')} for r in output],brick_count=len(output),strategy_basis='RENKO',has_completed_brick=bool(output))
     # Exits inspect every newly available brick, never an unchanged prior brick.
     last['brick_exit_events']=[{k:r.get(k) for k in ('close','ema_exit','brick_direction','raw_supertrend_cross_direction')} for r in output]
+    if session_auto.selected(engine.raw_config):last['session_auto']=deepcopy(session_reference)
     s.update(previous=c,count=s.get('count',0)+1)
     for key in ('ema10','ema30','ema100'):s[key]=last.get(key)
     return last

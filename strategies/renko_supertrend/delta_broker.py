@@ -346,3 +346,6 @@ class Broker:
         matches=[token for token,o in self.delta.live['orders'].items() if str(o.get('order_id'))==str(order_id) and o.get('strategy')=='RENKO_SUPERTREND_V1']
         if len(matches)!=1: raise ValueError('Delta cancellation ownership ambiguous.')
         return self.execution.cancel(matches[0])
+
+from .session_auto import candle_source as _session_auto_candle_source
+Broker.candles = _session_auto_candle_source(Broker.candles)

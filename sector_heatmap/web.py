@@ -4198,6 +4198,10 @@ def run_server():
                             forming_rows=[r for r in shared_rows if r.get('is_forming') and r['timestamp']+TIMEFRAMES[timeframe]>time.time()]
                         except (ValueError,RuntimeError):pass
                     else:
+                        from strategies.renko_supertrend import session_auto
+                        if session_auto.selected(config):
+                            config.update(underlying=symbol,timeframe=timeframe,broker='FYERS')
+                            session_auto.prepare(renko_chart_broker,config)
                         analyzed,rows,forming_rows,history = renko_chart_history.load(ema_readonly_client(),symbol,timeframe,
                             str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),
                             {**config,'underlying':symbol,'timeframe':timeframe},tick)
@@ -4224,7 +4228,8 @@ def run_server():
                             candles = [c for c in candles if not c.get('is_forming')] + [forming]
                         except (ValueError,RuntimeError) as error:
                             candidate_error = str(error)
-                    self.send_json(200, {'symbol': symbol, 'timeframe': timeframe, 'settings': {k:v for k,v in config.items() if not k.startswith('_chart')},
+                    from strategies.renko_supertrend import session_auto as renko_session_auto
+                    self.send_json(200, {'session_auto': renko_session_auto.for_observation(config,time.time(),tick), 'symbol': symbol, 'timeframe': timeframe, 'settings': {k:v for k,v in config.items() if not k.startswith('_')},
                         'tick_size': tick, 'rows': [r for r in rows if r['timestamp'] >= float((query.get('since') or ['0'])[0])] if (query.get('revision') or [''])[0] == history['analysis_revision'] else rows, 'incremental': (query.get('revision') or [''])[0] == history['analysis_revision'], 'history':history, 'latest': rows[-1] if rows and analysis_available else None, 'data_quality':data_quality,
                         'confirmed_source':confirmed_source, 'initialization_anchor': analyzed['anchor'],
                         'host_bar_count': analyzed['state']['count'], 'forming': [c for c in candles if c.get('is_forming')],

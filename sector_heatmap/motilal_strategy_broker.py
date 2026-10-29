@@ -338,3 +338,6 @@ class Broker:
         rows=[r for r in self.orders() if r['id']==str(order_id)]
         if len(rows)!=1:raise PermissionError('No unique native strategy-owned order to cancel.')
         with account_lock(self.service.folder):return self.service.client.request('cancel',dict(uniqueorderid=str(order_id)))
+
+from strategies.renko_supertrend.session_auto import candle_source as _session_auto_candle_source
+Broker.candles = _session_auto_candle_source(Broker.candles)

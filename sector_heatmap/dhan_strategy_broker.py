@@ -468,3 +468,6 @@ class Broker:
         path=self.service.folder/'dhan-strategy-intents'/(hashlib.sha256(tag.encode()).hexdigest()+'.json')
         if not path.exists():raise PermissionError('Dhan order is not owned by this strategy adapter.')
         return self.authenticated_client().request('DELETE','/orders/'+str(order_id))
+
+from strategies.renko_supertrend.session_auto import candle_source as _session_auto_candle_source
+Broker.candles = _session_auto_candle_source(Broker.candles)

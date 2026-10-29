@@ -18,11 +18,17 @@ def observe(export, config, tick_size, tick, received, generation):
     except (TypeError,ValueError):return []
     if not all(math.isfinite(v) for v in (stamp,price,received)) or price<=0 or not 0<=received-stamp<=15:return []
     state=export['state']
+    from . import session_auto
+    session_reference=None
     live=state.setdefault('price_renko',{})
     sequence=tick.get('observation_sequence')
     if live.get('last_exchange_at') is not None:
         if stamp<live['last_exchange_at']:return []
         if stamp==live['last_exchange_at'] and (sequence is None or live.get('last_sequence') is None or sequence<=live['last_sequence']):return []
+    if session_auto.selected(config):
+        session_reference=session_auto.apply_observation(state,config,stamp,tick_size)
+        if session_reference is None:return []
+        live=state.setdefault('price_renko',{})
     box=state.get('brick_box') or export['last'].get('box')
     if not box or box<=0:raise ValueError('Confirmed Auto/Manual brick sizing is not initialized.')
     baseline=(not live or live.get('run_id')!=config.get('_run_id')
@@ -65,6 +71,7 @@ def observe(export, config, tick_size, tick, received, generation):
                       brick_direction=side,box=box,host_close=price,host_atr=(state.get('brick_host_atr') or {}).get('value',result.get('host_atr')),
                       ema_exit=exit_ema,ema_exit_enabled=config.get('ema_exit_enabled',False),
                       has_completed_brick=True,brick_count=1)
+        if session_reference:result['session_auto']=deepcopy(session_reference)
         result['brick_exit_events']=[dict(close=closing,ema_exit=exit_ema,brick_direction=side,
                                         raw_supertrend_cross_direction=result.get('raw_supertrend_cross_direction'))]
         result['brick_events']=[deepcopy(result)]
@@ -108,6 +115,8 @@ def producer(runner,run_id):
     while runner.state.get('running') and runner.state.get('run_id')==run_id and not runner.stop_requested.is_set():
         try:
             config=runner.state['config']
+            from . import session_auto
+            if session_auto.selected(config):session_auto.prepare(runner.adapter,config)
             if not runner.state.get('renko_engine'):
                 rows=runner.history_rows(runner.adapter.candles(config))
                 runner.state['renko_engine']=analysis(rows,config,runner.adapter.host_tick_size(config['underlying']))
