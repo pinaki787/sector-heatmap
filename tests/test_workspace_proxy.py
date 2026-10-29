@@ -145,6 +145,25 @@ window.fetch('https://other.example/api/read');assert.equal(seen.pop(),'https://
             self.assertEqual(h.status,403)
         self.assertEqual(Backend.seen,[])
 
+
+    def test_only_read_only_renko_chart_gets_full_history_budget(self):
+        from unittest.mock import patch
+        import http.client
+        original=http.client.HTTPConnection
+        cases=[('/api/renko-delta/chart?timeframe=1+minute','GET',False,120),
+               ('/api/renko-supertrend/chart','GET',False,120),
+               ('/api/renko-delta/runner','GET',False,35),
+               ('/api/renko-delta/chart','POST',True,35),
+               ('/api/renko-delta/chart-option','GET',False,35)]
+        for path,method,mutation,timeout in cases:
+            with self.subTest(path=path,method=method):
+                h=Handler('/broker-workspace/'+self.aid+path,method,b'{}' if mutation else b'')
+                with patch('sector_heatmap.workspace_proxy.http.client.HTTPConnection',wraps=original) as connection:
+                    proxy(self.auth,h,mutation)
+                self.assertEqual(h.status,200)
+                self.assertEqual(connection.call_args.kwargs['timeout'],timeout)
+                self.assertIn(str(self.server.server_port),str(connection.call_args.args))
+
     def test_non_workspace_paths_remain_unhandled(self):
         h=Handler('/api/renko-supertrend/runner')
         self.assertFalse(proxy(self.auth,h));self.assertEqual(Backend.seen,[])

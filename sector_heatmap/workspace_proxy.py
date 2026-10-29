@@ -52,7 +52,10 @@ def proxy(auth,handler,mutation=False):
         size=int(handler.headers.get('Content-Length','0'))
         if size<0 or size>1024*1024:raise ValueError('Workspace request too large.')
         body=handler.rfile.read(size) if size else None
-        connection=http.client.HTTPConnection('127.0.0.1',account['port'],timeout=35)
+        # Full confirmed Renko history can exceed the ordinary API read budget.
+        # Match its chart client budget; mutations retain the shorter timeout.
+        chart_read=not mutation and handler.command=='GET' and re.fullmatch(r'/api/renko-(delta|supertrend|motilal|dhan)/chart', '/'+tail)
+        connection=http.client.HTTPConnection('127.0.0.1',account['port'],timeout=120 if chart_read else 35)
         try:
             connection.request(handler.command,target,body,headers)
             response=connection.getresponse()
