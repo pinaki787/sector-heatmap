@@ -46,7 +46,7 @@
     }else error='Runner history anchor unavailable; matching calculations cannot be verified.';
     if(settings.confirmed_run_id){history={};error=null;}
     const basis=state.running||state.position||state.pending?'active':'recorded';
-    return {basis,settings,history,differences,error,runId:state.run_id,anchor,label:(basis==='active'?'ACTIVE RUNNER':'LAST RECORDED RUN · STOPPED · '+c.mode)+' · '+c.timeframe+(c.renko_brick_exit_enabled?' · exit: first opposing brick':c.supertrend_exit_enabled!==false?' · exit: Supertrend reversal':'')+' · brick '+(state.confirmed_indicators?.latest?.box??state.last_signal?.box??c.manual_brick)+(differences.length?' · draft differs; not applied':(c.renko_confirmation==='PRICE'?' · price-confirmed bricks · timeframe sizes Auto':' · captured Start settings'))};
+    return {basis,settings,history,differences,error,runId:state.run_id,anchor,label:(basis==='active'?'ACTIVE RUNNER':'LAST RECORDED RUN · STOPPED · '+c.mode)+' · '+c.timeframe+(c.renko_brick_exit_enabled?' · exit: first opposing brick':c.supertrend_exit_enabled!==false?' · exit: Supertrend reversal':'')+' · calculated historical signals, not fills · brick '+Number(state.confirmed_indicators?.latest?.box??state.last_signal?.box??c.manual_brick).toFixed(2)+(differences.length?' · draft differs; not applied':(c.renko_confirmation==='PRICE'?' · price-confirmed bricks · timeframe sizes Auto':' · captured Start settings'))};
   }
   function runnerChartAlignment(context,state,data){
     if(context.basis==='draft')return {verified:false,blocked:false,reason:'Draft preview; historical signals are not runner decisions.'};
@@ -1907,7 +1907,7 @@
       if(previewBlocked)el('brick-preview-status').textContent=previewBlocked;
       if(preview.length)el('brick-preview-status').textContent=el('provisional-status').textContent='FORMING '+(preview[0].close>preview[0].open?'BULLISH':'BEARISH')+' RENKO · '+(preview.at(-1).progress*100).toFixed(2)+'% of target · visual preview only · no entry or exit until confirmed';
     }
-    function paintMarkers(){paintEntryPrice();if(chart){let markers=boundChartContext().basis==='draft'?historicalMarkers:executionMarkers([],lastRunner,el('symbol').value,el('timeframe').value);if(chart.uniformRenkoRows)markers=mapExecutionMarkers(markers,chart.uniformRenkoRows);candles.setMarkers(markers);}}
+    function paintMarkers(){paintEntryPrice();if(chart){let markers=historicalMarkers;if(chart.uniformRenkoRows)markers=mapExecutionMarkers(markers,chart.uniformRenkoRows);candles.setMarkers(markers);}}
     function paintPnl(s,connected=true){
       const p=pnlValues(s,connected),money=n=>isDelta?deltaPnl(n,s.pnl_currency||'USD'):n==null?'Unavailable':new Intl.NumberFormat('en-IN',{style:'currency',currency:isDelta?(s.pnl_currency||'USD'):'INR',signDisplay:'exceptZero'}).format(n);
       el('live-pnl').replaceChildren();
