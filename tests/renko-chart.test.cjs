@@ -19,7 +19,7 @@ test('research BUY and actual runner BUY have distinct evidence and status',()=>
  const markers=executionMarkers(historical,state,'BSE:SENSEX-INDEX','1 minute');
  assert.equal(markers[0].text,'BUY');assert.equal(markers.length,1);
  state.execution_signals.push({timestamp:3,direction:'BULLISH',mode:'PAPER',status:'FILLED'});
- assert.equal(executionMarkers(historical,state,'BSE:SENSEX-INDEX','1 minute')[1].text,'BUY · PAPER · FILLED');
+ assert.equal(executionMarkers(historical,state,'BSE:SENSEX-INDEX','1 minute').length,1); // FILLED assessment alone cannot establish an order fill.
  assert.equal(executionMarkers(historical,state,'NSE:NIFTY50-INDEX','1 minute').length,1);
 });
 test('P&L never reports stale or disconnected option marks as live profit',()=>{
@@ -63,7 +63,7 @@ test('chart status reports forming-candle failure separately from broker and run
 
 test('actual EMA exit markers use local fill candle and recorded applied period, not current chart lines',()=>{
  const s={config:{underlying:'MCX:TEST',timeframe:'1 minute',mode:'PAPER'},order_history:[{tag:'EXIT1',is_entry:false,filled_at:901,underlying_symbol:'MCX:TEST',status:'FILLED',mode:'PAPER',reason:'EMA10_CONFIRMED_BREACH',submitted_at:900,indicator_snapshot:{settings:{ema_exit_length:10},indicators:{timestamp:600,direction:'BEARISH',ema10:100,ema30:200}}}]};
- const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'SELL EXIT · PAPER · EMA10 · FILLED');
+ const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'SELL EXIT');
  s.order_history[0].status='PENDING';assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]);
 });
 

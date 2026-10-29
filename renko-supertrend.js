@@ -215,16 +215,12 @@
   function executionMarkers(history,state,symbol,timeframe){
     const historical=history.map(m=>({...m,text:m.text,size:1}));
     if(state?.config?.underlying!==symbol||state?.config?.timeframe!==timeframe)return historical;
-    // Failed assessments stay in the execution audit, rather than obscuring prices.
+    // Only the order ledger establishes actual fills. Qualification records can
+    // reference those same orders and must not create a second chart glyph.
     const fills=new Map();
-    for(const e of state.execution_signals||[]){
-      if(e.status!=='FILLED'||!['BULLISH','BEARISH'].includes(e.direction))continue;
-      const buy=e.direction==='BULLISH';
-      // timestamp is the host candle; event_at remains the execution audit time.
-      fills.set(e.timestamp+'|'+e.direction+'|'+e.mode,{time:e.timestamp,position:buy?'belowBar':'aboveBar',shape:buy?'arrowUp':'arrowDown',color:buy?'#2ea043':'#e53935',size:1,text:(buy?'BUY':'SELL')+' · '+e.mode+' · FILLED'});
-    }
-    for(const row of state.order_history||[]){
-      const snap=row.indicator_snapshot,reason=row.reason||snap?.reason;
+    const orders=[...(state.order_history||[])].sort((a,b)=>(a.first_fill_confirmed_at||a.filled_at||0)-(b.first_fill_confirmed_at||b.filled_at||0));
+    for(const row of orders){
+      const snap=row.indicator_snapshot;
       if(row.status!=='FILLED'||row.underlying_symbol!==symbol)continue;
       if(row.run_id&&state.run_id&&row.run_id!==state.run_id)continue;
       const filledAt=row.first_fill_confirmed_at||row.filled_at;if(!Number.isFinite(filledAt))continue;
@@ -235,9 +231,12 @@
       const entry=(state.order_history||[]).find(r=>r.lifecycle_id===row.lifecycle_id&&r.is_entry===true);
       const direction=entry?.indicator_snapshot?.indicators?.direction||(state.trade_history||[]).find(t=>t.lifecycle_id===row.lifecycle_id)?.direction||snap?.indicators?.direction;
       if(!['BULLISH','BEARISH'].includes(direction))continue;const bullish=direction==='BULLISH',isEntry=row.is_entry===true;
-      const period=!isEntry&&(reason||'').match(/^EMA(\d+)/)?.[1];
-      // The order ledger establishes fills even when its eligibility row remains ELIGIBLE.
-      fills.set((isEntry?'entry|':'exit|')+row.tag,{time,brickReference:ordered?ref:null,position:isEntry?(bullish?'belowBar':'aboveBar'):(bullish?'aboveBar':'belowBar'),shape:isEntry?(bullish?'arrowUp':'arrowDown'):'circle',color:isEntry?(bullish?'#2ea043':'#e53935'):'#f2c14e',size:1,text:(bullish?'BUY':'SELL')+(isEntry?'':' EXIT')+' · '+(row.mode||state.config.mode)+(period?' · EMA'+period:'')+' · FILLED'});
+      const identity=row.lifecycle_id||row.order_id||row.tag;if(!identity)continue;
+      const key=(isEntry?'entry|':'exit|')+identity;
+      if(isEntry&&fills.has(key))continue;
+      // One initial entry and one final exit per lifecycle, including repeated
+      // ledger snapshots or several partial-exit orders. Details retain fills.
+      fills.set(key,{time,brickReference:ordered?ref:null,position:isEntry?(bullish?'belowBar':'aboveBar'):(bullish?'aboveBar':'belowBar'),shape:isEntry?(bullish?'arrowUp':'arrowDown'):'circle',color:isEntry?(bullish?'#2ea043':'#e53935'):'#f2c14e',size:1,text:(bullish?'BUY':'SELL')+(isEntry?'':' EXIT')});
     }
     const execution=[...fills.values()];
     // A fill replaces only its matching entry/provisional glyph, never an exit.
@@ -1907,7 +1906,7 @@
       if(previewBlocked)el('brick-preview-status').textContent=previewBlocked;
       if(preview.length)el('brick-preview-status').textContent=el('provisional-status').textContent='FORMING '+(preview[0].close>preview[0].open?'BULLISH':'BEARISH')+' RENKO · '+(preview.at(-1).progress*100).toFixed(2)+'% of target · visual preview only · no entry or exit until confirmed';
     }
-    function paintMarkers(){paintEntryPrice();if(chart){let markers=executionMarkers(historicalMarkers,lastRunner,el('symbol').value,el('timeframe').value);if(chart.uniformRenkoRows)markers=mapExecutionMarkers(markers,chart.uniformRenkoRows);candles.setMarkers(markers);}}
+    function paintMarkers(){paintEntryPrice();if(chart){let markers=boundChartContext().basis==='draft'?historicalMarkers:executionMarkers([],lastRunner,el('symbol').value,el('timeframe').value);if(chart.uniformRenkoRows)markers=mapExecutionMarkers(markers,chart.uniformRenkoRows);candles.setMarkers(markers);}}
     function paintPnl(s,connected=true){
       const p=pnlValues(s,connected),money=n=>isDelta?deltaPnl(n,s.pnl_currency||'USD'):n==null?'Unavailable':new Intl.NumberFormat('en-IN',{style:'currency',currency:isDelta?(s.pnl_currency||'USD'):'INR',signDisplay:'exceptZero'}).format(n);
       el('live-pnl').replaceChildren();
@@ -2232,7 +2231,7 @@ el('ema-momentum-enabled').disabled=lastRunner?.entry_momentum_revision!=='split
         line.applyOptions({title:(query.timeframe==='1 minute'?'1-minute':query.timeframe.replace(' minutes','-minute'))+' Supertrend'});
         fiveMinuteLine.setData([]);
         supertrendPointerPoints=plottedAnalysis.map(c=>({time:c.timestamp,value:c.supertrend,color:c.pine_direction<0?'#2ea043':'#e53935'}));line.setData(supertrendPointerPoints);fiveMinutePointerPoints=[];paintSupertrendPointers();
-        const events=chartHistoricalEvents(d,chartParity);latestSignalIndex=events.length?plotted.findIndex(c=>c.time===events.at(-1).timestamp):null;plottedCount=plotted.length;el('latest-signal').disabled=latestSignalIndex===null;const latestEvent=events.at(-1);el('signal-range').textContent=chartParity?.blocked?'Historical signals withheld · runner comparison unconfirmed.':!available?'Historical signals unavailable · invalid broker OHLC.':latestEvent?`Latest historical ${latestEvent.lifecycle_event}: ${stamp(latestEvent.timestamp)} IST. Use Show latest historical event if its marker is outside your visible range.`:'No historical entry/exit events in the loaded history with these settings.';const markers=events.map(c=>({time:c.timestamp,position:(c.lifecycle_event==='BUY'||c.lifecycle_event==='SELL EXIT')?'belowBar':'aboveBar',shape:c.lifecycle_event.endsWith('EXIT')?'circle':c.lifecycle_event==='BUY'?'arrowUp':'arrowDown',color:c.lifecycle_event.endsWith('EXIT')?'#f2c14e':c.lifecycle_event==='BUY'?'#2ea043':'#e53935',text:c.lifecycle_event+' · historical'}));if(d.intrabar_entries&&provisional?.entry_direction&&view==='host'&&!last.projected_position)markers.push({time:provisional.timestamp,position:provisional.entry_direction==='BULLISH'?'belowBar':'aboveBar',shape:'square',color:'#f2c14e',text:'PROVISIONAL '+(provisional.entry_direction==='BULLISH'?'BUY':'SELL')});historicalMarkers=markers;paintMarkers();
+        const events=chartHistoricalEvents(d,chartParity);latestSignalIndex=events.length?plotted.findIndex(c=>c.time===events.at(-1).timestamp):null;plottedCount=plotted.length;el('latest-signal').disabled=latestSignalIndex===null;const latestEvent=events.at(-1);el('signal-range').textContent=chartParity?.blocked?'Historical signals withheld · runner comparison unconfirmed.':!available?'Historical signals unavailable · invalid broker OHLC.':latestEvent?`Latest historical ${latestEvent.lifecycle_event}: ${stamp(latestEvent.timestamp)} IST. Use Show latest historical event if its marker is outside your visible range.`:'No historical entry/exit events in the loaded history with these settings.';const markers=events.map(c=>({time:c.timestamp,position:(c.lifecycle_event==='BUY'||c.lifecycle_event==='SELL EXIT')?'belowBar':'aboveBar',shape:c.lifecycle_event.endsWith('EXIT')?'circle':c.lifecycle_event==='BUY'?'arrowUp':'arrowDown',color:c.lifecycle_event.endsWith('EXIT')?'#f2c14e':c.lifecycle_event==='BUY'?'#2ea043':'#e53935',text:c.lifecycle_event}));if(d.intrabar_entries&&provisional?.entry_direction&&view==='host'&&!last.projected_position)markers.push({time:provisional.timestamp,position:provisional.entry_direction==='BULLISH'?'belowBar':'aboveBar',shape:'square',color:'#f2c14e',text:'PROVISIONAL '+(provisional.entry_direction==='BULLISH'?'BUY':'SELL')});historicalMarkers=markers;paintMarkers();
         if(!available)el('chart-description').textContent=chartParity?.blocked?'Broker OHLC only · '+chartParity.reason:view==='host'?'Valid broker OHLC only · invalid candles are visible time gaps · derived indicators and historical signals withheld.':'Synthetic Renko unavailable · invalid broker history; choose Host candles to view valid OHLC.';
         if(available&&chartParity?.blocked){
           el('direction').textContent=last.direction+' · chart only';

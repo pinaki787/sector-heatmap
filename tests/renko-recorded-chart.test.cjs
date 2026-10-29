@@ -8,7 +8,7 @@ test("ordered Paper fills use original fractional bricks and the order ledger",(
  {tag:"B",lifecycle_id:"A",run_id:"R",underlying_symbol:"BTCUSD",is_entry:false,status:"FILLED",filled_at:122,reason:"OPPOSITE_RENKO_BRICK_CLOSE",indicator_snapshot:{settings:{ema_exit_length:10,ema_exit_enabled:false},confirmed_indicator_reference:{...ref,timestamp:120.75,open:90,close:100}}},
  {tag:"OLD",run_id:"OLD",underlying_symbol:"BTCUSD",is_entry:true,status:"FILLED",filled_at:110,indicator_snapshot:{confirmed_indicator_reference:ref,indicators:{direction:"BEARISH"}}}]};
  const markers=executionMarkers([],state,"BTCUSD","5 minutes");
- assert.deepEqual(markers.map(m=>m.time),[100.125,120.75]);assert.match(markers[0].text,/SELL .* FILLED/);assert.match(markers[1].text,/SELL EXIT .* FILLED/);
+ assert.deepEqual(markers.map(m=>m.time),[100.125,120.75]);assert.equal(markers[0].text,'SELL');assert.equal(markers[1].text,'SELL EXIT');
  assert.doesNotMatch(markers[1].text,/EMA/);
  const bricks=[{...ref,time:100.458,indicator_timestamp:100.125},{...ref,open:90,close:100,time:121.083,indicator_timestamp:120.75}];
  assert.deepEqual(mapExecutionMarkers(markers,bricks).map(m=>m.time),[100.458,121.083]);
@@ -38,6 +38,13 @@ test('USD price precision and signed dual P&L retain native values and verified 
 test('entry page changes the Renko asset URL from the obsolete cached build',()=>{
  const fs=require('node:fs'),path=require('node:path');
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
- assert.match(html,/renko-supertrend\.js\?[^"']*v=20261029-recorded-price-audit-2/);
+ assert.match(html,/renko-supertrend\.js\?[^"']*v=20261029-clean-execution-markers-3/);
  assert.doesNotMatch(html,/renko-supertrend\.js\?[^"']*20261022-chart-indicator-recovery-1/);
+});
+test("filled assessment, repeated ledger snapshots and partial exits yield one entry and final exit",()=>{
+ const entry={tag:"entry",lifecycle_id:"trade-1",is_entry:true,status:"FILLED",underlying_symbol:"BTCUSD",filled_at:601,indicator_snapshot:{indicators:{direction:"BULLISH"}}};
+ const exit={...entry,tag:"exit-1",is_entry:false,filled_at:901};
+ const state={config:{underlying:"BTCUSD",timeframe:"5 minutes",mode:"PAPER"},execution_signals:[{timestamp:600,direction:"BULLISH",mode:"PAPER",status:"FILLED"}],order_history:[entry,{...entry},exit,{...exit,tag:"exit-2",filled_at:1201}]};
+ const out=executionMarkers([],state,"BTCUSD","5 minutes");
+ assert.deepEqual(out.map(m=>[m.time,m.text]),[[600,"BUY"],[1200,"BUY EXIT"]]);
 });
