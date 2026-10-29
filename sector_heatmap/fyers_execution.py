@@ -857,8 +857,8 @@ class FyersExecutionService:
 
     def _batch_preflight(self, payload):
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
-        if not 1 <= len(items) <= 100:
-            raise ValueError("Select between 1 and 100 High-Conviction plans for one FYERS batch preview.")
+        if not 1 <= len(items) <= 10:
+            raise ValueError("FYERS permits at most 10 orders per basket. Select up to 10 plans and review additional stocks in a separate basket.")
         symbols = [str(item.get("underlying") or "") for item in items]
         if len(set(symbols)) != len(symbols):
             raise ValueError("A FYERS batch cannot contain the same underlying more than once.")
@@ -1024,6 +1024,8 @@ class FyersExecutionService:
             stored = self.previews.get(preview_id)
         if not stored or not stored.get("batch"):
             raise ValueError("Unknown or expired FYERS batch preview.")
+        if len(stored["payload"].get("items", [])) > 10:
+            raise ValueError("FYERS permits at most 10 orders per basket. Prepare a new preview with up to 10 plans; no orders were sent.")
         if confirmation != f"CONFIRM {preview_id}":
             raise ValueError("Type the exact confirmation phrase from the current FYERS batch preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
@@ -1105,6 +1107,8 @@ class FyersExecutionService:
             stored = self.previews.get(preview_id)
         if not stored:
             raise ValueError("Unknown or expired FYERS preview.")
+        if len(stored["payload"].get("items", [])) > 10:
+            raise ValueError("FYERS permits at most 10 orders per basket. Prepare a new preview with up to 10 plans; no orders were sent.")
         if confirmation != f"CONFIRM {preview_id}":
             raise ValueError("Type the exact confirmation phrase from the current FYERS preview.")
         if self.now().astimezone() >= datetime.fromisoformat(stored["preview"]["expires_at"]):
