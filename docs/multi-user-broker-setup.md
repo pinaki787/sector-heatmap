@@ -39,7 +39,7 @@ side by side; switching accounts does not change or stop an existing strategy.
 7. Leave **Enable Live capability** off for Paper/read-only setup. Enabling it
    permits explicit account execution after the existing broker checks; it does
    not start a runner or place an order. KAMA/parser/protection-specific Live
-   gates stay disabled in this initial workspace release. Credentials clear from
+   gates stay disabled in this standalone workspace setup. Credentials clear from
    the form on save and are never returned by the list/status APIs.
 8. **Launch dashboard** creates and opens that account's isolated process. On
    first launch, source comes from the committed release or verified deployable
@@ -96,7 +96,7 @@ private registry/credentials and journals consistently, reconcile and stop the
 account process with operational authority, replace reviewed source while
 preserving its account-local configuration/state, and verify revision and account
 identity. Do not copy an active workspace between machines or start two managers
-for the same actual account. The first release does not provide an automatic
+for the same actual account. This workflow does not provide an automatic
 workspace migration/update or credential import tool.
 
 Public source deployables exclude the registry, passwords, sessions, credentials,
@@ -122,12 +122,18 @@ execution require destination verification.
 
 ## Dhan broker accounts
 
-In **User Master → Broker accounts**, choose **Dhan**, use the Dhan client ID
-as the broker account reference, then save **Dhan client ID** and **Dhan access
-token** under Connection settings. Each user's account and saved authorization remain private.
-Token renewal is performed in DhanHQ; paste the renewed token in this account's
-connection settings. Live capability remains off unless explicitly enabled by
-the account owner. Saving or checking a connection does not send an order.
+In **Broker accounts**, choose **Dhan** and use the Dhan client ID as the
+account reference. Save the matching client ID and API key/secret privately, then
+choose **Connect to Dhan** to complete browser consent. The application obtains
+and persists the resulting authorization for that saved account. Do not paste an
+access token as the normal setup or renewal procedure. The hosted Dhan application
+redirect is https://utrading.pinakicloud.com/accounts; use the account form's
+displayed redirect if operating a separate installation.
+
+After connecting, use **Test Connection**. All sections for that account reuse its
+saved authorization; different accounts remain isolated. Live capability is a
+separate owner-controlled gate. Saving, authenticating or checking a connection
+does not start a runner or send an order.
 
 Open **Dhan order ticket** from the account row or dashboard account menu. The
 manual ticket uses Dhan's security ID and current exchange segment, quantity,

@@ -11,7 +11,8 @@ Updated 21 November 2026.
 | Saved users and broker-account boundaries | [Account setup](multi-user-broker-setup.md) |
 | Architecture and mathematical audit scope | [Technical guide](technical-guide.md) |
 | Generated callable and settings catalog | [Source reference](source-reference.md) |
-| Main release and preserved live source variants | [As-of-live release](releases/2026-11-21-as-of-live.md) |
+| Current authentication, docs and validation release | [Session and documentation release](releases/2026-11-21-session-freshness.md) |
+| Earlier source preservation checkpoint | [As-of-live source capture](releases/2026-11-21-as-of-live.md) |
 
 Dated investigation, evidence and checkpoint documents retain historical facts.
 Their old process IDs, account states and activation results are not current

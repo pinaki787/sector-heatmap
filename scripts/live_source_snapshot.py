@@ -24,6 +24,7 @@ def safe(path):
     return not p.is_absolute() and '..' not in p.parts and not any(v.startswith('.') and v not in {'.env.example','.fyers.env.example','.gitignore','.gitattributes'} for v in p.parts)
 
 def source_file(path):
+    if path.startswith("deploy/live-source-snapshots/"):return False
     p = Path(path)
     return safe(path) and not EXCLUDED.intersection(p.parts) and (p.suffix in SUFFIXES or path in {'chart-shared-indicators.json','release-source-files.json','requirements.txt','requirements.lock','requirements-telegram.txt','requirements-research.txt'})
 
