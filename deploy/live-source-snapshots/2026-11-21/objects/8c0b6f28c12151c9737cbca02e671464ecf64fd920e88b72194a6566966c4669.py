@@ -1,0 +1,258 @@
+"""Delta Renko HTTP component: shared chart math, isolated execution ownership."""
+from datetime import datetime, timedelta
+from copy import deepcopy
+from zoneinfo import ZoneInfo
+import hashlib
+from .stream import browser_snapshot, browser_managers
+import json
+from pathlib import Path
+import threading
+import time
+from urllib.parse import parse_qs, urlparse
+
+from .delta_broker import Broker
+from .delta_runner import DeltaRunner, DeltaAdoptedRunner
+from .adoption import Manager
+from .runner import analysis, provisional
+from .signals import settings
+from . import session_auto
+from strategies.ema_crossover.runner import TIMEFRAMES
+
+PREFIX='/api/renko-delta/'
+
+
+class Service:
+    def __init__(self, delta, root, instance_key='default', instrument=None):
+        self.delta=delta; self.root=Path(root); self.wake=threading.Event()
+        self.context={}; self.lock=threading.RLock();self.instrument=instrument;self.instance_key=instance_key
+        state_root=self.root/'.private' if instance_key=='default' else self.root/'.private'/'renko-delta-instances'/instance_key
+        def factory(): return Broker(delta,self.root/'.private'/'renko-delta-history',on_tick=lambda raw:self.wake.set())
+        self.broker=factory(); self.chart_broker=factory()
+        self.runner=DeltaRunner(self.broker,state_root/'renko-delta-state.json')
+        self.runner.bound_broker='DELTA_INDIA';self.runner.bound_instrument=instrument;self.runner.bound_instance=instance_key
+        self.runner.valuation_adapter=self.chart_broker
+        def account(): return self.broker.execution.authenticate()
+        def owners():
+            symbols=set()
+            for state in (self.runner.state,delta.runner):
+                if (state.get('config') or {}).get('mode')!='LIVE': continue
+                for pos in (state.get('position'),(state.get('pending') or {}).get('position')):
+                    if pos and pos.get('symbol'): symbols.add(pos['symbol'])
+            if delta.live.get('runner_position'): symbols.add(delta.live['runner_position']['symbol'])
+            # All external active broker orders, including native protective
+            # orders, block adoption/duplicate entries until resolved.
+            for row in self.broker.orders():
+                if row['status'] not in (1,2,5,7): symbols.add(row['symbol'])
+            return symbols
+        self.external_owners=lambda:set()
+        local_owners=owners
+        self.owners=lambda:local_owners()|set(self.external_owners())
+        self.adoptions=Manager(state_root/'renko-delta-adoptions',factory,factory(),account,self.owners,runner_type=DeltaAdoptedRunner)
+        self.adoptions.guard(self.runner)
+        # This honors a durable prior Stop only; ordinary saved runs stay inert.
+        self.runner.recover_requested_paper_stop()
+        self.runner.recover_unsubmitted_intent()
+
+    def chart_config(self, query):
+        raw={k:(query[k][0].lower()=='true' if isinstance(default,bool) else query[k][0]) for k,default in settings({}).items() if k in query}
+        if 'swing_breakout_enabled' in query:raw['swing_breakout_enabled']=query['swing_breakout_enabled'][0].lower()=='true'
+        for key,default in [('renko_brick_exit_enabled','false'),('anti_chop_enabled','false'),('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('use_adx','false'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]: raw[key]=(query.get(key) or [default])[0]=='true'
+        carry=(query.get('carry_policy') or ['CONTINUOUS'])[0]
+        if carry not in ('CONTINUOUS','DAILY_SQUARE_OFF'):raise ValueError('Unknown crypto carry policy.')
+        deadline=(query.get('session_deadline') or [''])[0] if carry == 'DAILY_SQUARE_OFF' else None
+        import re
+        if carry == 'DAILY_SQUARE_OFF' and (not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',deadline or '') or deadline=='00:00'): raise ValueError('Choose an explicit Delta daily square-off time.')
+        from .ema_exit import settings as exit_settings
+        from .exit_indicators import DEFAULTS as exit_defaults, settings as indicator_exit_settings
+        exits=indicator_exit_settings({key:(query.get(key) or [str(default)])[0].lower()=='true' for key,default in exit_defaults.items()})
+        route=(query.get('execution_route') or ['OPTIONS'])[0]
+        if route not in ('OPTIONS','DELTA_PERPETUAL'):raise ValueError('Choose Delta options or perpetual futures explicitly.')
+        config=dict(execution_route=route,**{**settings(raw),**exits,**exit_settings({'ema_exit_enabled':(query.get('ema_exit_enabled') or ['false'])[0]=='true','ema_exit_length':(query.get('ema_exit_length') or ['10'])[0]})},underlying=(query.get('symbol') or [''])[0],timeframe=(query.get('timeframe') or ['5 minutes'])[0],session_deadline=deadline,carry_policy=carry,broker='DELTA_INDIA')
+        if self.instrument and config['underlying']!=self.instrument:raise ValueError('Select this instance instrument or create another instance.')
+        from .chart_destinations import query_settings
+        config.update(query_settings({**query,'broker':[self.execution.account['broker'] if hasattr(self,'execution') else 'DELTA_INDIA']}))
+        config['chart_zone_target_enabled']=(query.get('chart_zone_target_enabled') or ['false'])[0]=='true'
+        self.chart_broker.session_policy(config)
+        from .indicator_families import apply
+        return apply(config)
+
+    def manual_brick(self, query):
+        from .manual_brick import rule, calculate
+        symbol=(query.get('symbol') or [''])[0]
+        if self.instrument and symbol!=self.instrument:
+            raise ValueError('Reference instrument differs from selected instance.')
+        config=dict(underlying=symbol,timeframe='5 minutes',carry_policy='CONTINUOUS',broker='DELTA_INDIA')
+        policy=self.chart_broker.session_policy(config)
+        if not symbol.startswith(('NSE:','BSE:','MCX:')):
+            policy={**policy,'session_exchange':'CRYPTO'}
+        spec=rule(symbol,policy,atr_length=(query.get('atr_length') or [None])[0])
+        now=time.time()
+        rows=self.chart_broker.candles(dict(config,history_start=now-60*86400))
+        return dict(calculate(rows,spec,300,now),symbol=symbol,
+                    source='Selected account broker completed OHLC; Wilder ATR reference sizing')
+
+    def confirmed_chart(self, query, requested_run):
+        from .confirmed_feed import bind_confirmed
+        symbol=(query.get('symbol') or [''])[0]
+        timeframe=(query.get('timeframe') or ['5 minutes'])[0]
+        if self.instrument and symbol!=self.instrument:
+            raise ValueError('Select this instance instrument or create another instance.')
+        source=bind_confirmed(self.runner,requested_run,symbol,timeframe)
+        rows=source.pop('rows')
+        if not rows:
+            raise ValueError('Confirmed runner history unavailable; previous chart retained.')
+        engine=source.pop('_engine'); config=source.pop('_config')
+        history=dict(requested_from='runner anchor',requested_to='recorded candle',
+            display_oldest=rows[0]['timestamp'],display_latest=rows[-1]['timestamp'],
+            display_count=len(rows),initialization_bars=max(0,source['count']-len(rows)),
+            source='Shared confirmed runner indicator snapshot · retained window',
+            anchor_policy='Confirmed recurrence and OHLC published by the runner owner.',
+            intrabar_history='Provisional live previews never change confirmed state.',
+            analysis_revision=source['revision'],history_error=None,
+            data_quality={'analysis_available':True})
+        return dict(session_auto=deepcopy(engine["state"].get("session_auto")),symbol=symbol,timeframe=timeframe,settings={k:v for k,v in config.items() if not k.startswith('_')},
+            tick_size=self.chart_broker.host_tick_size(symbol),rows=rows,incremental=False,
+            history=history,latest=rows[-1],initialization_anchor=engine['anchor'],
+            host_bar_count=engine['state']['count'],forming=[],history_error=None,
+            data_quality=history['data_quality'],confirmed_source=source,
+            session_policy=self.chart_broker.session_policy(config),
+            option_route=dict(available=None,message='Execution preflight verifies current product availability separately from confirmed price chart publication.'),
+            squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',
+            parity='Recorded runner confirmed indicators.',intrabar_entries=bool(config.get('intrabar_entries')),
+            provisional_candidate=None,provisional_error=None)
+
+    def chart(self, query):
+        requested_run=(query.get('confirmed_run_id') or [''])[0]
+        if requested_run:
+            return self.confirmed_chart(query,requested_run)
+        config=self.chart_config(query); now=time.time(); tz=ZoneInfo('Asia/Kolkata')
+        today=datetime.fromtimestamp(now,tz).date(); preset=(query.get('history_preset') or ['45'])[0]
+        if preset=='custom':
+            first=datetime.fromisoformat(query['history_from'][0]).date(); last=datetime.fromisoformat(query['history_to'][0]).date()
+        else:
+            if preset not in ('7','45','90'): raise ValueError('Unsupported history range.')
+            last=today; first=today-timedelta(days=int(preset)-1)
+        if first>last or last>today or (last-first).days>90: raise ValueError('History must span at most 91 past calendar days.')
+        begin=datetime.combine(first-timedelta(days=7),datetime.min.time(),tz).timestamp()
+        end=datetime.combine(last+timedelta(days=1),datetime.min.time(),tz).timestamp()
+        config.update(self.chart_broker.session_policy(config))
+        config['history_start']=begin
+        candles=self.chart_broker.candles(config)
+        candles=[c for c in candles if begin<=c['timestamp']<end]
+        tick=self.chart_broker.host_tick_size(config['underlying'])
+        if config.get('chart_zone_target_enabled'):
+            config['_chart_zone_rows']=[r for r in self.chart_broker.candles(dict(config,timeframe='5 minutes',history_start=begin)) if begin<=r['timestamp']<end and not r.get('is_forming')]
+        if config.get('higher_timeframe_enabled') and config.get('chart_entry_guards'):
+            config['_chart_higher_rows']=[r for r in self.chart_broker.candles(dict(config,timeframe=config['supertrend_timeframe'],history_start=begin)) if begin<=r['timestamp']<end and not r.get('is_forming')]
+        from . import mtf_rsi
+        if config.get('chart_entry_guards') and mtf_rsi.enabled(config):
+            config['_chart_rsi_rows']={}
+            for frame in mtf_rsi.frames(config):
+                try:config['_chart_rsi_rows'][frame]=self.chart_broker.candles(dict(config,timeframe=frame,history_start=begin))
+                except Exception:config['_chart_rsi_rows'][frame]=[]  # Missing native evidence blocks the enabled slot.
+        context_key=json.dumps(self.chart_config(query),sort_keys=True)
+        # Serialize identical chart calculations and continue the same confirmed
+        # recurrence. Bound display payloads, not initialization history.
+        with self.lock:
+            if not hasattr(self,'chart_calculation_lock'):self.chart_calculation_lock=threading.RLock()
+            calculation_lock=self.chart_calculation_lock
+        with calculation_lock:
+            with self.lock:previous=self.context.get(context_key)
+            saved=previous[0] if previous and candles and previous[0]['anchor']==candles[0]['timestamp'] else None
+            from .chart_recovery import analyze_chart
+            result,recovery=analyze_chart(candles,config,tick,saved=saved,retain=5000)
+            with self.lock:
+                self.context[context_key]=(result,config,tick)
+                for old in list(self.context)[:-2]:self.context.pop(old,None)
+        display_start=datetime.combine(first,datetime.min.time(),tz).timestamp()
+        rows=[r for r in result['rows'] if r['timestamp']>=display_start]
+        forming=[c for c in candles if c.get('is_forming')]
+        revision=hashlib.sha256(json.dumps([config,rows],sort_keys=True).encode()).hexdigest()
+        self.chart_broker.start()
+        history=dict(requested_from=first.isoformat(),requested_to=last.isoformat(),display_oldest=rows[0]['timestamp'] if rows else None,display_latest=rows[-1]['timestamp'] if rows else None,display_count=len(rows),initialization_bars=sum(c['timestamp']<display_start for c in candles),source='Delta India public REST OHLCV; backend public WebSocket forming candles.',anchor_policy='Full selected history initializes indicators; chart displays at most the latest 5,000 completed source candles. Choose a narrower custom range to inspect older periods.',intrabar_history='Forming candles are provisional; no historical replay into execution.',analysis_revision=revision,history_error=None)
+        if recovery:history['recovery']=recovery
+        response = dict(session_auto=session_auto.for_observation(config,now,tick),symbol=config['underlying'],timeframe=config['timeframe'],settings={k:v for k,v in config.items() if not k.startswith('_')},tick_size=tick,rows=rows,incremental=False,history=history,latest=rows[-1] if rows else None,initialization_anchor=result['anchor'],host_bar_count=result['state']['count'],forming=forming,history_error=None,session_policy=self.chart_broker.session_policy(config),option_route=self.chart_broker.route_availability(config),squareoff_time=(config['session_deadline']+' Asia/Kolkata') if config.get('session_deadline') else 'None · continuous crypto; held contract expiry applies',parity='Shared supplied Renko engine; broker candle sources differ.',intrabar_entries=(query.get('intrabar_entries') or ['false'])[0]=='true',provisional_candidate=None,provisional_error=None)
+
+        if (query.get('live_price_chart') or ['false'])[0]!='true':return response
+        from .live_chart import chart_for
+        live=chart_for(self.chart_broker)
+        live.seed(context_key,result,config,tick,replace=recovery is not None)
+        live.poll(config)
+        return live.apply(context_key,response)
+
+    def get(self, handler, path):
+        if not path.startswith(PREFIX): return False
+        action=path[len(PREFIX):]; query=parse_qs(urlparse(handler.path).query)
+        try:
+            if action=='stream': return self.stream(handler,query)
+            if action=='runner': value=self.runner.snapshot()
+            elif action=='settings': value=self.runner.read_preferences()
+            elif action=='broker-positions': value=self.adoptions.inventory()
+            elif action=='search':
+                text=(query.get('q') or [''])[0].upper()
+                value=dict(matches=[dict(symbol=p['symbol'],underlying=p['underlying']) for p in self.delta.catalog()['instruments'] if p['contract_type']=='perpetual_futures' and text in p['symbol']][:50])
+            elif action=='manual-brick': value=self.manual_brick(query)
+            elif action=='chart': value=self.chart(query)
+            elif action in ('journal','journal.xlsx'):
+                snapshot=self.runner.snapshot();value=dict(schema_version=1,exported_at=time.time(),broker='DELTA_INDIA',pnl_currency=snapshot.get('pnl_currency'),trades=snapshot.get('trade_history',[]))
+                if action.endswith('.xlsx'):
+                    # Use the existing presentable workbook while retaining native
+                    # currency in every trade; export rendering is validated below.
+                    from .journal_export import export_xlsx
+                    body=export_xlsx(value,self.root)
+                    handler.send_response(200); handler.send_header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); handler.send_header('Content-Disposition','attachment; filename="renko-delta-journal.xlsx"'); handler.send_header('Content-Length',str(len(body))); handler.end_headers(); handler.wfile.write(body); return True
+            else: raise ValueError('Unknown Delta Renko read action.')
+            handler.send_json(200,value)
+        except Exception as error: handler.send_json(409,dict(error=str(error)))
+        return True
+
+    def post(self, handler, path, payload):
+        if not path.startswith(PREFIX): return False
+        if (handler.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'): raise PermissionError('Local dashboard required.')
+        origin=handler.headers.get('Origin')
+        if origin and urlparse(origin).netloc!=handler.headers.get('Host'): raise PermissionError('Cross-origin actions forbidden.')
+        actions=dict(**{'spread-filter':self.runner.set_spread_filter,'trend-reentry':self.runner.set_trend_reentry,'resume-position':self.runner.resume_position},settings=self.runner.save_preferences,preview=self.runner.preview,start=self.runner.activate,stop=lambda p:self.runner.request_stop(p),adopt=self.adoptions.apply,**{'adoption-control':self.adoptions.control,'override-entry':self.runner.override_entry,'chart-stop':self.runner.chart_stop,'chart-mode':self.runner.chart_mode,'chart-timeframe':self.runner.chart_timeframe})
+        action=path[len(PREFIX):]
+        if action not in actions: raise ValueError('Unknown Delta Renko action.')
+        if self.instrument and action in ('preview','start','adopt','override-entry') and payload.get('underlying')!=self.instrument:raise ValueError('Action instrument differs from selected instance.')
+        handler.send_json(200,actions[action](payload)); return True
+
+    def stream(self, handler, query):
+        config=self.chart_config(query); self.chart_broker.subscribe(config['underlying'],TIMEFRAMES[config['timeframe']]); self.chart_broker.start()
+        handler.send_response(200); handler.send_header('Content-Type','text/event-stream'); handler.send_header('Cache-Control','no-store'); handler.end_headers()
+        last_live_revision=None
+        try:
+            while not hasattr(handler,'workspace_stream_valid') or handler.workspace_stream_valid():
+                forming=None; error=None
+                try: forming=self.chart_broker.forming_for_stream(config,time.time()) if hasattr(self.chart_broker,'forming_for_stream') else self.chart_broker.forming(config,[],time.time())
+                except ValueError as exc: error=str(exc)
+                now=time.time();tick_at=None;tick_error=None
+                try:_,tick_at=self.chart_broker.live_price(config,now)
+                except (ValueError,RuntimeError) as exc:tick_error=str(exc)
+                # Quote may arrive after the pre-request clock sample.
+                now=time.time()
+                frame=dict(**browser_snapshot(self.runner,now),forming=forming,market=dict(connected=self.chart_broker.connected,fresh=forming is not None,error=error,tick_fresh=tick_at is not None and 0<=now-tick_at<=15,tick_exchange_at=tick_at,tick_error=tick_error),orders=dict(connected=False,basis=getattr(self,'order_source','Delta REST reconciliation; broker order notifications not claimed.')),server_at=now,bar_seconds=TIMEFRAMES[config['timeframe']])
+                if self.adoptions.lock.acquire(blocking=False):
+                    try:managers=dict(self.adoptions.runners)
+                    finally:self.adoptions.lock.release()
+                    frame.update(browser_managers(managers,now))
+                from .live_chart import chart_for
+                live=chart_for(self.chart_broker)
+                live.poll(config)
+                if (query.get('live_price_chart') or ['false'])[0]=='true' and not (query.get('confirmed_run_id') or [''])[0]:
+                    live_key=json.dumps(config,sort_keys=True)
+                    # Initial history arrives through HTTP. Advertise its identity
+                    # instead of duplicating tens of MB on the SSE heartbeat.
+                    if last_live_revision is None:last_live_revision=live.revision(live_key)
+                    frame['live_chart']=live.apply(live_key,revision=last_live_revision) if last_live_revision is not None else None
+                    if frame['live_chart']:last_live_revision=frame['live_chart']['live_chart_revision']
+                    frame['live_chart_pending_revision']=last_live_revision
+                with self.lock: context=self.context.get(json.dumps(config,sort_keys=True))
+                if context and forming:
+                    try: frame['display_analysis']=provisional(*context[:1],forming,context[1],context[2],time.time())
+                    except ValueError: pass
+                handler.wfile.write(('event: state\ndata: '+json.dumps(frame,allow_nan=False)+'\n\n').encode()); handler.wfile.flush()
+                self.wake.wait(1); self.wake.clear(); time.sleep(.15)
+        except (BrokenPipeError,ConnectionResetError,TimeoutError): pass
+        finally: handler.close_connection=True
+        return True

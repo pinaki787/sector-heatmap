@@ -1,0 +1,190 @@
+"""Authenticated localhost setup portal for separate users and broker accounts."""
+import argparse
+import getpass
+import hmac
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from pathlib import Path
+from urllib.parse import urlparse
+from .workspaces import COOKIE, WorkspaceRuntime, WorkspaceStore, cookie_token
+
+ROOT=Path(__file__).resolve().parents[1]
+
+
+def handler_factory(store,runtime,port):
+    class Handler(BaseHTTPRequestHandler):
+        def response(self,status,payload,content_type='application/json',cookie=None):
+            data=json.dumps(payload).encode() if content_type=='application/json' else payload
+            self.send_response(status)
+            self.send_header('Content-Type',content_type)
+            self.send_header('Content-Length',str(len(data)))
+            self.send_header('Cache-Control','no-store')
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            if cookie:
+                self.send_header('Set-Cookie','sector_pulse_local_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+                self.send_header('Set-Cookie',cookie)
+            self.end_headers();self.wfile.write(data)
+
+        def trusted_host(self):
+            return self.headers.get('Host')==f'127.0.0.1:{port}'
+
+        def do_GET(self):
+            if not self.trusted_host():
+                self.response(403,{'error':'Use the displayed 127.0.0.1 portal address.'});return
+            path=urlparse(self.path).path
+            files={'/':'workspace-portal.html','/workspace-portal.js':'workspace-portal.js','/workspace-portal.css':'workspace-portal.css','/sector-pulse-background.css':'sector-pulse-background.css','/assets/nse-building-zadeus.jpg':'assets/nse-building-zadeus.jpg','/assets/bull-bear-algo.png':'assets/bull-bear-algo.png','/assets/currency-motifs.svg':'assets/currency-motifs.svg'}
+            if path in files:
+                name=files[path];mime='text/html' if name.endswith('.html') else 'text/javascript' if name.endswith('.js') else 'image/jpeg' if name.endswith('.jpg') else 'image/png' if name.endswith('.png') else 'image/svg+xml' if name.endswith('.svg') else 'text/css'
+                self.response(200,(ROOT/name).read_bytes(),mime);return
+            try:
+                user=store.session(cookie_token(self.headers))
+                if path=='/api/workspaces/sidebar-visibility':
+                    self.response(200,store.sidebar_visibility());return
+                if path=='/api/workspaces/renko-visibility':
+                    self.response(200,store.renko_visibility());return
+                if path=='/api/workspaces/me':
+                    self.response(200,{**user,'dhan_api_login':True,'account_rename':True,'account_disconnect':True});return
+                if path=='/api/workspaces/users':
+                    from .section_permissions import FEATURES
+                    self.response(200,{'users':store.users(user),'sections':FEATURES,'notification_email_controls':True});return
+                if path=='/api/workspaces/service-restart-status':
+                    from .service_restart import status
+                    self.response(200,status(store,user));return
+                if path=='/api/workspaces/restart-targets':
+                    if not user.get('admin'):raise PermissionError('Administrator access required.')
+                    rows=[dict(id=a['id'],label=a['label'],broker=a['broker'],running=runtime.running(a['id'])) for a in store.accounts(user)]
+                    self.response(200,dict(accounts=rows));return
+                if path=='/api/workspaces/accounts':
+                    rows=store.accounts(user)
+                    for a in rows:
+                        a.update(running=runtime.running(a['id']),configured=(store.folder(a)/'credentials.json').exists(),url=f"http://127.0.0.1:{a['port']}/")
+                    for a in rows:
+                        credential_path=store.folder(a)/'credentials.json'
+                        saved=json.loads(credential_path.read_text()) if credential_path.exists() else {}
+                        key_name={'FYERS':'FYERS_APP_ID','DHAN':'DHAN_CLIENT_ID','DELTA_INDIA':'DELTA_INDIA_API_KEY','MOTILAL_OSWAL':'MO_API_KEY'}[a['broker']]
+                        secret_name={'FYERS':'FYERS_SECRET_KEY','DHAN':'DHAN_ACCESS_TOKEN','DELTA_INDIA':'DELTA_INDIA_API_SECRET','MOTILAL_OSWAL':'MO_API_SECRET'}[a['broker']]
+                        a['disconnected']=(store.folder(a)/'disconnected.json').exists()
+                        a['credential_key']=saved.get(key_name,'')
+                        a['secret_saved']=bool(saved.get(secret_name))
+                        a['dhan_api_key']=saved.get('DHAN_API_KEY','') if a['broker']=='DHAN' else ''
+                        a['dhan_api_secret_saved']=bool(saved.get('DHAN_API_SECRET')) if a['broker']=='DHAN' else False
+                    for a in rows:
+                        if a['broker']=='FYERS':
+                            credentials=store.folder(a)/'credentials.json'
+                            values=json.loads(credentials.read_text()) if credentials.exists() else {}
+                            a['redirect_uri']=values.get('FYERS_REDIRECT_URI','')
+                    for a in rows:
+                        if a['broker']=='MOTILAL_OSWAL':
+                            path=store.folder(a)/'credentials.json'
+                            saved=json.loads(path.read_text()) if path.exists() else {}
+                            a.update(credential_key=saved.get('MO_API_KEY',''),secret_saved=bool(saved.get('MO_API_SECRET')),server_public_ip=saved.get('MO_PUBLIC_IP',''))
+                    for a in rows:
+                        if a['running']:
+                            owner=store.folder(a)/'dashboard-owner.lock'
+                            try:a['dashboard_pid']=json.loads(owner.read_text())['pid']
+                            except (OSError,ValueError,KeyError):pass
+                    self.response(200,{'accounts':rows});return
+                self.response(404,{'error':'Unknown setup endpoint.'})
+            except PermissionError as e:self.response(401,{'error':str(e)})
+
+        def do_POST(self):
+            if not self.trusted_host() or self.headers.get('Origin')!=f'http://127.0.0.1:{port}':
+                self.response(403,{'error':'Setup requires a same-origin request.'});return
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=16384 or self.headers.get('Transfer-Encoding'):
+                    raise ValueError('Invalid request size.')
+                if self.headers.get('Content-Type','').split(';')[0]!='application/json':
+                    raise ValueError('Send JSON.')
+                payload=json.loads(self.rfile.read(size))
+                if not isinstance(payload,dict):raise ValueError('Send an object.')
+                path=urlparse(self.path).path
+                if path=='/api/workspaces/login':
+                    token,user=store.login(payload.get('username',''),payload.get('password',''))
+                    self.response(200,user,cookie=f'{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800');return
+                token=cookie_token(self.headers);user=store.session(token)
+                if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),user['csrf']):
+                    raise PermissionError('Refresh the setup page before saving.')
+                if path=='/api/workspaces/logout':
+                    store.logout(token)
+                    self.response(200,{'signed_out':True},cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return
+                if path=='/api/workspaces/password':
+                    store.change_password(user,payload.get('current_password'),payload.get('new_password'))
+                    self.response(200,{'signed_out':True},cookie=f'{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return
+                if path=='/api/workspaces/sidebar-visibility':
+                    self.response(200,store.set_sidebar_visibility(user,payload.get('settings')));return
+                if path=='/api/workspaces/renko-visibility':
+                    self.response(200,store.set_renko_visibility(user,payload.get('settings')));return
+                if path=='/api/workspaces/user-notification-email':
+                    self.response(200,store.set_notification_email(user,payload.get('username'),payload.get('email'),payload.get('enabled')));return
+                if path=='/api/workspaces/user-sections':
+                    self.response(200,store.set_features(user,payload.get('username'),payload.get('features')));return
+                if path=='/api/workspaces/users':
+                    self.response(201,store.create_user(payload.get('username',''),payload.get('password',''),actor=user));return
+                if path=='/api/workspaces/accounts':
+                    a=store.create_account(user,payload.get('broker'),payload.get('label',''),payload.get('account_ref',''))
+                    self.response(201,{k:v for k,v in a.items() if k not in ('credential_identity','user_id')});return
+                if path in {'/api/workspaces/dhan-login-start','/api/workspaces/dhan-login-complete'}:
+                    from .dhan_account_login import login
+                    result=login(store,runtime,user,payload.get('account_id'),payload.get('token_id') if path.endswith('complete') else None)
+                    self.response(200,result);return
+                if path in {'/api/workspaces/disconnect','/api/workspaces/reconnect'}:
+                    operation=runtime.disconnect if path.endswith('/disconnect') else runtime.reconnect
+                    self.response(200,operation(user,payload.get('account_id')));return
+                if path=='/api/workspaces/rename':
+                    a=store.rename_account(user,payload.get('account_id'),payload.get('label'))
+                    self.response(200,{'id':a['id'],'label':a['label']});return
+                if path=='/api/workspaces/configure':
+                    a=runtime.configure(user,payload.get('account_id'),payload.get('credentials',{}),payload.get('live_enabled',False))
+                    self.response(200,{'id':a['id'],'configured':True,'live_enabled':bool(a['live_enabled'])});return
+                if path=='/api/workspaces/service-restart':
+                    from .service_restart import begin
+                    self.response(202,begin(store,runtime,user,payload.get('request_id')));return
+                if path in {'/api/workspaces/bounce','/api/workspaces/bounce-status'}:
+                    from .workspace_bounce import begin, status
+                    if path.endswith('/bounce'):
+                        from .service_restart import status as dashboard_status, ACTIVE
+                        if dashboard_status(store,user)['status'] in ACTIVE:raise ValueError('Wait for the dashboard restart to finish first.')
+                    result = begin(store,runtime,user,payload.get('account_id')) if path.endswith('/bounce') else status(store,user,payload.get('account_id'))
+                    self.response(202 if path.endswith('/bounce') else 200,result);return
+                if path=='/api/workspaces/open':
+                    self.response(200,runtime.start(user,payload.get('account_id')));return
+                self.response(404,{'error':'Unknown setup endpoint.'})
+            except PermissionError as e:self.response(403,{'error':str(e)})
+            except (ValueError,TypeError,KeyError) as e:self.response(400,{'error':str(e)})
+            except Exception as error:
+                print('Workspace operation failed:',type(error).__name__,flush=True)
+                self.response(500,{'error':'Workspace operation failed. Review the local portal log.'})
+
+        def log_message(self,*args):pass
+    return Handler
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port',type=int,default=8079)
+    parser.add_argument('--registry',type=Path,default=ROOT/'.private/workspaces/registry.sqlite3')
+    parser.add_argument('--bootstrap-admin',metavar='USERNAME')
+    args=parser.parse_args()
+    if not 1024<=args.port<=65535 or 8100<=args.port<=8999:
+        parser.error('Choose a portal port outside workspace range 8100–8999.')
+    store=WorkspaceStore(args.registry)
+    if args.bootstrap_admin:
+        password=getpass.getpass('New administrator password (12+ characters): ')
+        if password!=getpass.getpass('Repeat password: '):parser.error('Passwords differ.')
+        store.create_user(args.bootstrap_admin,password,bootstrap=True)
+        print('Administrator created. Run this command without --bootstrap-admin to open setup.')
+        return
+    with store.db() as db:
+        if not db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
+            parser.error('Create an administrator first with --bootstrap-admin USERNAME.')
+    runtime=WorkspaceRuntime(store,ROOT,args.port)
+    server=ThreadingHTTPServer(('127.0.0.1',args.port),handler_factory(store,runtime,args.port))
+    print(f'Sector Pulse user and broker setup: http://127.0.0.1:{args.port}')
+    try:server.serve_forever()
+    except KeyboardInterrupt:pass
+    finally:server.server_close()
+
+
+if __name__=='__main__':main()
