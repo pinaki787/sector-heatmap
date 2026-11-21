@@ -1,14 +1,18 @@
 # Sector Pulse user guide
 
-Updated 17 October 2026
+Updated 21 November 2026
 
 ## Start here · accounts and dashboard navigation
+
+Open https://utrading.pinakicloud.com and sign in to Sector Pulse. Manage saved connections at https://utrading.pinakicloud.com/accounts. Localhost addresses in installation examples refer to a separate installation, not the hosted dashboard.
 
 Choose a saved broker account before reviewing instruments, holdings, funds or orders. FYERS, Dhan, Motilal Oswal and Delta India have separate data and execution routes. Connection status, market-data permission, runner status and order-stream status are different checks.
 
 Configuration → Brokers manages saved connections and account dashboards. User Master manages users and section access for administrators. Sidebar visibility preferences and permissions determine which sections you can open; a hidden section is not proof that its server job stopped.
 
 Use the search box in this guide to find a setting by its on-screen name, strategy or purpose. The parameter reference lists allowed options and form bounds. These are UI constraints, not guarantees of broker support. The broker master, fresh data and server validation remain authoritative.
+
+Authenticate once per saved broker account. Sections for that account reuse the same private saved authorization. FYERS Handoff refreshes its analysis client when that saved token changes; Dhan already reloads changed saved credentials. A different saved account retains its own authorization.
 
 ## Sector rotation and stock cards
 
@@ -25,6 +29,10 @@ The index/commodity panel accepts one to six broker-native symbols. Eligible res
 Analysis submissions run as background jobs. The page releases submission controls after acceptance, renders results when available, and retains completed or partial output for later retrieval. Stop targets the selected analysis job. Recommendations remain research until a separate explicit trading action passes current validation.
 
 Planning capital, daily and per-idea limits, reserve, concurrent positions, reward/risk and declared external risk constrain planning when enabled. Fresh funds inclusion is optional. Exporting a packet or downloading settings does not send an order.
+
+Scheduled findings show their actual generation time. Current means the latest completed scan is at most 15 minutes old. Historical and partial findings remain visible for reference; they cannot be selected for Manual preparation. A failed or newer incomplete scan does not make an older report current.
+
+An authentication rejection is different from no eligible recommendations. On a visible dashboard, a confirmed FYERS or Dhan authorization rejection offers the account-specific sign-in flow once per account per day in that browser session until a successful connection resets the warning. A network timeout alone does not trigger reauthentication. Login and reconnect do not start runners or retry orders.
 
 ## Runner jobs and saved analysis outputs
 
@@ -110,6 +118,8 @@ Host candles use broker OHLC. Synthetic Renko bodies and historical entry/exit a
 
 History range, initialization anchor and warmup affect path-dependent replay. Missing or invalid OHLC can withhold indicators while valid candles remain displayed. Tick-live/candle-delayed means price observations exist but verified candle data is incomplete. Chart differs from active runner means compare instrument/timeframe/settings, not assume a login failure.
 
+The AI options strategy embedded chart uses its captured account, contract, timeframe and frozen source in a separate chart context. Standalone Chart selections and saved settings remain independent.
+
 ## Server resources, restart progress and recovery
 
 Server resources shows resource samples and retained history. Admin restart controls for the dashboard and broker services are grouped here. Restart requests have independent identities and reported outcomes; a browser/network timeout does not establish restart failure.
@@ -117,6 +127,8 @@ Server resources shows resource samples and retained history. Admin restart cont
 The progress indicator shows Request, Restart, Readiness and Complete, with elapsed time and frequent probes. It does not invent an estimated percentage. READY requires the applicable readiness evidence. FAILED and UNKNOWN are explicit; do not automatically resend an uncertain restart request.
 
 Before a restart, inspect active runners, retained positions and pending orders. A service can return while a retained strategy remains stopped. Never infer that exit monitoring resumed from a green page badge; check the specific job and broker state. Access controls and account isolation remain in force.
+
+Main is the integration baseline. The as-of-live source release dated 21 November 2026 includes source variants for the six hosted broker workspaces. A Git merge is separate from deployment, process activation and broker verification. Source recovery excludes credentials, orders and account runtime state.
 
 ## P&L, journals, exports and troubleshooting
 
@@ -132,7 +144,7 @@ Expired session: renew the same saved account through its supported connection w
 
 ### Broker view
 
-Select the broker workspace whose instruments, market data, account and execution routes will be used. Account selection does not move another broker’s positions.
+Select the broker workspace whose instruments, market data, account and execution routes will be used. Account selection does not move another broker’s positions. Available choices are loaded from your permitted saved accounts or the selected broker’s current instrument master; example instrument names are not fixed defaults.
 
 ### Market
 
@@ -188,7 +200,7 @@ Name of the single saved configuration for this instrument. Save settings update
 
 ### Selected instruments
 
-Instruments selected for independent runner submissions. Differences from each saved configuration are resolved before batch submissions start.
+Instruments selected for independent runner submissions. Differences from each saved configuration are resolved before batch submissions start. Available choices are loaded from your permitted saved accounts or the selected broker’s current instrument master; example instrument names are not fixed defaults.
 
 ### Intrabar entries and EMA exits
 
@@ -634,6 +646,18 @@ Filter displayed journal records by Paper or Live. Filtering does not delete tra
 
 Reference sizing value retained by the manual-brick workflow; the displayed verified calculation and selected contract policy govern its use.
 
+### EMA 100 · third EMA · Strategy
+
+Third EMA entry filter, enabled by default at period 100. Price and every selected EMA must align in the trend direction, using first, second, then third EMA order. Applies on the next Start; does not change exits.
+
+### EMA 100 · third EMA · Indicator
+
+Chart-only third EMA selection; does not enable strategy entries. Period and formula match the configured third EMA.
+
+### Third EMA period
+
+Third EMA period: whole number 1–1000, default 100. Calculated on host candle closes using the same EMA formula as the first two EMAs.
+
 ## Sector analysis, handoff, screener and planning parameters
 
 ### Filter
@@ -648,7 +672,7 @@ Choose the metric used to order sector rows. A ranking is analysis rather than a
 
 How often sector analysis is refreshed. A new response is not necessarily a new completed market candle.
 
-### Lots per legBuys this many lots of both the ATM call and put. Confirm available funds before live use.
+### Lots per leg
 
 Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
 
@@ -792,7 +816,7 @@ Comma-separated segment allowlist for the optional policy.
 
 Comma-separated strategy allowlist for the optional policy.
 
-### Completed-candle signal conditions, one per line15m, 1h, Daily and Weekly completed candles must all be fresh Every timeframe must agree as exact FULL BULLISH ALIGNMENT or FULL BEA
+### Completed-candle signal conditions
 
 Completed-candle alignment conditions required by the optional policy; unavailable or stale observations do not count as agreement.
 
@@ -864,7 +888,7 @@ Maximum permitted evidence age in seconds; older data vetoes the policy action.
 
 Acknowledgement required by this policy workflow after reviewing its complete preview. It is separate from the Renko configuration-choice popup.
 
-### Recommendation textVerify the source independently. The ticket uses the FYERS master and a fresh FYERS quote.
+### Recommendation text
 
 Recommendation text to parse into a reviewed ticket. Verify its source, instrument and levels; parsing does not submit an order.
 
@@ -880,7 +904,7 @@ Exchange/product segment used to restrict broker-master search and supported exe
 
 Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
 
-### Broker-supported symbol or option searchFor stock options, enter the underlying or exact master search. Expiry, strike, call/put, lot size and tick must be returned by broker metad
+### Broker-supported instrument search
 
 Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
 
@@ -974,7 +998,7 @@ Chartink screener to evaluate. Results are analysis candidates; submission uses 
 
 ### Broker account
 
-Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account. Available choices are loaded from your permitted saved accounts or the selected broker’s current instrument master; example instrument names are not fixed defaults.
 
 ### Cash product
 
@@ -984,27 +1008,27 @@ Choose intraday cash or delivery CNC for eligible screener orders.
 
 Manually declare INR risk from exposure outside the positions known to this workflow.
 
-### UnderlyingOnly current FYERS cash/index or commodity-future underlyings with listed options are shown.
+### Underlying search
 
 Search the selected broker’s supported instruments. Entering text does not select a verified execution contract.
 
-### UnderlyingChoose an underlying; the completed EMA Band signal chooses Call (CE) or Put (PE).
+### Underlying
 
 Select the exact supported broker instrument for this workflow. Search results must be resolved to current master metadata before execution.
 
-### ModePaper/forward testing is active. No broker order route exists in this mode.
+### Execution mode
 
 Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.
 
-### LotsQuantity for the automatic BUY entry order.
+### Lots
 
 Whole position quantity in the labelled lots, shares or contracts. Use the selected contract’s current lot and multiplier; sizing is not silently reduced.
 
-### Stop-loss (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price falls this % below entry. Leave blank to exit purely on the EMA Band indica
+### Stop-loss (%) · optional
 
 Optional option-premium percentage stop below the filled entry. Blank retains the normal indicator-based exit policy.
 
-### Target (%) (optional)Optional extra safety net: auto-exit SELL is submitted early if the option price rises this % above entry. Leave blank to exit purely on the EMA Band indicator
+### Target (%) · optional
 
 Optional option-premium percentage target above the filled entry. Blank retains the normal indicator-based exit policy.
 
@@ -1214,7 +1238,7 @@ Friendly label for this strategy instance; it does not alter signal calculations
 
 Choose Paper simulation or explicitly authorized Live execution. Saving a setting does not start trading.
 
-### Maximum trades per runCaps entry orders, including uncertain submissions. Exit orders remain allowed. Resets only on a new start while flat.
+### Maximum trades per run
 
 Maximum new entries per run. Exit orders remain allowed, and a new flat Start creates a new run quota.
 
@@ -1234,11 +1258,11 @@ Optional absolute underlying target. In this RSI/MA runner, setting either under
 
 Optional absolute underlying stop checked on completed closes. Blank leaves that level unused.
 
-### Quoted premium cap per entry (₹, optional)Leave blank for no per-entry cap. Any configured daily budget still applies.
+### Quoted premium cap per entry · optional
 
 Optional per-entry quoted premium cap; blank disables that cap while any daily budget still applies.
 
-### Daily loss budget (₹, optional)Leave blank for no daily budget. When set, realized losses plus new premium must fit; fees are additional.
+### Daily loss budget · optional
 
 Optional daily INR loss budget for this runner; realized losses and new premium are checked by its policy.
 
@@ -1250,7 +1274,7 @@ Enable the strategy’s optional application-managed trailing exit. Manual order
 
 Choose a percentage of the filled option entry or a fixed premium-point step; it does not compound the base distance.
 
-### Trailing stepPercentage defaults to 10%. Points require your positive distance. Fixed distance; never compounds.
+### Trailing step
 
 Positive fixed trailing step. Percentage and premium-point units depend on the selected trailing mode.
 
@@ -1286,7 +1310,7 @@ Period of the SMA/EMA applied to RSI.
 
 Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
 
-### Show${Object.entries(labels).map(([key, text]) =>
+### Holdings category
 
 Filter the holdings review results by the displayed category. It does not sell or rebalance holdings.
 
@@ -1294,7 +1318,7 @@ Filter the holdings review results by the displayed category. It does not sell o
 
 ### Broker account
 
-Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account. Available choices are loaded from your permitted saved accounts or the selected broker’s current instrument master; example instrument names are not fixed defaults.
 
 ### Execution mode
 
@@ -1438,7 +1462,7 @@ Polling interval in seconds. Polling discovers new evidence; it does not guarant
 
 ### Order broker
 
-Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account.
+Select the saved broker account used by this workflow. Data, funds, instruments and execution stay scoped to that account. Available choices are loaded from your permitted saved accounts or the selected broker’s current instrument master; example instrument names are not fixed defaults.
 
 ### Quantity · whole Delta contracts
 

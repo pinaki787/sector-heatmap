@@ -197,8 +197,12 @@ def main():
             response=dict(id=request["id"],ok=True,result=result)
         except Exception as error:
             from .fyers_execution import FyersExecutionUnavailable,PreviewChanged
+            from .sector_service import FyersAuthenticationError
+            from .dhan_execution import DhanAPIError
+            auth=isinstance(error,FyersAuthenticationError) or (isinstance(error,DhanAPIError) and error.reauthentication_required)
             safe=isinstance(error,(ValueError,PermissionError,FyersExecutionUnavailable,PreviewChanged))
             response=dict(id=request.get("id") if isinstance(request,dict) else None,ok=False,
-                error=str(error) if safe else "Owned ticket operation failed ("+type(error).__name__+"); no automatic entry retry.")
+                reauthentication_required=auth,
+                error="Broker sign-in required; the latest saved account authorization was rejected. Sign in once in Brokers." if auth else str(error) if safe else "Owned ticket operation failed ("+type(error).__name__+"); no automatic entry retry.")
         sys.stdout.write(json.dumps(response,allow_nan=False)+"\n");sys.stdout.flush()
 if __name__=="__main__":main()

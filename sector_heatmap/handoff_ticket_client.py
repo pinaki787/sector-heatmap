@@ -26,5 +26,8 @@ class TicketClient:
             except Exception:
                 self.unresponsive=True
                 raise ValueError("Ticket response uncertain; no automatic order retry.") from None
+            if response.get("reauthentication_required") is True:
+                from .handoff_errors import BrokerAuthenticationRequired
+                raise BrokerAuthenticationRequired(response.get("error") or "Broker sign-in required.")
             if response.get("ok") is not True:raise ValueError(response.get("error") or "Owned ticket action rejected.")
             return response["result"]

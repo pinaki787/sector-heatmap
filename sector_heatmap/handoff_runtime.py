@@ -67,9 +67,11 @@ class Runtime:
                      automatic_broker_supported=value["broker"] in {"FYERS","DHAN"},
                      amo_status="NEXT_OPEN_FRESH_ANALYSIS_REGULAR_ORDERS_ONLY_NO_BROKER_AMO")
         with item["schedule"].db() as db:
-            row=db.execute("SELECT output FROM runs WHERE output IS NOT NULL ORDER BY created DESC LIMIT 1").fetchone()
+            row=db.execute("SELECT slot,output FROM runs WHERE output IS NOT NULL ORDER BY created DESC LIMIT 1").fetchone()
         import json
-        output=json.loads(row[0]) if row else {}
+        output=json.loads(row[1]) if row else {}
+        from .handoff_freshness import report_freshness
+        value["report_freshness"]=report_freshness(output,row[0] if row else None,value.get("latest"),time.time())
         recommendations=output.get("recommendations",[])
         value["allocation"]={k:output.get(k) for k in ("available","allocated","unallocated","blocked")}
         value["executions"]=output.get("executions",[])

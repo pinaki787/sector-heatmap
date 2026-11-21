@@ -1,22 +1,29 @@
 """Generate a secret-free module/settings map from source without imports or execution."""
 import ast
 import re
+import subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 TARGET=ROOT/'docs/source-reference.md'
 
 
 def source_files():
-    paths=list(ROOT.glob('*.py'))
-    for folder in ('sector_heatmap','strategies','backtesting','scripts'):
-        paths.extend((ROOT/folder).rglob('*.py'))
-    return sorted(p for p in set(paths) if not any(part in ('__pycache__','cache') for part in p.parts) and not p.name.startswith('test_'))
+    names=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard'],cwd=ROOT,text=True).splitlines()
+    allowed={'sector_heatmap','strategies','backtesting','scripts'}
+    paths=[]
+    for name in set(names):
+        p=Path(name)
+        if p.suffix!='.py' or p.name.startswith(('test_','._')):continue
+        if len(p.parts)>1 and p.parts[0] not in allowed:continue
+        if any(v in {'__pycache__','cache','frozen-source','evidence','site-packages','venv'} or v.startswith('.') for v in p.parts):continue
+        if (ROOT/p).is_file():paths.append(ROOT/p)
+    return sorted(paths)
 
 
 def render():
-    out=['# Generated source and settings reference','Generated from source on 8 October 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.']
+    out=['# Generated source and settings reference','Generated from source on 21 November 2026 without importing modules or reading credential/runtime files. This is a coverage map of all Python application, strategy, helper and research sources and root JavaScript. It complements the [technical guide](technical-guide.md), [user guide](user-functional-guide.md), and [deployment guide](deployment-guide.md). Function signatures list exact defaults; payload-setting entries list literal fallbacks. Defaults in wrappers can override helper defaults. Research modules remain research-only. Source links own full branches, formulas, validation and rounding; the catalog does not execute them.']
     for p in source_files():
-        rel=p.relative_to(ROOT).as_posix();tree=ast.parse(p.read_text())
+        rel=p.relative_to(ROOT).as_posix();tree=ast.parse(p.read_text(),filename=rel)
         out += ['## '+rel,'[Owning source](../'+rel+')']
         if ast.get_docstring(tree):out.append(ast.get_docstring(tree).split('\n')[0])
         entries=[]

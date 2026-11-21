@@ -1,4 +1,6 @@
-# Handoff automation implementation status
+# Handoff automation — historical implementation checkpoints
+
+For current links and daily workflows, use [current operations](current-operations.md). The process IDs, account state and verification results below are historical evidence from their stated dates.
 
 Verified on remote Ubuntu, 21 October 2026, after the 10:00 IST slot and approved Auto activation.
 This file distinguishes source, active services, and broker-confirmed outcomes.

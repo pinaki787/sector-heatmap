@@ -1,4 +1,8 @@
-# NSE Sector Heat Map
+# Sector Pulse — NSE sector analysis and multi-broker workspace
+
+Current hosted dashboard: [Sector Pulse](https://utrading.pinakicloud.com). Sign in there; use [Broker accounts](https://utrading.pinakicloud.com/accounts) for saved connections. Updated 21 November 2026.
+
+Start with the [current operations guide](docs/current-operations.md), [user guide](docs/user-functional-guide.md), [deployment guide](docs/deployment-guide.md), and [release record](docs/releases/2026-11-21-as-of-live.md). The localhost commands below are for a separate installation, not the hosted login address.
 
 For a first-time setup, run the native setup-and-launch entry point from the
 project root. It creates `.venv`, installs the fully resolved Python dependency
@@ -24,7 +28,7 @@ On Ubuntu/Debian or Oracle Linux / RHEL-family Linux, run as the ordinary applic
 sudo access (not as root):
 
 ```sh
-HEATMAP_SERVER_SETUP=1 HEATMAP_DOMAIN=trading.pinakicloud.com \
+HEATMAP_SERVER_SETUP=1 HEATMAP_DOMAIN=utrading.pinakicloud.com \
 HEATMAP_CERT_EMAIL=you@example.com HEATMAP_TEST_RENEWAL=1 sh setup_and_run.sh
 ```
 
@@ -44,7 +48,7 @@ Before running, point the domain's A/AAAA records to this server and allow inbou
 TCP **80 and 443** in the cloud Security List/NSG. The installer cannot edit cloud
 firewall rules or FYERS app settings. Register this exact Redirect URL in the
 [FYERS API dashboard](https://myapi.fyers.in/dashboard):
-`https://trading.pinakicloud.com/callback` (replace the domain for another server).
+`https://utrading.pinakicloud.com/callback` (replace the domain for another server).
 Server mode stores its public origin in `.private/server-settings.json` and uses
 that callback by default. Explicit `FYERS_REDIRECT_URI` overrides are preserved;
 update an old override to the same HTTPS callback if one exists. OAuth state and
@@ -63,7 +67,7 @@ services, and `journalctl -u sector-heatmap.service` for application service log
 To inspect generated system configuration without applying it:
 
 ```sh
-.venv/bin/python scripts/configure_server.py --domain trading.pinakicloud.com --plan
+.venv/bin/python scripts/configure_server.py --domain utrading.pinakicloud.com --plan
 ```
 
 For a transferred archive, extract it into an ordinary writable directory. Copy
@@ -408,7 +412,7 @@ Renko adds mandatory completed 1-minute/5-minute Supertrend agreement, optional 
 ## Multiple users and broker accounts
 
 Use the opt-in [user and broker setup portal](docs/multi-user-broker-setup.md) for
-separate logins and multiple FYERS / Delta India account workspaces. Bootstrap an
+separate logins and FYERS, Dhan, Delta India and Motilal Oswal account workspaces. On the hosted service, open [Broker accounts](https://utrading.pinakicloud.com/accounts). For a separate localhost installation, Bootstrap an
 administrator with `.venv/bin/python -m sector_heatmap.workspace_portal --bootstrap-admin admin`,
 then run `.venv/bin/python -m sector_heatmap.workspace_portal` and open
 `http://127.0.0.1:8079/`. Each account owns its credentials, dashboard process,
@@ -417,7 +421,7 @@ independent; the portal does not migrate or restart it.
 
 
 Dhan accounts can be configured per application user in **Broker accounts** using
-their client ID and access token. Manual single/batch LIMIT tickets can select
+their client ID and API-key consent login. Authorization is obtained through the broker browser flow and saved privately; users do not need to paste an access token. Manual single/batch LIMIT tickets can select
 those saved Dhan accounts; the dedicated **Dhan orders** page provides native
 security-ID entry and read-only reconciliation. See
 [the multi-user setup guide](docs/multi-user-broker-setup.md#dhan-broker-accounts)

@@ -2,6 +2,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 import time
+import hashlib
 from .market_calendar import IST
 from .handoff import FyersCmMaster,FyersFoMaster,fetch_fyers_chain,build_long_option_proposals
 from .fyers_execution import _current_client,_fresh_depth_quote
@@ -10,6 +11,9 @@ from .sector_service import SectorAnalysisService
 class Provider:
     broker="FYERS"
     def __init__(self,account,folder,*,state_dir=None):
+        from .config import load_config
+        token=load_config().get("FYERS_ACCESS_TOKEN", "")
+        self._session_digest=hashlib.sha256(token.encode()).digest()
         self.folder=folder
         self.execution=SimpleNamespace(account=account)
         self.screener_state_dir=state_dir
@@ -28,14 +32,28 @@ class Provider:
         self.cash_master=FyersCmMaster();self.option_master=FyersFoMaster()
         self.live=[];self.refreshed=0
 
+    def refresh_session(self):
+        """Reuse the account's current saved token; invalidate only analysis caches."""
+        from .config import load_config
+        token=load_config().get("FYERS_ACCESS_TOKEN", "")
+        revision=hashlib.sha256(token.encode()).digest()
+        if revision == self._session_digest:
+            return False
+        updated=type(self)(self.execution.account,self.folder,**({"state_dir":self.screener_state_dir} if hasattr(self,"screener_state_dir") else {}))
+        self.__dict__.update(updated.__dict__)
+        return True
+
     def candidates(self,mode):
+        self.refresh_session()
         if time.monotonic()-self.refreshed>=300:
             self.sectors.refresh()
             self.refreshed=time.monotonic()
-        return self.sectors.alignment_candidates(self.live_sectors(),mode=mode)
+        live=self.live_sectors()
+        return self.sectors.alignment_candidates(live,mode=mode)
 
     def live_sectors(self):
         """Read constituent attribution directly from the existing broker connection."""
+        self.refresh_session()
         from .sectors import SECTOR_DEFINITIONS,equity_symbol
         symbols=list(dict.fromkeys([s.symbol for s in SECTOR_DEFINITIONS]+
             [equity_symbol(c.ticker) for s in SECTOR_DEFINITIONS for c in s.constituents]))
@@ -62,18 +80,21 @@ class Provider:
         return rows
 
     def positions(self):
+        self.refresh_session()
         value=self.client.positions()
         if not isinstance(value,dict) or value.get("s")!="ok" or not isinstance(value.get("netPositions"),list):
             raise ValueError("Fresh FYERS positions unavailable for Handoff.")
         return value["netPositions"]
 
     def orders(self):
+        self.refresh_session()
         value=self.client.orderbook()
         if not isinstance(value,dict) or value.get("s")!="ok" or not isinstance(value.get("orderBook"),list):
             raise ValueError("Fresh FYERS order book unavailable for Handoff.")
         return value["orderBook"]
 
     def quote(self,symbol):
+        self.refresh_session()
         quote=_fresh_depth_quote(self.client,symbol,datetime.now(IST))
         return quote["ltp"],quote["provider_timestamp"]
 
@@ -83,6 +104,7 @@ class Provider:
         return row["tick_size"]
 
     def options(self,symbol,direction,risk):
+        self.refresh_session()
         chain,expiry=fetch_fyers_chain(self.client,symbol)
         symbols=[r.get("symbol") for r in (chain.get("data") or {}).get("optionsChain",[]) if r.get("symbol")]
         return build_long_option_proposals(chain,expiry,self.option_master.lookup(symbols),direction,risk)

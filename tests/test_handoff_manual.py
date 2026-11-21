@@ -1,4 +1,5 @@
 import json,tempfile,time,unittest
+from datetime import datetime,timezone
 from pathlib import Path
 from unittest.mock import Mock
 from sector_heatmap.handoff_runtime import Runtime
@@ -33,7 +34,7 @@ class ManualReview(unittest.TestCase):
    entry=100,stop=95,target=108,conviction=self.card["analysis"]["conviction"],validated=True,lot_size=1,
    report_card=self.card,ticket_payload=dict(underlying="NSE:TEST-EQ",proposal=dict(kind="EQUITY",quantity=1)))
   with self.schedule.db() as db:db.execute("INSERT INTO runs VALUES(?,?,?,?,?,?)",
-    ("slot","COMPLETED",time.time(),time.time(),json.dumps(dict(recommendations=[row])),None))
+    ("slot","COMPLETED",time.time(),time.time(),json.dumps(dict(recommendations=[row],report=dict(generated_at=datetime.now(timezone.utc).isoformat()))),None))
   Bridge.calls=[]
  def tearDown(self):self.runtime.close();self.tmp.cleanup()
  def prepare(self):return self.runtime.manual.prepare(self.user,self.account["id"],"synthetic-token",["a"*64])
@@ -118,4 +119,10 @@ class MixedManualReview(unittest.TestCase):
   review=self.prepare()
   self.assertEqual(len(review["items"]),1);self.assertEqual(review["items"][0]["quantity"],50)
   self.assertEqual(review["excluded"][0]["symbol"],"NSE:TEST-EQ")
+  self.assertFalse(Bridge.calls)
+
+ def test_newer_failed_scan_blocks_recent_older_recommendations(self):
+  with self.schedule.db() as db:
+   db.execute("INSERT INTO runs VALUES(?,?,?,?,?,?)",("newer","REVIEW",time.time()+1,time.time(),None,"Broker unavailable"))
+  with self.assertRaisesRegex(ValueError,"Historical analysis"):self.prepare()
   self.assertFalse(Bridge.calls)

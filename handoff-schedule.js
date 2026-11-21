@@ -64,13 +64,14 @@ async function mount(){
   for(const row of rows){
    const label=document.createElement('label');label.className='candidate-card '+String(row.direction||'').toLowerCase();
    const input=document.createElement('input');input.type='checkbox';input.value=row.fingerprint;input.checked=true;input.dataset.recommendation='1';
-   input.disabled=data.policy.mode!=='MANUAL';input.onchange=invalidateManual;
+   input.disabled=data.policy.mode!=='MANUAL'||data.report_freshness?.selectable===false;input.onchange=invalidateManual;
    const text=document.createElement('span');const score=Number(row.score_fraction)*10;
    text.textContent=row.symbol+' · '+row.direction+' · '+(Number.isFinite(score)?score.toFixed(2)+'/10 evidence':'conviction unavailable')+' · entry '+row.entry+' · stop '+row.stop+' · target '+row.target;
    if(row.provenance?.length){const source=document.createElement('small');source.textContent='Sources: '+[...new Set(row.provenance.map(p=>p.label))].join(' + ');text.append(document.createElement('br'),source);}
    label.append(input,text);node('opportunities').append(label);
   }
-  const disabled=!rows.length||data.policy.mode!=='MANUAL';
+  if(data.report_freshness&&data.report_freshness.state!=='CURRENT')node('selection-note').textContent=data.report_freshness.message+(data.report_freshness.generated_at?' Last analysis: '+new Date(data.report_freshness.generated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' IST.':'');
+  const disabled=!rows.length||data.policy.mode!=='MANUAL'||data.report_freshness?.selectable===false;
   for(const name of ['select-all','clear','prepare'])node(name).disabled=disabled;
  }
  function render(data){
@@ -78,7 +79,7 @@ async function mount(){
   node('resume-entries').hidden=!data.policy.entries_halted;
   node('mode').value=data.policy.mode;node('capital').value=data.policy.capital;node('enabled').checked=data.policy.enabled;node('duplicate-reports').checked=data.policy.allow_duplicate_reports===true;
   node('candidate-scope').value=data.policy.candidate_scope||'MERGED';
-  status.textContent=(data.policy.enabled?'Enabled':'Paused')+' · '+data.policy.mode+' · '+(data.session_bound?(data.authorization_basis==='BROKER_SESSION_AND_SAVED_OWNER_GRANT'?'saved Auto authorization active':'account session bound'):'save to authorize this schedule')+(data.latest?' · latest '+data.latest.state:' · no scheduled run yet')+((data.runtime_error||data.latest?.error)?' · '+(data.runtime_error||data.latest.error):'')+(data.allocation?.blocked?' · '+data.allocation.blocked:'')+(data.policy.entries_halted?' · new entries halted: '+(data.policy.halt_reason||'review required'):'')+(data.deferred?.state==='WAITING_FRESH_ANALYSIS'?' · waiting for next-open fresh analysis':'');
+  status.textContent=(data.policy.enabled?'Enabled':'Paused')+' · '+data.policy.mode+' · '+(data.session_bound?(data.authorization_basis==='BROKER_SESSION_AND_SAVED_OWNER_GRANT'?'saved Auto authorization active':'account session bound'):'save to authorize this schedule')+(data.latest?' · last scan '+(Number.isFinite(Date.parse(data.latest.slot))?new Date(data.latest.slot).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'time unavailable')+' · '+data.latest.state:' · no scheduled run yet')+((data.runtime_error||data.latest?.error)?' · '+(data.runtime_error||data.latest.error):'')+(data.allocation?.blocked?' · '+data.allocation.blocked:'')+(data.policy.entries_halted?' · new entries halted: '+(data.policy.halt_reason||'review required'):'')+(data.deferred?.state==='WAITING_FRESH_ANALYSIS'?' · waiting for next-open fresh analysis':'');
   if(data.allocation?.available!=null)status.textContent+=' · available for new entries '+currency(data.allocation.available);
   const diagnostic=data.diagnostic;
   if(diagnostic)status.textContent+=' · read-only scan '+diagnostic.state+(diagnostic.eligible!==undefined?' ('+diagnostic.eligible+' eligible)':'')+(diagnostic.error?' · '+diagnostic.error:'');

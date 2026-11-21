@@ -1,0 +1,11 @@
+{
+  "name": "sector-pulse-browser-tests",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test:handoff": "cd .. && node --test tests/test_dhan_connection_status.cjs tests/handoff-screener.test.cjs tests/handoff-manual-ui.test.cjs tests/renko-embedded-chart-isolation.test.cjs tests/renko-ai-chart-source.test.cjs tests/renko-ai-chart-markers.test.cjs tests/chart-renko-study-alignment.test.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

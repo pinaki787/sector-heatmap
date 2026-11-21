@@ -12,14 +12,31 @@ if(typeof window==='undefined'&&typeof module!=='undefined'&&module.exports){mod
 let key='',version=0,last=0,connectionContext=null,contextRequest=null;
 let dhanPending='',lastSelectedAccountId='';
 const reauthShown=new Set();
-function offerDhanReauthentication(account){
+function promptKey(account){
+ const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ return 'sector-pulse:reauth:'+account.id+':'+day;
+}
+function alreadyPrompted(account){
+ const id=promptKey(account);
+ try{return reauthShown.has(id)||root.sessionStorage.getItem(id)==='shown';}catch{return reauthShown.has(id);}
+}
+function clearPrompt(account){
+ const id=promptKey(account);reauthShown.delete(id);
+ try{root.sessionStorage.removeItem(id);}catch{}
+ for(const dialog of document.querySelectorAll('dialog[data-broker-reauth]')){if(dialog.dataset.brokerReauth===account.id){if(dialog.open&&typeof dialog.close==='function')dialog.close();dialog.remove();}}
+}
+function offerReauthentication(account,broker){
  if(document.querySelector('#sp-chart-workspace[open], #chart-workspace.view.active'))return;
- if(reauthShown.has(account.id)||document.visibilityState==='hidden')return;
- reauthShown.add(account.id);
- const dialog=document.createElement('dialog');
- const heading=document.createElement('h3');heading.textContent='Dhan sign-in required';
- const text=document.createElement('p');text.textContent='Dhan authorization expired or is invalid for '+account.label+'. Sign in again to restore broker access. This does not start a runner or retry an order.';
- const link=document.createElement('a');link.className='button';link.textContent='Reauthenticate Dhan';link.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);
+ if(alreadyPrompted(account)||document.visibilityState==='hidden')return;
+ const id=promptKey(account);reauthShown.add(id);
+ try{root.sessionStorage.setItem(id,'shown');}catch{}
+ const name=broker==='FYERS'?'FYERS':'Dhan';
+ const dialog=document.createElement('dialog');dialog.dataset.brokerReauth=account.id;
+ const heading=document.createElement('h3');heading.textContent=name+' sign-in required';
+ const text=document.createElement('p');text.textContent='The latest saved authorization for '+account.label+' was rejected by '+name+'. Sign in once to restore access across this account’s sections.';
+ const link=document.createElement('a');link.className='button';link.textContent='Reauthenticate '+name;
+ if(broker==='FYERS')fyersConnect(link,account);
+ else link.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);
  const later=document.createElement('button');later.textContent='Later';later.onclick=()=>{dialog.close();dialog.remove();};
  dialog.append(heading,text,link,later);document.body.append(dialog);dialog.showModal();
 }
@@ -116,8 +133,8 @@ async function update(){
    try{
     const response=await fetch('/api/dhan/status?account_id='+encodeURIComponent(account.id),{signal:controller.signal});if(!response.ok)throw Error();
     const data=await response.json();message=data.authenticated?'Connected':data.reauthentication_required?'Sign-in required':'Not connected';
-    if(generation===version&&data.reauthentication_required){connect.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);connect.textContent='Reauthenticate Dhan';offerDhanReauthentication(account);}
-    if(data.authenticated)reauthShown.delete(account.id);
+    if(generation===version&&data.reauthentication_required){connect.href='/accounts?reauth_dhan='+encodeURIComponent(account.id);connect.textContent='Reauthenticate Dhan';offerReauthentication(account,broker);}
+    if(data.authenticated)clearPrompt(account);
    }finally{clearTimeout(timeout);if(dhanPending===next)dhanPending='';}
   }else if(broker==='DELTA_INDIA'){
    const response=await fetch((account?'/broker-workspace/'+account.id:'')+'/api/delta-india/status');if(!response.ok)throw Error();
@@ -125,6 +142,8 @@ async function update(){
   }else{
    const response=await fetch('/broker-workspace/'+account.id+'/api/auth/status');if(!response.ok)throw Error();
    const data=await response.json();
+   if(generation===version&&data.reauthentication_required===true)offerReauthentication(account,broker);
+   if(data.authenticated===true)clearPrompt(account);
    message=data.connected===true||data.authenticated===true?'Connected'
     :data.reauthentication_required===true||String(data.message).includes('no current access token')?'Sign-in required'
     :'Status unavailable — retrying';

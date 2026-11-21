@@ -7,3 +7,6 @@ class IncompleteAnalysis(ValueError):
     def __init__(self,message,report):
         super().__init__(message)
         self.report=report
+
+class BrokerAuthenticationRequired(ValueError):
+    """Latest saved credentials were rejected; never retry a trading operation."""

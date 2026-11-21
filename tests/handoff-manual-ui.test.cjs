@@ -32,3 +32,18 @@ test('scheduled Manual selection and preview never submit; exact confirmation do
  assert.equal(requests.find(r=>r.url.endsWith('handoff-submit')).body.confirmation,'CONFIRM review');
  dom.window.close();
 });
+
+test('historical findings remain readable and cannot be prepared',async()=>{
+ const dom=new JSDOM('<section id="handoff"><header></header></section>',{url:'https://portal.example/',runScripts:'outside-only'});
+ const w=dom.window;
+ w.BrokerForms={ready:Promise.resolve(),account:()=>({id:'owned',broker:'FYERS'})};
+ const data={policy:{mode:'MANUAL',capital:100000,enabled:true},report_freshness:{state:'STALE',selectable:false,message:'Historical analysis retained for reference.',generated_at:'2026-11-03T09:30:00+05:30'},recommendations:[{fingerprint:'a'.repeat(64),symbol:'NSE:TEST-EQ',direction:'BULLISH',entry:100,stop:95,target:108}]};
+ class XHR {open(){}send(){queueMicrotask(()=>{this.status=200;this.responseText=JSON.stringify(data);this.onload();});}}
+ w.XMLHttpRequest=XHR;w.eval(fs.readFileSync(require.resolve('../handoff-schedule.js'),'utf8'));
+ await new Promise(r=>setTimeout(r,25));
+ assert.match(w.document.querySelector('[data-selection-note]').textContent,/Historical analysis/);
+ assert.match(w.document.querySelector('[data-opportunities]').textContent,/NSE:TEST-EQ/);
+ assert.equal(w.document.querySelector('[data-prepare]').disabled,true);
+ assert.equal(w.document.querySelector('[data-recommendation]').disabled,true);
+ w.close();
+});

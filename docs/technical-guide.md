@@ -1,12 +1,27 @@
 # Sector Pulse technical guide
 
-Audited 8 October 2026 against repository source. This guide describes implementation, not current broker positions, service health, verified live fills, profitability, or a recommendation. [User guide](user-functional-guide.md), [deployment guide](deployment-guide.md), and [complete source/default catalog](source-reference.md) are companion references. The callable catalog is generated from source and lists every application/strategy/research module, function signature, literal default and payload setting discovered by the generator. Source remains authoritative for rounding, validation, edge cases and later changes.
+Architecture and account-session guidance refreshed 21 November 2026. The detailed mathematical sections below retain the earlier audit scope; inspect the linked owning source for later strategy changes. This guide describes implementation, not current broker positions, service health, verified live fills, profitability, or a recommendation. [User guide](user-functional-guide.md), [deployment guide](deployment-guide.md), and [complete source/default catalog](source-reference.md) are companion references. The callable catalog is generated from source and lists every application/strategy/research module, function signature, literal default and payload setting discovered by the generator. Source remains authoritative for rounding, validation, edge cases and later changes.
 
 ## Architecture and responsibility
 
-[web.py](../sector_heatmap/web.py) builds independent services and routes HTTP requests on localhost. [heatmap_server.py](../heatmap_server.py) is the entry point. The served application is root `index.html` and root JavaScript, with the vendored Lightweight Charts library. `client/` is a separately built React/Vite client; building it does not replace the root dashboard. FYERS supplies Indian equity/index/commodity history, masters, tick/order streams and account execution. Delta India supplies crypto data and its own signed execution/account APIs. UI broker selection does not authorize or migrate another broker's positions. Dhan-labelled selection/research helpers are not evidence of a Dhan production order runner.
+[web.py](../sector_heatmap/web.py) builds independent services and routes HTTP requests on localhost. [heatmap_server.py](../heatmap_server.py) is the entry point. The served application is root `index.html` and root JavaScript, with the vendored Lightweight Charts library. `client/` is a separately built React/Vite client; building it does not replace the root dashboard. FYERS supplies Indian equity/index/commodity history, masters, tick/order streams and account execution. Delta India supplies crypto data and its own signed execution/account APIs. UI broker selection does not authorize or migrate another broker's positions. Dhan has native account-bound execution and strategy adapters; a route being implemented does not establish that a particular runner is active or broker fills were verified.
 
-The sector analysis service is read-only. EMA/RSI, Renko, KAMA, parser and straddle ownership/lifecycles are separate. Research workers use historical data and have no strategy promotion authority. Browser settings, saved preferences, armed-run configuration, broker positions and durable order intent are distinct records. A saved setting never establishes a fill or starts trading by itself. Threads cache history and stream quotes; durable state is written atomically or committed to SQLite before uncertain external order outcomes can be retried. The Python HTTP server is not a multi-user production trading service.
+The sector analysis service is read-only. EMA/RSI, Renko, KAMA, parser and straddle ownership/lifecycles are separate. Research workers use historical data and have no strategy promotion authority. Browser settings, saved preferences, armed-run configuration, broker positions and durable order intent are distinct records. A saved setting never establishes a fill or starts trading by itself. Threads cache history and stream quotes; durable state is written atomically or committed to SQLite before uncertain external order outcomes can be retried. Hosted access uses application login, section permissions and account-owned source/process boundaries behind the HTTPS proxy; localhost endpoints are not public login addresses.
+
+## Account authentication and Handoff freshness
+
+The hosted origin is https://utrading.pinakicloud.com. A saved broker account owns
+one private credential store; sections must reuse it rather than copy a token into
+section-specific settings. FYERS Handoff checks the latest saved token before
+analysis and account reads, replacing its analysis client/history cache on change.
+Dhan's execution service already rebuilds its client when saved credentials change.
+Neither path retries a trading mutation because credentials changed.
+
+Scheduled report freshness comes from the report generation time and latest run
+identity, not a later status update. Retained historical or partial output remains
+visible but is ineligible for Manual preparation. Latest completed evidence expires
+after 15 minutes. Confirmed authorization rejection is reported separately from
+network unavailability and empty eligible results.
 
 ## Shared mathematical conventions
 

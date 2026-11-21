@@ -2,7 +2,7 @@
 import re
 from pathlib import Path
 from generate_source_reference import ROOT, source_files
-FILES=[ROOT/'README.md']+[ROOT/'docs'/name for name in ('technical-guide.md','user-functional-guide.md','deployment-guide.md','source-reference.md','multi-user-broker-setup.md')]
+FILES=[ROOT/'README.md']+[ROOT/'docs'/name for name in ('README.md','current-operations.md','technical-guide.md','user-functional-guide.md','deployment-guide.md','source-reference.md','multi-user-broker-setup.md')]
 errors=[]
 for p in FILES:
     text=p.read_text()

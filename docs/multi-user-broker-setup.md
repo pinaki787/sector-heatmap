@@ -1,6 +1,8 @@
 # Multiple users and broker accounts
 
-Sector Pulse now has an opt-in localhost setup portal with separate user logins
+Updated 21 November 2026. Hosted users open [Sector Pulse](https://utrading.pinakicloud.com) and [Broker accounts](https://utrading.pinakicloud.com/accounts). The standalone localhost procedure below is for separate installations.
+
+Sector Pulse has an account setup portal with separate user logins
 and multiple FYERS / Delta India accounts per user. Login and account setup use the same dark colours, typography, panels,
 fields and buttons as the Sector Pulse dashboard. Both share a faint NSE building
 photograph and decorative bull/bear artwork behind readable foreground panels. Each account gets its own
@@ -57,8 +59,8 @@ before changing users on a shared browser if exposure needs attention.
 
 ## Isolation and persistence
 
-Default registry: `.private/workspaces/registry.sqlite3`. Credentials live in
-`.private/workspaces/accounts/<generated-id>/credentials.json`; each account's
+On the hosted installation, the registry is `.private/dashboard-login/registry.sqlite3`. Credentials live in
+`.private/dashboard-login/accounts/<generated-id>/credentials.json`; a separately started local setup portal may use its own configured registry. each account's
 `source/` owns its `.private/` runtime files, and its `home/` owns broker token
 caches and configuration discovery. File permissions restrict registry and
 credential files to the local OS user. Passwords use salted scrypt; session
@@ -102,12 +104,12 @@ account source copies and runtime state. Keep private backups separately. Source
 publication does not activate this portal, migrate the existing single-user
 session or rearm any runner. The original single-user service remains independent
 and is not protected by these portal logins. Do not expose the original service
-or portal publicly; remote Internet hosting requires a separate deployment design
-with HTTPS and appropriate access controls. All provisioned processes bind only
-to 127.0.0.1; users here are application users on the local installation, not
-separate OS security principals.
+or bare localhost portal publicly. The hosted service uses HTTPS, application login,
+same-origin proxies and account/section permission enforcement. Open the hosted
+links above rather than exposing an account port.
 
-## Verification scope
+
+## Historical verification scope
 
 Automated tests use fake credentials and exercise user ownership, admin limits,
 session expiry/revocation, CSRF/Host/Origin checks, broker mutation boundaries,
@@ -122,7 +124,7 @@ execution require destination verification.
 
 In **User Master → Broker accounts**, choose **Dhan**, use the Dhan client ID
 as the broker account reference, then save **Dhan client ID** and **Dhan access
-token** under Connection settings. Each user's account and token remain private.
+token** under Connection settings. Each user's account and saved authorization remain private.
 Token renewal is performed in DhanHQ; paste the renewed token in this account's
 connection settings. Live capability remains off unless explicitly enabled by
 the account owner. Saving or checking a connection does not send an order.

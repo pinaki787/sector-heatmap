@@ -1,6 +1,21 @@
 # Sector Pulse deployment guide
 
-Updated 8 October 2026. [Technical rules](technical-guide.md), [user operations](user-functional-guide.md), [source/default catalog](source-reference.md). Installing files does not authorize orders, start a strategy, or establish that a broker connection is usable. This guide describes the current release procedure; runtime state must be checked at the time of any update.
+Updated 21 November 2026. [Technical rules](technical-guide.md), [user operations](user-functional-guide.md), [source/default catalog](source-reference.md). Installing files does not authorize orders, start a strategy, or establish that a broker connection is usable. This guide describes the current release procedure; runtime state must be checked at the time of any update.
+
+## Hosted service and release identity
+
+The current dashboard is [utrading.pinakicloud.com](https://utrading.pinakicloud.com).
+[Broker accounts](https://utrading.pinakicloud.com/accounts) manages saved connections.
+The shared HTTPS FYERS callback is https://utrading.pinakicloud.com/callback;
+an account can retain an explicit registered redirect override, so inspect that
+account's private configuration before changing an API registration.
+The local callback examples below apply only to separate localhost installs.
+
+Main is the integration baseline. See the [as-of-live source release](releases/2026-11-21-as-of-live.md)
+for preserved deployed source variants and offline recovery. A merge/tag does not
+reload an existing process. Restore only reviewed source; retain account credentials
+and state in their private locations. Existing live or recovering workflows require
+an explicit, exposure-aware activation plan.
 
 ## Package and platform boundaries
 
@@ -80,3 +95,12 @@ Verify with `shasum -a 256 ARCHIVE.tar.gz` on macOS or `sha256sum ARCHIVE.tar.gz
 ## Opt-in user/account deployment
 
 The [multi-user setup guide](multi-user-broker-setup.md) describes administrator bootstrap, portal launch, per-account callback registration and source snapshots. It uses the same runtime dependencies. New source archives include `release-source-files.json`, allowing verified account provisioning from an extracted release without Git. No real users, credentials or account processes are created by installing this feature. The portal and account dashboards bind only to loopback. Existing single-user runtime and legacy credentials are not migrated; existing account snapshots are not auto-updated.
+
+## Focused JavaScript regression tests
+
+The browser test dependency is pinned separately from the React client.
+From the repository root, run `npm --prefix tests ci --ignore-scripts`, then
+`npm --prefix tests run test:handoff`. The lockfile pins jsdom and its transitive
+dependencies. Node.js and npm are test tooling prerequisites; ordinary dashboard
+runtime does not load jsdom. No temporary directory path is required by the
+connection-status regression test.

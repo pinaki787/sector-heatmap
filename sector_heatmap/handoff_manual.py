@@ -18,9 +18,15 @@ class Manual:
         if not isinstance(selected,list) or not 1<=len(selected)<=5 or len(set(selected))!=len(selected):
             raise ValueError("Select one to five distinct high-conviction recommendations.")
         with schedule.db() as db:
-            latest=db.execute("SELECT slot,updated,output FROM runs WHERE output IS NOT NULL ORDER BY created DESC LIMIT 1").fetchone()
+            latest=db.execute("SELECT slot,updated,output,state FROM runs WHERE output IS NOT NULL ORDER BY created DESC LIMIT 1").fetchone()
         if not latest or not 0<=self.clock()-latest[1]<=900:raise ValueError("Scheduled evidence expired; wait for a fresh analysis.")
-        rows=json.loads(latest[2]).get("recommendations",[])
+        from .handoff_freshness import report_freshness
+        with schedule.db() as db:
+            current=db.execute("SELECT slot,state FROM runs ORDER BY created DESC LIMIT 1").fetchone()
+        output=json.loads(latest[2])
+        freshness=report_freshness(output,latest[0],dict(slot=current[0],state=current[1]) if current else None,self.clock())
+        if not freshness["selectable"]:raise ValueError(freshness["message"])
+        rows=output.get("recommendations",[])
         wanted={r["fingerprint"]:r for r in rows}
         if any(key not in wanted for key in selected):raise ValueError("Selection differs from the latest scheduled recommendations.")
         account=self.runtime.owned(user,aid)
