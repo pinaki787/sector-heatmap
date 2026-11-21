@@ -65,6 +65,14 @@ $('status').onclick=event=>run(event.target,()=>status());
  const params=new URLSearchParams(location.search),auth=params.get('authtoken');if(auth)history.replaceState(null,'',location.pathname);
  context=await api('/api/workspace-context');$('account').textContent=context.workspace.label+' · '+context.workspace.account_ref+' · '+(context.workspace.live_enabled?'Live capability enabled':'Paper / read-only');
  if(!context.visible||!context.permitted){message('Broker connection is hidden or not assigned in User Master.');return;}$('broker-panel').hidden=false;
+ const chartFeature='chart-workspace';
+ if(context.sidebar_visibility?.[chartFeature]===true
+     && (context.admin || context.allowed_features?.includes(chartFeature))){
+   const chartLink=document.createElement('a');
+   chartLink.textContent='Chart workspace';
+   chartLink.href='/?'+new URLSearchParams({view:chartFeature,chartSource:context.workspace.id});
+   $('workflow-links').append(chartLink,document.createElement('br'));
+ }
  for(const [label,kind] of [['Renko Supertrend','renko'],['Analysis handoff','handoff'],['Screener','screener'],['Sector rotation','sector']]){
   const link=document.createElement('a');link.textContent=label;link.href='/?'+new URLSearchParams({brokerForm:kind,brokerAccount:context.workspace.id,[kind+'Account']:context.workspace.id,...(kind==='renko'?{renkoBroker:'MOTILAL_OSWAL'}:{})});$('workflow-links').append(link,document.createElement('br'));
  }

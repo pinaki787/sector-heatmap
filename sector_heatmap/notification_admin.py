@@ -7,7 +7,7 @@ from .workspaces import WorkspaceStore,cookie_token
 from .trade_notifications import ROOT
 
 
-def handler_factory(store,port=8090,runtime=None):
+def handler_factory(store,port=8090,runtime=None,reports=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):
             pass  # Do not log recipient addresses, cookies or request bodies.
@@ -37,6 +37,11 @@ def handler_factory(store,port=8090,runtime=None):
         def do_GET(self):
             try:
                 parsed=urlparse(self.path)
+                if parsed.path=="/api/notification-admin/reports":
+                    from .report_delivery import ReportDelivery
+                    user=self.user(admin=False)
+                    section=(parse_qs(parsed.query).get("section") or [""])[0]
+                    self.respond(200,(reports or ReportDelivery(ROOT,store)).status(user,section));return
                 if parsed.path=="/api/notification-admin/sector-detail":
                     user=self.user(admin=False)
                     query=parse_qs(parsed.query)
@@ -61,9 +66,10 @@ def handler_factory(store,port=8090,runtime=None):
         def do_POST(self):
             try:
                 path=urlparse(self.path).path
+                report_control=path=="/api/notification-admin/reports"
                 schedule=path in ("/api/notification-admin/handoff","/api/notification-admin/handoff-prepare","/api/notification-admin/handoff-submit","/api/notification-admin/handoff-diagnose")
-                user=self.user(mutation=True,admin=not schedule)
-                if not schedule and path!="/api/notification-admin/user-email":
+                user=self.user(mutation=True,admin=not (schedule or report_control))
+                if not schedule and not report_control and path!="/api/notification-admin/user-email":
                     self.respond(404,{"error":"Unknown notification settings endpoint."});return
                 if self.headers.get("Transfer-Encoding") or self.headers.get("Content-Type","").split(";")[0]!="application/json":
                     raise ValueError("Send a JSON object.")
@@ -71,7 +77,10 @@ def handler_factory(store,port=8090,runtime=None):
                 if not 0<size<=4096:raise ValueError("Invalid notification request size.")
                 payload=json.loads(self.rfile.read(size))
                 if not isinstance(payload,dict):raise ValueError("Send a JSON object.")
-                if schedule:
+                if report_control:
+                    from .report_delivery import ReportDelivery
+                    result=(reports or ReportDelivery(ROOT,store)).configure(user,payload)
+                elif schedule:
                     if runtime is None:raise ValueError("Handoff scheduling runtime unavailable.")
                     aid=payload.pop("account_id",None)
                     if path.endswith("/handoff-diagnose"):

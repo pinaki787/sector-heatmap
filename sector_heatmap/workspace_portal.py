@@ -20,6 +20,7 @@ def handler_factory(store,runtime,port):
             self.send_header('Content-Length',str(len(data)))
             self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Referrer-Policy','no-referrer')
             self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             if cookie:
                 self.send_header('Set-Cookie','sector_pulse_local_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
@@ -44,7 +45,7 @@ def handler_factory(store,runtime,port):
                 if path=='/api/workspaces/renko-visibility':
                     self.response(200,store.renko_visibility());return
                 if path=='/api/workspaces/me':
-                    self.response(200,{**user,'dhan_api_login':True,'account_rename':True,'account_disconnect':True});return
+                    self.response(200,{**user,'dhan_api_login':True,'account_rename':True,'account_disconnect':True,'account_delete':True});return
                 if path=='/api/workspaces/users':
                     from .section_permissions import FEATURES
                     self.response(200,{'users':store.users(user),'sections':FEATURES,'notification_email_controls':True});return
@@ -132,6 +133,8 @@ def handler_factory(store,runtime,port):
                 if path in {'/api/workspaces/disconnect','/api/workspaces/reconnect'}:
                     operation=runtime.disconnect if path.endswith('/disconnect') else runtime.reconnect
                     self.response(200,operation(user,payload.get('account_id')));return
+                if path=='/api/workspaces/delete':
+                    self.response(200,runtime.delete(user,payload.get('account_id'),payload.get('confirmation')));return
                 if path=='/api/workspaces/rename':
                     a=store.rename_account(user,payload.get('account_id'),payload.get('label'))
                     self.response(200,{'id':a['id'],'label':a['label']});return

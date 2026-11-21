@@ -32,7 +32,7 @@ test('submission completes while AI is unresolved; no AI on parse', async () => 
   }
   const out = new Element()
   const advisory = create(out, () => { aiCalls++; return new Promise(resolve => { resolveAi = resolve }) }, 1000)
-  vm.runInNewContext(source.slice(start,end), {$, parserAdvisory: advisory, refreshParserLifecycle: async () => {}, parserParsedTicket:{symbol:'NSE:TEST',text:'BUY TEST',submission_id:'test-one'},parserSubmissionAttempted:false,
+  vm.runInNewContext(source.slice(start,end), {$, parserAdvisory: advisory, refreshParserLifecycle: async () => {}, window:{BrokerForms:{account:()=>({id:'f',broker:'FYERS'})}},parserParsedTicket:{account_id:'f',symbol:'NSE:TEST',text:'BUY TEST',submission_id:'test-one'},parserSubmissionAttempted:false,
     postJson: async url => { assert.equal(url, '/api/trade-recommendation/submit-direct'); orderCalls++; return {message:'broker result'} }})
   await click()
   assert.equal(orderCalls, 1)

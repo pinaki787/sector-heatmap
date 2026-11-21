@@ -113,6 +113,11 @@ def review(row, candles, expected_session, now=None):
     result['evidence'] = {**{k: round(v, 4) for k, v in info.items()}, 'completed_session': expected_session,
                           'quote_timestamp': datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
                           'price_basis': 'Recent quote' if session['status'] == 'OPEN' else 'Last completed session quote'}
+    latest_raw=next((r for r in reversed(candles) if r.get('source')=='DHAN_COMPLETE_INTRADAY_SESSION' and r.get('session')==expected_session),None)
+    if latest_raw:
+        result['evidence'].update(daily_source='Dhan complete 375-minute session aggregation',source_minutes=375,official_daily_pending=True)
+        result['limitations'].append('Latest completed session is aggregated from all 375 Dhan one-minute candles; official Dhan daily candle is not yet published. Closing-auction adjustments may differ.')
+        result['chart']['basis']='Completed daily history plus latest session aggregated from all 375 Dhan one-minute candles; official daily publication pending.'
     close, e20, e50, atr, rsi = (info[k] for k in ('close', 'ema20', 'ema50', 'atr14', 'rsi14'))
     if abs(price - close) > 3 * atr:
         result['reasons'] = ['Current price differs from the completed daily close by more than 3 ATR; review the gap and intraday risk before relying on swing rules.']
@@ -358,7 +363,9 @@ class HoldingsAnalysis:
                             with self.lock:
                                 if len(self.history_cache) >= 500: self.history_cache.pop(next(iter(self.history_cache)))
                                 self.history_cache[cache_key] = (now, candles)
-                    except Exception: failure = 'Broker daily history unavailable; no recommendation produced.'
+                    except Exception as error:
+                        from .native_holdings import DhanSessionEvidenceError
+                        failure = str(error) if isinstance(error,DhanSessionEvidenceError) else 'Broker daily history unavailable; no recommendation produced.'
                 item = diagnostics.call(adapter.broker, 'holdings.rule_analysis', review_linear, row, candles, self.clock()) if adapter.broker == 'DELTA_INDIA' else diagnostics.call(adapter.broker, 'holdings.rule_analysis', review, row, candles, capture['session'], self.clock())
                 if failure:
                     item.update(action='REVIEW_NEEDED', reasons=[failure], candidate_stop=None)

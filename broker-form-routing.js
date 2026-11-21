@@ -7,7 +7,7 @@ let accounts=[],workspaceContext=root.SectorPulseWorkspace||null,resolveReady,re
 const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
 function initial(kind){
  const p=new URLSearchParams(location.search);
- return (kind==='manual'&&['handoff','screener'].includes(p.get('brokerForm'))?(p.get(p.get('brokerForm')+'Account')||p.get('brokerAccount')):null)||p.get(kind+'Account')||(p.get('brokerForm')===kind||kind==='renko'?p.get('brokerAccount'):null);
+ return (kind==='manual'&&['handoff','screener'].includes(p.get('brokerForm'))?(p.get(p.get('brokerForm')+'Account')||p.get('brokerAccount')):null)||p.get(kind+'Account')||p.get('brokerAccount')||workspaceContext?.workspace?.id||null;
 }
 function account(kind){
  const control=kind==='handoff'?document.getElementById('ticket-broker'):kind==='manual'?document.querySelector('.view.active .order-account'):document.getElementById(IDS[kind]);
@@ -17,9 +17,35 @@ function account(kind){
  return accounts.find(a=>a.id===id)||null;
 }
 function kind(url){const p=new URL(url,location.href).pathname;
- return /\/holdings-analysis(?:\/|$)/.test(p)?'holdings':p.startsWith('/api/chartink/analyze')?'screener':p.startsWith('/api/trade-recommendation/')?'parser':(['/api/account','/api/realized-pnl','/api/live-pnl','/api/auth/status','/api/auth/start','/api/chartink/analyze','/api/chartink/analyze-options'].includes(p) )?'account':p.startsWith('/api/analysis-handoff/')?'handoff':p.startsWith('/api/sector-analysis')?'sector':p.startsWith('/api/trade-ticket/')?'manual':p.startsWith('/api/kama/')?'kama':p.startsWith('/api/ema-crossover/')?'rsi':p.startsWith('/api/ema-band/')?'band':p.startsWith('/api/renko-')?'renko':null;
+ return /\/holdings-analysis(?:\/|$)/.test(p)?'holdings':p.startsWith('/api/chartink/')?'screener':p.startsWith('/api/trade-recommendation/')?'parser':(['/api/account','/api/realized-pnl','/api/live-pnl','/api/account-reports/analyze','/api/auth/status','/api/auth/start','/api/chartink/analyze','/api/chartink/analyze-options'].includes(p) )?'account':p.startsWith('/api/analysis-handoff/')?'handoff':p.startsWith('/api/sector-analysis')?'sector':p.startsWith('/api/trade-ticket/')?'manual':p.startsWith('/api/kama/')?'kama':p.startsWith('/api/ema-crossover/')?'rsi':p.startsWith('/api/ema-band/')?'band':p.startsWith('/api/renko-')?'renko':null;
+}
+function renkoSwitchUrl(href,selected,renkoView=true){
+ const u=new URL(href);
+ for(const key of ['renkoInstance','renkoSymbol','renkoChartSymbol','renkoBatchChart','renkoNextMode','renkoNextTimeframe','brokerForm'])u.searchParams.delete(key);
+ if(renkoView){u.searchParams.set('view','renko-supertrend');
+ for(const key of ['chartSource','chartContext','chartInstance','symbol','interval','type','method','brick','renkoSource','aiRenko'])u.searchParams.delete(key);}
+ u.searchParams.set('renkoBroker',selected.broker);u.searchParams.set('renkoAccount',selected.id);u.searchParams.set('brokerAccount',selected.id);
+ return u.href;
 }
 function route(kind,url,selected){
+ if(kind==='renko'&&selected){
+  const u=new URL(url,location.href),prefix={FYERS:'/api/renko-supertrend/',DELTA_INDIA:'/api/renko-delta/',DHAN:'/api/renko-dhan/'+encodeURIComponent(selected.id)+'/',MOTILAL_OSWAL:'/api/renko-motilal/'+encodeURIComponent(selected.id)+'/'}[selected.broker];
+  const registry=['FYERS','DELTA_INDIA'].includes(selected.broker)&&/^\/api\/renko-instances(?:\/|$)/.test(u.pathname);
+  const instrumentSearch=selected.broker==='FYERS'&&u.pathname==='/api/ema-band/underlying-search';
+  if(u.origin!==location.origin||!prefix||(!u.pathname.startsWith(prefix)&&!registry&&!instrumentSearch))throw Error('Renko route differs from the selected broker account.');
+ }
+
+ if(kind==='parser'&&selected&&selected.broker!=='FYERS'){
+  const u=new URL(url,location.href);if(u.origin!==location.origin||!u.pathname.startsWith('/api/trade-recommendation/'))throw Error('Unsupported private parser route.');
+  u.pathname='/api/broker-parser/'+encodeURIComponent(selected.id)+'/'+u.pathname.slice('/api/trade-recommendation/'.length);return u.href;
+ }
+ if(selected?.broker==='DHAN'&&['handoff','screener'].includes(kind)){
+  const lookup=new URL(url,location.href);
+  if(lookup.origin===location.origin&&lookup.pathname==='/api/analysis-handoff/screener-selection'){
+   lookup.pathname='/broker-workspace/'+encodeURIComponent(selected.id)+'/api/dhan/analysis-handoff/screener-selection';
+   lookup.searchParams.set('account_id',selected.id);return lookup.href;
+  }
+ }
  if(selected?.broker==='MOTILAL_OSWAL'){
   const u=new URL(url,location.href);
   if(u.origin!==location.origin)throw Error('Native broker routes require this dashboard origin.');
@@ -32,7 +58,7 @@ function route(kind,url,selected){
   else throw Error('This form has no Motilal route; no alternate broker will be used.');
   u.searchParams.set('account_id',selected.id);return u.href;
  }
- const u=new URL(url,location.href);if(kind==='parser'&&selected?.broker!=='FYERS')throw Error('Select a configured FYERS account for this parser.');if(!selected||u.origin!==location.origin||!u.pathname.startsWith('/api/'))return u.href;
+ const u=new URL(url,location.href);if(!selected||u.origin!==location.origin||!u.pathname.startsWith('/api/'))return u.href;
  if(u.pathname.startsWith('/api/dhan/')||Object.values(ROUTES).some(k=>u.pathname.startsWith('/api/'+k+'-dhan/')))return u.href;
  if(kind==='holdings'&&selected.broker==='DELTA_INDIA'&&u.pathname.startsWith('/api/holdings-analysis/')){u.pathname='/broker-workspace/'+selected.id+u.pathname.replace('/api/','/api/delta-india/');u.searchParams.set('account_id',selected.id);return u.href;}
  if(kind==='holdings'&&selected.broker==='DHAN'){
@@ -44,9 +70,13 @@ function route(kind,url,selected){
   u.searchParams.set('account_id',selected.id);return u.href;
  }
  if(kind==='account'&&selected.broker==='DHAN'){
-  const paths={'/api/account':'account','/api/realized-pnl':'realized-pnl','/api/live-pnl':'live-pnl','/api/auth/status':'status'};
+  const paths={'/api/account-reports/analyze':'account-reports/analyze','/api/account':'account','/api/realized-pnl':'realized-pnl','/api/live-pnl':'live-pnl','/api/auth/status':'status'};
   if(!paths[u.pathname])throw Error('This analysis action still requires its FYERS data provider; Dhan account selection cannot redirect it.');
   u.pathname='/api/dhan/'+paths[u.pathname];u.searchParams.set('account_id',selected.id);return u.href;
+ }
+ if(kind==='screener'&&selected.broker==='DHAN'){
+  if(!['/api/chartink/refresh','/api/chartink/analyze'].includes(u.pathname))throw Error('Dhan Screener is read-only. Option and execution actions are unavailable.');
+  u.pathname=u.pathname.replace('/api/chartink/','/api/dhan/chartink/');u.searchParams.set('account_id',selected.id);return u.href;
  }
  if(kind==='sector'&&selected.broker==='DHAN'){
   if(!['/api/sector-analysis','/api/sector-analysis/detail'].includes(u.pathname))throw Error('Unsupported Dhan sector analysis request.');
@@ -81,9 +111,10 @@ async function scopedFetch(key,url,options){
  const selected=declared?accounts.find(a=>a.id===declared):account(key),id=selected?.id||null,revision=manualRevision;
  if(!selected)throw Error(key==='sector'?'Sector Rotation requires a configured FYERS, Dhan or Motilal Oswal data account. Select one in the Sector Rotation broker field.':'Select a configured broker account before using this form.');
  if(selected.broker==='MOTILAL_OSWAL'&&options?.body){const body=JSON.parse(options.body);if(body.account_id&&body.account_id!==selected.id)throw Error('Conflicting broker account.');options={...options,body:JSON.stringify({...body,account_id:selected.id,broker:selected.broker})};}
- if(key==='handoff'&&selected.broker==='DHAN'&&options?.body){
-  const body=JSON.parse(options.body);options={...options,body:JSON.stringify({...body,account_id:selected.id,broker:'DHAN'})};
+ if(['handoff','screener','account'].includes(key)&&selected.broker==='DHAN'&&options?.body){
+  const body=JSON.parse(options.body);if(['screener','account'].includes(key)&&(body.account_id&&body.account_id!==selected.id||body.broker&&body.broker!=='DHAN'))throw Error('Broker request differs from the selected Dhan account.');options={...options,body:JSON.stringify({...body,account_id:selected.id,broker:'DHAN'})};
  }
+ if(key==='renko'&&new URL(url,location.href).pathname==='/api/ema-band/underlying-search'&&(options?.method||'GET').toUpperCase()!=='GET')throw Error('Renko instrument search is read-only.');
  const response=await root.fetch(route(key,url,selected),options);
  if(key==='manual'?manualRevision!==revision:(account(key)?.id||null)!==id)throw Error(options?.method==='POST'?'Broker account changed during an action. Check the previous account status before another action.':'Broker account changed; previous response discarded.');
  return response;
@@ -95,8 +126,18 @@ function remember(kind,id){
  else{url.searchParams.delete(kind+'Account');if(url.searchParams.get('brokerForm')===kind){url.searchParams.delete('brokerForm');url.searchParams.delete('brokerAccount');}}
  history.replaceState(null,'',url);
 }
+function brokerSwitchUrl(href,selected,kind){
+ const u=new URL(renkoSwitchUrl(href,selected,kind==='renko'));
+ if(u.pathname.startsWith('/broker-workspace/'))u.pathname='/';
+ for(const key of [...u.searchParams.keys()])if(key.endsWith('Account')||key.endsWith('Instance'))u.searchParams.delete(key);
+ u.searchParams.set('brokerAccount',selected.id);u.searchParams.set('brokerForm',kind==='manual'?'handoff':kind);
+ u.searchParams.set((kind==='manual'?'handoff':kind)+'Account',selected.id);
+ return u.href;
+}
 function onChange(kind,selected){
- if(kind!=='sector'&&selected?.broker==='MOTILAL_OSWAL'&&location.pathname.startsWith('/broker-workspace/')){const u=new URL(location.href);u.pathname='/';u.searchParams.set('brokerForm',kind==='manual'?'handoff':kind);u.searchParams.set('brokerAccount',selected.id);u.searchParams.set((kind==='manual'?'handoff':kind)+'Account',selected.id);if(kind==='renko')u.searchParams.set('renkoBroker',selected.broker);location.href=u.href;return;}
+ if(selected?.id&&kind!=='sector'){location.href=brokerSwitchUrl(location.href,selected,kind);return;}
+
+ if(kind!=='sector'&&selected?.broker==='MOTILAL_OSWAL'&&location.pathname.startsWith('/broker-workspace/')){const u=new URL(location.href);u.pathname='/';u.searchParams.set('brokerForm',kind==='manual'?'handoff':kind);u.searchParams.set('brokerAccount',selected.id);u.searchParams.set((kind==='manual'?'handoff':kind)+'Account',selected.id);if(kind==='renko'){location.href=renkoSwitchUrl(u.href,selected);return;}location.href=u.href;return;}
 
  if(kind==='manual'){
   manualRevision++;
@@ -107,13 +148,13 @@ function onChange(kind,selected){
  }
  remember(kind,selected?.id);
  if(kind==='renko'){
-  const url=new URL(location.href);url.searchParams.set('renkoBroker',selected.broker);url.searchParams.set('renkoAccount',selected.id);url.searchParams.set('brokerAccount',selected.id);url.searchParams.delete('renkoInstance');url.searchParams.delete('brokerForm');
-  location.href=url.href;return;
+  location.href=renkoSwitchUrl(location.href,selected);return;
  }
  // Existing controls stay on this screen. Read requests and activation use the new account.
  root.dispatchEvent(new CustomEvent('broker-account-change',{detail:{kind,account:selected}}));
 }
 function presentation(kind){
+ if(!['band','rsi','kama'].includes(kind)||!document.getElementById({band:'ema-band',rsi:'ema-cross',kama:'kama'}[kind]))return;
  const selected=account(kind),dhan=selected?.broker==='DHAN';
  const disable=(id,value)=>{const node=document.getElementById(id);if(!node)return;node.disabled=dhan;if(dhan&&value!==undefined){if(node.type==='checkbox')node.checked=value;else node.value=value;}node.title=dhan?'Unavailable for this Dhan route; not silently applied.':'';};
  if(kind==='band'){
@@ -149,5 +190,5 @@ function presentation(kind){
 root.addEventListener('broker-account-change',event=>presentation(event.detail.kind));
 root.addEventListener('broker-accounts-ready',()=>['band','rsi','kama'].forEach(presentation));
 root.BrokerForms={ready,context:()=>workspaceContext,accounts:()=>accounts.slice(),account,initial,kind,route,fetch:scopedFetch,setAccounts,onChange,fail:error=>rejectReady(error)};
-if(typeof module!=='undefined')module.exports={route,kind};
+if(typeof module!=='undefined')module.exports={route,kind,renkoSwitchUrl,brokerSwitchUrl};
 })(typeof window==='undefined'?globalThis:window);

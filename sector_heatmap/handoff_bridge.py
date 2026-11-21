@@ -141,18 +141,37 @@ class OwnedBridge:
         raise ValueError("Analysis is still running; this schedule slot will not be replayed.")
 
     def collect(self,policy):
-        reports=[self.analysis(route,policy) for route in ("cash_equity","stock_options")]
+        reports=[self.analysis(route,policy) for route in (("cash_equity",) if policy.get("candidate_scope")=="SCREENER_EQUITY" else ("cash_equity","stock_options"))]
         rows=[];excluded=[]
         for report in reports:
+            if report.get('execution_blocked'):
+                from .handoff_errors import IncompleteAnalysis
+                combined=dict(report, cards=[deepcopy(card) for r in reports for card in r.get('cards',[])],
+                    analysis_scopes=[dict(route=r.get('instrument_route'),scope=r.get('scope') or {}) for r in reports],
+                    execution_blocked=True,order_authority='NONE',decision_support_only=True)
+                raise IncompleteAnalysis('Ranked analysis available; selected execution account exposure unavailable. No Live order submitted.',combined)
             source_scope=(report.get('scope') or {}).get('screener') or {}
             if policy.get('mode')=='AUTO' and source_scope.get('enabled') and source_scope.get('auto_enabled') and source_scope.get('status') not in {'COMPLETED','DISABLED'}:
-                raise ValueError('Fresh Screener collection is incomplete; combined priority ranking cannot submit new Auto entries.')
+                from .handoff_errors import IncompleteAnalysis
+                if any(r.get('source',{}).get('broker')!=self.account['broker'] for r in reports):
+                    raise ValueError('Analysis returned a different broker; no report or entry.')
+                # A failed source must block the entire Auto ranking, but must
+                # not discard completed read-only findings or failure evidence.
+                report=dict(schema='sector-pulse-auto-analysis/v1',generated_at=datetime.now(IST).isoformat(),
+                    source=dict(broker=self.account['broker'],mode='intraday'),
+                    cards=[deepcopy(card) for r in reports for card in r.get('cards',[])],candidates=[],
+                    analysis_scopes=[dict(route=r.get('instrument_route'),scope=r.get('scope') or {}) for r in reports],
+                    exclusions=[deepcopy(x) for r in reports for x in r.get('exclusions',[])],
+                    scheduled_status=dict(code='DATA_UNAVAILABLE',message='Screener source incomplete; automatic entries withheld. Available analysis is for review only.'),
+                    execution_blocked=True,order_authority='NONE',decision_support_only=True)
+                raise IncompleteAnalysis('Fresh Screener collection is incomplete; combined priority ranking cannot submit new Auto entries.',report)
             if report.get("source",{}).get("broker")!=self.account["broker"]:
                 raise ValueError("Analysis returned a different broker; no report or entry.")
             excluded.extend(report.get("exclusions",[]))
             from .handoff_priority import priority_key
             for source in sorted(report.get("cards",[]),key=priority_key):
                 card=deepcopy(source);plan=card["analysis"];candidate=card["candidate"]
+                if policy.get("candidate_scope")=="SCREENER_EQUITY" and (plan.get("kind")!="EQUITY" or not any(p.get("kind")=="SCREENER" for p in candidate.get("provenance",[]))):continue
                 if str((plan.get("conviction") or {}).get("rating","")).upper()!="HIGH":continue
                 if policy.get('ai_provider')=='CODEX_CHATGPT':
                     reviewed=next((r for r in (report.get('ai_review') or {}).get('recommendations',[]) if r.get('symbol')==candidate['symbol']),None)
@@ -191,7 +210,9 @@ class OwnedBridge:
         from .handoff_priority import priority_key
         rows.sort(key=priority_key)
         return rows,dict(schema="sector-pulse-auto-analysis/v1",generated_at=datetime.now(IST).isoformat(),
-            source=dict(broker=self.account["broker"],mode="intraday"),cards=[],candidates=[],
+            source=dict(broker=self.account["broker"],mode="intraday"),
+            cards=[deepcopy(card) for report in reports for card in report.get("cards",[])],
+            candidates=[deepcopy(candidate) for report in reports for candidate in report.get("candidates",[])],
             analysis_scopes=[dict(route=report.get("instrument_route"),scope=report.get("scope") or {}) for report in reports],
             exclusions=excluded,order_authority="NONE",decision_support_only=True)
 

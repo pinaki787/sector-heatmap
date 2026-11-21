@@ -1,0 +1,2225 @@
+{
+  "commit": "c9c7b40426a6863fa5c4e23b1244e32caa8b4e6e",
+  "files": [
+    {
+      "path": ".env.example",
+      "size": 272,
+      "sha256": "8f0d2281eb9d90b59d297814c3536b89ffbdfbff2284ccc3715fa79bef95a6cb"
+    },
+    {
+      "path": ".fyers.env.example",
+      "size": 538,
+      "sha256": "ea4e4158ce19acb4651ec68e8c7f55a42b1e5b865e7f425738df2f009089a98b"
+    },
+    {
+      "path": ".gitattributes",
+      "size": 37,
+      "sha256": "2b5d157d4287b76be0a62f24eeb19e670abf3e17c21e6b73de8131271123e4d0"
+    },
+    {
+      "path": ".gitignore",
+      "size": 1589,
+      "sha256": "602c77afe32e48bc82ad95ef09baa02755dd7b7dbae2b09ab87e8950f8aa8f5a"
+    },
+    {
+      "path": "BROKER_POLICY.md",
+      "size": 1514,
+      "sha256": "98b37ad929e515f10495d977f24c15737b4394d161bb9e58643ed0cf1cf1da93"
+    },
+    {
+      "path": "README.md",
+      "size": 22093,
+      "sha256": "2fc5b07969c4fd4d1c3e32518a6e139112dfdaafd5cd39bb1599db88b4ff0b10"
+    },
+    {
+      "path": "activate_venv.bat",
+      "size": 111,
+      "sha256": "a7b26bb2a658390293e42ea7331c2930b2f6d4e0676e954affc0deac428772a8"
+    },
+    {
+      "path": "assets/README.md",
+      "size": 1248,
+      "sha256": "2617f354be37443be1953f609e42720d5717e56769e4b36e909afedac6167d45"
+    },
+    {
+      "path": "assets/bull-bear-algo.png",
+      "size": 2290627,
+      "sha256": "2200bbbdf6b0f86ae4a6b384d8dc1e19d852170a1b60fd475a3f9dea3c541491"
+    },
+    {
+      "path": "assets/currency-motifs.svg",
+      "size": 1082,
+      "sha256": "4f91b946341f6bdc7a4664c74b7d443b7f2efdfc8abee17c83ff88192805ab06"
+    },
+    {
+      "path": "assets/nse-building-zadeus.jpg",
+      "size": 430312,
+      "sha256": "5d365da662bf4f3a38b22c4862ed68b8b1b877c32bd91ba8d8793cf783f445f0"
+    },
+    {
+      "path": "backtesting/coalindia_long_straddle/coalindia_long_straddle_check.py",
+      "size": 1302,
+      "sha256": "c50c04a3a2966a7fa195ae42f11a7be7608a077757957999729495dff1f92222"
+    },
+    {
+      "path": "backtesting/coalindia_long_straddle/fyers_coalindia_snapshot.py",
+      "size": 2712,
+      "sha256": "f07547ef603e212b99b5753c22c4c10da98fe36313bbe81c7bf1c52b2d2bc75b"
+    },
+    {
+      "path": "backtesting/delta_indicator_grid/render_report.py",
+      "size": 7225,
+      "sha256": "60d6ee29884290a4ea280a6d107dd82b749b5b7b2982ee8e9c669dc56082731e"
+    },
+    {
+      "path": "backtesting/delta_indicator_grid/research.py",
+      "size": 11704,
+      "sha256": "c6a5f1803bd6491ee8cf0deb3b41529e9eca9dcc83bf2b125447984484dcc740"
+    },
+    {
+      "path": "backtesting/delta_indicator_grid/test_research.py",
+      "size": 2784,
+      "sha256": "52c5ba9e4420055ee86ce94bfd36d64c8596d29b9e1c4605a07b7939261baf59"
+    },
+    {
+      "path": "backtesting/ema_crossover_10_30/NIFTY_confluence_optimize.py",
+      "size": 7861,
+      "sha256": "7e5ee7fd86dd92fb6990504f14490123fd59b767c28c664c813e4cd215dc1325"
+    },
+    {
+      "path": "backtesting/ema_crossover_10_30/NIFTY_ema_crossover_backtest.py",
+      "size": 8217,
+      "sha256": "9939a9511568837e6fd6f94ce561352774bb351afcf4fd44214a6328cd1062f6"
+    },
+    {
+      "path": "backtesting/ema_crossover_10_30/confluence/assessment.md",
+      "size": 3729,
+      "sha256": "863e36202d5d2e05c2e77aa89f26586d0000f85c4290723b6a74675b172664f2"
+    },
+    {
+      "path": "backtesting/ema_daily_confluence/README.md",
+      "size": 6606,
+      "sha256": "56fdd4531fd5501bcd547f21e1eb09bbe2f0699190167b54f522fd1994894b3a"
+    },
+    {
+      "path": "backtesting/ema_daily_confluence/diagnostics.py",
+      "size": 2552,
+      "sha256": "0da68fdb2a62aa8c094e90e1abeb0222169620c663ef3a0f8a530839b4618c49"
+    },
+    {
+      "path": "backtesting/ema_daily_confluence/fetch_volume.py",
+      "size": 2100,
+      "sha256": "1c61b1eb32f74443aaf67ee0c91f42aadcf0b3dc375dd4c3cc9f050fe58d2fcb"
+    },
+    {
+      "path": "backtesting/ema_daily_confluence/render_report.py",
+      "size": 1308,
+      "sha256": "f479cfff6a8a3e238d84ed71866c91852c13145d3cdd35f128b96b8f1f60b235"
+    },
+    {
+      "path": "backtesting/ema_daily_confluence/research.py",
+      "size": 11859,
+      "sha256": "7302be882bd2772aacf3f08d46651263cb254416e70f9869758bc077eb1bda2d"
+    },
+    {
+      "path": "backtesting/kama_solarinds/solarinds_kama_7d_backtest.py",
+      "size": 4143,
+      "sha256": "bda89efd1cd45f9d85bb5e5c42c744ef8b14d16fd3fb40bf7bc458ea819f1508"
+    },
+    {
+      "path": "backtesting/kama_vwap_htf_solarinds/solarinds_kama_vwap_htf_7d_backtest.py",
+      "size": 2900,
+      "sha256": "cc6ac721f193b169d493ae7fc11d2fd5011f6eda88d2b7ed4a52d2047ed3d54a"
+    },
+    {
+      "path": "backtesting/kama_vwap_htf_solarinds/solarinds_kama_vwap_htf_confluence_optimize.py",
+      "size": 2719,
+      "sha256": "252b0a8af2f7bcc42c84d044b82f35271ab1cf8259255a6d5d591292a8b8418d"
+    },
+    {
+      "path": "backtesting/kama_vwap_solarinds/solarinds_kama_vwap_7d_backtest.py",
+      "size": 3832,
+      "sha256": "bf20d2f34dba8bfb6907f64063d73a03df0a26a2e06b425b5f26c04abf01fbe1"
+    },
+    {
+      "path": "backtesting/nifty_30_point_feasibility/nifty_30_point_feasibility.py",
+      "size": 2635,
+      "sha256": "21553a3740302521dedc4fd31ad8fa65b9fb535dfca8682f5b32b5e0adaaf2f8"
+    },
+    {
+      "path": "backtesting/nifty_daily_pullback_proxy/nifty_daily_pullback_proxy.py",
+      "size": 6056,
+      "sha256": "cde7a0312db96a8f7d5acef2fb6057e19187c122cb1a458f06e79227e0ca3d58"
+    },
+    {
+      "path": "backtesting/nifty_futures_feasibility/nifty_futures_feasibility.py",
+      "size": 2349,
+      "sha256": "0181aae40d8e50790d2cbdfd5c0784eedfc1eed0fae66a7fda472d58ca460ff8"
+    },
+    {
+      "path": "backtesting/nifty_price_action/nifty_opening_range_breakout_90d.py",
+      "size": 2891,
+      "sha256": "e404f7199a6cf7c8e7e8b66a283c8fb984feec5c5e16ed7b5cc43bd8ecb6fe0f"
+    },
+    {
+      "path": "backtesting/nifty_price_action/nifty_orb_rsi_90d.py",
+      "size": 4294,
+      "sha256": "f60e71bf26f45045b028589c89df1b7cac9e169695555d30ce459172c61db487"
+    },
+    {
+      "path": "backtesting/nifty_prop_vwap_mean_reversion/nifty_vwap_mean_reversion.py",
+      "size": 6082,
+      "sha256": "8e884c70b5cb6325748606c382b8a29dc70dd471b76af1f2855f112462014009"
+    },
+    {
+      "path": "backtesting/nifty_regime_trend_continuation/nifty_regime_trend_continuation.py",
+      "size": 6508,
+      "sha256": "c1b67f1e1a90182ded313a462f528a217d6e324e8b445ca29cbd0c92c2bcc0eb"
+    },
+    {
+      "path": "backtesting/nifty_regime_trend_continuation_15m/nifty_regime_trend_continuation_15m.py",
+      "size": 6305,
+      "sha256": "196306c0ae67ade386409237ff607513a94e6e0299ce6bb8cad80c1b609cd7a8"
+    },
+    {
+      "path": "backtesting/nifty_regime_trend_kama_15m/nifty_regime_trend_kama_15m.py",
+      "size": 5263,
+      "sha256": "8184b8e43282c124d4101416123bae90cfe363e9d1a588df9e25bacdc262c681"
+    },
+    {
+      "path": "backtesting/nifty_renko_10pt_multitimeframe/nifty_renko_10pt_multitimeframe.py",
+      "size": 1703,
+      "sha256": "c90e1b7539d9f83a3f2cdcc782f89d6c3b3af34ccb491fd2255ac08a42351df1"
+    },
+    {
+      "path": "backtesting/nifty_renko_brick_diagnostic/nifty_renko_brick_diagnostic.py",
+      "size": 1395,
+      "sha256": "5263c578877600afcb08e69f202b633c1148adb14e760f89acecfce74f2e4738"
+    },
+    {
+      "path": "backtesting/nifty_renko_combo_comparison/nifty_renko_combo_comparison.py",
+      "size": 5646,
+      "sha256": "39537bcc4b5eb429a1fb2201f2e307f25da1e0f02dbad7fe3fae1da01fd108e1"
+    },
+    {
+      "path": "backtesting/nifty_renko_reversal_multitimeframe/nifty_renko_reversal_multitimeframe.py",
+      "size": 5612,
+      "sha256": "32522048c015153688b0fe1545a2a5ea1de1dab3b44e60dff39a126f9a9f755b"
+    },
+    {
+      "path": "backtesting/nifty_smc_only_15m/nifty_smc_only_15m.py",
+      "size": 5113,
+      "sha256": "4382d82188e415ee1dc66be6ff4576d833727176de37afc53f0af823f286a52c"
+    },
+    {
+      "path": "backtesting/nifty_smc_vwap_15m/nifty_smc_vwap_15m.py",
+      "size": 4338,
+      "sha256": "4e526860155a249bab933986bfa889d78a2dcb482cd89fe6db947eb8e189bbfa"
+    },
+    {
+      "path": "backtesting/nifty_vwap_pullback_30pt_trail_multitimeframe/nifty_vwap_pullback_30pt_trail_multitimeframe.py",
+      "size": 5203,
+      "sha256": "30794990697c4e50562854b63bba2b888dafd743a8446b924e0c2902c121ee95"
+    },
+    {
+      "path": "backtesting/nifty_vwap_pullback_8pt_trail_multitimeframe/nifty_vwap_pullback_8pt_trail_multitimeframe.py",
+      "size": 1629,
+      "sha256": "1a57535e225377e85fe6aa908adb17ac669522f388d9689205ff8a5027b49a47"
+    },
+    {
+      "path": "backtesting/nifty_vwap_pullback_multitimeframe/nifty_vwap_pullback_multitimeframe.py",
+      "size": 6109,
+      "sha256": "a39399da4da637e801e369ec17b97e304c1df8f7e1455d7f170c6117a24547a3"
+    },
+    {
+      "path": "backtesting/pinaki_das_supertrend/nifty_pinaki_das_supertrend_research.py",
+      "size": 6749,
+      "sha256": "caf445587f5ee006aa5da825624f26efd94773d0010f3f24de76ecb9a0d55e5c"
+    },
+    {
+      "path": "backtesting/sensex_dhan_real_options/dhan_rolling_options_backtest.py",
+      "size": 23050,
+      "sha256": "467268335f38acffaafedd455c7f2c896e91fbe0a46302b07dc89082742d59b2"
+    },
+    {
+      "path": "backtesting/sensex_dhan_real_options/optimize_atr_stop.py",
+      "size": 6329,
+      "sha256": "30d1eacc751ec9e1879fa7bc21a1c06ec4e4cd06f1ef82c5923d28c406bc9230"
+    },
+    {
+      "path": "backtesting/sensex_dhan_real_options/optimize_entry_filters.py",
+      "size": 4559,
+      "sha256": "2bcb4ea9a672a42305fdd8ca86d73034ef319950713856f0edd61ad5da7bdd25"
+    },
+    {
+      "path": "backtesting/sensex_dhan_real_options/optimize_hard_stop.py",
+      "size": 4675,
+      "sha256": "1a65664b4af2cdde34fd8ab62d21288ead1a87a12d8af0e62f3abaed090ecad6"
+    },
+    {
+      "path": "backtesting/sensex_dhan_real_options/optimize_time_window.py",
+      "size": 5078,
+      "sha256": "f0d5ff4b5c6425a86d7356f516a669349d495f774c5740e9850021af84d07816"
+    },
+    {
+      "path": "backtesting/swing_scan/fyers_stock_option_scan.py",
+      "size": 2476,
+      "sha256": "7c44aea9771036faa556d05cb72e93db6193b4c868a926cf125c707961a3ddb6"
+    },
+    {
+      "path": "backtesting/swing_scan/fyers_swing_scan.py",
+      "size": 2204,
+      "sha256": "f19995ef674f32cf940d04f688976e74c7905edad89e11f72de1a89108f12cd0"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/README.md",
+      "size": 3206,
+      "sha256": "1362656b8aa113d4e32c640658884db9437f87bc83de3596878a85530e440783"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/audit.py",
+      "size": 996,
+      "sha256": "be9c5fe0ba00186d2aece40942a18cce755e0267df60a2fd112a31aa9f5524ae"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/case_analysis.py",
+      "size": 1636,
+      "sha256": "1294cd5a6505b6ea4ea43cb7bf4de6f633171a1e9a1c87bb8bd9fd7cdcbf0038"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/case_counterfactuals.py",
+      "size": 1787,
+      "sha256": "f35244571b5c8efd8371683edfeb4d3ee7673ad0eef9e5edcb6157fe86b15f98"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/cases.py",
+      "size": 1089,
+      "sha256": "3c0a548b98fdfbe2103b26e236923d930aeb8978ef3e31531e5e45eff091ca75"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/expired_catalog.py",
+      "size": 652,
+      "sha256": "282332c09c29204dc8d34cc09d09d54950f251f7e4e7c08e7ff8d98bacdc3f49"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/fetch_cases.py",
+      "size": 697,
+      "sha256": "413e25cd5bbdf9a73243376c8b50eb22bba92e9751406f94ab3a1e80d3343c6d"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/fetch_crude_options.py",
+      "size": 890,
+      "sha256": "151fa1fff90c04e4b83c20eea2814070b087aa280e9bdedabfbbaf42e743d6a6"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/fetch_history.py",
+      "size": 1485,
+      "sha256": "57687c546e4c44aca48ec39b922a7dcc9e67c861d42732082129966bfc51f9c4"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/fetch_selected.py",
+      "size": 3093,
+      "sha256": "b5a5775869dafeb75f35ecf594a48d2209c36d0405865e49d6bae79ec6acaa4e"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/open_case.py",
+      "size": 1629,
+      "sha256": "979e0ab6002e39be1b8f231093da0b38f681a53eacc134cbec22a0527ec37390"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/prepare.py",
+      "size": 2879,
+      "sha256": "767639732e76b88c16525020307eeb7b9faf91631534982b55780e36d927e649"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/probe_expired.py",
+      "size": 742,
+      "sha256": "9d1db33725c728654c7faa67af5d76177cd0ae38d3918ca7c31d63812fa3f14d"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/report.py",
+      "size": 21861,
+      "sha256": "97f412954033ed374e77732f58d9326acbba4930c2815bed9a78bb6b165a4523"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/research.py",
+      "size": 11046,
+      "sha256": "a36ec9bcb7b59872063106696c3401022ba1c0bac972c11a7a5de187a599d981"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/__init__.py",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/candle_patterns.py",
+      "size": 1563,
+      "sha256": "8f3646b2d9557c39b7c15fb90cb02ce3b8419c827ac13f49be27df4fd750b61c"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/retest.py",
+      "size": 2887,
+      "sha256": "f0a669418732283d66d433d81e1fbfea49bd46c4addde12a3834af528b715fdc"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/rsi_slope.py",
+      "size": 1756,
+      "sha256": "d1e0005a1ed2d0ad68a524472e2a2e45db4a5d5b0cba361035e23ed5049d248a"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/sideways.py",
+      "size": 3029,
+      "sha256": "606906e51df9d463197c11e9b8c7877c24efac9c207c25691bfab6fc4faa85af"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/signals.py",
+      "size": 14346,
+      "sha256": "4ddd8130037da65dbc5e843939b2e3d6ac538693ef5c30f0dd5d4cfb452ff560"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/source_snapshot/trailing_stop.py",
+      "size": 2789,
+      "sha256": "388b251f4b9fe4e392862a84307a9fd8594391b3c3316824c362be8e115fab9b"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/summarize.py",
+      "size": 2614,
+      "sha256": "8608aa9abf227b91ca4d481a95b05894c316d581a227ab48676f1a6f4e5d3c29"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/test_research.py",
+      "size": 1779,
+      "sha256": "b7943967fdbaf09e40d1011394de82ae9f87b962320b434396c69b2ffb8b0ed3"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/uncertainty.py",
+      "size": 2131,
+      "sha256": "f5ca9c64706793d34b71f94c6f3d67fd3a3a50c47819df2721ea5528d9cf3e43"
+    },
+    {
+      "path": "backtesting/trailing_exit_research/verify_outputs.py",
+      "size": 1301,
+      "sha256": "790da0d666a7314583fbc4ad57814556c9b9c37fe5cd10a8e9b502a74300e494"
+    },
+    {
+      "path": "client/.gitignore",
+      "size": 253,
+      "sha256": "fe718e7babb14f3cbad2d97f08889b9ce5215ed3fe0e43b2b8cfbfb3b9b844e8"
+    },
+    {
+      "path": "client/.oxlintrc.json",
+      "size": 231,
+      "sha256": "1be899e45c49b2a2edc715bc3bfb31d8ed8e866ed7ebab2065ff6e55e88c2396"
+    },
+    {
+      "path": "client/README.md",
+      "size": 1009,
+      "sha256": "1f8fa46483b514305f44e34a47e85e88428c3a667c9494e1583628ef18d7bc79"
+    },
+    {
+      "path": "client/index.html",
+      "size": 358,
+      "sha256": "7465896f241f95502948351ee894bde08de5f070c05660c1e9afe5d06964963c"
+    },
+    {
+      "path": "client/package.json",
+      "size": 493,
+      "sha256": "e667891e68d78d47d5439760d86a4dfa60ded3954913dde5c49f9dc2d27cfa99"
+    },
+    {
+      "path": "client/pnpm-lock.yaml",
+      "size": 23728,
+      "sha256": "b987631fb02e71aa921b69019c474043059f75afd20ae1a5ab17dcf9fa955ab2"
+    },
+    {
+      "path": "client/public/favicon.svg",
+      "size": 9522,
+      "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66"
+    },
+    {
+      "path": "client/public/icons.svg",
+      "size": 5031,
+      "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a"
+    },
+    {
+      "path": "client/src/App.css",
+      "size": 6009,
+      "sha256": "5a5f00dc86ba4cabad52a258a417a6004fb1ecc7868b1f1d756762e969a0e689"
+    },
+    {
+      "path": "client/src/App.jsx",
+      "size": 10445,
+      "sha256": "3ed145cc6ae6ade8c5c3ebf1ba7e463b24faa292e1d05d4721151313c4152448"
+    },
+    {
+      "path": "client/src/App.official.css",
+      "size": 604,
+      "sha256": "dfb070637e343dbd2c48fa93e5b158e12109a00c26926a141c77a3dfbfd894da"
+    },
+    {
+      "path": "client/src/assets/hero.png",
+      "size": 13057,
+      "sha256": "881ffbcaafc212e49addad08846a5b82761355fa20624253af3477ba33262c5c"
+    },
+    {
+      "path": "client/src/assets/react.svg",
+      "size": 4126,
+      "sha256": "35ef61ed53b323ae94a16a8ec659b3d0af3880698791133f23b084085ab1c2e5"
+    },
+    {
+      "path": "client/src/assets/vite.svg",
+      "size": 8709,
+      "sha256": "5be21acd42eb7b896e517f4e0f0f11eb5c5d9e54fbbcebe9453f033008fcca6f"
+    },
+    {
+      "path": "client/src/index.css",
+      "size": 14,
+      "sha256": "2007703776e20c24376ebae0a759bc90112c3d0632a9f44428e11f7a8444a297"
+    },
+    {
+      "path": "client/src/main.jsx",
+      "size": 229,
+      "sha256": "4b4b864dbe45253425d0c925337180ec07e204295179f80f59551216f466f618"
+    },
+    {
+      "path": "client/vite.config.js",
+      "size": 274,
+      "sha256": "e61837bac1b499eb4793f84d317a810e0e42a812e40e843d1952b5f47eb239b4"
+    },
+    {
+      "path": "dashboard-enhancements.js",
+      "size": 345553,
+      "sha256": "a00cfcadee7c7042e5a41a75b68ada12d9f44a9312a6a683ebc49692e9953d96"
+    },
+    {
+      "path": "delta-adaptive.js",
+      "size": 14518,
+      "sha256": "7b6bf082e61b71ad9bfa06f9a88073ad0b99d32507fd21e52176b81985185263"
+    },
+    {
+      "path": "delta-backtest.js",
+      "size": 31417,
+      "sha256": "5a846916bfa7543443d26b18a122973ede8a76ff739da7035ddf817f541b72c9"
+    },
+    {
+      "path": "delta-india.js",
+      "size": 96774,
+      "sha256": "cdb930b751e4de977eea112a1334e090b09601cd31ff27b28656b6cb28243fcd"
+    },
+    {
+      "path": "delta-inr.js",
+      "size": 1618,
+      "sha256": "0300d61fc55be1ea784d4cf54d5a8c23d5ebd6446067ab86f3cfa186c5454047"
+    },
+    {
+      "path": "delta-journal.js",
+      "size": 4639,
+      "sha256": "90833773ecb7a73fab67deccbc608bfc6b9e9e5b93f105ee25d4301d3ba1a851"
+    },
+    {
+      "path": "docs/delta-india-backtest.md",
+      "size": 10179,
+      "sha256": "93610683ebbeea8c704570904dd37f406592987d003bbab5a66e85a226a562a3"
+    },
+    {
+      "path": "docs/delta-india.md",
+      "size": 25990,
+      "sha256": "81a3675df10db471b478065bc71f06ff9bfd4cce63fb52e848fc273c0d743cb4"
+    },
+    {
+      "path": "docs/deployment-guide.md",
+      "size": 16436,
+      "sha256": "15f483d8dda81f0946a94fd298cf73bbc0328933de0b2d299f4371c2d2441aea"
+    },
+    {
+      "path": "docs/multi-user-broker-setup.md",
+      "size": 7865,
+      "sha256": "2c0891fe32472e85c3226b2c6aaed54ea3a7e1c11497020dd2fc1771227b190f"
+    },
+    {
+      "path": "docs/official-weight-attribution.md",
+      "size": 3805,
+      "sha256": "1d7f35f0e9c91b7e6b3c60df3c327fcd9164bb9c81af9916d249c730a011b0d4"
+    },
+    {
+      "path": "docs/release-notes-2026-10-08.md",
+      "size": 3626,
+      "sha256": "d0275ea77de4a6c2fa4e88afbad3225cb18fbe4ac6de497a18968b6b5a932df1"
+    },
+    {
+      "path": "docs/renko-churn-evidence/churn_replay.py",
+      "size": 4475,
+      "sha256": "178eb1cff1ab0894a3387f9bed28ddcf3bff6c4d20815832bff906e3f750831e"
+    },
+    {
+      "path": "docs/renko-churn-evidence/entry-preflight.patch",
+      "size": 4384,
+      "sha256": "b976cfeab69b0e41a216e0d644ae1db6f9dd670c2da63b014a021def18910604"
+    },
+    {
+      "path": "docs/renko-churn-evidence/review.md",
+      "size": 4121,
+      "sha256": "957d6a3b6714dca72eab4c1580b5d3b1e50c3a6ef5fd5cfa17df0ad2c8d0395e"
+    },
+    {
+      "path": "docs/renko-churn-evidence/today-paper-review.md",
+      "size": 6484,
+      "sha256": "654b44221d54b7bceb548a5619e1fec76b49af14a445b48c7f2243c950add324"
+    },
+    {
+      "path": "docs/renko-churn-investigation-ledger.md",
+      "size": 43989,
+      "sha256": "f79a7bb7ea7cda3bd1a231d89a898eb72aeb8e9f8b987b8d6277ff355b5c1373"
+    },
+    {
+      "path": "docs/renko-delta-feasibility.md",
+      "size": 7156,
+      "sha256": "3822a7be96dcf7be05076a7129d049cedc60056be924ed69241acd6f4ee2c55a"
+    },
+    {
+      "path": "docs/renko-position-adoption.md",
+      "size": 3600,
+      "sha256": "2a720a9a6dce17f7a8f1f4f1505af9bd30a1b249c4239dd58fbd7c897340232b"
+    },
+    {
+      "path": "docs/sector-analysis-design.md",
+      "size": 4245,
+      "sha256": "4b4734d7ca71e96a8a8056e745b2c423ee0043db4b992c798d0960bac0790c14"
+    },
+    {
+      "path": "docs/source-reference.md",
+      "size": 129373,
+      "sha256": "f7b8b7772742ccb24360a3ce56b0ca9c142df5e95505c7731d44dcb60415efcf"
+    },
+    {
+      "path": "docs/technical-guide.md",
+      "size": 44869,
+      "sha256": "5b4fa3539945d5e4b4f4c171b2d139bd73a7952fdf7f849115963169b4e2102f"
+    },
+    {
+      "path": "docs/telegram-trade-parser.md",
+      "size": 2980,
+      "sha256": "89af282f2007e573e46f7732c19c0b705852a49715a40d3c0f3af435755f362a"
+    },
+    {
+      "path": "docs/user-functional-guide.html",
+      "size": 41216,
+      "sha256": "21fb636632bb427b76ee5854751fcd5d18e7444a81f07e9fb6be0e15a6eb7525"
+    },
+    {
+      "path": "docs/user-functional-guide.md",
+      "size": 35875,
+      "sha256": "30e576b9bdb2638f9bed69fb07d2b01bb243ac7e83a520378400f54b9927cf64"
+    },
+    {
+      "path": "docs/virtual-paper-capital.md",
+      "size": 2616,
+      "sha256": "267ed0cf92a0c4601113a061bc39957c413fe44835763a25296415b51060a346"
+    },
+    {
+      "path": "ema-cloud-chart.js",
+      "size": 59465,
+      "sha256": "cfe69d0cf5a3addb1b6f4d12ff63271ca40b0a9dbe9607cc8fed09d70027e103"
+    },
+    {
+      "path": "ema-crossover-live.js",
+      "size": 25812,
+      "sha256": "f62829d45bcceba0a7e1848f1f26f9301723e3f95bc3252e53c2b84fa831c855"
+    },
+    {
+      "path": "ema-crossover.js",
+      "size": 11476,
+      "sha256": "70f8e85583978e3ae2bb62e0a5bd688310beb9d26ea9509e97bdbeaa08e57004"
+    },
+    {
+      "path": "get_fyers_token.py",
+      "size": 187,
+      "sha256": "92d7735505b2805806804de560c88ff2bd09e53b0bee6fc57e5afeada1b279bf"
+    },
+    {
+      "path": "heatmap_server.py",
+      "size": 157,
+      "sha256": "9a05d687ad7a9fc658ed72945eef37857b48974345b6162536ccee2c15e935a5"
+    },
+    {
+      "path": "index.html",
+      "size": 1844,
+      "sha256": "361463c2e3a310973d3deb579d9e72a129970b6f6a2c26b278a89f870366ad27"
+    },
+    {
+      "path": "nifty_ema_band_midpoint_live.py",
+      "size": 17082,
+      "sha256": "a69c2b80e71ec3e3f49d84ffb9f3a17b877fbe5ddc4402a5884b97dd63d12e4f"
+    },
+    {
+      "path": "paper-capital.js",
+      "size": 537,
+      "sha256": "f6a76a82b69981cf6986663fda4e32e322f79038d6fdf2e87e17642de819e9a2"
+    },
+    {
+      "path": "position-history-links.js",
+      "size": 1181,
+      "sha256": "d3d1941cafebd56d1129d243b294082c209ebd01b31c1b47863afd4c94176465"
+    },
+    {
+      "path": "position-history-metadata.js",
+      "size": 836,
+      "sha256": "c96d5f8f6ddbb22768853e3a1750802942bd6501a1de7923d00d25c2f2114941"
+    },
+    {
+      "path": "position-history.js",
+      "size": 4790,
+      "sha256": "157b3639bc9a5654babd2f67a24ff0c160552ed7e3ae6cb18b45164cc6676a78"
+    },
+    {
+      "path": "redbar-overlays.js",
+      "size": 9429,
+      "sha256": "8555884f6a7c7080d4a2e502364020067dbb819620076df3fe81e77f0d0c3962"
+    },
+    {
+      "path": "renew_fyers_token.bat",
+      "size": 414,
+      "sha256": "6db906b54966a8722367722f2ed962f73063c3eeaeafee24c79e9b33ff0706b6"
+    },
+    {
+      "path": "renew_fyers_token.sh",
+      "size": 377,
+      "sha256": "ab0a7304e8b76d1c965b45d61de549ec940e11c3e6dfad5ed3905ed6e830bf23"
+    },
+    {
+      "path": "renko-assessment.js",
+      "size": 8510,
+      "sha256": "6981a0c05140399a7e8eba08bcefe1fe253a5c70a167961d23059e5a97905d90"
+    },
+    {
+      "path": "renko-supertrend.js",
+      "size": 168627,
+      "sha256": "7167c6f11cc9d687ca9b3c2e6f5fdb42fa3ac3b44c28478eb840115374dff5f9"
+    },
+    {
+      "path": "requirements-research.txt",
+      "size": 214,
+      "sha256": "b88c22c95516acdc135ae60ea3c758b5a51aabb9f8539bf955901c528220c796"
+    },
+    {
+      "path": "requirements.lock",
+      "size": 736,
+      "sha256": "b0bc6b0ccd2a0210ce33e04d4921149312e82124900cfc7137608494398ee616"
+    },
+    {
+      "path": "requirements.txt",
+      "size": 225,
+      "sha256": "5a69231ef4b392f34c5403224ad64485bfc0b3c766ee79674047ea151cfbba47"
+    },
+    {
+      "path": "run_live_heatmap.bat",
+      "size": 2044,
+      "sha256": "06325080da81b66f038881477597d4a88bc802af24024632f12c0f240ed0674a"
+    },
+    {
+      "path": "run_live_heatmap.sh",
+      "size": 1528,
+      "sha256": "a50f9f730e05bcf671da97feaa8e9eb7df5a54e01f1e583713bf3f7a25c56063"
+    },
+    {
+      "path": "scripts/analyze_mahabank.py",
+      "size": 5873,
+      "sha256": "df1718aa597b8f5837482b84785ed22541f4e32511e8615284b3402beb254691"
+    },
+    {
+      "path": "scripts/audit_position_history_metadata.py",
+      "size": 1714,
+      "sha256": "efd51aee7e34c8dd414dda2599aac05766f83931b53615e3945961b775fec8fb"
+    },
+    {
+      "path": "scripts/check_documentation.py",
+      "size": 1334,
+      "sha256": "c19daf9cc71a9144aa3386ce7ba600486825860766dd73309c9047d92a10f7b3"
+    },
+    {
+      "path": "scripts/check_ema_cloud_stream.py",
+      "size": 1057,
+      "sha256": "ad2e82000868f10529edef173a52ff5dfe435efe7fe77f729b16f9560548d726"
+    },
+    {
+      "path": "scripts/check_fyers_policy_readiness.py",
+      "size": 4414,
+      "sha256": "cfb0f3b7757d7a4223ec9ab123d1c42aee67c7c0a411b6a6fef7e748c74dec6a"
+    },
+    {
+      "path": "scripts/check_rsi_table.py",
+      "size": 788,
+      "sha256": "1f6025a0ed8a5b49f38dd8962d3bcc0d7b1746c62456d5e2f3ab87a3e54e3ff3"
+    },
+    {
+      "path": "scripts/check_setup.py",
+      "size": 1230,
+      "sha256": "1068feeee04a1da1661504440e44dfadaa5f6e75ebab979cfd5aea155deb029a"
+    },
+    {
+      "path": "scripts/check_trade_advisory.py",
+      "size": 1275,
+      "sha256": "9ebd4be86703f8f93a8c7aae0bba8963a0d2f1b66114eefc08190579a3d6dc7f"
+    },
+    {
+      "path": "scripts/delta-journal-export.mjs",
+      "size": 7006,
+      "sha256": "f45e15b684eac0b519794a221a890e4078c6a9e8fb7e2ce8160e98f5105f6b45"
+    },
+    {
+      "path": "scripts/diagnose_fyers_index_history.py",
+      "size": 1596,
+      "sha256": "60dad38aace27134d2c36407dc5108ca48a08e77e13a649d41ada7755194246b"
+    },
+    {
+      "path": "scripts/ema_band_historical_check.py",
+      "size": 2443,
+      "sha256": "d61ab69e375f22ecbf73bc8cc280743b5c34def5d814f121b177ccc5720fca84"
+    },
+    {
+      "path": "scripts/fyers_day_pnl_snapshot.py",
+      "size": 1704,
+      "sha256": "f086699b1826e758e0eb8edf356c035167135f20dc2c2a2d2551eb20a8002817"
+    },
+    {
+      "path": "scripts/fyers_positions_snapshot.py",
+      "size": 1170,
+      "sha256": "6cdfa026794f50abc404e72beb74fc41ffbf79cdc5573d8a5fa029358f31df4c"
+    },
+    {
+      "path": "scripts/generate_source_reference.py",
+      "size": 3987,
+      "sha256": "a1a87f5f01df88589b635e8dae130c632ac045bc5a22aaa2c70772b6d06489aa"
+    },
+    {
+      "path": "scripts/nifty_completed_30m_snapshot.py",
+      "size": 1588,
+      "sha256": "57bb552c5ba2f30e41cd661918fa8e8b67860a038944ccfe5537378f846853b8"
+    },
+    {
+      "path": "scripts/nifty_daily_swing_snapshot.py",
+      "size": 2659,
+      "sha256": "8054d1a6e8c2c36059f66893a35cc1d469e1d8c7dc17f62dfafe2595538b5ce8"
+    },
+    {
+      "path": "scripts/nifty_expiry_snapshot.py",
+      "size": 6520,
+      "sha256": "bf9ad9bcfb37faadc9a6c42a85a01ca4c9b733e6b1b5628ee431c116ba1239df"
+    },
+    {
+      "path": "scripts/nifty_iron_condor_snapshot.py",
+      "size": 3506,
+      "sha256": "2e05d2a3ff5beb1358c76bcce5b215279439c79c3c3b044166c777328374c592"
+    },
+    {
+      "path": "scripts/package_release.py",
+      "size": 3776,
+      "sha256": "e447ec788f9f0c82ce744673fdef842ea7e3435f649386d0cde93d63210527c5"
+    },
+    {
+      "path": "scripts/preview_trade_advisory.py",
+      "size": 2563,
+      "sha256": "e17f547c82c7cad548cab0af3a8a6f94f6592189580f337f8a92c7bef32c18e3"
+    },
+    {
+      "path": "scripts/probe_rsi_table_history.py",
+      "size": 745,
+      "sha256": "3ee8046d0134ac62579d6c8d976f5896b81549fb3f4d0d4db52a125df6d0a3c2"
+    },
+    {
+      "path": "scripts/rank_chartink_candidates.py",
+      "size": 4969,
+      "sha256": "d39750f482a00d75ae66d5f96f671018c03bb8457406575c1ec7225bdab27cfe"
+    },
+    {
+      "path": "scripts/refresh_official_weights.py",
+      "size": 2569,
+      "sha256": "63418d891c2c09be5a30caf4c2e3d8c0efc25b825b78de5747fe0092412ebb16"
+    },
+    {
+      "path": "scripts/render_user_functional_guide.py",
+      "size": 2898,
+      "sha256": "fb69ede5d2d8aade9b9a5d93dc56473fe4fd931089ad2fede15b911bd3d5a114"
+    },
+    {
+      "path": "scripts/save_default_fyers_paper_policy.py",
+      "size": 5450,
+      "sha256": "012e32898da119b68c57ae6b999a8ef3d64ee93470645a85a750405570b2b528"
+    },
+    {
+      "path": "scripts/suggest_high_conviction_spreads.py",
+      "size": 3099,
+      "sha256": "ba330dbbfe02c947db4d2d011ecc61d6568fe03ff5031c03e34acbc51ae71d04"
+    },
+    {
+      "path": "scripts/verify_redbar_zones.py",
+      "size": 3669,
+      "sha256": "311bfb64675b5e83d606f253440dd14633b06c6c28ecbe7ba20b94b64148b53b"
+    },
+    {
+      "path": "scripts/whatsapp/build.sh",
+      "size": 256,
+      "sha256": "02b10524e9d1b007eac08f2b6e35a1a01a8098c1bbcb2514f0471b2ad44c0859"
+    },
+    {
+      "path": "scripts/whatsapp/read_selected_chat.swift",
+      "size": 3029,
+      "sha256": "da33ccd097f9bd42b3998afc61a44b28131c5437555b7406053738ef2437da34"
+    },
+    {
+      "path": "sector-dashboard-model.js",
+      "size": 6924,
+      "sha256": "86ecb5986f9bb1fc35e5f9cb37cd63dfa3b07e7649f13f831d98c930ba49df0d"
+    },
+    {
+      "path": "sector-pulse-background.css",
+      "size": 1214,
+      "sha256": "b1bf0f55c1bb12c4812dec6be0ec2c285d13780a60da26bb9f53b058316b5a72"
+    },
+    {
+      "path": "sector_heatmap/__init__.py",
+      "size": 59,
+      "sha256": "de58c4fdc892e4491209c28be584fe8ec5911f35c07b31468afa4b610298948c"
+    },
+    {
+      "path": "sector_heatmap/analysis.py",
+      "size": 19124,
+      "sha256": "a09746e05fb7a8405e1d032a6a6b2f81a058ef438483bf59167f9a3b9bb16a77"
+    },
+    {
+      "path": "sector_heatmap/analysis_config.py",
+      "size": 1720,
+      "sha256": "594e8a7c1a11ca490788cec2ef70fd4a88ab47bb00fadfefbc37c9378f1aad2c"
+    },
+    {
+      "path": "sector_heatmap/auth_refresh.py",
+      "size": 373,
+      "sha256": "63c8ad92b1906161d006d9640e7342b944c2f34486a56e5ae5d3163d849ec395"
+    },
+    {
+      "path": "sector_heatmap/authentication.py",
+      "size": 3091,
+      "sha256": "39b1db35ddad373816a13e2c85fec99ae5dc1b05a99ab79b82cf91da0edbcca3"
+    },
+    {
+      "path": "sector_heatmap/automation.py",
+      "size": 23148,
+      "sha256": "3b8814027711fd1e0e2f735ba79ca456647c32ace8b958a50d69457ada4fd0ef"
+    },
+    {
+      "path": "sector_heatmap/config.py",
+      "size": 5757,
+      "sha256": "13f58f158e4f9510b2d1c81ef6e8ff5823f115cd7fb15550c78d50961b17726f"
+    },
+    {
+      "path": "sector_heatmap/data/nse_weights/2026-07-31.json",
+      "size": 16056,
+      "sha256": "48733587d296a039811be7a2ddd2f914cf427be197b28f79efb21e1df277051e"
+    },
+    {
+      "path": "sector_heatmap/delta_adaptive.py",
+      "size": 30833,
+      "sha256": "bb1fde7467ddd7f8f6b7ec01b2f02ff17c591bdfd311cd274fa79eb39f5fb100"
+    },
+    {
+      "path": "sector_heatmap/delta_adx.py",
+      "size": 1614,
+      "sha256": "29ee50f4fbe921921d52efb39e04191f6cf37a6518ca07594a65c4e68308fe52"
+    },
+    {
+      "path": "sector_heatmap/delta_backtest.py",
+      "size": 27464,
+      "sha256": "1e38bd7d6c7b887daf4cf37d3a766d93cadf90ecdbb9b638902d4f858cdc85f9"
+    },
+    {
+      "path": "sector_heatmap/delta_backtest_server.py",
+      "size": 7830,
+      "sha256": "52afad8c23dd5cf12b79b9e9564a3ab53c653524cee92e0082c484b4d9f9cad6"
+    },
+    {
+      "path": "sector_heatmap/delta_currency.py",
+      "size": 1988,
+      "sha256": "624c4eb204f5ae573e061038790dff8b1f350dba82bc538e35fa8f3294db007a"
+    },
+    {
+      "path": "sector_heatmap/delta_history.py",
+      "size": 5690,
+      "sha256": "53c84145a5ca1ce2c9e2a37c45e0a634414a5fe4135923b358b2531de997210d"
+    },
+    {
+      "path": "sector_heatmap/delta_india.py",
+      "size": 101041,
+      "sha256": "326470b06e055a78a2841948df368c92a775f249f4696500b3fb0dc1ea0b46c2"
+    },
+    {
+      "path": "sector_heatmap/delta_journal.py",
+      "size": 4552,
+      "sha256": "3a0daeb39226114f13063d2208db4ba1ad5dce76b568d6d19a6b97e1756e21a4"
+    },
+    {
+      "path": "sector_heatmap/delta_journal_export.py",
+      "size": 282,
+      "sha256": "e051bbccaa80b0dbe5e37745557fb1831570cacd5436c1e08e33e2b651f5e0ab"
+    },
+    {
+      "path": "sector_heatmap/delta_lifecycle.py",
+      "size": 7148,
+      "sha256": "22b34ef0af5ba2cf6954207e8e42b7285005bd132324064b30e59f9ca9cb33aa"
+    },
+    {
+      "path": "sector_heatmap/delta_monitoring.py",
+      "size": 3088,
+      "sha256": "1b458b0b3e702aef56512adb4318dadf9a14306a054581be2a8ff83d3a57e009"
+    },
+    {
+      "path": "sector_heatmap/delta_research_ai.py",
+      "size": 7774,
+      "sha256": "1b61bbba1532a20a8079dbf5d555db0a8e82d733aedb5fed20bc6fa7161c9eef"
+    },
+    {
+      "path": "sector_heatmap/delta_signals.py",
+      "size": 3391,
+      "sha256": "e75c39f6499280e01b753be1bad17d0b4fa507f911656454a99935fbfde244cd"
+    },
+    {
+      "path": "sector_heatmap/delta_trailing.py",
+      "size": 6374,
+      "sha256": "bb43d260dd48600cb2dc5880de099d73dacd28ed57765bcd517a61338c7d59a8"
+    },
+    {
+      "path": "sector_heatmap/equity_exit_plan.py",
+      "size": 2552,
+      "sha256": "e62c10d5b2a0a73c9faea84cd76e9339937e8ebf15da6223683f3de6b8a2b91b"
+    },
+    {
+      "path": "sector_heatmap/file_lock.py",
+      "size": 891,
+      "sha256": "7e3fff2ab170c75d50aa20bcff5e4c3f14b437601a8bbe8cdfc73571db0a7a7b"
+    },
+    {
+      "path": "sector_heatmap/fyers_execution.py",
+      "size": 59974,
+      "sha256": "60549638785a8128a04b24b0e570e1d2ce96ce90b9f950fae0c23065482e91dc"
+    },
+    {
+      "path": "sector_heatmap/handoff.py",
+      "size": 41275,
+      "sha256": "0b47f4b075f97b92affcf472313c72bc1c887f0f289c72a274add43ce63b8ada"
+    },
+    {
+      "path": "sector_heatmap/indicators.py",
+      "size": 7894,
+      "sha256": "4160f16d848cecf3dee8f6f93e02f232e607de76f8356c4db50740365386b384"
+    },
+    {
+      "path": "sector_heatmap/kama-v2.pine",
+      "size": 3694,
+      "sha256": "c5f741b71a0c55ad81811b7d575cb252f91f90e73be2b9fe6aae4297d050386e"
+    },
+    {
+      "path": "sector_heatmap/kama-v3.pine",
+      "size": 3174,
+      "sha256": "5d3fac17c6c1a76f6fd0c04cada9610eb45e662580a817df57ba2b83564a80b5"
+    },
+    {
+      "path": "sector_heatmap/kama-v4.pine",
+      "size": 3529,
+      "sha256": "6ef412ed844eec0e369fe5b5333f5c8dfaa7df6b8e3f4bfc8abef85b03fc12a9"
+    },
+    {
+      "path": "sector_heatmap/kama-v5.pine",
+      "size": 3512,
+      "sha256": "e1a89c069ca348695eaa4b3dd5bdfb99ddaca7d9d2685bfe34c5f2f7ec3ddaee"
+    },
+    {
+      "path": "sector_heatmap/kama-v6.pine",
+      "size": 3557,
+      "sha256": "295cd7598b6ba5ad9c3496b0f38a849b6f3fd72a95ab58a4ab44b357d58199e0"
+    },
+    {
+      "path": "sector_heatmap/kama_strategy.py",
+      "size": 8171,
+      "sha256": "add04a9664e7dcaf3a2cbbbcc88ae1c58b0c1c7aa5c02b71f9dd4fc4aeade323"
+    },
+    {
+      "path": "sector_heatmap/market_calendar.py",
+      "size": 3957,
+      "sha256": "c251336ccece5d6c1aa3d3a5618274bd8a44beda12ef2d1137f69292758fc609"
+    },
+    {
+      "path": "sector_heatmap/market_data.py",
+      "size": 8087,
+      "sha256": "e320f5ace6214afa20801f719dd31c5e3571ee9e74111c4d9fc45e618d93b7a5"
+    },
+    {
+      "path": "sector_heatmap/nifty_straddle.py",
+      "size": 10515,
+      "sha256": "913094de5c8f4b7f7858ce841617b2cb16852aa5f675eade04ebd1f426b0b40f"
+    },
+    {
+      "path": "sector_heatmap/official_weights.py",
+      "size": 6236,
+      "sha256": "ffc1aec1dbecd41017b20a16014c9967b111e764b975f5d6258e781543041a8d"
+    },
+    {
+      "path": "sector_heatmap/paper_wallet.py",
+      "size": 1771,
+      "sha256": "df9d01d8c954fd72793de6cbf8afe3d1ea1a8c3e2754dca7506303bc7867c17c"
+    },
+    {
+      "path": "sector_heatmap/parser_lifecycle.py",
+      "size": 10705,
+      "sha256": "490d026d30f6d5f4b59db38b86d72ed67857cea0877b7dff6050493d74dd34f1"
+    },
+    {
+      "path": "sector_heatmap/parser_protection_broker.py",
+      "size": 1879,
+      "sha256": "4935afc00fd4896a3111a7563aff4e3c973b82c6cd095c9da76d07a6578135fe"
+    },
+    {
+      "path": "sector_heatmap/parser_quote.py",
+      "size": 3396,
+      "sha256": "a327cbb8295f22ed467943e056f204cbf52e6f0ec5ec30dcea3d08489d971400"
+    },
+    {
+      "path": "sector_heatmap/parser_submission.py",
+      "size": 1653,
+      "sha256": "64b9274a4c300407248dbd6c9319676ef526bf4dce9d5e491408dabfc927d991"
+    },
+    {
+      "path": "sector_heatmap/portable_journal.py",
+      "size": 2700,
+      "sha256": "8fb1db9e159bebe7fb9c135e1f481bf755711175ec3501bb2c6c8bd9569db10e"
+    },
+    {
+      "path": "sector_heatmap/rsi_table.py",
+      "size": 7668,
+      "sha256": "f88d38422af798bd7ae98c84823eb4645ba87dd08a755698c23144c754fc3eda"
+    },
+    {
+      "path": "sector_heatmap/sector_service.py",
+      "size": 26005,
+      "sha256": "197f893aca40b37661e59f32d0d24998d8cb563f340481cfa7ff97680a3d0b55"
+    },
+    {
+      "path": "sector_heatmap/sectors.py",
+      "size": 2563,
+      "sha256": "b9ed3dfc28dc6d29673083da4407cd1c97523d113516a9fc2f14e9616775e2b2"
+    },
+    {
+      "path": "sector_heatmap/sensex_straddle.py",
+      "size": 13358,
+      "sha256": "dddcf7b36e394278d890d0c89834fc7d7ca979598380f8d0611c2ed2f0e9949b"
+    },
+    {
+      "path": "sector_heatmap/straddle_paper.py",
+      "size": 4416,
+      "sha256": "f19bb94524e2272546a6d5fcca727ae587576dc6b141a81f0cd148917c80d462"
+    },
+    {
+      "path": "sector_heatmap/straddle_squareoff.py",
+      "size": 7296,
+      "sha256": "99d162167b5866ea6ea4bc25efa4a2cdb549338d79dec9e1068b4193898b87ba"
+    },
+    {
+      "path": "sector_heatmap/telegram_parser.py",
+      "size": 6420,
+      "sha256": "9a180cf8040122f2d48bc90c0f952ddd24ffaa1fac1a103b069dc6d9eacd440f"
+    },
+    {
+      "path": "sector_heatmap/telegram_polling.py",
+      "size": 8518,
+      "sha256": "e7f350c27177a7b1f8429fbfbc2b6b01aa18eebd9795529a57ea3e55576c2f02"
+    },
+    {
+      "path": "sector_heatmap/trade_advisory.py",
+      "size": 18142,
+      "sha256": "6e5dabfe193003588dd4e13c94473e81de8e21b0d70267dd8929f1b337023bf6"
+    },
+    {
+      "path": "sector_heatmap/web.py",
+      "size": 289982,
+      "sha256": "87a4b0a5884e8aa735a0aefd4ac1a4de77549d82b65449ea48aeade57fc98b5f"
+    },
+    {
+      "path": "sector_heatmap/whatsapp_polling.py",
+      "size": 9940,
+      "sha256": "bc07490a923f3491debbf7d6d8d458fb9830649f7a13020b0142c1294de630af"
+    },
+    {
+      "path": "sector_heatmap/whatsapp_source.py",
+      "size": 1352,
+      "sha256": "5748b59f6a55b17cfb55aa0af73ee95e0ca5c643da5de8063670ab1a4ea4140d"
+    },
+    {
+      "path": "sector_heatmap/workspace_guard.py",
+      "size": 4563,
+      "sha256": "761f57169d60b874b27ca9ba9f4df7fcc92126c618976db5966c6aa43f54ee3c"
+    },
+    {
+      "path": "sector_heatmap/workspace_portal.py",
+      "size": 7970,
+      "sha256": "4e097287abe0a1906dbb83a609b9782df2a631dace2662b497d8f17aa68c7e32"
+    },
+    {
+      "path": "sector_heatmap/workspaces.py",
+      "size": 18718,
+      "sha256": "8a2974fde3b6a9f405ccc4a71dc88108bc4d0dd54a4e845aa90b46d1d8dc952c"
+    },
+    {
+      "path": "sensex_ema_band_midpoint_live.py",
+      "size": 16910,
+      "sha256": "0ccb33bdc859cdfa5f16a3452751e1e0ef2942b235a9e49ea445812c43d9569c"
+    },
+    {
+      "path": "setup_and_run.bat",
+      "size": 3773,
+      "sha256": "0d653a46a61de000da27e772292bb3adbdeb740560343e913b50036beb51e8f5"
+    },
+    {
+      "path": "setup_and_run.sh",
+      "size": 3205,
+      "sha256": "d57f321313edb302a4cd8d0bbf5877dd6d3c32cfb3cb9b34ac7543da8a8cc6bd"
+    },
+    {
+      "path": "strategies/ema_band/README.md",
+      "size": 756,
+      "sha256": "cb0669594d894b7cfb7f13426b56b6fd931d5ed69c1fc2b6deb5178777a44e4c"
+    },
+    {
+      "path": "strategies/ema_band/backtest.py",
+      "size": 629,
+      "sha256": "eaf54f4e8756fd7ce4e9d0d1107e4172a4785bf48c245b9c8edac4d34bb707af"
+    },
+    {
+      "path": "strategies/ema_band/demonstrate.pine",
+      "size": 4030,
+      "sha256": "95a2a93860a61138799626277bcf641a5a2ccc42acd11d033401841e378e9de5"
+    },
+    {
+      "path": "strategies/ema_band/ema_band_latest_tradingview_strategy.pine",
+      "size": 10313,
+      "sha256": "71add653a3051d41f8ff3fa9ae392cb41ca3c7e000ce12232be414e53994fab7"
+    },
+    {
+      "path": "strategies/ema_band/sector_pulse_runtime_pine_strategy.pine",
+      "size": 4365,
+      "sha256": "76cccb7a76f89169fa5eaa6ea2d620cbdb9f51571bc68381187952d55aed8278"
+    },
+    {
+      "path": "strategies/ema_band/signals.py",
+      "size": 1277,
+      "sha256": "49540d1eeb2680aa5986ec45604c0bafa9c78055f8c4ed23ef88cef1bad86a90"
+    },
+    {
+      "path": "strategies/ema_band/slope_filter_backtest.py",
+      "size": 5018,
+      "sha256": "38db40147ae9e034dc44964398acefa5b3e991d5dd125906e13d30ab8b7d5b00"
+    },
+    {
+      "path": "strategies/ema_band/source.pine",
+      "size": 10405,
+      "sha256": "5becf6418c2dcb79e8fff123ebd3a1571f7d33b32eb0f2daf64fbd72aaa60fa8"
+    },
+    {
+      "path": "strategies/ema_crossover/README.md",
+      "size": 9664,
+      "sha256": "728057bb1c78388311401b186702116c809d798b4c2494e237a6949a0003c28f"
+    },
+    {
+      "path": "strategies/ema_crossover/VERSION",
+      "size": 19,
+      "sha256": "e9869a9be99e8f222d5d324df5fdb2ceec7055ce493a8ae987b90e5fb3c79773"
+    },
+    {
+      "path": "strategies/ema_crossover/__init__.py",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "strategies/ema_crossover/audit_contract.py",
+      "size": 1523,
+      "sha256": "6378e8f3a077acb67f94b1d5be41cee498615fffda532b26ec6222f429b1133a"
+    },
+    {
+      "path": "strategies/ema_crossover/backtest.py",
+      "size": 3608,
+      "sha256": "7371b719f19935853348a9377c9a1f131b8e10e6445b43ee24e2bd393f305c79"
+    },
+    {
+      "path": "strategies/ema_crossover/broker.py",
+      "size": 18637,
+      "sha256": "eba3e40f435bceedbc24f79ddba33fc40e1a1d6d6a6c17e649f0efd51bfa402a"
+    },
+    {
+      "path": "strategies/ema_crossover/check_master_valuation.py",
+      "size": 1642,
+      "sha256": "6a6325e84d18bcf4af5bb340edd7bb7a9e1a53c0bc669a45c86df3fcf4b641af"
+    },
+    {
+      "path": "strategies/ema_crossover/cloud_backtest.py",
+      "size": 1963,
+      "sha256": "d283cf45e34fec2054443d8dd6044ea82eda01c3cb5371afc92eb834b119e031"
+    },
+    {
+      "path": "strategies/ema_crossover/history.py",
+      "size": 6473,
+      "sha256": "84d23f6eb2f03da11679c97ae841702931ada3cc99af3dfbc2487f4d92b1135c"
+    },
+    {
+      "path": "strategies/ema_crossover/paper_capital.py",
+      "size": 2876,
+      "sha256": "516424ae016e05ac937931994c2911f28090fdd315cc893b134516b766f8b68d"
+    },
+    {
+      "path": "strategies/ema_crossover/redbar-reference.pine",
+      "size": 43712,
+      "sha256": "5a93f4c46fc6c013c8cb267be4c9ecd87c583ed09e1677ae38d54f32f35cd9af"
+    },
+    {
+      "path": "strategies/ema_crossover/runner.py",
+      "size": 34441,
+      "sha256": "e641009a67e29395f19302b04495886254da3bbec21e94a3dd7a0de6ce9ee15b"
+    },
+    {
+      "path": "strategies/ema_crossover/signals.py",
+      "size": 4913,
+      "sha256": "d36782f86540aaf1f86c50aea6a80952f44398d37646bb7f5c8f2afc2bf7540c"
+    },
+    {
+      "path": "strategies/ema_crossover/test_broker_stream.py",
+      "size": 4403,
+      "sha256": "b88ca5ef7e01a0285f9698f3eb42b65d507deaaec37c2fc2a501645f6f06875b"
+    },
+    {
+      "path": "strategies/ema_crossover/test_funds.py",
+      "size": 2495,
+      "sha256": "be8d9c740e967e9fbdfd98c0252318376fc251c095d1ac82f8f219b3c1446963"
+    },
+    {
+      "path": "strategies/ema_crossover/test_market_payload.py",
+      "size": 647,
+      "sha256": "8b3ae508641b399413415cd175243dc830de62ba0391d300b74d5d9a798c196b"
+    },
+    {
+      "path": "strategies/ema_crossover/test_rsi_signals.py",
+      "size": 2983,
+      "sha256": "3d251c7d7d525216168dfd9093941b4dda4ef30a68b25558f422e0bcf52f9a00"
+    },
+    {
+      "path": "strategies/ema_crossover/test_runner.py",
+      "size": 15532,
+      "sha256": "12498d519c46008269009d655aaea38bf9b8d221275d5421cfe3c139906cb72a"
+    },
+    {
+      "path": "strategies/ema_crossover/test_signals.py",
+      "size": 2041,
+      "sha256": "53ff9d6aed0d285b47864a3146cb2e3836e469a558f21629932d5289fd33cc76"
+    },
+    {
+      "path": "strategies/ema_crossover/test_spot_exits.py",
+      "size": 1359,
+      "sha256": "ac2da7616a9183347468a482fe00be35c0ad01dbd70a2a876cd44840c8010b77"
+    },
+    {
+      "path": "strategies/ema_crossover/test_trailing_history.py",
+      "size": 8035,
+      "sha256": "f77e1f422f43ef984042399dcdd9e2ad4b0f19a11a4b79bd11d3f55f93a90f4d"
+    },
+    {
+      "path": "strategies/ema_crossover/test_valuation.py",
+      "size": 1920,
+      "sha256": "3fc8c27607450d8752d928b30c007c0bed10235f7a1eb58409f338d41cc86d14"
+    },
+    {
+      "path": "strategies/ema_crossover/trailing.py",
+      "size": 4167,
+      "sha256": "ba7e6b83b6afafd0b848c16d5ee75b0bfc8e7ad1c15cfc92f42c23d9d0844981"
+    },
+    {
+      "path": "strategies/ema_crossover/valuation.py",
+      "size": 540,
+      "sha256": "cb61c331b24c6c7fb7db59557e654b7afe42786fd8e497accfae133e6a0908a7"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v2.pine",
+      "size": 3704,
+      "sha256": "7474b80daeb53a02607d08832b23b32931f059988e7063fdae68c9ff16a61609"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v3_optional_vwap.pine",
+      "size": 3181,
+      "sha256": "3aad740f01253bf61a35ea90ca9cc08549d1f585a15be07d3e21f034c03abd49"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v4_breakout_resumption.pine",
+      "size": 3536,
+      "sha256": "55a9981d472b0cacddb445c1f23071451daaaa817f09cf325e0823cfc0e90c58"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v5_intraday_continuation.pine",
+      "size": 4544,
+      "sha256": "304ed0d402665363922fb0e932bfdde9de58b85b87505fcf7a832abf3b60ed36"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v6_editor_safe.pine",
+      "size": 3606,
+      "sha256": "391cdd7cf7b6b333771f08f0c46690bcd8164aa2f8f42efcdddb4ea10ffac59a"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v6_efficiency_breakout.pine",
+      "size": 3566,
+      "sha256": "0ad4f2688c5d927c747adf6a015d623fdcd38c4d43adda865cd712d21da0038f"
+    },
+    {
+      "path": "strategies/kama/kama_trend_filter_v7_breakout_only.pine",
+      "size": 3619,
+      "sha256": "74af23614c44ca96345f3f83dc8d0b4bc010dd059acd294a1f1741734430d837"
+    },
+    {
+      "path": "strategies/kama/nifty_kama_vwap_continuation_strategy.pine",
+      "size": 6585,
+      "sha256": "84e7e9f2108d65f0e9c29975fa27697afa1882601e29ce3702dd5e8a9b2caf1b"
+    },
+    {
+      "path": "strategies/kama/version_ledger.md",
+      "size": 1239,
+      "sha256": "c3656306a75118ef639c4423037af29fa2c8eebe3137dc584b251477b5e35376"
+    },
+    {
+      "path": "strategies/long_straddle/README.md",
+      "size": 1480,
+      "sha256": "79acc08c911479d325373275c669f3341d9c803bc98b6fa17128778b837c68cd"
+    },
+    {
+      "path": "strategies/long_straddle/nifty_straddle.py",
+      "size": 32405,
+      "sha256": "39f15b7e3145e30a0af9e0ceb21eaf692ee60a1dc11cadd6d9ff70e33ccc4812"
+    },
+    {
+      "path": "strategies/long_straddle/sensex_straddle.py",
+      "size": 33952,
+      "sha256": "4fab72c4fd42fd2bc5d81b38177889a50308f94c29aef535119f14254047e431"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/README.md",
+      "size": 1642,
+      "sha256": "5a15c8239969a0d1f770c2bfd1250e6d8fe82f49d1c557d76bb7e2c9b46e4584"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/credit_spread_basket.json",
+      "size": 897,
+      "sha256": "f58742d21e5832f72241a5d02142945b657fdec4596f33aaf99e478bb4c0cab7"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/flow.mmd",
+      "size": 610,
+      "sha256": "f7c44f2c8b6adbe5a78ca83d4fe1e89fa3bcd99fda23a2fc1752b0f045c0b29b"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/requirements.txt",
+      "size": 12,
+      "sha256": "177a230da7fa418ee858fac85b2c82e076bbcbc3b5b0fdd54ed8e1eaf9ba3553"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/run.py",
+      "size": 8775,
+      "sha256": "341dbfe7ebfc439486821e91bec732de2102a33862b0c9f234b5b28a919ab6b6"
+    },
+    {
+      "path": "strategies/nifty_call_credit_monitor/signal.json",
+      "size": 418,
+      "sha256": "30a5d40f430df51ac577fe52d12f1e365423631cdff2cc24f7616ea49c43dfd4"
+    },
+    {
+      "path": "strategies/pinaki_das_supertrend/pinaki_das_supertrend.pine",
+      "size": 2107,
+      "sha256": "ea5791f34edb3ba48f646becae1172faab594e0fbdc6065fdbf8bdd22486977d"
+    },
+    {
+      "path": "strategies/prst_ema30_research/README.md",
+      "size": 670,
+      "sha256": "ede0dad4e76d481a9005fb6c6fb265207edf3f03135fead4a87e75586f96e432"
+    },
+    {
+      "path": "strategies/prst_ema30_research/prst_auto_ema30.pine",
+      "size": 8319,
+      "sha256": "474e2349a7c7cc3d4cd788179097f57ebb5ba7330913faf20e689540a292fcb7"
+    },
+    {
+      "path": "strategies/renko_supertrend/README.md",
+      "size": 17611,
+      "sha256": "8d4cb0bc25bb57415f6932a19d4ed6bc6385c39d34c36a9f195cdff8c586ad69"
+    },
+    {
+      "path": "strategies/renko_supertrend/__init__.py",
+      "size": 78,
+      "sha256": "8b59cdc7d3acf07c81c87649c1ca8e5ca40764b376c963d1be2d6695f1575d36"
+    },
+    {
+      "path": "strategies/renko_supertrend/adoption.py",
+      "size": 18766,
+      "sha256": "998c371c600d6d0ae5c59048abc578d284f33737a2f2ac61c18ffd637ebe1fc9"
+    },
+    {
+      "path": "strategies/renko_supertrend/batch.py",
+      "size": 4351,
+      "sha256": "6312cbd5bc9ec94b6258817891d782921325448349140e2e595ae141df5d6ac9"
+    },
+    {
+      "path": "strategies/renko_supertrend/candle_patterns.py",
+      "size": 1563,
+      "sha256": "8f3646b2d9557c39b7c15fb90cb02ce3b8419c827ac13f49be27df4fd750b61c"
+    },
+    {
+      "path": "strategies/renko_supertrend/chart_history.py",
+      "size": 10841,
+      "sha256": "fcdfc2def72b9bc049578c711c3b30d3b917377731da7972826994e25b1cf969"
+    },
+    {
+      "path": "strategies/renko_supertrend/costs.py",
+      "size": 6835,
+      "sha256": "260c5b7abf44afef492a606c8bc603c13f0747cc74dd471c07215202e9515f7f"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_broker.py",
+      "size": 19135,
+      "sha256": "f0ebb490700bb54dc344da7859b8ded72e148a305f40661adf46488e7db727d0"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_contracts.py",
+      "size": 9338,
+      "sha256": "3f6ced022755d61ba10e5dcb2625082360878dd13d2a345d83d866f9acb4792a"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_costs.py",
+      "size": 3687,
+      "sha256": "8c864fe4b79f6d9ab09f07b51a6f5091f7c5c23423517240b25c706c02d24e7a"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_execution.py",
+      "size": 4400,
+      "sha256": "20a102c7de5940702bd9e267fdadd31e777d4158596df493406b89bb5f9f6b88"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_runner.py",
+      "size": 5172,
+      "sha256": "2d8f46885ef906567ffc8feca7790fcd14d50ac7517fc27f47722caaa0c95815"
+    },
+    {
+      "path": "strategies/renko_supertrend/delta_service.py",
+      "size": 11894,
+      "sha256": "0b4ae5305295dc437bb9c6fb22b8a2f318f3c59297cdcb4346447c1cb16831e1"
+    },
+    {
+      "path": "strategies/renko_supertrend/directional_research.py",
+      "size": 9670,
+      "sha256": "e6974bfc672c147b30fab2f5782336522d40ebbb42bdd25eb15b4f104947fb7c"
+    },
+    {
+      "path": "strategies/renko_supertrend/ema_exit.py",
+      "size": 2216,
+      "sha256": "8b967d0146434b143adb905b148e1924b7b9467cd6c4f1d1b25a0b816e768e1d"
+    },
+    {
+      "path": "strategies/renko_supertrend/ema_proximity.py",
+      "size": 2280,
+      "sha256": "994e02f99920ffd9f7f7af5f1ef3524617140328fec48a1f3c9ea30431f2d8fe"
+    },
+    {
+      "path": "strategies/renko_supertrend/execution_audit.py",
+      "size": 851,
+      "sha256": "4d22191f6bbe1a559da78c7414ebf8f83e6d03f1055ba881fc6be385a3bdfd5b"
+    },
+    {
+      "path": "strategies/renko_supertrend/history.py",
+      "size": 4480,
+      "sha256": "1f34512237177cfc5b5e16516832a5bcf5d8da13077aa0fea421f6ba7c7a9648"
+    },
+    {
+      "path": "strategies/renko_supertrend/journal_export.mjs",
+      "size": 15073,
+      "sha256": "d82c525fe00715c6e4b7a24917b31a712015cbbdb9bab7745183bb13cf40aac7"
+    },
+    {
+      "path": "strategies/renko_supertrend/journal_export.py",
+      "size": 313,
+      "sha256": "a567e0ff7278f866ea4445d83d16397439e9f7040d6102c83900a164cb38d7bd"
+    },
+    {
+      "path": "strategies/renko_supertrend/market_structure.py",
+      "size": 1908,
+      "sha256": "58f25ed013dca81d8590dcbc197e0d8a9b6ccd12c90efc43b345781d98e4549d"
+    },
+    {
+      "path": "strategies/renko_supertrend/mtf_supertrend.py",
+      "size": 1954,
+      "sha256": "37efeaf6cb38e6d7976ba9d2ffb366cb51566cd039253d2728d61ef89a3a6f90"
+    },
+    {
+      "path": "strategies/renko_supertrend/preferences.py",
+      "size": 3924,
+      "sha256": "b9722b42c538f6f417d4291aa8e298d23b3e32d31217226973a777eb502f949c"
+    },
+    {
+      "path": "strategies/renko_supertrend/research_replay.py",
+      "size": 3730,
+      "sha256": "72d12225b366dbe9402115c152ef814141b268b2c3b5cac0e854db87ca9c91a5"
+    },
+    {
+      "path": "strategies/renko_supertrend/retest.py",
+      "size": 2887,
+      "sha256": "f0a669418732283d66d433d81e1fbfea49bd46c4addde12a3834af528b715fdc"
+    },
+    {
+      "path": "strategies/renko_supertrend/risk.py",
+      "size": 917,
+      "sha256": "f67b0bf4a7a4c7c3c9adb5fa8c918b88ff1ed5b11695ece2981a7cf5f6a89efd"
+    },
+    {
+      "path": "strategies/renko_supertrend/rsi_slope.py",
+      "size": 1756,
+      "sha256": "d1e0005a1ed2d0ad68a524472e2a2e45db4a5d5b0cba361035e23ed5049d248a"
+    },
+    {
+      "path": "strategies/renko_supertrend/runner.py",
+      "size": 94192,
+      "sha256": "199bce0cf2d27e2422658b6d6e2fe6cc7a324e7c8d082176f5aad08fde91d675"
+    },
+    {
+      "path": "strategies/renko_supertrend/sideways.py",
+      "size": 3029,
+      "sha256": "606906e51df9d463197c11e9b8c7877c24efac9c207c25691bfab6fc4faa85af"
+    },
+    {
+      "path": "strategies/renko_supertrend/signals.py",
+      "size": 14346,
+      "sha256": "4ddd8130037da65dbc5e843939b2e3d6ac538693ef5c30f0dd5d4cfb452ff560"
+    },
+    {
+      "path": "strategies/renko_supertrend/source.pine",
+      "size": 6896,
+      "sha256": "1b9e70c376197887348476977d5d491f08501d19d3d74ad5903b215fa361065f"
+    },
+    {
+      "path": "strategies/renko_supertrend/source_reference.py",
+      "size": 4895,
+      "sha256": "a12a9d876b1a80a3bfe420ee00a94f0d8878677cec003b27615a5d661d8da05b"
+    },
+    {
+      "path": "strategies/renko_supertrend/stream.py",
+      "size": 5947,
+      "sha256": "17f43c5693c80e26789d9ca801eef1bf43e78b1a2e97c5a3af8a22fd40aee7ca"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_adoption.py",
+      "size": 9557,
+      "sha256": "760da2029edeca842fe766383e0e84545bb5a55884286e8ca7fe331fa8a74815"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_candle_patterns.py",
+      "size": 1484,
+      "sha256": "982c9e57f6e1d444e6b369397d774183efc2cbe2805972507bf5e542dce3e2b8"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_cash_equity.py",
+      "size": 7422,
+      "sha256": "896c09485eba56e06b2084862672f64ae92b29bb2dd819adee2bb2c71624e95a"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_chart_history.py",
+      "size": 8035,
+      "sha256": "b8b4be6a2354d726f60b831842058833f7cfd105a6fee4d04d7e8dac08df568e"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_continuous_activation.py",
+      "size": 2218,
+      "sha256": "ee0475e3eb28bbe28123433c7f7047ab0da501a1623b2422d1cc6746a083a79b"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_controls_history.py",
+      "size": 7288,
+      "sha256": "ec0e14a09c7ccfa563f855486fc1833d4fba99121558f952e06f362f5c859569"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_costs.py",
+      "size": 4057,
+      "sha256": "8eae4b8c38871b3e62175e135125e3dfc633c8622eda9791f3a2ee80d72b4f0e"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_delta_contracts.py",
+      "size": 6358,
+      "sha256": "9860cdbcc124414bd3ec689039d64437e2ae5b09a56ef09a8bd9cd3e49a8638c"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_delta_costs.py",
+      "size": 1844,
+      "sha256": "5a0fe49d905bd4996562cf6e5fa9b11bb38421c23db8b01ae143726ca10d49a8"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_delta_execution.py",
+      "size": 3522,
+      "sha256": "f780f113d54b043b429c1f56e7c295403ddb984db2c22cf0552f808fe1093e56"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_delta_integration.py",
+      "size": 9461,
+      "sha256": "98c035843d49879baf37e9797b25389cb95d7c6912e887c96a3c447338a8b3ec"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_directional_research.py",
+      "size": 4095,
+      "sha256": "caae8f6b6dc83d1fd6fc70fb9c210fce497ae162a4ae335608ca8ee7b79ff2ac"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_ema_entry.py",
+      "size": 3830,
+      "sha256": "f5be4d1b14de9b078c8256ce7b06ed2867613617408bf663c7d0edf107cd757d"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_ema_exit.py",
+      "size": 3036,
+      "sha256": "0ff32930889eaa462e935027bd808692099dd3d1a310fa6d360b5f4ff0d89a01"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_ema_timing.py",
+      "size": 2527,
+      "sha256": "658447c30eeb19397f428ee9e513fc41c10a77bfedf734d33220662930063b0b"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_execution_audit.py",
+      "size": 2180,
+      "sha256": "37a1cda1d39e351f64696e9b905bb8683978b6104cda339548903dbd2a278e4f"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_history_recovery.py",
+      "size": 6433,
+      "sha256": "a4c011550633b8922b435b3272b247b55d10698d291747d763181ed7dc5126b1"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_intrabar.py",
+      "size": 8159,
+      "sha256": "402d4236ed8cf52ad03337ffd5c0497947b2cbb261d1f613dabeb1bc9fda0aed"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_journal.py",
+      "size": 3119,
+      "sha256": "b9b3100388820be7d7b2177a961ba2d4b4c879e5d2e6242231be66d89200a4ff"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_manual_override.py",
+      "size": 9220,
+      "sha256": "6057a32e735fbff0a52054b03566f0c9d35b5cdfe19c048bae1acc3604d538e0"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_market_cutoff.py",
+      "size": 5503,
+      "sha256": "3b4cfc397d66b62fc762b09610a15229744f451437253aafc909f58b91132eb2"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_mtf_supertrend.py",
+      "size": 4793,
+      "sha256": "c5966337b0a195bf05d32b43647cee0ce49d3a8d61b6220d5838095203267e49"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_optional_guards.py",
+      "size": 5765,
+      "sha256": "c75e6c820c59c906dd1da3f1981659843ee40efa4e79d989b0607275496b259d"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_price_continuity.py",
+      "size": 3294,
+      "sha256": "2d911e124c7c4eb19b98fccd1a01e7c9c75878e49e1862fff4b49f2a3519d6d4"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_projection.py",
+      "size": 2559,
+      "sha256": "1e1790cdbab03daa082395d86748b1131464ef54fb93546696cb662680b0b10b"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_quote_retry.py",
+      "size": 3004,
+      "sha256": "a33a2cb9eae4c922d18441bf76d581e1b3d6b84e59133b257c8bb9a2f6270bee"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_recovery_assessments.py",
+      "size": 9323,
+      "sha256": "97a1dcbaeae35eca87241e935d233dbe4bc18e8dcfbdd3c1dd39a1f24136dd43"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_resume.py",
+      "size": 2648,
+      "sha256": "d8158d9eea5ecbadd7a6864e1f923894100c0bf33af4f2dd790d7536e4d0243f"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_retest.py",
+      "size": 6357,
+      "sha256": "c9aa9ec485207af0394156438a93ce9a48e8ce5286a2ef63b17e07594f2cee88"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_risk.py",
+      "size": 2404,
+      "sha256": "d972de503653c801deeca9dc0ad115510ae2a013d57f8d1ff882ba9962ce8740"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_runner.py",
+      "size": 5820,
+      "sha256": "60fc2507c90f82a41266203144145c6777857cb2324163331c8e9281cad16e37"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_sideways.py",
+      "size": 5352,
+      "sha256": "359e6c2577858750f6a3fede10c208109a2898616f23e634400a594c5a509b8d"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_signals.py",
+      "size": 7304,
+      "sha256": "b45ab5ab475be2752733102749ad7f7d2e5075d333d21ed44b69a9decedfcc64"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_socket_stop.py",
+      "size": 1323,
+      "sha256": "1b9d925bb21d1f9a5a30dc430b7f6b9dd77740d59cc781c7c78ed80d68cc31b8"
+    },
+    {
+      "path": "strategies/renko_supertrend/test_stream.py",
+      "size": 3536,
+      "sha256": "078aa1d2c37476948f8c3f65fe68a0e4d9167f5c6cfc3d5991dd572d3523d302"
+    },
+    {
+      "path": "strategies/renko_supertrend/trailing_stop.py",
+      "size": 2789,
+      "sha256": "388b251f4b9fe4e392862a84307a9fd8594391b3c3316824c362be8e115fab9b"
+    },
+    {
+      "path": "strategies/renko_supertrend/zone_target.py",
+      "size": 5174,
+      "sha256": "5803f94363274d3ae5617f973607e1b762c88c9dc6ee9653012d90395c0a4941"
+    },
+    {
+      "path": "telegram-parser.js",
+      "size": 10095,
+      "sha256": "d095006aa104f8d0b25b95ddd9523b5cc416e81217c23b274197e4f8c83007e7"
+    },
+    {
+      "path": "tests/__init__.py",
+      "size": 47,
+      "sha256": "a0f2a837de5be76842a79377cbda5f59f2caf04c47ecd22a9358b16660b78578"
+    },
+    {
+      "path": "tests/dashboard-model.test.cjs",
+      "size": 6619,
+      "sha256": "84fc8f653a03d3567b13991ead20b8cd0c66bc7524a63da7f721d3b54461b06d"
+    },
+    {
+      "path": "tests/delta-adaptive.test.cjs",
+      "size": 991,
+      "sha256": "741a7bb257459002608dc77604e26b0c88b04545058dbc17d4751315d3563a37"
+    },
+    {
+      "path": "tests/delta-backtest.test.cjs",
+      "size": 2713,
+      "sha256": "9acc8eddef31ed616df66c710f8c6a21addd6139181d4298c08362dd26f711ec"
+    },
+    {
+      "path": "tests/delta-chart-position.test.cjs",
+      "size": 3102,
+      "sha256": "0b4432049ca77b9404a01c4eaeecd79611fd01297c2d41a4c3c24c8376fcbacb"
+    },
+    {
+      "path": "tests/delta-execution-markers.test.cjs",
+      "size": 2756,
+      "sha256": "7e0d05129ad2e172654929e848d760ace75f45b0485705740353f9ef7ccae6bd"
+    },
+    {
+      "path": "tests/delta-history-colors.test.cjs",
+      "size": 1499,
+      "sha256": "becc3834a60da06181f96f04d3bda1057fe97785038c1a7b4b43bf3e862ff9f4"
+    },
+    {
+      "path": "tests/delta-india-ui.test.cjs",
+      "size": 17497,
+      "sha256": "93362a021c9e6c173edabcf9484e536a52b0399069bed52ffd0beca87c0e0544"
+    },
+    {
+      "path": "tests/delta-inr.test.cjs",
+      "size": 1038,
+      "sha256": "43c310a3b7845ab800ad21b62d593b3efd9690aed37d1221dca508ce68788cd1"
+    },
+    {
+      "path": "tests/delta-journal.test.cjs",
+      "size": 2483,
+      "sha256": "1d170389666c0654b543c348c8532056b6d99e338966a89e4e60dd636d970bc9"
+    },
+    {
+      "path": "tests/delta-paper-pnl.test.cjs",
+      "size": 1046,
+      "sha256": "e350664d65ed48873fdaf53c78a234c1235ea185a2727cf72f7c95281209b7a2"
+    },
+    {
+      "path": "tests/delta-paper-timeframe.test.cjs",
+      "size": 1095,
+      "sha256": "9c2e61b2bca3689a4f8d3637f3b56ebdeaab72bfb044e133e46616c2ee8e8b38"
+    },
+    {
+      "path": "tests/delta-position-view.test.cjs",
+      "size": 2529,
+      "sha256": "eb0bfa604b1ad455fc41aff1ab6ff97a73fd19888a3c9da6fad2735f66ffeacb"
+    },
+    {
+      "path": "tests/delta-stream.test.cjs",
+      "size": 4353,
+      "sha256": "732ec7ab62532f5b296ea56aba5eeb5e1a11e313211e0c3e88a5fd24b5c95d05"
+    },
+    {
+      "path": "tests/delta-touch-chart.test.cjs",
+      "size": 2426,
+      "sha256": "1de4be4789e9224fc98f7c3a8d7eeec24ca5e70c4061862a51ddb6a921cc5bea"
+    },
+    {
+      "path": "tests/ema-cloud-chart.test.cjs",
+      "size": 6323,
+      "sha256": "b64467fc5c060030eb7ccc014b2b68a8a428d92e3610ea2b60a8a42498c5ac08"
+    },
+    {
+      "path": "tests/ema-crossover.test.cjs",
+      "size": 1334,
+      "sha256": "fdb23bb71cc592fe48c66a621968f531178cc69536b856ef95fa1ff3785dc34a"
+    },
+    {
+      "path": "tests/handoff-card-scope.test.cjs",
+      "size": 2975,
+      "sha256": "028ffff1e19fd60d85a84c4fc53e2cc5970f8ada6715a534bf74e60188cea564"
+    },
+    {
+      "path": "tests/paper-capital-ui.test.cjs",
+      "size": 766,
+      "sha256": "c028022ccffe03db4caf9d8eb38a1889b4f62c0a6390ae703725eeded8488459"
+    },
+    {
+      "path": "tests/position-history.test.cjs",
+      "size": 2103,
+      "sha256": "76ddd60bffc2b221895eb196d5e2eda02fd3579f4280f8001b177cf915a517ea"
+    },
+    {
+      "path": "tests/redbar-overlays.test.cjs",
+      "size": 4412,
+      "sha256": "0284fcaf01f042f26dc74e5acc037051adb5693f978724af22729e48bac05a87"
+    },
+    {
+      "path": "tests/renko-assessment.test.cjs",
+      "size": 7491,
+      "sha256": "ed95a0b4a9c16ef8a8b404e218afddf6d2d0c0e4b24d7d33abb18f98ddfacba1"
+    },
+    {
+      "path": "tests/renko-chart.test.cjs",
+      "size": 8894,
+      "sha256": "2f0bc43f3cf63ef042951bb75170b529e7a603ebf1bc9e7f4c4531cb7280649a"
+    },
+    {
+      "path": "tests/renko-mtf-supertrend.test.cjs",
+      "size": 854,
+      "sha256": "bbb0a864d24f96fd9f2abeb7c560a4151db555c1fca46f431995611a54509e50"
+    },
+    {
+      "path": "tests/renko-rsi.test.cjs",
+      "size": 1579,
+      "sha256": "791c374a9129e616e3c3cd40a68e1e99724759a382dd454758b3f4bbd0c08e91"
+    },
+    {
+      "path": "tests/renko-settings.test.cjs",
+      "size": 3979,
+      "sha256": "aa37a5e6a45e01847ee84cb9c0fd0be6276e0e9f40177ab0037349e8c42a29a3"
+    },
+    {
+      "path": "tests/test_authentication.py",
+      "size": 5116,
+      "sha256": "e4453d2d40a53ad41a640093471eb029cedeea767d2563960348a85935e610c5"
+    },
+    {
+      "path": "tests/test_automation.py",
+      "size": 5402,
+      "sha256": "e1bbd22976a93202318c98dd27fbc140e828cea0097e24e55e2ca0427cf02c9f"
+    },
+    {
+      "path": "tests/test_bundled_straddles.py",
+      "size": 1106,
+      "sha256": "46e14a1896f53943577df34c2b646ec5b8cc078028947a44458e732e9be3c7d2"
+    },
+    {
+      "path": "tests/test_config.py",
+      "size": 4474,
+      "sha256": "395026edd6c58b52c22a530f3257eede2978cb39aa946909715e0409d0dac187"
+    },
+    {
+      "path": "tests/test_delta_account.py",
+      "size": 2615,
+      "sha256": "f659f23b3241aae37a54ab502e14ccc8f44b499c34f7f0840baa263c534e5fce"
+    },
+    {
+      "path": "tests/test_delta_adaptive.py",
+      "size": 8545,
+      "sha256": "3f7cb193279d35490115a6acf29af1da9b8c00eadef9e8645c373794d5796f3b"
+    },
+    {
+      "path": "tests/test_delta_adx.py",
+      "size": 2411,
+      "sha256": "e6063de85d6e8c4ee7949ed136dcf0acadb0c69e82dc85ce436c9040c8c97fb6"
+    },
+    {
+      "path": "tests/test_delta_atm_runner.py",
+      "size": 8384,
+      "sha256": "569d3ac7d64dfeae5190ffd27fe71e8f2eaa8c0bd0a48d0115b018d092ca0246"
+    },
+    {
+      "path": "tests/test_delta_atr.py",
+      "size": 4452,
+      "sha256": "4f001d0bd649d923d2f7d319f417ca2a1303890111f103b43e3a10e46eccea18"
+    },
+    {
+      "path": "tests/test_delta_backtest.py",
+      "size": 16423,
+      "sha256": "e176fb5731a7942a6290c3a07bee7043000204cb3987a6956575fcf458677f80"
+    },
+    {
+      "path": "tests/test_delta_chart_options.py",
+      "size": 4870,
+      "sha256": "87a40d8df8d389231fc7c09706c94061ef25034c9d6049f643a64b8a12cd7251"
+    },
+    {
+      "path": "tests/test_delta_history.py",
+      "size": 3597,
+      "sha256": "eab2df40490c0d4e0638545db718f75fb2fdae6f15ea8a00bc9f9ca1115ca0ed"
+    },
+    {
+      "path": "tests/test_delta_india.py",
+      "size": 19991,
+      "sha256": "0852fbb63b5cf824d08b5da711722b96cf834a894c17f3a2bad40f0c8c4d4c3b"
+    },
+    {
+      "path": "tests/test_delta_journal.py",
+      "size": 5891,
+      "sha256": "844273588a17e946c927b6be205b81c4f00f75923754eedb03f6ccb3ec3c33ec"
+    },
+    {
+      "path": "tests/test_delta_lifecycle.py",
+      "size": 3889,
+      "sha256": "d7669616941827dabce6001bd8502cb23243143e1c0a44434d0b7109491d29df"
+    },
+    {
+      "path": "tests/test_delta_momentum.py",
+      "size": 2647,
+      "sha256": "cac6c61f70fa1c98eafbe2cd8534fa09eaea2130c01cc16b22f3957749951944"
+    },
+    {
+      "path": "tests/test_delta_monitoring.py",
+      "size": 5210,
+      "sha256": "94755c60da68b4821d51e1cab21f871548d2fced2e0ff91683a3f28079ce55ae"
+    },
+    {
+      "path": "tests/test_delta_recovery.py",
+      "size": 3652,
+      "sha256": "6c807724d21bf71dbd8bd19ffde5a56ebbf1a503de7950902866f5bae4e36af9"
+    },
+    {
+      "path": "tests/test_delta_signals.py",
+      "size": 2278,
+      "sha256": "1048501036d91b551a1231411c628696a0899724581be5daedfae5048c52b8dd"
+    },
+    {
+      "path": "tests/test_delta_submit_strategy.py",
+      "size": 10129,
+      "sha256": "1259fe88f09e4737dccc5b27d7e30010da73c7f2c6addd58cfd390c666e6902f"
+    },
+    {
+      "path": "tests/test_delta_telegram.py",
+      "size": 1369,
+      "sha256": "fdabb0ae77b759863b7a1db00dfd2691002d97864f67f59f94af7e5ea66d76be"
+    },
+    {
+      "path": "tests/test_delta_trailing.py",
+      "size": 9435,
+      "sha256": "aa42c00b82cb34a21167b5797cdf17fb9e727f8d35491264b078f5774d1b160a"
+    },
+    {
+      "path": "tests/test_equity_exit_plan.py",
+      "size": 1805,
+      "sha256": "0b835c54bf21fc9183d861f46c75597a56b3923fd8656cdc44d4cd2305279978"
+    },
+    {
+      "path": "tests/test_fyers_execution.py",
+      "size": 12147,
+      "sha256": "6e1184ce9110b2d761da6c0e5daee81033509e90134f989dc4e8030df3400798"
+    },
+    {
+      "path": "tests/test_fyers_only_invariant.py",
+      "size": 1283,
+      "sha256": "ed75e4ee8ed289579c028dff70795366e18202e61eb51506d1aec9371f8c3904"
+    },
+    {
+      "path": "tests/test_handoff.py",
+      "size": 11240,
+      "sha256": "71a8d0c43d9cdef45cf65c605e7e0884a20e5cda8af422d5a460e4c72f2d2296"
+    },
+    {
+      "path": "tests/test_handoff_long_options.py",
+      "size": 5485,
+      "sha256": "7162c3c6f10dfecea36edb7f3715f9778d398e72bac34606acabbdbdf6cbc1db"
+    },
+    {
+      "path": "tests/test_kama_live_gate.py",
+      "size": 3551,
+      "sha256": "aa6ecdfe507adaaec3e80f269f16ecbef2f8dbf648575910e73ac8760abdddd2"
+    },
+    {
+      "path": "tests/test_kama_strategy.py",
+      "size": 7479,
+      "sha256": "245d7b3ba45acde159cb605dc764ce17789d7f3e3b13f59f8f08bba1c73715f7"
+    },
+    {
+      "path": "tests/test_nifty_straddle.py",
+      "size": 4521,
+      "sha256": "3d6c25043cdeef2c55efd3adb9d7e3855f1a9611d929c4e306953d6515706db4"
+    },
+    {
+      "path": "tests/test_official_weights.py",
+      "size": 5594,
+      "sha256": "351bcf5962120ec3e80060357ee3ac91facb50172acf0a3e574074cd815ffdcc"
+    },
+    {
+      "path": "tests/test_paper_capital.py",
+      "size": 5723,
+      "sha256": "78786b08e09ce744eb0ac1c0250063f6e2288f4748703ad28bb3acefc1260e02"
+    },
+    {
+      "path": "tests/test_parser_lifecycle.py",
+      "size": 4914,
+      "sha256": "6340360efd629619708b6154598475d566d7ec3199428764b4355cc8b9ff1057"
+    },
+    {
+      "path": "tests/test_parser_order_preparation.py",
+      "size": 2785,
+      "sha256": "01f5d0ffe20a7d7411d64c1f4a1dc4a3457de4c711ce30310fab1c146d935a1c"
+    },
+    {
+      "path": "tests/test_parser_quote.py",
+      "size": 2817,
+      "sha256": "c0876fcbca468545f407388be8b6be4636d6f2ec31a2f2b92e46a19dd091a0d7"
+    },
+    {
+      "path": "tests/test_release_portability.py",
+      "size": 1678,
+      "sha256": "735eeae45cb1302399232ed159704343fc585de58e79b5ab1655c97a9bfc143b"
+    },
+    {
+      "path": "tests/test_rsi_table.py",
+      "size": 3221,
+      "sha256": "84957129c8d8f56a38501d3362d7139799b7454e29339593bbc71ca3c23e894b"
+    },
+    {
+      "path": "tests/test_sector_analysis.py",
+      "size": 19834,
+      "sha256": "cb901f282efde9fca2e32d7edb1d4642a7fe283f45704e95b9bd49cd652c3167"
+    },
+    {
+      "path": "tests/test_sensex_straddle.py",
+      "size": 7048,
+      "sha256": "22685c6bc86c9ca031879fc2ea7b058bc91d7f06ea7b6ff386f38a91386f0bc4"
+    },
+    {
+      "path": "tests/test_setup_launchers.py",
+      "size": 1049,
+      "sha256": "cbcefc54e35de90b7f35f1b9b565230c983c30f80db4ca8a52e83ce38fc6de7e"
+    },
+    {
+      "path": "tests/test_straddle_paper_capital.py",
+      "size": 2450,
+      "sha256": "2e78a0cce0160f2ee0f12eba5d9b2ca6908a494fe0f9b28a0d2f59eeb092f565"
+    },
+    {
+      "path": "tests/test_straddle_squareoff.py",
+      "size": 3737,
+      "sha256": "997a38d6fbef6a0cec0c6c7317fce46069a6eed4355b54595053ec4318a3acd6"
+    },
+    {
+      "path": "tests/test_telegram_parser.py",
+      "size": 7141,
+      "sha256": "efdffad45cd14980ab200f895f55f17d8197e9b9106eecd8d7f2b288b303f7c5"
+    },
+    {
+      "path": "tests/test_trade_advisory.py",
+      "size": 6579,
+      "sha256": "414957cad9dbafef16f66fada895b5d451b684c70a95ad8fa76dd7cdd94c8866"
+    },
+    {
+      "path": "tests/test_web.py",
+      "size": 31263,
+      "sha256": "23747b0f16d15aa70b3d696453c6a820926ea80f80acda416999e89277fa36cd"
+    },
+    {
+      "path": "tests/test_whatsapp_polling.py",
+      "size": 6197,
+      "sha256": "7fae8b9d6976a438cd47bbb39b2de788f00a786a4a463f6ec16ebe55532535d8"
+    },
+    {
+      "path": "tests/test_workspaces.py",
+      "size": 15050,
+      "sha256": "a4a7b5105e2f8db348c771fee28452f7e02290e20cba011426d014351ead0fb8"
+    },
+    {
+      "path": "tests/trade-parser-direct.test.cjs",
+      "size": 1841,
+      "sha256": "d5aaa36377a8617322bf5e20cb17053945ed016e1c231adc9cd4b5634e280398"
+    },
+    {
+      "path": "tests/trade_parser_advisory.test.cjs",
+      "size": 3995,
+      "sha256": "86bbf8dc4ed0a084d505044577fdcb252b5ffbd5a9669a35de25940161707fc6"
+    },
+    {
+      "path": "trade-parser-advisory.js",
+      "size": 4493,
+      "sha256": "046293f3381ba3672e14de23182ade9176c8a54de68457ea1abb133b933d43d4"
+    },
+    {
+      "path": "trade-parser-quote.js",
+      "size": 4177,
+      "sha256": "9b2da3faed9c89de650adfefca58e65ff7ed481b5b0d468cdc0fefa05339acab"
+    },
+    {
+      "path": "vendor/lightweight-charts-4.2.3.js",
+      "size": 163684,
+      "sha256": "c7dda807d662a95b3d257119ed315cec669e3bdf5aaece75c480a39307f23540"
+    },
+    {
+      "path": "vendor/lightweight-charts-LICENSE.txt",
+      "size": 11347,
+      "sha256": "70c9d5382506dd184465425c08a99ad9bd6d9ac1313c252968ba0b585e5ef823"
+    },
+    {
+      "path": "whatsapp-polling.js",
+      "size": 5988,
+      "sha256": "b80f12639de6affdebb992470d7964c4925b0e0ccb81ab8098e9a9c1a82bdcd0"
+    },
+    {
+      "path": "workspace-context.js",
+      "size": 942,
+      "sha256": "27cf983879a560d52dade0c075de029258f97628e3caa8f5061b2b0e0b4a55b3"
+    },
+    {
+      "path": "workspace-portal.css",
+      "size": 3400,
+      "sha256": "ec05b9e9c1fc9dfdf1e36b96d565e4c57c434ad4d16ae7c46ddda21c5da165a8"
+    },
+    {
+      "path": "workspace-portal.html",
+      "size": 4178,
+      "sha256": "5968b8bd27256f454b69a006854a4e52d58695524148d15b19a04c5ac7b52ac0"
+    },
+    {
+      "path": "workspace-portal.js",
+      "size": 6812,
+      "sha256": "378b101057420121bfddb9706df77736fd71dde42985612eec93660c4f0d23a6"
+    }
+  ]
+}

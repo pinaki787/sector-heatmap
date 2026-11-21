@@ -338,15 +338,32 @@ def prepare(adapter, config, host_rows=()):
         raise ValueError("Saved session sizing instrument identity changed; explicit new-run review required.")
     config["_session_auto_instrument_identity"] = identity
     oldest = min((r["timestamp"] for r in host_rows if not r.get("is_forming")), default=config.get("history_start", now-52*86400))
-    inputs, source = _load_reference_inputs(adapter, config, min(oldest-30*86400, now-80*86400), now)
+    store = FrozenReferences(_store_path(adapter, broker, config["underlying"], identity))
+    source_path = store.path.with_name(store.path.stem + "-source.json")
+    if source_path.exists():
+        # The persisted reference anchor owns Wilder initialization. Reusing it
+        # prevents each cold runner/chart load from fetching another 30 days
+        # before an unrelated durable host-cache anchor.
+        persisted_source = json.loads(source_path.read_text())
+        if persisted_source.get("revision") != REVISION:
+            raise ValueError("Session reference source version requires explicit migration.")
+        begin = persisted_source["anchor"]
+        if not isinstance(begin, (int, float)) or isinstance(begin, bool) or not math.isfinite(begin) or begin > now:
+            raise ValueError("Canonical session reference anchor is invalid; explicit review required.")
+    elif config.get("history_start") is None:
+        # An implicit runner load already has its durable host history. Seed
+        # from that history, with at least 80 days, without extending it on
+        # every restart. Early sessions without ATR warmup remain unavailable.
+        begin = min(oldest, now-80*86400)
+    else:
+        begin = min(oldest-30*86400, now-80*86400)
+    inputs, source = _load_reference_inputs(adapter, config, begin, now)
     inputs = [r for r in inputs if not r.get("is_forming") and r.get("completed_at", float("inf")) <= now]
     length = int(config["atr_length"])
     if len(inputs) < length:
         raise ValueError("Session Auto requires sufficient fully covered completed sessions for reference ATR; no host-seed fallback.")
-    store = FrozenReferences(_store_path(adapter, broker, config["underlying"], identity))
     # Persist the canonical input anchor; later rolling source windows cannot
     # reseed the reference. Source revisions must be reviewed, never rewritten.
-    source_path = store.path.with_name(store.path.stem + "-source.json")
     from sector_heatmap.workspaces import private_write
     import os
     from sector_heatmap.file_lock import lock_file, unlock_file
@@ -403,7 +420,11 @@ def candle_source(original):
     def load(adapter, config):
         rows = original(adapter, config)
         if selected(config):
-            prepare(adapter, config, rows)
+            # Explicit chart windows must not extend reference warmup backwards
+            # from unrelated older candles retained in the durable broker cache.
+            start=config.get("history_start")
+            reference_rows=[r for r in rows if r["timestamp"]>=start] if start is not None else rows
+            prepare(adapter, config, reference_rows)
         return rows
     return load
 
@@ -434,8 +455,14 @@ def apply_observation(state, config, stamp, tick):
     if not prior or prior["session_start"] != ref["session_start"]:
         if not prior and state.get("count", 0) and state.get("brick_box") is not None:
             raise ValueError("Legacy engine cannot acquire session sizing without an explicit new-run rebuild.")
-        state.update(session_auto=deepcopy(ref), brick_box=ref["box"], brick_level=None, brick_direction=0)
-        # The new session starts from its first observed price. Never construct
-        # a tradeable path across an unobserved overnight/session boundary.
-        state["price_renko"] = {}
+        old_box = state.get("brick_box")
+        new_box = ref["box"]
+        # Preserve the absolute last brick close when the session box changes.
+        # Fractional grid coordinates keep the first new brick contiguous.
+        if old_box and state.get("brick_level") is not None:
+            state["brick_level"] *= old_box / new_box
+        live = state.get("price_renko") or {}
+        if old_box and live.get("level") is not None:
+            live["level"] *= old_box / new_box
+        state.update(session_auto=deepcopy(ref), brick_box=new_box)
     return ref

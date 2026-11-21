@@ -1,0 +1,13 @@
+# Qualified Renko chart signals — 3 November 2026
+
+The hosted frontend now validates historical BUY/SELL markers against selected **Strategy** entry settings, independently of chart-only study visibility. A separate read-only chart calculation is requested only when its strategy settings differ from the plotted studies. Live Market Chart remains independent of the runner; Runner Session Audit uses captured settings.
+
+Each marker requires a completed observation, matching Renko body/direction, the saved swing-confirmation count and strict beyond-level close, selected Supertrend direction/slope and EMA constraints, plus evidence for every applicable optional selected filter. Missing evidence blocks the simulated entry and is reported in the replay summary. A current failing assessment does not rewrite an earlier brick that qualified at its own timestamp.
+
+Historical exits are accepted only after an accepted simulated entry of the same side. The chart uses `SIM BUY`, `SIM SELL` and concise `SIM EXIT`; the event table retains the full side-specific exit name. Confirmed order-ledger fills use `FILL` labels. Execution exits require a filled owned entry or confirmed owned trade history. Provisional observations never generate BUY/SELL markers. Live price-confirmed simulations use the actual observation timestamp, without adding the host timeframe.
+
+Inspection of the actual CRUDEOILM response found the historical 20:34:02 SELL had swing 2/2 and passing slope at that event; the later 0/2 assessment was a different observation. The prior presentation did not make that distinction clear. Another inspected loaded window contained an exit without its qualifying entry evidence; it is now excluded from simulation markers, with an unpaired-exit count shown.
+
+The deployed frontend works against the current worker. Shared Python core qualification certificates and complete per-brick evidence are staged in main and all seven account source trees, and require a separately authorized backend reload. Until then, optional selected rules whose evidence is absent from older per-brick payloads remain explicitly unavailable/filtered; they are never assumed to pass. No reload, runner Start/Stop, override or broker order was performed for this fix. The FYERS owner PID remained 302685 and its captured configuration matches the initial audit.
+
+Validation: 145 focused Python tests; 45 JavaScript tests; all eight source-tree syntax/import/qualification smoke checks; hosted desktop and 390px presentation. Evidence response and captured configuration: `.private/chart-label-audit-20261103/`. Source backup: `.private/chart-qualified-replay-source-backup-20261103/`.

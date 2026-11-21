@@ -14,7 +14,7 @@ test('aliased account histories show one failed job and its actionable error',as
  const rows=w.document.querySelectorAll('#runner-jobs .saved-jobs-catalog > article');
  assert.equal(rows.length,1);
  assert.match(rows[0].textContent,/account read timed out/);
- dom.window.close();
+ await new Promise(r=>setTimeout(r,10));dom.window.close();
 });
 
 test('opening a saved output focuses and reveals it below a long job list',async()=>{
@@ -32,7 +32,7 @@ test('opening a saved output focuses and reveals it below a long job list',async
  w.SectorPulseJobs.open();
  open.click();assert(revealed);assert.equal(w.document.activeElement,revealed);
  assert.match(revealed.textContent,/Synthetic Equity/);
- dom.window.close();
+ await new Promise(r=>setTimeout(r,10));dom.window.close();
 });
 
 test('saved Handoff reports show readable prices and directions with raw data collapsed',async()=>{
@@ -54,7 +54,7 @@ test('saved Handoff reports show readable prices and directions with raw data co
  assert(report.querySelector('.report-plan.bearish'));assert.equal(report.querySelectorAll('img').length,0);
  assert.equal(report.querySelector('details[data-audit-key="full-saved-data"]').open,false);
  assert.equal(report.querySelector('details[data-audit-key="analysis-exclusions"]').open,false);
- dom.window.close();
+ await new Promise(r=>setTimeout(r,10));dom.window.close();
 });
 
 test('saved outputs use creation time, unaffected by incidental progress refreshes',async()=>{
@@ -68,5 +68,5 @@ test('saved outputs use creation time, unaffected by incidental progress refresh
  w.document.querySelector('[data-jobs-kind]').value='';w.document.querySelector('[data-jobs-kind]').dispatchEvent(new w.Event('change'));
  const labels=[...w.document.querySelectorAll('#runner-jobs .saved-job-title strong')].map(n=>n.textContent);
  assert.deepEqual(labels,['Runner history','Earlier completion','Latest completed analysis','Fallback creation time']);
- dom.window.close();
+ await new Promise(r=>setTimeout(r,10));dom.window.close();
 });

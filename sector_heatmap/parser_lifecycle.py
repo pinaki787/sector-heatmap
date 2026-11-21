@@ -4,6 +4,7 @@ No existing/manual positions are adopted. An uncertain submission is never retri
 Only a future entry carrying explicit protection consent can be managed.
 """
 from .file_lock import lock_file, unlock_file
+from .chart_trade_admission import serialized_fyers_entry,ChartOrderNotSent
 from contextlib import contextmanager
 import hashlib
 import json
@@ -68,12 +69,15 @@ class ParserLifecycle:
     def rows(self):
         with self.lock:return [json.loads(r[0]) for r in self.db.execute('SELECT data FROM entries ORDER BY rowid DESC')]
 
+    @serialized_fyers_entry
     def submit_entry(self, ticket):
         with self.mutation_lock():
             key=ticket['preview_id']
             row=self.db.execute('SELECT data FROM entries WHERE id=?',(key,)).fetchone()
             if row:return json.loads(row[0])
             if not self.enabled():raise ValueError('Parser protection worker is disabled. No entry submitted.')
+            from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+            assert_workspace_chart_entry_allowed("FYERS")
             account=self.broker.snapshot()
             order=dict(ticket['order'])
             if any(x['symbol']==order['symbol'] and (x.get('netQty',0)!=0) for x in account['positions']):
@@ -90,6 +94,9 @@ class ParserLifecycle:
                  'message':'Entry intent saved; broker acceptance and fill not yet confirmed.'}
             self._save(key,row)  # durable intent before network side effect
             try:reply=self.broker.place_entry(order)
+            except ChartOrderNotSent:
+                row.update(status="REJECTED",order_submitted=False,message="Entry rejected before native placement; no broker order was sent.")
+                self._save(key,row);return row
             except Exception:return row
             if reply.get('s')=='ok' and reply.get('id'):
                 row.update(entry_id=str(reply['id']),status='WAITING_FOR_FILL',message='Broker accepted entry. Trigger/acceptance is not a fill; no protection yet.')

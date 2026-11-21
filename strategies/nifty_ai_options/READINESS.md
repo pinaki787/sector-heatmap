@@ -1,0 +1,48 @@
+# Current readiness —20 November2026
+
+**NOT READY FOR TRADING. The full goal is incomplete.**
+The user requires exact native Renko ATR-box sizing constructed inside Sector Pulse. Ordinary candle ATR, ATR over Renko bars, fixed400 and externally calculated sizing are not approved replacements.
+
+| Requirement | Evidence and current limit |
+|---|---|
+| Native chart plotting | Hosted Sector Pulse canvases use bundled Lightweight Charts, local Renko construction and a same-origin Pine worker. No TradingView application/widget is embedded. |
+| Exact fixed-brick construction |10/10 retained native reference bricks match local prices and source-candle timestamps at the known diagnostic size. This does not prove automatic sizing. |
+| Automatic native ATR5 box selection |**Incomplete.** Cache resolver only; no validated local selector. The observed400 reference is WITHHELD_NATIVE_CONSTRUCTION_UNVERIFIED and cannot authorize a new run. |
+| Parent windows and fixed30-minute sizing |6H/12 NSE/BSE regular session;23H/46 crypto;22H/44 gold;14H/28 other commodities implemented in sizing_policy.py. Direct products use base size; options multiply by absolute provider delta. These require a valid native reference. |
+| Prior completed-parent reference/refresh |**Incomplete.** Native constructor/cache provenance and causal refresh have not been established. |
+| Options selection and rules |Nearest tradable expiry/premium40 adapters, underlying flip plus bullish premium entry, premium bearish flip exit implemented/tested. Optional underlying1mSMA30 exit defaults OFF. Recorded previews are dated evidence. |
+| Source1/5/30 and chart isolation |Provider-confirmed source closes and captured per-run ledgers implemented.9 retained cases/148 bricks have zero numeric error against the local Pine worker. Standalone choices were verified separately. Real user-started handover remains unverified. |
+| Paper and Live routes |Implemented gates and offline/fake execution checks. No agent-started trading stream or real test order. First user-started end-to-end lifecycle remains unverified. |
+| Ownership/recovery |Owner-bound processes/intents and restart guards implemented. Stop does not flatten. Unresolved owned exposure blocks new activity. No current broker-flatness claim follows from dated audits. |
+| Deployment |FYERS backend previously verified. Later validator changes are prepared without a new reload. Delta backend reload remains separately unapproved. Research prototypes are not production dependencies. |
+| RSI display correction |Hosted price legend no longer duplicates pane-only RSI levels/readings. Oscillator pane and saved study settings retained;7 focused JS checks pass. |
+
+## Latest native-source investigation
+
+Approved read-only research covered8 ATR lengths,5 parent frames, native OHLC history,2/3000/20000-bar depth controls, and the native context's tick and history origin. Twelve local update/rounding hypotheses did not match all8controls. The Renko-close feedback hypothesis matched1/8 and was rejected.
+
+Public source acquisition reached the chart-library client served by tv.dhan.co. Its cached first-valid ATR initialization and tick-rounded fixed box were independently implemented in native_bootstrap_research.py. The modern charts.dhan.co constructor uses a different normalizer and was not treated as interchangeable. Original vendor bundles remain private research references, not deployed code.
+
+The20000-bar request reaches standard data from February2009, before the native history begins in April2009. The recovered first6source bars produce a strict previous-close ATR5 seed33.94 in both the reference calculation and local initializer; its tick-rounded box is33.95. The native feed remains400. Thus the local initializer is verified for that source context, but the feed's actual construction/cache provenance is still absent. Neither the source API nor the inspected client establishes why the feed selects400.
+
+The local Pine worker's ticker.renko() factory currently returns its base ticker. This missing primitive must not be used as proof of native reference construction. The AI indicator itself receives actual locally built Renko host bars and is separately verified.
+
+115 root Python tests pass. No candidate has populated a usable reference cache. No trading stream, order, live gate change or service restart was performed during this investigation.
+
+## Authoritative artifacts
+
+- evidence/final-status.json
+- evidence/native-bootstrap-prefix-crosscheck-20261120.json
+- evidence/native-full-origin-acquisition-20261120.json
+- evidence/native-bootstrap-source-audit-20261120.json
+- evidence/native-selector-evidence-limit-20261120.json
+- evidence/native-fixed-geometry-control-20261120.json
+- evidence/rsi-pane-legend-correction-20261120.json
+
+Reproduce fixed geometry:
+    PYTHONPATH=strategies/nifty_ai_options .venv/bin/python strategies/nifty_ai_options/verify_native_fixed_geometry.py
+
+This page consolidates and supersedes earlier contradictory readiness wording. Earlier reports remain preserved as dated evidence; their test counts or400/12 examples do not establish current trading readiness.
+
+## Blocking dependency
+The fresh three-turn audit is evidence/native-exact-sizing-blocked-audit-20261120.json. The available38-tool interface exposes no native-constructor/cache-state retrieval operation; its standard Renko source search returns0scripts. Authoritative Nifty reference lookup remains unavailable. Current native-feed constructor or initialization/cache provenance is required before exact native sizing can be implemented and verified. No changed formula or external sizing path is assumed.

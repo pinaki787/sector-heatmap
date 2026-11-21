@@ -7,6 +7,8 @@ from copy import copy,deepcopy
 from io import BytesIO
 import json
 import re
+import secrets
+import threading
 import time
 from urllib.parse import urlsplit,parse_qs,urlencode
 from .persistent_jobs import JobStore,JobCancelled,JobInterrupted,JobStopFailed
@@ -15,12 +17,12 @@ from .section_permissions import allowed
 
 def operation(path):
     route=urlsplit(path).path
-    if route=='/api/investment/analyze':return ('ANALYSIS','investment')
+    if route in ('/api/investment/analyze','/api/investment/seasonality/analyze'):return ('ANALYSIS','investment')
     if not route.startswith('/api/'):return None
     if any(term in route for term in ('trade-ticket','submit','override','squareoff','login','auth/','diagnostic')):return None
     if route.endswith('/analysis-handoff/preview'):return ('ANALYSIS','handoff')
     if route.endswith(('/analyze','/analyze-options','/analyze-market','/analysis','/ai-review','/ai-analysis','/backtest')):
-        feature=('screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route
+        feature=('broker' if '/account-reports/' in route else 'screener' if 'chartink' in route else 'holdings' if 'holding' in route else 'handoff' if 'handoff' in route
                  else 'renko-engine' if 'renko-engine' in route else 'renko-supertrend' if 'renko' in route
                  else 'ema-band' if 'band' in route else 'ema-cross' if 'crossover' in route or 'ema-dhan' in route
                  else 'kama' if 'kama' in route else 'delta-india' if 'delta-india' in route else 'straddles' if 'straddle' in route
@@ -50,6 +52,9 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
     native_portfolios=HoldingsAnalysis()
     holding_action_services={}
     holding_trail_services={}
+    from .investment_entry import DhanEntry, ROUTE
+    entry_previews={}
+    entry_guard=threading.RLock()
     original_get,original_post=handler_class.do_GET,handler_class.do_POST
 
     def identity(handler,mutation=False):
@@ -69,7 +74,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
     def owner_for(handler,user,account,path=None,payload=None):
         aid=account['id'] if account else 'dashboard'
         candidate=(payload or {}).get('account_id') or (parse_qs(urlsplit(path or handler.path).query).get('account_id') or [None])[0]
-        match=re.search(r'/api/(?:renko-motilal|renko-dhan|ema-dhan|band-dhan|kama-dhan|renko-engine)/([a-f0-9]{32})/',path or handler.path)
+        match=re.search(r'/api/(?:broker-parser|renko-motilal|renko-dhan|ema-dhan|band-dhan|kama-dhan|renko-engine)/([a-f0-9]{32})/',path or handler.path)
         if match:candidate=match.group(1)
         if candidate:
             if account and candidate!=aid:raise PermissionError('Job differs from this broker account.')
@@ -78,6 +83,30 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
         return str(user.get('id',user.get('username')))+':'+aid
 
     def replay(handler,path,payload=None):
+        if urlsplit(path).path.endswith(('/seasonality/analyze','/sectors/analyze')):
+            from .seasonality import fetch_public,calculate
+            if path.startswith('/api/investment/'):
+                return fetch_public(root,payload or {})
+            authenticated=identity(handler,True)
+            if not authenticated:raise PermissionError('Authenticated workspace required.')
+            user,account=authenticated
+            owner=owner_for(handler,user,account,payload=payload)
+            job=store.get(owner,str(payload.get('review_job_id') or ''))
+            report=job.get('output') or {}
+            if job.get('feature')!='holdings' or report.get('account_id')!=payload.get('account_id') or report.get('broker')!=payload.get('broker'):
+                raise PermissionError('Seasonality review differs from the selected broker account.')
+            if urlsplit(path).path.endswith('/sectors/analyze'):
+                from .holdings_sectors import lookup
+                return lookup(root,report.get('rows',[]))
+            rows=[r for r in report.get('rows',[]) if str(r.get('id'))==str(payload.get('row_id'))]
+            if len(rows)!=1:raise ValueError('Saved holding is unavailable.')
+            row=rows[0]
+            if row.get('kind')=='DELIVERY_EQUITY':return fetch_public(root,dict(symbol=row['symbol']))
+            candles=(row.get('chart') or {}).get('candles') or []
+            if not candles:raise ValueError('No saved daily history for this contract. Contract returns are not replaced by underlying returns.')
+            result=calculate([dict(date=r['time'],close=r['close']) for r in candles],time.time(),'UTC' if payload.get('broker')=='DELTA_INDIA' else 'Asia/Kolkata')
+            result.update(symbol=row['symbol'],source='Saved '+str(payload.get('broker'))+' review candles',price_basis='Exact contract; saved review history only',fetched_at=report.get('as_of'),order_authority='NONE')
+            return result
         if urlsplit(path).path=='/api/investment/analyze':
             from .investment import analyze
             return analyze(root,payload or {})
@@ -156,22 +185,123 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
                     account_id=aid if aid!='dashboard' and job['request']['path'].startswith(('/api/dhan/','/api/motilal/')) else None)
                 return
 
+    def entry_monitor(handler, user, account, target_owner, payload, path):
+        if not allowed(user,path):
+            raise PermissionError('Investment is not assigned.')
+        auth_store=workspace_guard.store if workspace_guard else local_auth.store if local_auth else None
+        if not auth_store:
+            raise PermissionError('A signed-in broker account is required.')
+        aid=payload.get('account_id')
+        selected=auth_store.account(user,str(aid or ''))
+        if selected['broker']!='DHAN' or (account and selected['id']!=account['id']):
+            raise PermissionError('Select an owned Dhan account in its matching workspace or main dashboard.')
+        action=path.removeprefix(ROUTE)
+        symbol=payload.get('symbol')
+        if not isinstance(symbol,str) or not re.fullmatch(r'NSE:[A-Z0-9&_-]+-EQ',symbol):
+            raise ValueError('Choose an NSE equity.')
+        with entry_guard:
+            jobs=[job for job in store.list(target_owner,200)
+                  if job['request']['path']==ROUTE+'enable'
+                  and job['request']['payload'].get('symbol')==symbol]
+            existing=jobs[0] if jobs else None
+            if action=='status':
+                return handler.send_json(200,{'job':existing})
+            if action=='stop':
+                job=store.get(target_owner,str(payload.get('monitor_job_id') or ''))
+                if (job['request']['path']!=ROUTE+'enable'
+                        or job['request']['payload'].get('symbol')!=symbol):
+                    raise PermissionError('Monitor differs from the selected stock and account.')
+                return handler.send_json(200,{'job':store.cancel(target_owner,job['job_id'])})
+            if action not in ('preview','enable'):
+                return handler.send_json(404,{'error':'Unknown monitor operation.'})
+            if not auth_store.sidebar_visibility().get('investment',True):
+                raise PermissionError('Investment is hidden in dashboard visibility settings.')
+            if existing and not existing['terminal']:
+                raise ValueError('This stock already has an active entry monitor for the account.')
+            if action=='preview':
+                research_owner=owner_for(handler,user,account)
+                source=store.get(research_owner,str(payload.get('research_job_id') or ''))
+                output=source.get('output') or {}
+                if (source['status']!='COMPLETED' or source['request']['path']!='/api/investment/analyze'
+                        or output.get('schema')!='investment/v1'):
+                    raise ValueError('Complete a fresh Investment screen before previewing entry.')
+                rows=[row for row in output.get('rows',[]) if row.get('symbol')==symbol]
+                if len(rows)!=1:
+                    raise ValueError('This equity is unavailable in the saved Investment shortlist.')
+                from datetime import datetime
+                from .market_calendar import IST
+
+                user_identity=str(user.get('id',user.get('username')))
+                def account_lookup():
+                    with auth_store.db() as db:
+                        current=db.execute('SELECT * FROM accounts WHERE id=? AND user_id=?',
+                                           (aid,user_identity)).fetchone()
+                        member=db.execute('SELECT admin FROM users WHERE id=?',(user_identity,)).fetchone()
+                        assigned=db.execute("SELECT 1 FROM user_features WHERE user_id=? AND feature='investment'",(user_identity,)).fetchone()
+                    if (not current or not member or not (member['admin'] or assigned)
+                            or not auth_store.sidebar_visibility().get('investment',True)):
+                        raise PermissionError('Account ownership or Investment visibility changed.')
+                    return dict(current)
+                entry=DhanEntry(handler.dhan_service(aid),account_lookup)
+                entry.verify_enabled()
+                plan=entry.plan(rows[0],payload.get('level'),payload.get('quantity'),datetime.now(IST))
+                preview_id='INV-'+secrets.token_hex(8).upper()
+                now=time.time()
+                for key in [key for key,record in entry_previews.items() if record['expires']<now]:
+                    del entry_previews[key]
+                entry_previews[preview_id]=dict(owner=target_owner,plan=plan,entry=entry,expires=now+120)
+                return handler.send_json(200,dict(plan=plan,preview_id=preview_id,
+                    confirmation='ENABLE '+preview_id,expires_at=now+120))
+            preview_id=str(payload.get('preview_id') or '')
+            preview=entry_previews.get(preview_id)
+            if (not preview or preview['expires']<time.time() or preview['owner']!=target_owner
+                    or preview['plan']['symbol']!=symbol):
+                raise ValueError('Entry preview expired or belongs to another equity or account.')
+            if payload.get('confirmation')!='ENABLE '+preview_id:
+                raise ValueError('Confirm the exact reviewed delivery entry terms.')
+            entry=preview['entry']
+            entry.verify_enabled()
+            request=dict(path=path,account_id=aid,payload=dict(symbol=symbol,account_id=aid,monitor_id=preview_id))
+            job=store.submit(target_owner,'RUNNER','investment',symbol+' · Entry monitoring',request,
+                             lambda ctx:entry.run(ctx,preview['plan'],preview_id),preview_id)
+            del entry_previews[preview_id]
+            return handler.send_json(202,{'job':job})
+
     def post(handler):
         if getattr(handler,'_persistent_job_internal',False):return original_post(handler)
         path=urlsplit(handler.path).path
         # The portal proxies first; its owning account worker handles this job.
         if path.startswith('/broker-workspace/'):return original_post(handler)
         selected=operation(handler.path)
-        holding_action=bool(re.fullmatch(r'/api/(?:dhan/|motilal/|delta-india/)?holdings-analysis/(?:trail-preview|trail-enable|trail-status|trail-stop|trail-interval)',path)) or path in ('/api/dhan/holdings-analysis/action-preview','/api/dhan/holdings-analysis/action-submit')
-        if not selected and not holding_action and not path.startswith('/api/jobs/') and not path.endswith('/analysis-handoff/size'):return original_post(handler)
+        is_entry=path.startswith(ROUTE)
+        holding_action=bool(re.fullmatch(r'/api/(?:dhan/|motilal/|delta-india/)?holdings-analysis/(?:trail-preview|trail-enable|trail-status|trail-stop|trail-interval)',path)) or path in ('/api/dhan/holdings-analysis/action-preview','/api/dhan/holdings-analysis/action-submit','/api/holdings-analysis/chart','/api/dhan/holdings-analysis/chart','/api/motilal/holdings-analysis/chart','/api/delta-india/holdings-analysis/chart')
+        if not selected and not holding_action and not is_entry and not path.startswith('/api/jobs/') and not path.endswith('/analysis-handoff/size'):return original_post(handler)
         try:
             authenticated=identity(handler,True)
             if not authenticated:return
             user,account=authenticated
             payload=handler.read_json();owner=owner_for(handler,user,account,payload=payload)
+            if is_entry:return entry_monitor(handler,user,account,owner,payload,path)
             if holding_action:
                 if not allowed(user,path):raise PermissionError('Holdings review is not assigned.')
                 if workspace_guard:workspace_guard.validate_action(account,path,payload)
+                if path.endswith('/holdings-analysis/chart'):
+                    job=store.get(owner,str(payload.get('job_id') or ''));report=job.get('output') or {}
+                    if job.get('feature')!='holdings' or report.get('account_id')!=payload.get('account_id'):raise PermissionError('Saved chart belongs to another account.')
+                    rows=[r for r in report.get('rows',[]) if str(r.get('id'))==str(payload.get('row_id'))]
+                    if len(rows)!=1:raise ValueError('Saved holding is unavailable.')
+                    if path.startswith(('/api/dhan/','/api/motilal/')):
+                        broker,name,aid=market_factory(handler,payload)
+                        if name!=payload.get('broker') or aid!=payload.get('account_id'):raise PermissionError('Chart broker account differs from the selected account.')
+                        from .native_holdings import DhanHoldings,MotilalHoldings
+                        adapter=(DhanHoldings if name=='DHAN' else MotilalHoldings)(broker.service)
+                    else:
+                        port=trailing_factory(handler,payload)
+                        if port.account['id']!=payload.get('account_id') or port.account['broker']!=payload.get('broker'):raise PermissionError('Chart account mismatch.')
+                        adapter=port.adapter()
+                    from .holdings_chart import current_chart
+                    import time
+                    return handler.send_json(200,current_chart(adapter,rows[0],time.time()))
                 if path.startswith('/api/dhan/'):
                     if not market_factory:raise ValueError('Native broker action service unavailable.')
                     broker,name,aid=market_factory(handler,payload)
@@ -216,7 +346,21 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
             if not selected:return handler.send_json(404,{'error':'Unknown job operation.'})
             if workspace_guard:workspace_guard.validate_action(account,path,payload)
             kind,feature=selected
-            if feature=='investment':
+            if path.endswith('/sectors/analyze'):
+                if not allowed(user,path):raise PermissionError('Holdings sector allocation is not assigned.')
+                auth_store=workspace_guard.store if workspace_guard else local_auth.store if local_auth else None
+                if auth_store and any(not auth_store.sidebar_visibility().get(k,True) for k in ('holdings','holdings-allocation')):raise PermissionError('Holdings sector allocation is hidden.')
+                if not payload.get('review_job_id'):raise ValueError('A saved holding review is required.')
+            if path.endswith('/seasonality/analyze'):
+                if not allowed(user,path):raise PermissionError('This review section is not assigned.')
+                auth_store=workspace_guard.store if workspace_guard else local_auth.store if local_auth else None
+                if auth_store and not auth_store.sidebar_visibility().get(feature,True):raise PermissionError('This review section is hidden in dashboard visibility settings.')
+                if feature=='investment':
+                    from .seasonality import symbol_options
+                    symbol_options(payload)
+                elif not payload.get('review_job_id') or payload.get('row_id') is None:
+                    raise ValueError('A saved holding review and row are required.')
+            if feature=='investment' and not path.endswith('/seasonality/analyze'):
                 if not allowed(user,path):raise PermissionError('Investment section is not assigned.')
                 auth_store=workspace_guard.store if workspace_guard else local_auth.store if local_auth else None
                 if auth_store and not auth_store.sidebar_visibility().get('investment',True):raise PermissionError('Investment section is hidden in dashboard visibility settings.')
@@ -323,6 +467,7 @@ def install(handler_class,root,local_auth=None,workspace_guard=None,analysis_run
         except ValueError as error:return handler.send_json(409,{'error':str(error)})
         except Exception as error:
             if holding_action and getattr(error,'auth_required',False):return handler.send_json(403,{'error':'Reconnect the selected broker account before reviewing new protection. Existing monitor status and Stop remain available.'})
+            if is_entry:return handler.send_json(502,{'error':'Entry monitoring request could not be verified.'})
             if holding_action:return handler.send_json(502,{'error':'Broker verification or submission response is unavailable. Check the selected broker order book before another action; no automatic retry.'})
             raise
 

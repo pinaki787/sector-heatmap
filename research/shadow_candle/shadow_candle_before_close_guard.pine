@@ -1,0 +1,89 @@
+//@version=6
+indicator("Sector Pulse — Final Session Shadow Candle", overlay=true, precision=2, max_lines_count=250, max_labels_count=50)
+
+string gSource = "Source and session"
+string market = input.string("Auto", "Market classification", options=["Auto", "NSE/BSE", "Foreign gold", "MCX", "Crypto", "Manual"], group=gSource)
+string manualTf = input.timeframe("360", "Manual reference timeframe", group=gSource)
+string boundary = input.string("Exchange trading day", "Daily boundary", options=["Exchange trading day", "Custom daily reset"], group=gSource)
+string zone = input.string("Etc/UTC", "Custom reset timezone (IANA)", group=gSource)
+int resetHour = input.int(0, "Custom reset hour", minval=0, maxval=23, group=gSource)
+int resetMinute = input.int(0, "Custom reset minute", minval=0, maxval=59, group=gSource)
+string gLevels = "Range levels — measured upward from low"
+float p1 = input.float(46, "Level 1 (%)", minval=0, maxval=100, step=0.1, group=gLevels)
+float p2 = input.float(50, "Level 2 (%)", minval=0, maxval=100, step=0.1, group=gLevels)
+float p3 = input.float(56, "Level 3 (%)", minval=0, maxval=100, step=0.1, group=gLevels)
+int keep = input.int(3, "Completed sessions to retain", minval=1, maxval=40, group="Display")
+bool showLabels = input.bool(true, "Show range labels", group="Display")
+color edge = input.color(color.silver, "High / low", group="Display")
+color c1 = input.color(color.orange, "Level 1", group="Display")
+color c2 = input.color(color.yellow, "Level 2", group="Display")
+color c3 = input.color(color.aqua, "Level 3", group="Display")
+
+string symbolText = str.upper(syminfo.ticker)
+string prefix = str.upper(syminfo.prefix)
+bool gold = str.contains(symbolText, "GOLD") or str.contains(symbolText, "XAU")
+bool crypto = syminfo.type == "crypto" or prefix == "DELTAIN"
+bool indian = prefix == "NSE" or prefix == "BSE"
+bool mcx = str.contains(prefix, "MCX")
+string autoMarket = mcx ? "MCX" : indian ? "NSE/BSE" : gold ? "Foreign gold" : crypto ? "Crypto" : "Unknown"
+string selected = market == "Auto" ? autoMarket : market
+string refTf = selected == "Foreign gold" ? "1320" : selected == "Crypto" ? "1380" : selected == "MCX" ? "840" : selected == "NSE/BSE" ? "360" : manualTf
+if barstate.isfirst
+    if selected == "Unknown"
+        runtime.error("Unclassified symbol: choose a market classification or Manual reference timeframe.")
+    if not chart.is_standard or not timeframe.isintraday or timeframe.in_seconds() > timeframe.in_seconds(refTf)
+        runtime.error("Use a standard, time-based intraday chart at or below the reference timeframe (for example, 5 minutes).")
+
+// The custom boundary groups native HTF bars; it does not re-anchor their openings.
+customKey(int t) =>
+    int y = year(t, zone)
+    int m = month(t, zone)
+    int d = dayofmonth(t, zone)
+    int today = timestamp(zone, y, m, d, resetHour, resetMinute)
+    t >= today ? today : timestamp(zone, y, m, d - 1, resetHour, resetMinute)
+
+source() =>
+    int key = boundary == "Exchange trading day" ? time_tradingday : customKey(time)
+    // Price fields are offset. Current key is a known opening-time calendar value only.
+    [high[1], low[1], time[1], time_close[1], key[1], key]
+
+// Standard OHLC, independent of chart style. Price values never use the forming HTF bar.
+[h, l, sourceOpen, sourceClose, priorKey, currentKey] = request.security(ticker.standard(syminfo.tickerid), refTf, source(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+bool finalBar = not na(priorKey) and priorKey != currentKey
+bool aligned = boundary == "Exchange trading day" or sourceClose <= currentKey
+var int lastSource = na
+var array<line> history = array.new<line>()
+var array<line> active = array.new<line>()
+var array<label> labels = array.new<label>()
+var bool misaligned = false
+
+if finalBar and (na(lastSource) or sourceOpen != lastSource)
+    lastSource := sourceOpen
+    misaligned := not aligned
+    if aligned
+        // Freeze the old set at publication of the replacement; never draw back into the source candle.
+        if array.size(active) > 0
+            for ln in active
+                line.set_x2(ln, time)
+        array.clear(active)
+        array<float> prices = array.from(h, l, l + (h-l)*p1/100, l + (h-l)*p2/100, l + (h-l)*p3/100)
+        array<color> colors = array.from(edge, edge, c1, c2, c3)
+        for i = 0 to 4
+            line ln = line.new(time, array.get(prices, i), time_close, array.get(prices, i), xloc=xloc.bar_time, color=array.get(colors, i), width=i < 2 ? 2 : 1)
+            array.push(history, ln)
+            array.push(active, ln)
+        if showLabels
+            string labelText = str.format_time(sourceOpen, "dd MMM HH:mm", syminfo.timezone) + " → " + str.format_time(sourceClose, "dd MMM HH:mm", syminfo.timezone) + "\nH " + str.tostring(h, "#.##") + "  L " + str.tostring(l, "#.##") + "\n" + str.tostring(p1, "#.##") + "% " + str.tostring(l + (h-l)*p1/100, "#.##") + " | " + str.tostring(p2, "#.##") + "% " + str.tostring(l + (h-l)*p2/100, "#.##") + " | " + str.tostring(p3, "#.##") + "% " + str.tostring(l + (h-l)*p3/100, "#.##")
+            array.push(labels, label.new(time, h, labelText, xloc=xloc.bar_time, style=label.style_label_down, color=color.new(color.black, 20), textcolor=color.white, size=size.small))
+        while array.size(history) > keep * 5
+            line.delete(array.shift(history))
+        while array.size(labels) > keep
+            label.delete(array.shift(labels))
+if array.size(active) > 0
+    for ln in active
+        line.set_x2(ln, time_close)
+
+var table status = table.new(position.top_right, 1, 1)
+if barstate.islast
+    string note = misaligned ? "Custom reset cuts a reference candle: skipped; prior levels retained" : na(lastSource) ? "Waiting for a completed session in loaded history" : "Confirmed final candle • published next session"
+    table.cell(status, 0, 0, selected + " • " + refTf + " min\n" + note, text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.small)

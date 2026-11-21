@@ -17,7 +17,8 @@ from strategies.ema_crossover.valuation import amount, multiplier
 from strategies.ema_crossover.runner import TIMEFRAMES
 from strategies.ema_crossover.runner import Runner as BaseRunner, configuration as rsi_configuration
 from strategies.ema_crossover.broker import FyersBroker as BaseBroker
-from . import sideways,costs,zone_target,market_structure,mtf_supertrend,mtf_rsi,manual_trend,calibrated,zone_entry
+from . import line_entry
+from . import loss_range,sideways,costs,zone_target,market_structure,mtf_supertrend,mtf_rsi,manual_trend,calibrated,zone_entry
 from .ema_exit import settings as ema_exit_settings, confirmed_values
 from .risk import levels, hard_exit, validate_spot_levels
 from .recovery import Recovery
@@ -251,7 +252,14 @@ def configuration(payload):
     anti_chop.compatible({**payload,**selected})
     anti_chop.standalone_rules({**payload,**selected})
     calibrated.compatible({**payload,**selected});zone_entry.compatible({**payload,**selected})
-    if not (selected.get('anti_chop_enabled') and selected.get('anti_chop_role')=='Entry') and not any(selected[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled','rsi_slope_enabled','rsi_level_enabled')):raise ValueError('Select at least one directional indicator before starting; ADX is a strength filter.')
+    if selected.get('strategy_mode')!='SIMPLE_BRICK' and not (selected.get('anti_chop_enabled') and selected.get('anti_chop_role')=='Entry') and not any(selected[k] for k in ('supertrend_enabled','ema_fast_enabled','ema_slow_enabled','ema_third_enabled','ema_widening_enabled','rsi_slope_enabled','rsi_level_enabled')):raise ValueError('Select at least one directional indicator before starting; ADX is a strength filter.')
+    if selected.get('line_entry_enabled'):
+        if selected.get('strategy_basis')!='RENKO':raise ValueError('Bull/Bear lines require Renko brick strategy basis.')
+        if payload.get('intrabar_entries'):raise ValueError('Drawn-line entry requires completed Renko bricks; turn off intrabar entries.')
+        line=json.loads(selected['line_entry_definition'])
+        if line['timeframe']!=payload.get('timeframe'):raise ValueError('Entry line belongs to a different timeframe.')
+        if payload.get('broker')!='DELTA_INDIA' and line['symbol']!=payload.get('underlying'):raise ValueError('Entry line belongs to a different instrument.')
+        if payload.get('execution_route','OPTIONS')!='OPTIONS':raise ValueError('Drawn-line call/put entries require the options product.')
     route = payload.get('execution_route', 'OPTIONS')
     if route not in ('OPTIONS', 'CASH_EQUITY'):
         raise ValueError('Choose options or cash equity explicitly.')
@@ -275,8 +283,10 @@ def configuration(payload):
                                 'ma_length': 14, 'ma_type': 'SMA', 'lots': 1 if route == 'CASH_EQUITY' else payload.get('lots'), 'trailing_enabled': False, 'spot_target':None, 'spot_stop':None})
     for key in ('rsi_length', 'ma_length', 'ma_type'):
         shared.pop(key)
-    result = {**shared, **destinations.settings(payload), **exit_indicators.settings(payload), **settings(payload), 'indicator_family_choices':payload['indicator_family_choices'], **levels(payload), **sideways.settings(payload), **zone_target.settings(payload), **market_structure.settings(payload), **mtf_supertrend.settings(payload), **mtf_rsi.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',False)}), 'strategy': STRATEGY,
+    result = {**shared, **destinations.settings(payload), **exit_indicators.settings(payload), **settings(payload), 'indicator_family_choices':payload['indicator_family_choices'], **levels(payload), **sideways.settings(payload), **loss_range.settings(payload), **zone_target.settings(payload), **market_structure.settings(payload), **mtf_supertrend.settings(payload), **mtf_rsi.settings(payload), **costs.settings(payload), **trailing_stop.settings(payload), **ema_proximity.settings(payload), **ema_exit_settings({**payload,'ema_exit_enabled':payload.get('ema_exit_enabled',False)}), 'strategy': STRATEGY,
             'commodity_holding': holding if str(payload.get('underlying','')).startswith('MCX:') else None, 'execution_route': route, 'quantity': quantity, 'cash_product': cash_product if route == 'CASH_EQUITY' else None, 'label': 'Renko Supertrend Strategy', 'intrabar_entries': payload.get('intrabar_entries', False),  'exit_policy': 'OPPOSITE_CONFIRMED_SIGNAL'}
+    from .option_premium import settings as premium_settings
+    result.update(premium_settings(payload))
     result['renko_confirmation']=payload.get('renko_confirmation','PRICE' if selected['strategy_basis']=='RENKO' else 'CLOSE')
     if result['renko_confirmation'] not in ('PRICE','CLOSE'):raise ValueError('Choose ordered-price or completed-close Renko confirmation.')
     result=indicator_families.apply(result)
@@ -515,6 +525,9 @@ class Broker(BaseBroker):
                     'quantity':c['quantity']}
         else:
             result=super().resolve(c,direction)
+            if c.get('target_option_premium') is not None:
+                from .option_premium import choose
+                result=choose(self,c,result)
             if c.get('commodity_holding') == 'CARRY_FORWARD':
                 cutoff=commodity_expiry_exit_at(result.get('expiry_epoch'),self.session_policy(c)['master_regular_session'])
                 if time.time() >= cutoff:raise ValueError('Nearest MCX option is inside the pre-expiry carry protection window; overnight entry blocked.')
@@ -615,13 +628,72 @@ class Runner(BaseRunner):
         from .confirmed_feed import publish_confirmed
         publish_confirmed(self)
 
+    def warm_price_options(self,c):
+        if not hasattr(self.adapter,'warm_options'):return
+        if getattr(self,'_price_warm_thread',None) and self._price_warm_thread.is_alive():return
+        if self.clock()-getattr(self,'_price_warmed_at',0)<=10:return
+        self._price_warmed_at=self.clock()
+        self._price_warm_thread=threading.Thread(target=self.adapter.warm_options,args=(deepcopy(c),),daemon=True,name='price-renko-option-warmup')
+        self._price_warm_thread.start()
+
+    def handle_step_error(self,error):
+        # Price events have their own 15-second age, stream-generation and
+        # post-Start gates. A transient failure must not impersonate a rearm.
+        c=self.state.get('config') or {}
+        if c.get('strategy_basis')!='RENKO' or c.get('renko_confirmation')!='PRICE':
+            self.state['eligible_since']=self.clock()
+        import traceback
+        self.state['last_execution_error']={
+            'at':self.clock(),'type':type(error).__name__,
+            'traceback':traceback.format_exc(limit=12)}
+        self.event('BLOCKED',str(error))
+
+    def entry_preflight(self,order,contract,quote):
+        c=self.state['config']
+        if c.get('mode')!='LIVE' or c.get('renko_confirmation')!='PRICE':
+            return super().entry_preflight(order,contract,quote)
+        event=(self.state.get('last_signal') or {}).get('market_event_at')
+        if not isinstance(event,(int,float)):
+            raise ValueError('Fresh confirmed price event required for entry preflight.')
+        started=self.clock()
+        try:
+            return self.adapter.preflight(order,{**c,'_entry_deadline':event+15})
+        finally:
+            self.state['last_entry_preflight']={
+                'event_at':event,'started_at':started,'finished_at':self.clock(),
+                'elapsed_seconds':self.clock()-started,
+                'checks':deepcopy(getattr(self.adapter,'last_entry_preflight',{}))}
+
     def loop(self):
         self.recovery.beat()
         self.recovery.start()
         return super().loop()
 
+    def preferences_path(self):
+        return self.path.with_name('renko-supertrend-settings.json')
+
+    def binding_scope(self):
+        c=self.state.get('config') or {}
+        return dict(broker=getattr(self,'bound_broker',None) or c.get('broker') or 'FYERS',
+                    instrument=getattr(self,'bound_instrument',None) or c.get('underlying'))
+
+    def validate_binding(self,payload):
+        from .binding import validate_request
+        scope=self.binding_scope()
+        validate_request(payload,scope['broker'],getattr(self,'bound_instrument',None),getattr(self,'bound_account',None))
+        if getattr(self,'bound_instrument',None) and (self.state.get('config') or {}).get('underlying') not in (None,self.bound_instrument):
+            raise ValueError('Saved task instrument differs from its registered runner; task preserved for review.')
+
     def read_preferences(self):
-        return preferences.read(self.path.with_name('renko-supertrend-settings.json'))
+        from .binding import normalize_settings
+        result=preferences.read(self.preferences_path())
+        scope=self.binding_scope()
+        if result['settings']:
+            try:result['settings']=normalize_settings(result['settings'],**scope)
+            except ValueError as error:
+                result['settings']={};result['binding_error']=str(error)
+        result['binding']=scope
+        return result
 
     def drain_position_ticks(self):
         changed=False
@@ -646,6 +718,30 @@ class Runner(BaseRunner):
             p['exposure_range']=updated
             if persist:self.save()
             return True
+
+    def observe_renko_loss_range(self,signal):
+        config=self.state.get('config') or {}
+        pending=self.state.get('pending') or {}
+        owned=self.state.get('position') or (pending.get('position') if pending and pending.get('position',{}).get('renko_brick_range') and self.is_entry_order(pending['order'],pending['position']) else None)
+        loss_range.observe(owned,signal,config,self.clock(),TIMEFRAMES.get(config.get('timeframe'),60))
+
+    def renko_loss_entry_gate(self,signal=None,direction=None):
+        config=self.state.get('config') or {};lock=self.state.get('renko_loss_lock')
+        if not loss_range.enabled(config) or not lock or not lock.get('active'):return True
+        if lock.get('underlying')!=config.get('underlying') or lock.get('run_id')!=self.state.get('run_id'):
+            self.state.update(status='RENKO_RANGE_LOCKED',message='Renko loss range belongs to another run or symbol; review required.')
+            self.save();return False
+        signal=signal or self.state.get('last_signal') or {}
+        direction=direction or signal.get('cross_direction')
+        release=loss_range.breakout(lock,signal,direction,self.clock(),TIMEFRAMES[config['timeframe']])
+        if release:
+            lock.update(active=False,released_at=self.clock(),release=release)
+            self.state.setdefault('renko_loss_events',[]).append(deepcopy(lock))
+            self.event('RENKO_RANGE_RELEASED','Fresh completed '+direction.lower()+' brick closed beyond the protective loss range.')
+            self.save();return True
+        suffix=' · net result unavailable' if not lock.get('loss_confirmed') else ''
+        self.state.update(status='RENKO_RANGE_LOCKED',message=f"Renko loss range {lock['low']:.2f}–{lock['high']:.2f} locked; waiting for a completed directional breakout brick{suffix}.")
+        self.save();return False
 
     def sideways_entry_gate(self):
         c=self.state.get('config') or {}
@@ -698,16 +794,55 @@ class Runner(BaseRunner):
             initialization_anchor=engine.get('anchor'),host_bar_count=(engine.get('state') or {}).get('count'),
             observation_mode='INTRABAR' if sig.get('provisional') else 'CONFIRMED' if sig else 'WALL_CLOCK / INDICATORS_UNAVAILABLE',
             market_event_at=sig.get('market_event_at'),
-            indicators={k:deepcopy(sig.get(k)) for k in ('session_auto','anti_chop','timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max','rsi_level_enabled','rsi_level_pass','rsi_level_diagnostic','rsi_bullish_above','rsi_bearish_below','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','mtf_rsi','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
+            indicators={k:deepcopy(sig.get(k)) for k in ('session_auto','anti_chop','timestamp','close','rsi14','rsi14_previous','rsi14_slope','rsi_level_mode','rsi_bullish_min','rsi_bullish_max','rsi_bearish_min','rsi_bearish_max','rsi_level_enabled','rsi_level_pass','rsi_level_diagnostic','rsi_bullish_above','rsi_bearish_below','rsi_slope_enabled','rsi_slope_pass','rsi_slope_diagnostic','market_structure','mtf_supertrend','mtf_rsi','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_gap','ema_exit','ema_exit_length','ema_exit_enabled','sma','sma_length','ema_widening','retest_signal','retest_touched','retest_reference_ema10','retest_bounce','retest_patterns','retest_pattern_bars','retest_touch_evidence','entry_qualified','entry_diagnostic','supertrend','direction','pine_direction','box','auto_box','host_atr','synthetic_atr','regime_atr','low_atr','volatility_ratio','effective_factor','adx','signal_allowed')},
             confirmed_gap_history=deepcopy((engine.get('state') or {}).get('ema_gaps',[])),
             confirmed_indicator_reference=deepcopy(engine.get('last')),
             provenance='Captured at strategy event; missing observations remain unknown. Confirmation and broker fill times are separate.')
 
     def save_preferences(self,payload):
         with self.lock:
-            return preferences.write(self.path.with_name('renko-supertrend-settings.json'),payload,self.clock())
+            self.validate_binding(payload)
+            return preferences.write(self.preferences_path(),payload,self.clock(),scope=self.binding_scope())
+
+    def set_spread_filter(self,payload):
+        enabled=payload.get('enabled')
+        if not isinstance(enabled,bool):raise ValueError('Choose on or off for the spread limit.')
+        with self.lock:
+            prior=preferences.read(self.preferences_path())
+            fields={**prior.get('settings',{}),'spread-filter-enabled':enabled}
+            self.validate_binding({})
+            saved=preferences.write(self.preferences_path(),{'settings':fields},self.clock(),scope=self.binding_scope())
+            self.adapter.entry_spread_filter_enabled=enabled
+            if self.state.get('config'):
+                self.state['config']['spread_filter_enabled']=enabled
+                self.state['eligible_since']=max(self.clock(),self.state.get('eligible_since',0))
+                self.save()
+            result=self.snapshot()
+            result['spread_filter_saved_at']=saved['saved_at']
+            return result
+
+    def set_trend_reentry(self,payload):
+        enabled=payload.get('enabled')
+        if not isinstance(enabled,bool):raise ValueError('Choose on or off for trend re-entry.')
+        with self.lock:
+            prior=preferences.read(self.preferences_path())
+            fields={**prior.get('settings',{}),'trend-reentry-enabled':enabled}
+            self.validate_binding({})
+            saved=preferences.write(self.preferences_path(),{'settings':fields},self.clock(),scope=self.binding_scope())
+            if self.state.get('config'):
+                self.state['config']['trend_reentry_enabled']=enabled
+                if enabled:
+                    self.state['eligible_since']=max(self.clock(),self.state.get('eligible_since',0))
+                if not enabled and getattr(self,'_price_current',{}).get('trend_reentry'):
+                    self._price_current={**self._price_current,'entry_qualified':False,'cross_direction':None,'entry_direction':None,'entry_diagnostic':'TREND_REENTRY_DISABLED'}
+                self.save()
+            result=self.snapshot()
+            result['trend_reentry_saved_at']=saved['saved_at']
+            return result
 
     def preview(self,payload):
+        if payload.get('strategy_mode')=='AI_RENKO_OPTIONS':raise ValueError('AI Renko options use the dedicated standalone runtime; legacy runner fallback is forbidden.')
+        self.validate_binding(payload)
         if payload.get('auto_sizing_policy')=='session-atr-scaled-v1' and (self.state.get('position') or self.state.get('pending')) and (self.state.get('config') or {}).get('auto_sizing_policy')=='session-atr-scaled-v1':
             payload={**payload,**{k:deepcopy(v) for k,v in self.state['config'].items() if k.startswith('_session_auto_')}}
         payload=ema_proximity.new_entry_defaults(payload)
@@ -728,8 +863,8 @@ class Runner(BaseRunner):
             self.state.pop('pending_timeframe',None)
             self.state.pop('management_only',None)
             p=self.preview(payload)
-            if after_cutoff(self.clock(),p['config']):
-                raise ValueError('Optional saved crypto daily strategy cutoff '+str(p['config'].get('session_deadline'))+' IST has passed; crypto trades 24/7. Select Continuous trading to remove the daily cutoff, or retain this daily risk policy.' if p['config'].get('broker')=='DELTA_INDIA' else 'Selected segment entry cutoff has passed.')
+            # Start authorizes monitoring. The session gate owns order eligibility.
+            self.state['awaiting_entry_session']=not self.entry_session_open(p['config'])
             tick=self.adapter.host_tick_size(p['config']['underlying'])
             source_rows=self.adapter.candles(p['config'])
             # A new, flat activation may choose a different validated anchor.
@@ -748,7 +883,7 @@ class Runner(BaseRunner):
                 if payload['resume_run_id']!=old.get('run_id') or comparable(expected)!=comparable(p['config']) or p['config']['mode']!='PAPER' or p['context'].get('account_identity')!=old.get('account_identity'):
                     raise ValueError('Guarded recovery requires the identical saved Paper run and account.')
                 super().start(dict(preview_id=p['id'],confirmation=p['confirmation']),False)
-                for key in ('run_id','trades_used','realized_pnl','started_at','last_exit_bar','rearm_after_exit','seen','losses','sideways_lock','sideways_events','execution_signals','order_history'):
+                for key in ('run_id','trades_used','realized_pnl','started_at','last_exit_bar','rearm_after_exit','seen','losses','renko_loss_lock','renko_loss_events','sideways_lock','sideways_events','execution_signals','order_history'):
                     if key in old:self.state[key]=deepcopy(old[key])
                 self.state['recovered_at']=self.clock()
                 self.event('WATCHING','Existing Paper run recovered with trade quota, P&L and journal preserved. Fresh post-recovery signals only.')
@@ -759,6 +894,7 @@ class Runner(BaseRunner):
                 return self.snapshot()
             # Format the response message before activating a runner.
             armed_message='Renko armed in '+p['config']['mode']+'; '+('fresh intrabar candidates' if p['config'].get('intrabar_entries') else 'completed-candle qualifications')+('; segment cutoff '+p['config']['session_deadline']+' IST' if p['config'].get('session_deadline') else '; continuous crypto; held contract expiry applies')+'. No historical signal replay.'
+            self.state.pop('renko_loss_lock',None)
             self.state['run_id']='RENKO-RUN-'+secrets.token_hex(10)
             previous_engine=self.state.pop('renko_engine',None)
             previous_recovery=self.state.get('source_history_recovery')
@@ -1005,15 +1141,20 @@ class Runner(BaseRunner):
 
     def snapshot(self):
         result = super().snapshot()
+        result['runner_binding']={**self.binding_scope(),'account_id':getattr(self,'bound_account',None),'instance_key':getattr(self,'bound_instance',None)}
         result['auto_recovery']=self.recovery.snapshot() if hasattr(self,'recovery') else {'status':'INITIALIZING'}
         result['indicator_selection_revision']='independent-indicators-v1'
         result['strategy_basis_revision']='confirmed-brick-basis-v1'
         result['price_renko_revision']='ordered-price-renko-v1'
+        result['trend_reentry_control_revision']='trend-brick-toggle-v1'
+        result['spread_filter_control_revision']='optional-entry-spread-v1'
         from . import session_auto
         result['session_auto_revision']=session_auto.REVISION
         result['session_auto']=deepcopy(((self.state.get('renko_engine') or {}).get('state') or {}).get('session_auto'))
         result['auto_sizing_policy']=(self.state.get('config') or {}).get('auto_sizing_policy',session_auto.LEGACY)
         result['renko_confirmation']=(result.get('config') or {}).get('renko_confirmation','CLOSE')
+        result['index_premium_selection_revision']='index-target-premium-v1' if isinstance(self.adapter,Broker) or getattr(self,'bound_broker',None) in ('DHAN','MOTILAL_OSWAL') else None
+        result['entry_pipeline_revision']='price-entry-pipeline-v1'
         result['price_confirmation_health']={'error':getattr(self,'price_producer_error',None),'queued_execution_events':self.confirmed_price_events.qsize(),'source':deepcopy(((self.state.get('renko_engine') or {}).get('state') or {}).get('price_renko'))}
         result['anti_chop_revision']=anti_chop.REVISION
         result['ema_third_revision']='third-ema-entry-v1'
@@ -1029,6 +1170,10 @@ class Runner(BaseRunner):
         result['chart_controls_revision']='stopped-flat-chart-controls-v1'
         result['next_start_mode']=self.read_preferences().get('settings',{}).get('mode','PAPER')
         result['activation_message_revision']='continuous-cutoff-status-v2'
+        result['simple_brick_revision']='simple-brick-v1'
+        result['sma_rules_revision']='completed-sma-v1'
+        result['swing_breakout_revision']='renko-swing-breakout-v1'
+        result['line_entry_revision']=line_entry.REVISION
         result['manual_override_revision']='explicit-entry-v1'
         result['entry_proximity_revision']='entry-only-normalized-atr-v1'
         result['entry_momentum_revision']=ema_proximity.REVISION
@@ -1064,6 +1209,7 @@ class Runner(BaseRunner):
             trade['sideways_lock_release']=next((deepcopy(e) for e in reversed(result.get('sideways_events',[])) if e.get('trade_id')==trade['trade_id'] and e.get('released_at')),None)
         if (result.get('config') or {}).get('mode') == 'PAPER':
             try:result['paper_capital']=self.paper_funds()
+            except TypeError:result['paper_capital']=dict(available=False,error='Paper capital unavailable: retained price or ledger evidence is incomplete.')
             except (ValueError,AttributeError,KeyError) as error:result['paper_capital']=dict(available=False,error=str(error))
         current=[t for t in result['trade_history'] if t.get('run_id')==result.get('run_id') and t.get('entry_filled')]
         net_realized=sum(t['costs']['realized_net'] for t in current) if all(t['costs'].get('realized_net') is not None for t in current) else None
@@ -1073,6 +1219,8 @@ class Runner(BaseRunner):
         if (result.get('config') or {}).get('execution_route') == 'CASH_EQUITY':
             result['cost_pnl'].update(model={'id':'CASH_EQUITY_FEES_UNVERIFIED'},basis='Cash gross P&L only; verified cash charge model unavailable. After-cost values unavailable.',realized_net=None,unrealized_net=None,total_net=None)
         result['manual_trend_revision']=manual_trend.REVISION
+        result['renko_loss_range_status']=dict(revision=loss_range.REVISION,enabled=loss_range.enabled(result.get('config') or {}),
+            buffer_bricks=(result.get('config') or {}).get('renko_loss_range_buffer',0),lock=deepcopy(result.get('renko_loss_lock')))
         result['sideways_status']=dict(revision='quick-close-cost-fallback-v2',enabled=(result.get('config') or {}).get('sideways_enabled',False),max_candles=(result.get('config') or {}).get('sideways_max_candles',3),loss_basis='AFTER_ESTIMATED_COSTS_OR_UNKNOWN_NET_PROTECTIVE_LOCK',lock=deepcopy(result.get('sideways_lock')),events=deepcopy(result.get('sideways_events',[])))
         signals=deepcopy([event for event in result.get('execution_signals',[]) if event.get('run_id')==result.get('run_id')])
         for event in signals:
@@ -1096,7 +1244,32 @@ class Runner(BaseRunner):
         digest = hashlib.sha256(json.dumps(settings(c), sort_keys=True).encode()).hexdigest()[:16]
         return f"RENKO_ST:{c['underlying']}:{c['timeframe']}:{digest}:{sig['timestamp']}"
 
+    def entry_session_open(self,config):
+        now=datetime.fromtimestamp(self.clock(),IST)
+        opening,ending=self.session_bounds(config)
+        if config.get('broker')!='DELTA_INDIA':
+            from sector_heatmap.market_calendar import is_trading_day
+            if not is_trading_day(now.date()):return False
+        return opening<=now.hour*60+now.minute<ending
+
+    def wait_for_entry_session(self):
+        if not self.state.get('awaiting_entry_session'):return False
+        if self.state.get('squareoff_requested') or self.stop_requested.is_set():return False
+        if self.state.get('position') or self.state.get('pending'):return False
+        if not self.entry_session_open(self.state['config']):
+            self.state.update(status='WAITING_FOR_MARKET_OPEN',
+                              message='Armed and waiting for the next trading session. Fresh qualifying signals will be evaluated after market opens.')
+            self.save()
+            return True
+        self.state.pop('awaiting_entry_session',None)
+        # Earlier closed-session signals cannot authorize an opening order.
+        self.state['eligible_since']=max(self.clock(),self.state.get('eligible_since',0))
+        self.state['last_processed_bar']=None
+        self.save()
+        return False
+
     def deadline(self):
+        if self.state.get('awaiting_entry_session'):return
         c=self.state.get('config') or {}
         if c.get('underlying','').startswith('MCX:') and c.get('commodity_holding') == 'CARRY_FORWARD':
             pending=self.state.get('pending') or {}
@@ -1125,6 +1298,8 @@ class Runner(BaseRunner):
             self.save()
 
     def step(self):
+        with self.lock:
+            if self.wait_for_entry_session():return
         c=self.state.get('config') or {}
         if c.get('strategy_basis')=='RENKO' and c.get('renko_confirmation')=='PRICE':
             from .price_basis import run_step
@@ -1178,11 +1353,7 @@ class Runner(BaseRunner):
                     owned['trailing_error']=str(error)
             if self.state.get('running') and c and not owned and not pending and self.state.get('accepting_entries') and hasattr(self.adapter,'warm_options'):
                 if c.get('renko_confirmation')=='PRICE':
-                    if not getattr(self,'_price_warm_thread',None) or not self._price_warm_thread.is_alive():
-                        if self.clock()-getattr(self,'_price_warmed_at',0)>30:
-                            self._price_warmed_at=self.clock()
-                            self._price_warm_thread=threading.Thread(target=self.adapter.warm_options,args=(deepcopy(c),),daemon=True,name='price-renko-option-warmup')
-                            self._price_warm_thread.start()
+                    self.warm_price_options(c)
                 else:self.adapter.warm_options(c)
             if self.state.get('running') and c and owned and not owned.get('exit_requested') and (owned.get('calibrated_levels') or any(c.get(k) is not None for k in ('spot_target','spot_stop'))):
                 try:
@@ -1201,7 +1372,7 @@ class Runner(BaseRunner):
                         self.save()
                 except (ValueError,RuntimeError,AttributeError) as error:
                     self.state['hard_boundary_error']=str(error)
-            if self.state.get('running') and c and c.get('intrabar_entries',False) and owned and not owned.get('exit_requested') and not after_cutoff(self.clock(),self.state.get('config')) and hasattr(self.adapter,'forming'):
+            if self.state.get('running') and c and c.get('intrabar_entries',False) and c.get('ema_exit_enabled',True) and owned and not owned.get('exit_requested') and not after_cutoff(self.clock(),self.state.get('config')) and hasattr(self.adapter,'forming'):
                 try:
                     rows = self.adapter.candles(c)
                     tick = self.adapter.host_tick_size(c['underlying'])
@@ -1276,6 +1447,7 @@ class Runner(BaseRunner):
         row=next(r for r in self.state['order_history'] if r['tag']==pending['tag'])
         position=pending['position']
         row.update({k:position.get(k) for k in ('option_type','strike','expiry_epoch','expiry_protection_at','run_id','entry_event_at','entry_mode','underlying_symbol')})
+        row['premium_selection']=deepcopy(position.get('premium_selection'))
         row['calibrated_levels']=deepcopy(position.get('calibrated_levels'))
         row['spot_fill_observations']=observations
         row['reconciliation_events']=reconciliations
@@ -1285,6 +1457,12 @@ class Runner(BaseRunner):
         if row['option_quote_observation'] is None:
             try:row['option_quote_observation']={'observed_at':self.clock(),'quote':deepcopy(self.adapter.quote(row['symbol'])),'basis':'Socket quote observed at local intent/reconciliation; not a fill.'}
             except (AttributeError,ValueError,RuntimeError):pass
+        if filled and self.is_entry_order(pending['order'],pending['position']):
+            position['first_fill_confirmed_at']=old.get('first_fill_confirmed_at',self.clock())
+            if self.state.get('position'):self.state['position']['first_fill_confirmed_at']=position['first_fill_confirmed_at']
+        if filled and self.is_entry_order(pending['order'],pending['position']) and not position.get('renko_brick_range'):
+            loss_range.observe(position,position.get('renko_entry_brick_signal'),self.state['config'],self.clock(),TIMEFRAMES[self.state['config']['timeframe']],seed=True)
+            if self.state.get('position'):self.state['position']['renko_brick_range']=deepcopy(position.get('renko_brick_range'))
         if filled and self.is_entry_order(pending['order'],pending['position']) and not position.get('exposure_range'):
             position['exposure_range']=sideways.observe(None,old.get('first_fill_confirmed_at',self.clock()),None,None,self.clock())
             if self.state.get('position'):self.state['position']['exposure_range']=deepcopy(position['exposure_range'])
@@ -1313,8 +1491,14 @@ class Runner(BaseRunner):
                 exposure=sideways.observe(None,prior.get('first_fill_confirmed_at',prior.get('opened_at')),None,None,self.clock())
             trade_id=(trade or {}).get('trade_id') or f"{self.state['config']['mode']}-TRADE-{prior['lifecycle_id']}"
             lock=sideways.freeze(exposure,self.clock(),net,TIMEFRAMES[self.state['config']['timeframe']],self.state['config'],trade_id,self.state['config']['underlying'],cost_evidence={k:cost_evidence.get(k) for k in ('available','reason','currency')})
+            brick_lock=loss_range.freeze(prior,self.state.get('last_signal'),self.state['config'],net,self.clock(),TIMEFRAMES[self.state['config']['timeframe']],self.state.get('run_id'),trade_id)
+            if brick_lock:
+                self.state['renko_loss_lock']=brick_lock
+                self.state.setdefault('renko_loss_events',[]).append(deepcopy(brick_lock))
+                self.event('RENKO_RANGE_LOCKED','Completed-brick reversal loss range locked; qualified directional breakout required.')
             for row in self.state.get('order_history',[]):
                 if row.get('lifecycle_id')==prior['lifecycle_id']:
+                    row['renko_loss_lock_trigger']=deepcopy(brick_lock)
                     row['exposure_range']=deepcopy(exposure)
                     row['exposure_host_candles']=lock['host_candles'] if lock else sideways.candle_count(exposure['entry_at'],self.clock(),TIMEFRAMES[self.state['config']['timeframe']])
                     row['sideways_lock_trigger']=deepcopy(lock)
@@ -1326,6 +1510,8 @@ class Runner(BaseRunner):
             self.save()
         if exit_filled and not self.state.get('position'):
             self.state['rearm_after_exit']=True
+            self.state['trend_reentry_after']=self.clock()
+            self.state['trend_reentry_run_id']=self.state.get('run_id')
             self.save()
         reason = self.state.pop('pending_entry_exit_reason',None)
         resume = self.state.pop('pending_entry_exit_resume',False)
@@ -1366,6 +1552,7 @@ class Runner(BaseRunner):
                 raise ValueError('Override is outside the selected entry session/cutoff.')
             if c['mode']=='LIVE' and not self.adapter.live_enabled():
                 raise ValueError('Live runtime gate disabled; no override entry.')
+            if not self.renko_loss_entry_gate(direction=direction):raise ValueError('Renko protective loss range blocks new entries.')
             if not self.sideways_entry_gate():
                 raise ValueError('Sideways position range lock blocks new entries.')
             # Refresh genuine analysis for exit management; never invent a signal crossover.
@@ -1465,11 +1652,39 @@ class Runner(BaseRunner):
             raise ValueError(decision['reason'])
         return decision
 
+    def swing_entry_gate(self, direction):
+        from .swing_breakout import check
+        signal=self.state.get('last_signal') or {}
+        publication=getattr(self,'_price_export',None)
+        if self.state['config'].get('renko_confirmation')=='PRICE' and publication and publication[0]==self.state.get('run_id'):
+            signal=publication[1]['last']
+        gate=check(self.state['config'],signal,direction)
+        if not gate['allowed']:raise ValueError('Renko swing breakout: '+gate['reason'])
+        return gate
+
     def validate_entry_authorization(self, position):
+        self.swing_entry_gate(position.get('direction'))
+        from .brick_entry import allowed as brick_entry_allowed
+        if position.get('entry_mode')!='MANUAL_OVERRIDE' and not brick_entry_allowed(self.state['config'],self.state.get('last_signal') or {},position.get('direction')):
+            raise ValueError('Automatic Renko entry requires a completed brick in its trade direction.')
+        if not self.renko_loss_entry_gate(direction=position.get('direction')):raise ValueError('Renko protective loss range blocks entry preflight.')
+        if (self.state.get('last_signal') or {}).get('trend_reentry') and not self.state['config'].get('trend_reentry_enabled',True):
+            raise ValueError('Trend re-entry is switched off.')
         if self.state['config'].get('renko_confirmation')=='PRICE' and position.get('entry_mode')!='MANUAL_OVERRIDE':
             stamp=(self.state.get('last_signal') or {}).get('market_event_at')
             if not isinstance(stamp,(int,float)) or not 0<=self.clock()-stamp<=15:
                 raise ValueError('Confirmed price entry expired during broker preflight; no historical replay.')
+        if self.state['config'].get('renko_confirmation')=='PRICE' and position.get('entry_mode')!='MANUAL_OVERRIDE':
+            publication=getattr(self,'_price_export',None)
+            if publication and publication[0]==self.state.get('run_id'):
+                current=deepcopy(publication[1]['last'])
+                from .trend_reentry import apply as apply_trend_reentry
+                if (self.state.get('last_signal') or {}).get('trend_reentry'):
+                    current=apply_trend_reentry(self.state,current,allow_pending_entry=True)
+                if not brick_entry_allowed(self.state['config'],current,position.get('direction')):
+                    raise ValueError('Completed Renko brick direction changed during broker preflight; no entry.')
+                if not current.get('entry_qualified') or current.get('direction')!=position.get('direction'):
+                    raise ValueError('Confirmed Renko setup changed during broker preflight; no entry.')
         self.zone_entry_gate(position.get('direction'))
         self.calibrated_entry_gate(position.get('direction'))
         if position.get('calibrated_levels'):
@@ -1520,10 +1735,16 @@ class Runner(BaseRunner):
         proximity=None
         manual=position.get('entry_mode')=='MANUAL_OVERRIDE' and reason=='MANUAL_OVERRIDE_ENTRY'
         if self.is_entry_order(order,position):
+            self.swing_entry_gate(position.get('direction'))
             self.manual_trend_entry_gate(position.get('direction'))
             c=self.state['config']
+            if not self.renko_loss_entry_gate(direction=position.get('direction')):raise ValueError('Renko protective loss range blocks new entries.')
             if not self.sideways_entry_gate():raise ValueError('Sideways position range lock blocks new entries.')
             if not manual:self.anti_chop_entry_gate(position.get('direction'))
+            if not manual and c.get('line_entry_enabled'):
+                line_gate=(self.state.get('last_signal') or {}).get('line_entry_filter') or {}
+                if not line_gate.get('allowed') or line_gate.get('direction')!=position.get('direction'):
+                    raise ValueError('Completed Renko brick beyond the matching Bull/Bear line required before strategy entry.')
             if any(c.get(k) is not None for k in ('spot_target','spot_stop')):
                 spot,stamp=self.adapter.live_price(c,self.clock())
                 if not 0<=self.clock()-stamp<=15:raise ValueError('Fresh underlying tick required to validate hard boundaries.')
@@ -1556,11 +1777,23 @@ class Runner(BaseRunner):
             price, stamp = self.adapter.live_price(c, self.clock())
             if c.get('strategy_basis')=='RENKO':
                 if not 0<=self.clock()-stamp<=15:raise ValueError('Fresh underlying observation required for Renko preflight.')
+                publication=getattr(self,'_price_export',None)
+                if publication and publication[0]==self.state.get('run_id'):
+                    self.state['renko_engine']=publication[1]
                 observation=deepcopy(self.state['renko_engine']['last'])
+                if (self.state.get('last_signal') or {}).get('trend_reentry'):
+                    from .trend_reentry import apply as apply_trend_reentry
+                    observation=apply_trend_reentry(self.state,observation,allow_pending_entry=True)
+                from .brick_entry import allowed as brick_entry_allowed
+                if not brick_entry_allowed(c,observation,position['direction']):
+                    raise ValueError('Completed Renko brick direction changed during broker preflight; no entry.')
                 if not observation.get('entry_qualified') or observation.get('direction')!=position['direction']:
                     raise ValueError('Confirmed Renko setup changed during broker preflight; no entry.')
             else:
-                observation = ema_exit_observation(self.state['renko_engine'], price, stamp, c, self.clock())
+                if not math.isfinite(price) or price <= 0 or not 0<=self.clock()-stamp<=15:
+                    raise ValueError('Fresh underlying observation required for entry preflight.')
+                needs_ema = c.get('ema_exit_enabled',True) or c.get('ema_proximity_enabled') or (self.state['last_signal'].get('retest_signal') and not self.state['last_signal'].get('provisional'))
+                observation = ema_exit_observation(self.state['renko_engine'], price, stamp, c, self.clock()) if needs_ema else dict(close=price)
             last=self.state['last_signal']
             if not manual and last.get('retest_signal') and not last.get('provisional'):
                 aligned=observation['close']>observation['ema10']>observation['ema30'] if position['direction']=='BULLISH' else observation['close']<observation['ema10']<observation['ema30']
@@ -1570,18 +1803,19 @@ class Runner(BaseRunner):
                 if not last.get('signal_allowed') or not aligned:
                     raise ValueError('Confirmed retest direction/alignment changed at fresh-price preflight; no order.')
             length = c.get('ema_exit_length', 10)
-            if c.get('strategy_basis')!='RENKO' and length != c.get('ema_fast_length',10):
+            if c.get('ema_exit_enabled',True) and c.get('strategy_basis')!='RENKO' and length != c.get('ema_fast_length',10):
                 base = self.exit_ema(self.adapter.candles(c), c)
                 alpha = 2 / (length + 1)
                 observation['ema_exit'] = alpha * price + (1 - alpha) * base
             observation['ema_exit_enabled'] = c.get('ema_exit_enabled', True)
-            if ema_adverse(observation, position['direction']):
+            if c.get('ema_exit_enabled',True) and ema_adverse(observation, position['direction']):
                 raise ValueError('Fresh underlying price already breaches configured exit EMA; no entry.')
-            if not manual:proximity=ema_proximity.check(c,price,observation['ema10'],self.state['renko_engine']['last'].get('host_atr'),{**self.state['last_signal'],'preflight_ema30':observation['ema30']},position['direction'])
+            if not manual and c.get('ema_proximity_enabled'):proximity=ema_proximity.check(c,price,observation['ema10'],self.state['renko_engine']['last'].get('host_atr'),{**self.state['last_signal'],'preflight_ema30':observation['ema30']},position['direction'])
             if proximity:proximity.update(exchange_at=stamp,observed_at=self.clock())
         elif not manual and self.is_entry_order(order,position) and self.state['config'].get('ema_proximity_enabled'):
             raise ValueError('Fresh underlying observation required for EMA proximity preflight.')
         if self.is_entry_order(order,position):
+            self.swing_entry_gate(position.get('direction'))
             self.manual_trend_entry_gate(position.get('direction'))
             zone_gate=self.zone_entry_gate(position.get('direction'))
             gate=self.calibrated_entry_gate(position.get('direction'))
@@ -1598,7 +1832,14 @@ class Runner(BaseRunner):
             self.state['rearm_after_exit']=False
             metadata=getattr(self.adapter,'resolved_contracts',{}).get(order['symbol'],{})
             position={**position,**{k:metadata.get(k) for k in ('option_type','strike','expiry_epoch','expiry_protection_at')},'run_id':self.state.get('run_id'),'underlying_symbol':self.state['config']['underlying']}
+            entry_bricks=loss_range.bricks(self.state['last_signal'],TIMEFRAMES[self.state['config']['timeframe']])
+            if entry_bricks:
+                entry_brick=entry_bricks[-1]
+                position['renko_entry_brick_signal']={**entry_brick,'market_event_at':entry_brick['event_at'],'has_completed_brick':True}
+            if metadata.get('premium_selection'):position['premium_selection']=deepcopy(metadata['premium_selection'])
             position['entry_indicator_snapshot']=self.indicator_snapshot(self.state['last_signal'],reason)
+            if self.state['last_signal'].get('line_entry_filter'):position['entry_indicator_snapshot']['line_entry_filter']=deepcopy(self.state['last_signal']['line_entry_filter'])
+            if position.get('premium_selection'):position['entry_indicator_snapshot']['premium_selection']=deepcopy(position['premium_selection'])
             if position.get('calibrated_levels'):position['entry_indicator_snapshot'].update(calibrated_levels=deepcopy(position['calibrated_levels']),calibrated_filter=deepcopy(gate))
             if zone_gate:position['entry_indicator_snapshot']['zone_entry_filter']=deepcopy(zone_gate)
             if mtf_gate:position['entry_indicator_snapshot']['mtf_supertrend_preflight']=deepcopy(mtf_gate)
@@ -1616,11 +1857,11 @@ class Runner(BaseRunner):
 
     def record_entry_assessment(self, sig, eligible, code, reason):
         c=self.state['config'];now=self.clock()
-        fields=('timestamp','close','direction','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_widening','entry_qualified',
+        fields=('timestamp','close','direction','ema10','ema30','ema100','ema_third_enabled','ema_third_length','ema_widening','sma','sma_length','entry_qualified',
                 'entry_direction','entry_diagnostic','cross_direction','signal_allowed','adx','open','high','low','host_atr',
                 'anti_chop','rsi14','rsi14_slope','rsi_slope_pass','retest_signal','retest_ready',
                 'retest_touched','retest_touch_evidence','retest_patterns','retest_bounce',
-                'confirmation_basis','source_timestamp','source_sequence','source_generation','source_observed_at','source_event_index','box','supertrend','supertrend_slope_filter','brick_direction','retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend','mtf_rsi','manual_trend','calibrated_filter','zone_entry_filter')
+                'swing_breakout','line_entry_filter','confirmation_basis','source_timestamp','source_sequence','source_generation','source_observed_at','source_event_index','box','supertrend','supertrend_slope_filter','brick_direction','retest_rsi_blocked','provisional','market_event_at','market_structure','mtf_supertrend','mtf_rsi','manual_trend','calibrated_filter','zone_entry_filter')
         record=dict(run_id=self.state.get('run_id'),underlying=c['underlying'],timeframe=c['timeframe'],
                     timestamp=sig['timestamp'],event_at=sig.get('market_event_at',sig['timestamp']+TIMEFRAMES[c['timeframe']]),
                     observed_at=now,eligible=bool(eligible),code=code,reason=reason,
@@ -1637,6 +1878,7 @@ class Runner(BaseRunner):
     def fresh_cross(self, sig):
         p=self.state.get('position')
         if p:
+            self.state.pop('line_entry_observation',None)
             # Protective exits do not use an entry arming/reconnect watermark.
             # Reconsider a revised fresh threshold, but never resubmit a saved
             # exit intent; pending/exit_requested reconciliation owns that path.
@@ -1663,8 +1905,16 @@ class Runner(BaseRunner):
             # Polls and corrected historical output must not overwrite a real
             # decision or cause a second entry for this completed candle.
             return False
-        gate=self.sideways_entry_gate()
-        if not gate:code,reason='SIDEWAYS_LOCK','Recorded loss-range gate blocks entry.'
+        line_gate=line_entry.observe(self.state,c,sig,self.state.get('run_id'))
+        sig['line_entry_filter']=line_gate
+        gate=self.renko_loss_entry_gate(sig) and self.sideways_entry_gate()
+        from .brick_entry import allowed as brick_entry_allowed
+        from .swing_breakout import check as swing_check
+        swing=swing_check(c,sig,sig.get('cross_direction') or sig.get('direction'))
+        if not swing['allowed']:code,reason=swing['reason'],'Renko swing breakout: '+str(swing.get('count',0))+'/'+str(c.get('swing_breakout_bricks',2))+' consecutive completed closes strictly beyond the confirmed swing.'
+        elif sig.get('cross_direction') and not brick_entry_allowed(c,sig,sig['cross_direction']):code,reason='OPPOSITE_BRICK_ENTRY','Automatic Renko entry requires a completed brick in its trade direction.'
+        elif sig.get('trend_reentry') and not c.get('trend_reentry_enabled',True):code,reason='TREND_REENTRY_DISABLED','Trend re-entry is switched off.'
+        elif not gate:code,reason=('RENKO_RANGE_LOCK','Completed Renko loss-range gate blocks entry.') if (self.state.get('renko_loss_lock') or {}).get('active') else ('SIDEWAYS_LOCK','Recorded loss-range gate blocks entry.')
         elif event_at<=self.state.get('eligible_since',self.state.get('started_at',now)):
             code,reason='BEFORE_ELIGIBILITY','Candle/event predates the actual arming, reconnect or lock-release boundary.'
         elif not 0<=now-event_at<=(15 if provisional or sig.get('confirmation_basis')=='ORDERED_LIVE_PRICE' else seconds):
@@ -1685,6 +1935,8 @@ class Runner(BaseRunner):
             code,reason='SUPERTREND_TIMEFRAME_AGREEMENT',(sig.get('mtf_supertrend') or {}).get('reason','One-minute/five-minute Supertrend agreement unavailable; entry blocked.')
         elif c.get('market_structure_enabled') and not (sig.get('market_structure') or {}).get('allowed'):
             code,reason='MARKET_STRUCTURE',(sig.get('market_structure') or {}).get('reason','Confirmed market structure unavailable; entry blocked.')
+        elif not line_gate['allowed']:
+            code,reason=line_gate['reason'],'Waiting for a completed Renko brick above the Bull line or below the Bear line, with the existing strategy conditions.'
         elif self.signal_key(sig) in self.state.get('seen',[]):
             code,reason='ALREADY_SUBMITTED','A durable order intent already consumed this signal.'
         else:code,reason='ELIGIBLE','Fresh post-arming strategy entry event; execution preflight still required.'
@@ -1816,6 +2068,7 @@ class Runner(BaseRunner):
     def signal(self):
         if (self.state.get('config') or {}).get('renko_confirmation')=='PRICE' and hasattr(self,'_price_current'):
             self.state['last_signal']=self._price_current
+            self.observe_renko_loss_range(self._price_current)
             return self._price_current
         c = self.state['config']
         tick = self.adapter.host_tick_size(c['underlying'])
@@ -1829,6 +2082,8 @@ class Runner(BaseRunner):
             self._confirmed_source_key = source_key if revision is not None else None
         self.state['renko_engine'] = result
         sig = {**result['last'], 'supertrend_cross_direction': result['last'].get('raw_supertrend_cross_direction',result['last']['cross_direction']), 'cross_direction': result['last']['entry_direction']}
+        from .trend_reentry import apply as apply_trend_reentry
+        sig=apply_trend_reentry(self.state,sig)
         if not self.state.get('position') and self.state.get('rearm_after_exit') and result['last']['entry_qualified'] and result['last'].get('has_completed_brick',True) and result['last']['timestamp']>self.state.get('last_exit_bar',0):
             sig['cross_direction']=result['last']['direction']
         self.deadline()
@@ -1848,7 +2103,7 @@ class Runner(BaseRunner):
         if c.get('manual_trend_enabled'):
             manual_trend.apply(sig,manual_trend.check(completed(rows),c,sig.get('cross_direction') or sig.get('direction'),TIMEFRAMES[c['timeframe']]))
             if not sig['manual_trend']['allowed']:sig['cross_direction']=None
-        sig.update(ema_exit=sig.get('ema_exit') if c.get('strategy_basis')=='RENKO' else self.exit_ema(rows,c) if c.get('ema_exit_length',10)!=c.get('ema_fast_length',10) else sig['ema10'],ema_exit_length=c.get('ema_exit_length',10),ema_exit_enabled=c.get('ema_exit_enabled',True))
+        sig.update(ema_exit=sig.get('ema_exit') if c.get('strategy_basis')=='RENKO' else self.exit_ema(rows,c) if c.get('ema_exit_enabled',True) and c.get('ema_exit_length',10)!=c.get('ema_fast_length',10) else sig['ema10'],ema_exit_length=c.get('ema_exit_length',10),ema_exit_enabled=c.get('ema_exit_enabled',True))
         if not c.get('ema_exit_enabled',True):sig['ema_exit_enabled']=False
         if c.get('ema_widening_exit_enabled'):
             prior=[row for row in result.get('rows',[]) if row['timestamp']<sig['timestamp']]
@@ -1856,6 +2111,7 @@ class Runner(BaseRunner):
         if c.get('market_structure_exit_enabled') and self.state.get('position'):
             sig['exit_market_structure']=market_structure.check(rows,self.state['position']['direction'],TIMEFRAMES[c['timeframe']],sig['timestamp']+TIMEFRAMES[c['timeframe']])
         self.state['last_signal'] = sig
+        self.observe_renko_loss_range(sig)
         from .confirmed_feed import publish_confirmed
         publish_confirmed(self)
         self.save()

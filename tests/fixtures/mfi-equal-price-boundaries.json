@@ -1,0 +1,37 @@
+{
+  "source": "PAXGUSD Delta30m completed broker export",
+  "pairs": [
+    [
+      {
+        "open": 3897.4,
+        "high": 3898.1,
+        "low": 3897.3,
+        "close": 3897.5,
+        "volume": 50813.0
+      },
+      {
+        "open": 3897.5,
+        "high": 3897.8,
+        "low": 3897.3,
+        "close": 3897.8,
+        "volume": 28403.0
+      }
+    ],
+    [
+      {
+        "open": 3878.1,
+        "high": 3879.3,
+        "low": 3870.3,
+        "close": 3872.3,
+        "volume": 906144.0
+      },
+      {
+        "open": 3872.6,
+        "high": 3877.2,
+        "low": 3871.0,
+        "close": 3873.7,
+        "volume": 520453.0
+      }
+    ]
+  ]
+}

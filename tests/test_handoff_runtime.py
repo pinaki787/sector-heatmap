@@ -137,11 +137,11 @@ class RuntimeTests(unittest.TestCase):
   result=self.runtime.status(self.user,self.a["id"])
   self.assertEqual(result["activation"],"NOT_RUNNING")
   self.assertFalse(result["scheduler_running"])
- def test_selecting_different_owned_account_pauses_previous_schedule(self):
+ def test_schedules_for_different_owned_accounts_remain_independent(self):
   second=self.store.create_account(self.user,"FYERS","Second","test2")
-  self.runtime.configure(self.user,self.a["id"],"synthetic-token",dict(enabled=True))
-  self.runtime.configure(self.user,second["id"],"synthetic-token",dict(enabled=True))
-  self.assertFalse(self.runtime.status(self.user,self.a["id"])["policy"]["enabled"])
+  self.runtime.configure(self.user,self.a["id"],"synthetic-token",dict(enabled=True,mode="MANUAL"))
+  self.runtime.configure(self.user,second["id"],"synthetic-token",dict(enabled=True,mode="MANUAL"))
+  self.assertTrue(self.runtime.status(self.user,self.a["id"])["policy"]["enabled"])
   self.assertTrue(self.runtime.status(self.user,second["id"])["policy"]["enabled"])
 
 class MotilalOwnedBridgeTests(unittest.TestCase):

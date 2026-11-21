@@ -7,9 +7,10 @@
     const valid = data.status === 'READY' && Number.isFinite(data.ltp) && data.ltp > 0
     const age = data.provider_timestamp ? (Date.now() - new Date(data.provider_timestamp).getTime()) / 1000 : NaN
     const fresh = valid && data.freshness === 'FRESH' && age >= -5 && age <= 30
+    const currency=data.currency||'INR',prefix=({INR:'₹',USD:'$',USDT:'USDT '}[currency]||currency+' ')
     output.textContent = valid
-      ? `FYERS LTP: ₹${data.ltp.toFixed(2)} · ${data.symbol}\n${fresh ? 'FRESH — provider timestamp within 30 seconds' : 'QUOTE RECEIVED — last price update time is not supplied by FYERS'}\nPrice update: ${formatTime(data.provider_timestamp)} · Received: ${formatTime(data.fetched_at)}`
-      : `${data.message || 'FYERS LTP unavailable.'}${data.symbol ? '\n' + data.symbol : ''}`
+      ? `${data.broker||'Broker'} LTP: ${prefix}${data.ltp<.01?'<0.01':data.ltp.toFixed(2)} · ${data.symbol}\n${fresh ? 'FRESH — provider timestamp within 30 seconds' : 'QUOTE RECEIVED — last price update time is not supplied by this broker'}\nPrice update: ${formatTime(data.provider_timestamp)} · Received: ${formatTime(data.fetched_at)}`
+      : `${data.message || 'Broker LTP unavailable.'}${data.symbol ? '\n' + data.symbol : ''}`
     output.style.whiteSpace = 'pre-line'
     output.style.color = fresh ? '#b9f4d2' : valid ? '#f1d598' : '#b8c7da'
   }
@@ -22,7 +23,7 @@
       clearTimeout(agingTimer)
       clearTimeout(retryTimer)
       button.disabled = true
-      render(output, {message:'FYERS LTP unavailable — parse an exact contract first.'})
+      render(output, {message:'Broker LTP unavailable — parse an exact contract first.'})
     }
     async function refresh() {
       if (!ticket || Date.now() < retryUntil) return
@@ -32,7 +33,7 @@
       const active = new AbortController()
       controller = active
       button.disabled = true
-      render(output, {symbol:target.symbol,message:'Fetching FYERS LTP…'})
+      render(output, {symbol:target.symbol,message:'Fetching Broker LTP…'})
       const timer = setTimeout(() => active.abort(), 10000)
       try {
         const response = await fetcher('/api/trade-recommendation/quote', {method:'POST',
@@ -52,7 +53,7 @@
         }, Math.max(0, 31000 - Math.max(0, Date.now() - new Date(data.provider_timestamp).getTime())))
       } catch (error) {
         if (version === current) render(output, {symbol:target.symbol,message:error.message === 'SERVER_UPDATE'
-          ? 'FYERS LTP unavailable: dashboard backend update is pending.' : 'FYERS LTP unavailable: quote request failed or timed out.'})
+          ? 'Broker LTP unavailable: dashboard backend update is pending.' : 'Broker LTP unavailable: quote request failed or timed out.'})
       } finally {
         clearTimeout(timer)
         if (version === current) button.disabled = Date.now() < retryUntil
@@ -63,7 +64,7 @@
       if (!symbol) return
       ticket = {text, symbol}
       if (Date.now() < retryUntil) {
-        render(output, {symbol, message:'FYERS LTP rate-limited. Wait for the refresh cooldown to finish.'})
+        render(output, {symbol, message:'Broker LTP rate-limited. Wait for the refresh cooldown to finish.'})
         retryTimer = setTimeout(() => { if (ticket) button.disabled = false }, retryUntil - Date.now())
       } else void refresh()
     }

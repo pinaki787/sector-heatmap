@@ -14,7 +14,7 @@ def bootstrap(prefix):
     return """;(function(){
 const prefix=PREFIX_VALUE,originalFetch=window.fetch.bind(window),OriginalSource=window.EventSource;
 function scoped(value){const url=new URL(value,location.href);
-if(url.origin===location.origin&&url.pathname.startsWith('/api/')&&!['/api/workspaces/','/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/'].some(path=>url.pathname.startsWith(path)))url.pathname=prefix+url.pathname;
+if(url.origin===location.origin&&url.pathname.startsWith('/api/')&&!['/api/manual-multi/','/api/broker-parser/','/api/workspaces/','/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/'].some(path=>url.pathname.startsWith(path)))url.pathname=prefix+url.pathname;
 return url.href;}
 window.fetch=function(input,options){if(input instanceof Request)return originalFetch(new Request(scoped(input.url),input),options);return originalFetch(scoped(input),options);};
 window.EventSource=class extends OriginalSource{constructor(url,options){super(scoped(url),options);}};
@@ -69,6 +69,13 @@ def proxy(auth,handler,mutation=False):
                 text=content.decode('utf-8')
                 # Bind bootstrap and application document navigation to this account.
                 text=text.replace('src="/workspace-bootstrap.js','src="'+prefix+'/workspace-bootstrap.js')
+                chart_assets = ('chart-workspace.css', 'chart-workspace.js', 'chart-workspace-studies.js',
+                                'vendor/lightweight-charts-4.2.3.js')
+                for asset in chart_assets:
+                    for attribute in ('src', 'href'):
+                        for leading in ('/', ''):
+                            text = text.replace(f'{attribute}="{leading}{asset}',
+                                                f'{attribute}="{prefix}/{asset}')
                 content=text.encode()
             if content is not None and ('/'+tail)=='/workspace-bootstrap.js':
                 content=bootstrap(prefix).encode()+content+b'\nif(window.SectorPulseWorkspace)window.SectorPulseWorkspace.portal_url="/accounts";'

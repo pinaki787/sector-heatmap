@@ -12,6 +12,7 @@ import secrets
 import threading
 import time
 from .signals import series, exit_on_close, rsi_sma_series, rsi_exit_on_close
+from sector_heatmap.chart_trade_admission import serialized_runner_entry
 from .valuation import amount, multiplier
 from .trailing import settings as trailing_settings, initial as trailing_initial, advance as trailing_advance, allocation as trailing_allocation, target_quantity
 from .history import position_history, verified_legacy_rows
@@ -179,9 +180,17 @@ class Runner:
             funds=None
             if (self.state.get('config') or {}).get('mode')=='PAPER':
                 try:funds=self.paper_funds()
+                except TypeError:funds=dict(available=False,error='Paper capital unavailable: retained price or ledger evidence is incomplete.')
                 except (ValueError,AttributeError,KeyError) as error:funds=dict(available=False,error=str(error))
             from sector_heatmap.runner_job_history import read as read_jobs
-            return {**deepcopy(self.state), 'job_history':read_jobs(self.path), 'paper_capital':funds, 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': self.runtime_revision, 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': self.strategy_id, 'scan_interval_seconds': 1, 'signal_policy':self.signal_policy, 'live_available': self.adapter.live_enabled()}
+            # Status needs the current indicator publication, not the full chart archive.
+            # Keep engine metadata coherent under the runner lock, without copying
+            # thousands of immutable historical rows on every heartbeat.
+            status_state=dict(self.state)
+            engine=status_state.get('renko_engine')
+            if engine and self.strategy_id.upper().startswith('RENKO'):
+                status_state['renko_engine']={k:v for k,v in engine.items() if k != 'rows'}
+            return {**deepcopy(status_state), 'job_history':read_jobs(self.path), 'paper_capital':funds, 'pnl': pnl, 'position_history':position_history(history), 'runtime_revision': self.runtime_revision, 'stream': self.adapter.stream_status() if hasattr(self.adapter, 'stream_status') else None, 'strategy': self.strategy_id, 'scan_interval_seconds': 1, 'signal_policy':self.signal_policy, 'live_available': self.adapter.live_enabled()}
         finally:
             self.lock.release()
 
@@ -318,8 +327,11 @@ class Runner:
             except Exception as error:
                 with self.lock:
                     # Keep ownership, pending intent, and position on all failures.
-                    self.state['eligible_since'] = self.clock()
-                    self.event('BLOCKED', str(error))
+                    if hasattr(self,'handle_step_error'):
+                        self.handle_step_error(error)
+                    else:
+                        self.state['eligible_since'] = self.clock()
+                        self.event('BLOCKED', str(error))
             self.wake.wait(max(0, 1 - (time.monotonic() - scan_started)))
             self.wake.clear()
         self.adapter.stop()
@@ -382,9 +394,14 @@ class Runner:
         if self.stop_requested.is_set() or not self.state['accepting_entries'] or self.clock()-last['timestamp']-TIMEFRAMES[c['timeframe']] > TIMEFRAMES[c['timeframe']]:
             raise ValueError('Entry authorization or signal expired during preflight.')
 
+    @serialized_runner_entry
     def submit(self, order, position, reason):
         self.adapter.validate_order(order)
         if self.is_entry_order(order, position):
+            if self.state["config"]["mode"]=="LIVE":
+                from sector_heatmap.chart_trade_ownership import assert_workspace_chart_entry_allowed
+                broker=getattr(self,"bound_broker",None) or self.state["config"].get("broker") or "FYERS"
+                assert_workspace_chart_entry_allowed(broker)
             self.validate_entry_authorization(position)
         execution_quote = self.adapter.quote(order['symbol'])  # Recheck socket freshness immediately before persisting intent.
         if self.state['config']['mode']=='PAPER' and self.is_entry_order(order,position):
@@ -400,6 +417,11 @@ class Runner:
                 self.state['trades_used'] = self.state.get('trades_used', 0) + 1
         if self.is_entry_order(order, position) and self.stop_requested.is_set():
             raise ValueError('Stop requested; new entry blocked before submission.')
+        if self.state["config"]["mode"]=="LIVE" and self.is_entry_order(order,position):
+            broker=getattr(self,"bound_broker",None) or self.state["config"].get("broker") or "FYERS"
+            if broker=="FYERS":
+                from sector_heatmap.chart_trade_admission import mark_entry_attempt
+                mark_entry_attempt(broker)
         self.state['pending'] = dict(order=order, tag=tag, id=None, position=position, reason=reason,
                                      submitted_at=self.clock(), cancel_requested=False,
                                      count_on_fill=bool(getattr(self.adapter, 'count_confirmed_entries', False)))

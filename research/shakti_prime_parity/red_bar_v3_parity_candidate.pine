@@ -1,0 +1,186 @@
+//@version=6
+indicator("Red Bar v3 — Shakti parity research", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=200)
+// Independent reconstruction. See research/shakti_prime_parity/evidence.md.
+// Reference historical timing uses lookahead_off after recalculation.
+// This is a visual parity candidate, not a validated causal trading signal.
+string gRef="01 — REFERENCE & SESSION"
+string refMode=input.string("Auto","Reference timeframe selection",options=["Auto","Manual"],group=gRef)
+string manualRef=input.timeframe("5","Manual reference timeframe",group=gRef)
+string optionMode=input.string("Auto","Indian option reference candle",options=["Auto","Force PE Green","Force Red"],group=gRef)
+string entryTF=input.timeframe("1","Entry confirmation TF",group=gRef)
+string renkoConfirmation=input.string("Confirmed bricks","Renko entry confirmation",options=["Confirmed bricks","Levels only"],group=gRef)
+string sessionMode=input.string("Auto","Session preset",options=["Auto","Manual"],group=gRef)
+string sess=input.session("0915-1530","Manual session",group=gRef)
+string tz=input.string("Asia/Kolkata","Manual timezone (IANA)",group=gRef)
+string openingMode=input.string("Auto gap + IST fallback","Global opening detection",options=["Auto gap + IST fallback","Fixed IST opening"],group="01A — GLOBAL BROKER SESSION (30M)")
+int fxHour=input.int(3,"Gold/FX fallback opening hour (IST)",minval=0,maxval=23,group="01A — GLOBAL BROKER SESSION (30M)")
+int fxMinute=input.int(30,"Gold/FX fallback opening minute (IST)",options=[0,15,30,45],group="01A — GLOBAL BROKER SESSION (30M)")
+int cryptoHour=input.int(2,"Crypto daily reset hour (IST)",minval=0,maxval=23,group="01A — GLOBAL BROKER SESSION (30M)")
+int cryptoMinute=input.int(30,"Crypto daily reset minute (IST)",options=[0,15,30,45],group="01A — GLOBAL BROKER SESSION (30M)")
+int openingGap=input.int(45,"Minimum trading break for opening detection (minutes)",minval=1,group="01A — GLOBAL BROKER SESSION (30M)")
+bool show30=input.bool(false,"Show EXTRA 30m Red Bar zone (India only)",group="01B — EXTRA INDIA 30M SELLING ZONE")
+color extraColor=input.color(color.red,"30m zone colour (Red)",group="01B — EXTRA INDIA 30M SELLING ZONE")
+int extraTransparency=input.int(91,"30m zone transparency",minval=0,maxval=100,group="01B — EXTRA INDIA 30M SELLING ZONE")
+bool extraLevels=input.bool(true,"Show 30m 44 / 50 / 56% levels",group="01B — EXTRA INDIA 30M SELLING ZONE")
+bool highlight=input.bool(true,"Highlight actual locked Red Bar candle",group="02 — CHART VISIBILITY")
+bool show5=input.bool(true,"Show 44%, 50%, 56% INSIDE Red Bar",group="02 — CHART VISIBILITY")
+bool targetBands=input.bool(true,"Show 44%-56% BANDS centered on EACH target",group="02 — CHART VISIBILITY")
+string targetMode=input.string("SMART","Target Display Mode",options=["SMART","ALL","OFF"],group="02 — CHART VISIBILITY")
+int forward=input.int(2,"SMART Forward Targets",minval=1,maxval=5,group="02 — CHART VISIBILITY")
+int targetTransparency=input.int(90,"Target band fill transparency",minval=0,maxval=100,group="02 — CHART VISIBILITY")
+int mainWidth=input.int(4,"Main High / Low line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY")
+int targetWidth=input.int(3,"Target line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY")
+int bandWidth=input.int(2,"Target 44/50/56 line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY")
+bool showTargets=input.bool(true,"Show bullish / bearish targets",group="02 — CHART VISIBILITY")
+color pendingColor=input.color(color.orange,"Pending target (Orange)",group="02 — CHART VISIBILITY")
+color upperColor=input.color(color.rgb(39,197,108),"Upper target reached (Green)",group="02 — CHART VISIBILITY")
+color lowerColor=input.color(color.rgb(255,0,0),"Lower target reached (Bright Red)",group="02 — CHART VISIBILITY")
+int targetCount=input.int(10,"Maximum targets",options=[5,10,15,20],group="02 — CHART VISIBILITY")
+bool targetLabels=input.bool(true,"Show T11-T20 price labels",group="02 — CHART VISIBILITY")
+bool bothDirections=input.bool(true,"Show both target directions",group="02 — CHART VISIBILITY")
+int historyInput=input.int(8,"Historical sessions to retain (object limit)",minval=1,maxval=8,group="02 — CHART VISIBILITY")
+bool crypto=syminfo.type=="crypto" or syminfo.prefix=="DELTAIN" or syminfo.prefix=="BINANCE" or syminfo.prefix=="BYBIT"
+bool india=syminfo.prefix=="NSE" or syminfo.prefix=="BSE" or syminfo.prefix=="MCX"
+bool indianOption=india and (str.contains(syminfo.ticker,"PE") or (syminfo.type=="option" and str.contains(syminfo.ticker,"P")))
+bool greenReference=optionMode=="Force PE Green" or (optionMode=="Auto" and indianOption)
+string refTF=refMode=="Manual" ? manualRef : india ? "5" : "30"
+string symbol=ticker.standard(syminfo.tickerid)
+f_ref() =>
+    bool manual=sessionMode=="Manual"
+    bool inSess=manual or india ? not na(time(timeframe.period,sess,tz)) : true
+    int resetMinutes=crypto ? cryptoHour*60+cryptoMinute : fxHour*60+fxMinute
+    int key=manual or india ? time("D") : int(math.floor((time+19800000-resetMinutes*60000)/86400000))
+    bool gap=openingMode=="Auto gap + IST fallback" and not crypto and not india and time-time_close[1]>=openingGap*60000
+    bool first=inSess and (not inSess[1] or key!=key[1] or gap)
+    var float hi=na
+    var float lo=na
+    var int sessionStart=na
+    var int lockedTime=na
+    if first
+        hi:=na
+        lo:=na
+        lockedTime:=na
+        sessionStart:=time
+    bool wanted=greenReference ? close>open : close<open
+    if inSess and not first and na(hi) and wanted
+        hi:=high
+        lo:=low
+        lockedTime:=time
+    [hi,lo,sessionStart,lockedTime]
+[a,b,k5,lock5]=request.security(symbol,refTF,f_ref(),lookahead=barmerge.lookahead_off)
+[c,d,k30,lock30]=request.security(symbol,"30",f_ref(),lookahead=barmerge.lookahead_off)
+bool active=not na(a) and not na(b)
+int start=k5
+float h5=a
+float l5=b
+float h30=c
+float l30=d
+f_level(float h,float l,float p) => l+(h-l)*p
+plot(h5,"LOCKED RED BAR HIGH",color.rgb(184,90,0),mainWidth,plot.style_linebr)
+plot(l5,"LOCKED RED BAR LOW",color.rgb(213,0,0),mainWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.44) : na,"44%",color.rgb(227,125,50),bandWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.50) : na,"50%",color.orange,bandWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.56) : na,"56%",color.rgb(227,125,50),bandWidth,plot.style_linebr)
+pHigh=plot(h5,"Reference fill high",display=display.none)
+pLow=plot(l5,"Reference fill low",display=display.none)
+fill(pHigh,pLow,color.new(color.red,94))
+bool showExtra=show30 and india
+p30h=plot(showExtra ? h30 : na,"Extra 30m High",extraColor,style=plot.style_linebr)
+p30l=plot(showExtra ? l30 : na,"Extra 30m Low",extraColor,style=plot.style_linebr)
+fill(p30h,p30l,color.new(extraColor,extraTransparency))
+plot(showExtra and extraLevels ? f_level(h30,l30,0.44) : na,"Extra 30m 44%",extraColor,style=plot.style_linebr)
+plot(showExtra and extraLevels ? f_level(h30,l30,0.50) : na,"Extra 30m 50%",extraColor,style=plot.style_linebr)
+plot(showExtra and extraLevels ? f_level(h30,l30,0.56) : na,"Extra 30m 56%",extraColor,style=plot.style_linebr)
+var array<box> referenceBoxes=array.new<box>()
+bool freshLock=not na(lock5) and (na(lock5[1]) or lock5!=lock5[1])
+if highlight and freshLock
+    array.push(referenceBoxes,box.new(lock5,h5,lock5+int(timeframe.in_seconds(refTF))*1000,l5,xloc=xloc.bar_time,border_color=color.new(color.red,35),bgcolor=color.new(color.red,90)))
+    if array.size(referenceBoxes)>historyInput
+        box.delete(array.shift(referenceBoxes))
+bool showSMA=input.bool(true,"Show 200 SMA High/Low Band",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+int maLength=input.int(200,"200 SMA Length (2m Bars)",minval=1,group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+color maBull=input.color(color.rgb(0,191,95),"Above Band — Green",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+color maBear=input.color(color.red,"Below Band — Red",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+color maNeutral=input.color(color.gray,"Inside Band — Neutral",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+bool maFill=input.bool(true,"Fill 200 SMA Band",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)")
+bool showSlow=input.bool(true,"Show 5 SMA Close",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)")
+int slowLength=input.int(5,"SMA Close Length",minval=1,group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)")
+color slowBull=input.color(color.green,"Close Above SMA — Green",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)")
+color slowBear=input.color(color.red,"Close Below SMA — Red",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)")
+int maWidth=input.int(2,"SMA Line Width",minval=1,maxval=4,group="03 — VISUAL SETTINGS")
+int maTransparency=input.int(88,"200 SMA Band Fill Transparency",minval=0,maxval=100,group="03 — VISUAL SETTINGS")
+[sh,sl]=request.security(symbol,"2",[ta.sma(high,maLength),ta.sma(low,maLength)],lookahead=barmerge.lookahead_off)
+color sc=close>sh ? maBull : close<sl ? maBear : maNeutral
+psh=plot(showSMA and timeframe.in_seconds()<=1800 ? sh : na,"200 SMA High — 2m",sc,maWidth)
+psl=plot(showSMA and timeframe.in_seconds()<=1800 ? sl : na,"200 SMA Low — 2m",sc,maWidth)
+fill(psh,psl,maFill ? color.new(sc,maTransparency) : na)
+float sma5=ta.sma(close,slowLength)
+plot(showSlow and timeframe.in_seconds()>=1800 ? sma5 : na,"5 SMA Close — 30m+",close>sma5 ? slowBull : slowBear,maWidth)
+string targetSource=refTF
+int keep=math.max(1,math.min(historyInput,int(math.floor(450.0/(targetCount*3)))))
+type TargetRecord
+    float hi
+    float lo
+    int key
+    int left
+    int right
+    float topClose
+    float botClose
+    float topWick
+    float botWick
+var array<line> targetLines=array.new<line>()
+var array<label> targetText=array.new<label>()
+var array<linefill> targetFill=array.new<linefill>()
+f_targetLine(float price,int left,int right,color col,string tag,float span) =>
+    line mid=line.new(left,price,right,price,xloc=xloc.bar_index,color=col,width=targetWidth)
+    array.push(targetLines,mid)
+    if targetBands
+        line upper=line.new(left,price+span*0.06,right,price+span*0.06,xloc=xloc.bar_index,color=color.new(col,55),width=bandWidth)
+        line lower=line.new(left,price-span*0.06,right,price-span*0.06,xloc=xloc.bar_index,color=color.new(col,55),width=bandWidth)
+        array.push(targetLines,upper)
+        array.push(targetLines,lower)
+        array.push(targetFill,linefill.new(upper,lower,color.new(col,targetTransparency)))
+    if targetLabels
+        array.push(targetText,label.new(math.min(right,last_bar_index),price,tag+" "+str.tostring(price,"#.00"),xloc=xloc.bar_index,style=label.style_label_right,color=color.new(col,15),textcolor=color.white,size=size.tiny))
+f_targets(float hi,float lo,int key,string name,bool enabled) =>
+    var array<TargetRecord> records=array.new<TargetRecord>()
+    if enabled and active and not na(start) and key >= start and not na(hi) and hi > lo
+        bool fresh=array.size(records) == 0
+        if not fresh
+            fresh := array.last(records).key != key
+        if fresh
+            array.push(records,TargetRecord.new(hi,lo,key,bar_index,bar_index,close,close,high,low))
+            if array.size(records) > keep
+                array.shift(records)
+        TargetRecord record=array.last(records)
+        record.right := bar_index
+        if barstate.isconfirmed
+            record.topClose := math.max(record.topClose,close)
+            record.botClose := math.min(record.botClose,close)
+            record.topWick := math.max(record.topWick,high)
+            record.botWick := math.min(record.botWick,low)
+    if barstate.islast and showTargets and enabled and targetMode != "OFF" and array.size(records) > 0
+        for j=0 to array.size(records)-1
+            TargetRecord record=array.get(records,j)
+            float span=record.hi-record.lo
+            int upperCount=targetMode == "ALL" ? targetCount : math.min(targetCount,math.max(forward,int(math.floor((record.topClose-record.hi)/span))+forward))
+            int lowerCount=targetMode == "ALL" ? targetCount : math.min(targetCount,math.max(forward,int(math.floor((record.lo-record.botClose)/span))+forward))
+            int right=j == array.size(records)-1 and key >= start ? bar_index+8 : record.right
+            for n=1 to targetCount
+                float up=record.hi+n*span
+                float down=record.lo-n*span
+                if n <= upperCount
+                    f_targetLine(up,record.left,right,record.topWick >= up ? upperColor : pendingColor,"T"+str.tostring(n),span)
+                if n <= lowerCount
+                    f_targetLine(down,record.left,right,record.botWick <= down ? lowerColor : pendingColor,"T"+str.tostring(n),span)
+if barstate.islast
+    for item in targetFill
+        linefill.delete(item)
+    array.clear(targetFill)
+    for item in targetLines
+        line.delete(item)
+    array.clear(targetLines)
+    for item in targetText
+        label.delete(item)
+    array.clear(targetText)
+f_targets(a,b,k5,refTF,true)

@@ -63,6 +63,11 @@ class Batches:
                 elif kind=='LONG_OPTION':
                     legs=proposal.get('legs') or []
                     if len(legs)!=1 or legs[0].get('action')!='BUY':raise ValueError('Review one native bought Call/Put.')
+                    if item.get('portable_manual_ticket') is True:
+                        expiry=item.get('expiry');strike=positive(legs[0].get('strike'),'Exact strike')
+                        rows=[r for r in self.adapter.option_rows(item['underlying']) if r['expiry']==expiry and r['option_type']==legs[0].get('option_type') and Decimal(str(r['strike']))==strike]
+                        if len(rows)!=1:raise ValueError('Exact native option expiry, strike and type are missing or ambiguous.')
+                        legs=[dict(legs[0],symbol=rows[0]['symbol'])]
                     symbol=legs[0]['symbol'];meta=self.adapter.contract(symbol)
                     if meta['option_type'] not in {'CE','PE'}:raise ValueError('Native Call/Put required.')
                     candidates=self.adapter.option_rows(item['underlying'])

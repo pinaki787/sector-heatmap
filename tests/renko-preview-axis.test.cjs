@@ -5,7 +5,7 @@ test('price previews keep a stable axis time across ticks until a real brick arr
  const a=provisionalRenkoBricks(b,{timestamp:101,close:105},10,true);
  const c=provisionalRenkoBricks(b,{timestamp:150,close:108},10,true);
  assert.equal(a[0].time,c[0].time);assert.notEqual(a[0].progress,c[0].progress);
- const multi=provisionalRenkoBricks(b,{timestamp:151,close:125},10,true);assert.equal(a[0].time,multi[0].time);
+ const multi=provisionalRenkoBricks(b,{timestamp:151,close:125},10,true);assert.deepEqual(multi,[],'crossed full bricks must arrive as confirmed observations');
 });
 test('fractional price indicator times map onto displayed Renko times without phantom slots',()=>{
  const bricks=[{time:10.333,source_timestamp:10,indicator_timestamp:10},{time:20.833,source_timestamp:20,indicator_timestamp:20.5}];
@@ -19,11 +19,19 @@ test('preview viewport restoration runs after the chart rebuilds provisional axi
  const start=src.indexOf('    function paintBrickPreview('),end=src.indexOf("      el('brick-preview-status').hidden",start);
  let range={from:20,to:60};const frames=[],host={},scale={getVisibleLogicalRange:()=>({...range}),setVisibleLogicalRange:r=>{range={...r}},options:()=>({barSpacing:12})};
  const chart={uniformRenkoRows:[{time:100,source_timestamp:100,open:90,close:100,box:10}],timeScale:()=>scale,addCandlestickSeries:()=>({setData:()=>{}})};
- const context={chart,chartPreviewPolicy:require('../renko-supertrend.js').chartPreviewPolicy,boundChartContext:()=>({basis:'active'}),historyFailures:0,chartAnalysisReady:true,chartSessionSizing:null,el:id=>id==='chart'?host:id==='chart-view'?{value:'synthetic'}:{},lastRunner:{config:{renko_confirmation:'PRICE'}},statusFrame:{},provisionalRenkoBricks,requestAnimationFrame:fn=>frames.push(fn),Date,Number,Math};
+ const context={chart,chartPriceConfirmed:false,chartPreviewPolicy:require('../renko-supertrend.js').chartPreviewPolicy,boundChartContext:()=>({basis:'active'}),historyFailures:0,chartAnalysisReady:true,chartSessionSizing:null,el:id=>id==='chart'?host:id==='chart-view'?{value:'synthetic'}:{},lastRunner:{config:{renko_confirmation:'PRICE'}},statusFrame:{},provisionalRenkoBricks,requestAnimationFrame:fn=>frames.push(fn),Date,Number,Math};
  vm.createContext(context);vm.runInContext('let previewBrickSeries=null,previewBrickFillSeries=null,previewViewportVersion=0,previewAxisAnchor=null,previewAxisTimes=[];'+src.slice(start,end)+'}paintBrickPreview({timestamp:101,close:105});',context);
  assert.equal(frames.length,1);
  // Lightweight Charts applies its queued data-axis change on the browser frame.
  range={from:19,to:59};frames.shift()();frames.shift()();
  assert.deepEqual(range,{from:20,to:60});
  assert.equal(host.renkoViewportAudit[0].after.from,20);
+});
+
+test('price preview shows only an unfinished continuation or two-box reversal',()=>{
+ const b=[{time:100,source_timestamp:100,open:90,close:100}];
+ assert.deepEqual(provisionalRenkoBricks(b,{timestamp:101,close:110},10,true),[]);
+ assert.deepEqual(provisionalRenkoBricks(b,{timestamp:101,close:80},10,true),[]);
+ const remainder=provisionalRenkoBricks(b,{timestamp:101,close:85},10,true);
+ assert.equal(remainder.length,1);assert.equal(remainder[0].progress,.75);
 });

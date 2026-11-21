@@ -1,0 +1,12 @@
+# Dhan Holding Review open positions
+Dhan inventory now reads both /holdings and /positions for the selected saved account, even when demat holdings are empty. Nonzero long and short positions stay separate from holdings and delivery concentration totals. Native mapping uses exchange segment plus security ID. Missing mappings stay visible; foreign-account rows or invalid quantities reject the capture.
+
+Open positions show product, signed quantity, average entry, native quote when resolvable and broker unrealised P&L. They retain Review needed with explicit contract/hedge/expiry/stop review requirements; delivery swing rules are not applied to intraday positions or options.
+
+Saved output older than ten minutes is explicitly stale. Use Analyse holdings & positions after reconnecting an expired Dhan account.
+
+Validation: 21 remote unittest cases passed (tests.test_holdings_open_positions and tests.test_holdings_analysis); JavaScript syntax passed. A fresh selected-account read on 24 October 2026 was rejected by Dhan as an expired/invalid session. Current positions remain unverified. Updated root and selected Dhan account source snapshot. No service reload, runner start, order or protection mutation was performed. Backend activation requires an authorized reload of the serving dashboard process.
+
+Activation completed on 24 October 2026 after explicit user approval. The restart guard had mistaken reconciliation and proximity audit captures for current runners; regression coverage now excludes those audit namespaces while retaining checks on canonical state. All 28 tests pass. Dashboard restarted and hosted HTTP response recovered. All 30 canonical runner state file hashes remained unchanged; no runner start/stop or broker order was submitted. Dhan broker authentication remains expired, so current live inventory verification is pending reconnection.
+
+Follow-up: Dhan authentication recovered. PASHUPATI was unresolved because the compact native master has no ISIN fields. Matching now requires native security ID, exchange/segment and exact symbol when ISIN is absent; an available conflicting ISIN remains rejected. MTF funding is labelled and its costs/risks are explicit. A read-only broker review found 500 PASHUPATI shares, no nonzero open trading positions, and completed the daily/weekly review. 29 focused tests pass. Saved outputs restore after job history refresh.

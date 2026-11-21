@@ -296,7 +296,10 @@ class ServiceContractTests(unittest.TestCase):
             self.assertNotIn("series", snapshot["sectors"][0]["timeframe_states"]["daily"])
             self.assertTrue(detail["sector"]["timeframe_states"]["daily"]["series"])
             self.assertTrue(path.exists())
-            self.assertEqual(len(provider.calls), (len(SECTOR_DEFINITIONS) + 1) * 3)
+            self.assertEqual(len(provider.calls), (len(SECTOR_DEFINITIONS) + 1) * 3 + len({item.ticker for sector in SECTOR_DEFINITIONS for item in sector.constituents}))
+            self.assertTrue(all(row["breadth_score"] is not None for row in snapshot["sectors"]))
+            self.assertTrue(all(row["volume_score"] is not None for row in snapshot["sectors"]))
+            self.assertTrue(all(row["participation"]["coverage"]["available"] == row["participation"]["coverage"]["total"] for row in snapshot["sectors"]))
             self.assertEqual(snapshot["refresh_state"]["phase"], "READY")
 
     def test_failed_refresh_retains_last_valid_snapshot(self):

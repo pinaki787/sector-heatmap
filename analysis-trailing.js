@@ -34,7 +34,8 @@ function mount(origin){
    const option=new Option(({DHAN:'Dhan',FYERS:'FYERS',MOTILAL_OSWAL:'Motilal Oswal',DELTA_INDIA:'Delta India'}[a.broker]||a.broker)+' · '+a.label+(supported(a)?'':' — trailing unavailable'),a.id);
    option.disabled=!supported(a);select.add(option);
   }
-  select.value=[...select.options].some(o=>o.value===saved&&!o.disabled)?saved:supported(context)?context.id:'';
+  const shared=root.BrokerForms.initial?.(origin);
+  select.value=shared?(supported(context)&&context.id===shared?shared:''):supported(context)?context.id:[...select.options].some(o=>o.value===saved&&!o.disabled)?saved:'';
   review.disabled=!supported(account())||busy;
  }
  function source(a,job){
@@ -73,6 +74,7 @@ function mount(origin){
  }
  select.onchange=()=>{
   revision++;reportJob=null;rows.replaceChildren();panel.querySelector('[data-monitors]').replaceChildren();localStorage.setItem(key,select.value);
+  if(account()&&root.BrokerForms.onChange){root.BrokerForms.onChange(origin,account());return;}
   root.dispatchEvent(new CustomEvent('protection-account-change',{detail:{origin}}));
   review.disabled=!supported(account())||busy;note.textContent='Protection account changed. Review its current positions before enabling trailing.';restore();
  };

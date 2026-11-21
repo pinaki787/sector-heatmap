@@ -16,8 +16,8 @@ from .handoff_allocation import allocate, rank, Claims
 from .handoff_errors import PreflightRejected
 from .market_calendar import market_session, IST, REGULAR_OPEN
 
-DEFAULTS = dict(enabled=False, mode="MANUAL", interval_minutes=15, capital=100000,
-                top=5, option_lots=1, broker="FYERS", ai_provider="RULES_ONLY",
+DEFAULTS = dict(enabled=False, mode="AUTO", interval_minutes=15, capital=100000,
+                top=5, candidate_scope="MERGED", option_lots=1, broker="FYERS", ai_provider="RULES_ONLY",
                 daily_loss_limit=10000, cash_product="INTRADAY", amo=False, entries_halted=False, allow_duplicate_reports=False)
 
 def confirmed_notional(result):
@@ -70,10 +70,14 @@ class Schedule:
     def policy(self):
         with self.db() as db:return json.loads(db.execute("SELECT body FROM policy WHERE id=1").fetchone()[0])
     def configure(self,payload):
-        allowed={"enabled","mode","capital","ai_provider","cash_product","live_authorized","amo","resume_entries","allow_duplicate_reports"}
+        allowed={"enabled","mode","capital","ai_provider","cash_product","live_authorized","amo","resume_entries","allow_duplicate_reports","candidate_scope"}
         if set(payload)-allowed:
             raise ValueError("Unsupported scheduler setting.")
         p={**self.policy(),**payload,"broker":self.broker}
+        if p.get("candidate_scope","MERGED") not in {"MERGED","SCREENER_EQUITY"}:
+            raise ValueError("Choose merged candidates or Screener cash equities.")
+        if p.get("candidate_scope")=="SCREENER_EQUITY" and self.broker!="FYERS":
+            raise ValueError("Screener Auto currently requires the protected FYERS integration.")
         if type(p.get("allow_duplicate_reports",False)) is not bool:
             raise ValueError("Allow duplicate reports must be an explicit checkbox value.")
         if "resume_entries" in payload and type(payload["resume_entries"]) is not bool:
@@ -94,7 +98,7 @@ class Schedule:
             raise ValueError("Choose a supported saved analysis path and cash product.")
         if p.get("amo"):
             raise ValueError("Automatic AMO is not enabled on an unverified broker API path. No AMO was sent.")
-        if p["mode"]=="AUTO" and payload.get("enabled") is not False:
+        if p["mode"]=="AUTO" and p["enabled"]:
             if p.get("live_authorized") is not True:
                 raise ValueError("Explicit Live automation authorization is required.")
             if not self.execute or not self.auto_ready or self.auto_ready() is not True:
@@ -155,19 +159,23 @@ class Schedule:
                 db.execute("UPDATE deferred_sessions SET state=? WHERE substr(next_open,1,10)=? AND state=?",
                     ("REVALIDATING",slot[:10],"WAITING_FRESH_ANALYSIS"))
             try:
-                # A missing/failed broker read cannot masquerade as an empty account.
-                state=self.exposure(deepcopy(p))
-                if state.get("positions_verified") is not True or state.get("orders_verified") is not True:
-                    raise ValueError("Fresh broker positions and orders are required; analysis and entries withheld.")
-                self.claims.settle_confirmed(self.account_id,state["exposed_underlyings"])
+                # Publish analysis independently; account reads gate execution only.
                 started=self.clock()
                 rows,report=self.collect(deepcopy(p))
+                with self.db() as db:db.execute('UPDATE runs SET output=? WHERE slot=?',(json.dumps(dict(report=report,orders_submitted=0,execution_blocked=True)),slot))
+                state=self.exposure(deepcopy(p))
+                if state.get("positions_verified") is not True or state.get("orders_verified") is not True:
+                    raise ValueError("Ranked analysis retained; fresh selected-broker positions and orders are required before Live submission.")
+                self.claims.settle_confirmed(self.account_id,state["exposed_underlyings"])
+                if p.get("candidate_scope")=="SCREENER_EQUITY":
+                    from .screener_auto import eligible_rows
+                    rows=eligible_rows(rows,report)
                 if slot_at(now+timedelta(seconds=max(0,self.clock()-started)))!=slot:
                     with self.db() as db:db.execute('UPDATE runs SET output=? WHERE slot=?',(json.dumps(dict(report=report,orders_submitted=0)),slot))
                     raise ValueError('Analysis exceeded its fresh schedule slot; no historical result submitted.')
                 with self.db() as db:
                     seen={r[0] for r in db.execute("SELECT fingerprint FROM reported")}
-                newly_reported,ranking_exclusions=rank(rows,exposed=state["exposed_underlyings"],seen=set() if p.get("allow_duplicate_reports",False) else seen,top=5)
+                newly_reported,ranking_exclusions=rank(rows,exposed=[],seen=set(),top=5)
                 with self.claims.db() as db:
                     claimed={r[0] for r in db.execute("SELECT fingerprint FROM claims WHERE account=?",(self.account_id,))}
                 ranked,execution_exclusions=rank(rows,exposed=state["exposed_underlyings"],seen=claimed,top=5)
@@ -178,10 +186,11 @@ class Schedule:
                 # Publish analysis independently of execution outcome, including a
                 # later rejected/uncertain order. Only unseen ranked plans publish.
                 chosen={plan["fingerprint"] for plan in newly_reported}
-                report["cards"]=[plan["report_card"] for plan in newly_reported if plan.get("report_card")]
+                if not report.get("cards"):
+                    report["cards"]=[plan["report_card"] for plan in newly_reported if plan.get("report_card")]
                 report.setdefault("exclusions",[]).extend(ranking_exclusions)
                 output["recommendations"]=ranked
-                report["automation_selection"]=dict(top=5,mode=p["mode"],new_recommendations=len(chosen),allow_duplicate_reports=p.get("allow_duplicate_reports",False))
+                report["automation_selection"]=dict(top=5,mode=p["mode"],new_recommendations=len(chosen),allow_duplicate_reports=True)
                 with self.db() as db:
                     for fingerprint in chosen:
                         db.execute("INSERT OR IGNORE INTO reported VALUES(?,?,?)",(fingerprint,slot,self.clock()))
@@ -268,6 +277,10 @@ class Schedule:
                 return {"state":"COMPLETED",**output}
             except Exception as error:
                 message=str(error) if isinstance(error,ValueError) else "Analysis or broker integration unavailable; no automatic retry."
+                from .handoff_errors import IncompleteAnalysis
+                if isinstance(error,IncompleteAnalysis):
+                    saved=dict(report=error.report,account_id=self.account_id,broker=self.broker,mode=p['mode'],orders_submitted=0,execution_blocked=True)
+                    with self.db() as db:db.execute('UPDATE runs SET output=? WHERE slot=?',(json.dumps(saved),slot))
                 with self.db() as db:
                     db.execute("UPDATE runs SET state=?,updated=?,error=? WHERE slot=?",("REVIEW",self.clock(),message,slot))
                     db.execute("UPDATE deferred_sessions SET state=? WHERE substr(next_open,1,10)=? AND state=?",

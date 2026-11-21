@@ -1,3 +1,4 @@
+from time import time
 import unittest
 import os
 from pathlib import Path
@@ -58,6 +59,30 @@ class AuthenticationConfigTests(unittest.TestCase):
                 self.assertTrue(is_token_error({"code": code, "message": "request failed"}))
         self.assertTrue(is_token_error("invalid access token"))
         self.assertFalse(is_token_error({"code": 200, "s": "ok"}))
+
+
+    def test_subscription_errors_do_not_require_new_session(self):
+        feed = FyersLiveFeed("APP-200:valid-token")
+        with patch("sector_heatmap.market_data.data_ws.FyersDataSocket") as sdk, \
+                patch("sector_heatmap.market_data.configure_websocket_ca_bundle"), \
+                patch("sector_heatmap.market_data.Thread"):
+            feed.start()
+        callbacks = sdk.call_args.kwargs
+        callbacks["on_connect"]()
+        callbacks["on_error"]({"code": 11001, "type": "sub", "message": "Unable to convert instrument token"})
+        self.assertTrue(feed.connected)
+        self.assertFalse(feed.token_expired)
+
+        callbacks["on_error"]("connection timed out")
+        self.assertFalse(feed.connected)
+        callbacks["on_message"]({"symbol": "NSE:SBIN-EQ", "ltp": 800, "exch_feed_time": time()})
+        self.assertTrue(feed.connected)
+
+        callbacks["on_error"]({"code": -16, "message": "invalid access token"})
+        callbacks["on_error"]("connection closed")
+        callbacks["on_message"]({"symbol": "NSE:SBIN-EQ", "ltp": 800, "exch_feed_time": time()})
+        self.assertFalse(feed.connected)
+        self.assertTrue(feed.token_expired)
 
     def test_expired_feed_never_reports_connected(self):
         feed = FyersLiveFeed("APP-200:expired-token")

@@ -49,6 +49,13 @@ class Tests(unittest.TestCase):
   self.assertFalse(restarted.runner['running'])
  def test_catalog_pagination_and_cache(self):
   self.req.pages=True;c=self.b.catalog();self.assertTrue(c['complete']);self.assertEqual(len(c['instruments']),2);self.assertFalse(c['forex_supported']);calls=len(self.req.calls);self.b.catalog();self.assertEqual(calls,len(self.req.calls))
+ def test_live_post_only_contract_is_available_to_charts(self):
+  self.req.product['trading_status']='disrupted_post_only'
+  self.assertFalse(self.b.catalog()['instruments'])
+  self.assertEqual(self.b.catalog(chart=True)['instruments'][0]['symbol'], 'BTCUSD')
+  self.assertEqual(self.b.product('BTCUSD', chart=True)['trading_status'], 'disrupted_post_only')
+  with self.assertRaises(ValueError):
+   self.b.product('BTCUSD')
  def test_status_missing_and_live_fail_closed(self):
   s=self.b.status();self.assertEqual(s['credentials'],'MISSING');self.assertFalse(s['running']);self.assertFalse(s['live_available'])
   with self.assertRaises(PermissionError):self.b.submit({'mode':'LIVE','request_id':'missing-key-test'})

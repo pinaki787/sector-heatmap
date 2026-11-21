@@ -270,7 +270,7 @@ class SectorOutbox(Outbox):
 
     def settle(self):
         with self.db:
-            self.db.execute("UPDATE delivery SET state='EXPIRED',error='Snapshot delivery window elapsed' WHERE state IN ('PENDING','RETRY','PAUSED') AND event IN (SELECT id FROM events WHERE created<?)",(self.clock()-1800,))
+            self.db.execute("UPDATE delivery SET state='EXPIRED',error='Snapshot delivery window elapsed' WHERE state IN ('PENDING','RETRY','PAUSED') AND event IN (SELECT id FROM events WHERE created<? AND COALESCE(json_extract(payload,'$.completed_run'),0)=0)",(self.clock()-1800,))
             for key,event_id in self.db.execute("SELECT id,event_id FROM jobs WHERE event_id IS NOT NULL").fetchall():
                 states={r[0] for r in self.db.execute("SELECT state FROM delivery WHERE event=? AND state<>'ROUTED'",(event_id,))}
                 state="DELIVERED" if states=={"SENT"} else "REVIEW" if "REVIEW" in states else "EXPIRED" if "EXPIRED" in states else "PAUSED" if "PAUSED" in states else "SKIPPED" if "SKIPPED" in states else "RETRY" if "RETRY" in states else "QUEUED"

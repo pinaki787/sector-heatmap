@@ -237,6 +237,10 @@ def public_read_error(error):
     from .motilal_api import MotilalError
     if isinstance(error,MotilalError) and error.auth_required:
         return 'Motilal sign-in is required or expired; reconnect this owned account. No new entry.'
+    from .dhan_execution import DhanAPIError
+    if isinstance(error,DhanAPIError):return str(error)
+    if isinstance(error,RuntimeError) and str(error).startswith('Dhan service is temporarily unavailable.'):
+        return 'Dhan account API is temporarily unavailable; fresh positions, orders, funds and holdings cannot be verified. Auto Live entries withheld.'
     return str(error) if isinstance(error,ValueError) else 'Owned broker evidence unavailable.'
 
 

@@ -115,7 +115,12 @@ def handoff_public(report,now):
   review=review if review in {"WAIT","NO_TRADE","TRADE","BUY","SELL","AVOID","REVIEW"} else None
   rows.append(dict(review_decision=review,symbol=symbol(c.get("symbol") or c.get("name")),direction=direction,conviction=rating,status=state,kind="OPTION" if a.get("kind")=="LONG_OPTION" else "EQUITY",contract=symbol(contract) if contract else None,horizons=horizons))
  rows.sort(key=lambda x:-(x["conviction"] or 0))
- return dict(status=status,asof=asof,checked=report.get("generated_at"),rows=rows[:2],total=len(rows))
+ refresh=report.get("report_refresh") or {}
+ scheduled=report.get("scheduled_status") or {}
+ if scheduled.get("code") in {"DATA_UNAVAILABLE","RATE_LIMITED"}:empty_reason="Fresh analysis unavailable; no current recommendation verified."
+ elif not rows:empty_reason="Analysis completed with no eligible recommendations."
+ else:empty_reason=None
+ return dict(status=status,asof=asof,checked=report.get("generated_at"),coverage_message=scheduled.get("message") if scheduled.get("code")=="PARTIAL_ANALYSIS" else None,rows=rows[:2],total=len(rows),retained=refresh.get("retained") is True,refresh_checked=refresh.get("checked_at"),empty_reason=empty_reason)
 
 def public_snapshot(snapshot):
  """Re-project persisted records: unknown/private fields never reach rendering or caption."""
@@ -131,7 +136,9 @@ def caption(snapshot):
  out += ["MTF: "+str(aligns.count("FULL BULLISH ALIGNMENT"))+" full bullish / "+str(aligns.count("FULL BEARISH ALIGNMENT"))+" full bearish", "15m / 1H / Daily / Weekly; freshness + states in image."]
  out += ["","ANALYSIS HANDOFF",str(h.get("status") or "UNAVAILABLE"),"Bars: "+date(h.get("asof"))]
  for r in h.get("rows",[])[:2]:out.append(r["symbol"]+" · "+r["direction"]+" · "+status_label(r["status"]))
- if not h.get("rows"):out.append("No verified recommendation available.")
+ if h.get("coverage_message"):out.append(h["coverage_message"])
+ if h.get("retained"):out.append("Latest refresh unavailable; last completed analysis shown. Not current recommendations.")
+ if not h.get("rows"):out.append(h.get("empty_reason") or "Fresh Handoff analysis unavailable.")
  out += ["","Levels in image: proposed report-only plans.","Premiums are model estimates; not executable quotes.","Analysis only. No order or fill confirmation."]
  # ASCII/BMP-only report; UTF-16 and Python character counts both below Telegram 1024.
  return "\n".join(out)[:1000]

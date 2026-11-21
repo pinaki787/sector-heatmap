@@ -1,0 +1,39 @@
+
+// Dashboard belongs to this script. Private engine states are deliberately not inferred.
+bool showDashboard=input.bool(true,"Show dashboard",group="02 — CHART VISIBILITY",display=display.none)
+string dashboardMode=input.string("Compact","Dashboard mode",options=["Compact","Detailed","Off"],group="00 | RESEARCH DASHBOARD",display=display.none)
+string dashboardPosition=input.string("Top Right","Dashboard position",options=["Top Right","Top Left","Bottom Right","Bottom Left"],group="00 | RESEARCH DASHBOARD",display=display.none)
+string dashboardAnchor=switch dashboardPosition
+    "Top Left" => position.top_left
+    "Bottom Right" => position.bottom_right
+    "Bottom Left" => position.bottom_left
+    => position.top_right
+color dashboardBg=color.rgb(12,17,28)
+color dashboardAlt=color.rgb(23,32,46)
+color dashboardBorder=color.rgb(78,69,53)
+color dashboardLabel=color.rgb(165,179,197)
+color dashboardPending=color.rgb(245,181,80)
+var table researchDashboard=table.new(dashboardAnchor,2,11,bgcolor=dashboardBg,frame_color=color.rgb(187,156,91),frame_width=2,border_color=dashboardBorder,border_width=1)
+f_dashboardRow(int row,string caption,string value,color valueColor) =>
+    color bg=row%2==0 ? dashboardAlt : dashboardBg
+    table.cell(researchDashboard,0,row,caption,text_color=dashboardLabel,text_size=size.small,bgcolor=bg)
+    table.cell(researchDashboard,1,row,value,text_color=valueColor,text_size=size.small,bgcolor=bg)
+if barstate.islast
+    table.clear(researchDashboard,0,0,1,10)
+    table.set_position(researchDashboard,dashboardAnchor)
+    if showDashboard and dashboardMode!="Off"
+        table.cell(researchDashboard,0,0,"RED BAR V3",text_color=color.white,text_size=size.small,bgcolor=color.rgb(41,38,32))
+        table.cell(researchDashboard,1,0,"RESEARCH COPY",text_color=color.rgb(221,194,139),text_size=size.small,bgcolor=color.rgb(41,38,32))
+        table.cell(researchDashboard,0,1,"SHAKTI PARITY",text_color=color.white,text_size=size.small,bgcolor=dashboardBg)
+        table.cell(researchDashboard,1,1,"INCOMPLETE",text_color=dashboardPending,text_size=size.small,bgcolor=dashboardBg,tooltip="Private engine formulas have not been independently matched. No original-indicator dependency is used.")
+        f_dashboardRow(2,"MARKET REGIME","UNVERIFIED",dashboardPending)
+        f_dashboardRow(3,"RENKO TREND","UNVERIFIED",dashboardPending)
+        f_dashboardRow(4,"SHAKTI DIRECTION","UNVERIFIED",dashboardPending)
+        f_dashboardRow(5,"TREND ALIGNMENT","UNVERIFIED",dashboardPending)
+        if dashboardMode=="Detailed"
+            string structure=na(sh) or na(sl) ? "UNAVAILABLE" : close>sh ? "BULLISH" : close<sl ? "BEARISH" : "INSIDE BAND"
+            f_dashboardRow(6,"SMA STRUCTURE",structure,na(sh) or na(sl) ? dashboardLabel : sc)
+            f_dashboardRow(7,"VOLATILITY","UNVERIFIED",dashboardPending)
+            f_dashboardRow(8,"PRICE EFFICIENCY","UNVERIFIED",dashboardPending)
+            f_dashboardRow(9,"CHART TYPE",chart.is_renko ? "RENKO" : "CANDLES / OTHER",dashboardLabel)
+            f_dashboardRow(10,"STATUS",barstate.isconfirmed ? "CONFIRMED" : "FORMING",dashboardLabel)

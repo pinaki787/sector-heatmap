@@ -12,3 +12,32 @@
 #investment .investment-table{min-width:1500px}#investment .investment-table th:nth-child(1){width:10%}#investment .investment-table th:nth-child(2){width:15%}#investment .investment-table th:nth-child(3){width:10%}#investment .investment-table th:nth-child(4){width:10%}#investment .investment-table th:nth-child(5){width:12%}#investment .investment-table th:nth-child(6){width:14%}#investment .investment-table th:nth-child(7){width:22%}#investment .investment-table th:nth-child(8){width:7%}#investment .investment-table td:nth-child(7){min-width:0;max-width:none}
 
 #investment-detail small{display:block;margin-top:7px;line-height:1.6;color:#b6c8da}#investment-detail .investment-rs-state{font-weight:600;color:#6bdbc3}
+
+/* Research remains next to the symbol instead of off-screen evidence columns. */
+#investment .investment-table td:first-child,#investment .investment-table th:first-child{position:sticky;left:0;z-index:2;background:#102238;min-width:190px;max-width:235px;border-right:1px solid #36516b}
+#investment .investment-research-tools{display:grid;gap:7px;margin-top:12px;max-width:190px}
+#investment .investment-research-tools .button{display:block;width:100%;min-height:36px;margin:0!important;padding:8px 10px;background:#153a3b;color:#c6eee4;border:1px solid #4e817d;border-radius:7px;font-size:12px;font-weight:650;line-height:1.35;white-space:normal;box-shadow:none}
+
+#investment .investment-research-tools .investment-chart-action{background:#163149;border-color:#496a86;color:#d9e7f3}
+.investment-result-controls{display:flex;align-items:end;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.investment-result-controls .field{flex:1;min-width:135px}
+.investment-result-controls .field:last-child{min-width:205px}
+.investment-results-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.investment-pages{justify-content:flex-end;margin:14px 0 0}
+.investment-pages[hidden]{display:none}
+.investment-pick{display:inline-grid;place-items:center;min-width:36px;min-height:36px;vertical-align:middle;margin-left:-8px}
+.investment-select{width:18px;height:18px;accent-color:#6bb6ff;cursor:pointer}
+.investment-sr-only{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
+.investment-detail-head .investment-results-actions{justify-content:flex-end;margin:0}
+#investment-report-status:empty{display:none}
+@media(max-width:700px){
+ .investment-result-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+ .investment-result-controls .field:first-child{grid-column:1/-1}
+ .investment-result-controls .field:last-child{min-width:0}
+ .investment-result-controls input,.investment-result-controls select{width:100%;min-width:0}
+ .investment-detail-head{flex-wrap:wrap}
+}
+@media(max-width:390px){.investment-result-controls{grid-template-columns:1fr}}
+
+#investment-holding-account [hidden]{display:none}
+#investment-entry-status:empty{display:none}

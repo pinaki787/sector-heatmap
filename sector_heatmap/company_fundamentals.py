@@ -65,10 +65,23 @@ class Provider:
     if size>1500000:raise ValueError('Public filing response exceeds bounded size.')
     chunks.append(part)
    return b''.join(chunks).decode('utf-8')
+ def etf_evidence(self,symbol,underlying):
+  cached=getattr(self,'_etf_symbols',None)
+  if cached is None:
+   try:
+    response=json.loads(self.get('https://www.nseindia.com/api/etf'));rows=response.get('data')
+    if not isinstance(rows,list) or not rows or len(rows)>5000 or any(not isinstance(row,dict) or not isinstance(row.get('symbol'),str) or 'assets' not in row for row in rows):raise ValueError('ETF registry unavailable.')
+    cached={row['symbol'] for row in rows}
+   except Exception:cached=set()
+   self._etf_symbols=cached
+  if symbol not in cached:return None
+  return dict(schema='company-fundamentals/v1',status='NOT_APPLICABLE',instrument_type='ETF',symbol=underlying,as_of=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat(),provider='NSE ETF directory',reason='Exchange-traded fund: company revenue, EPS and corporate financial-health ratios do not apply. Fund NAV, tracking difference, expense ratio and underlying exposure require fund-specific review.',metrics={},missing=[],sources=[dict(title='NSE ETF directory',url='https://www.nseindia.com/api/etf')])
  def evidence(self,underlying):
   if not isinstance(underlying,str) or not re.fullmatch(r'NSE:[A-Z0-9&_-]+-EQ',underlying):
    return dict(status='NOT_APPLICABLE' if underlying and any(x in underlying for x in ('INDEX','MCX:','USD','BTC')) else 'UNAVAILABLE',symbol=underlying,reason='No verified NSE company identity; indices, commodities and derivatives are not assigned company ratios.',metrics={},relationship='INSUFFICIENT_EVIDENCE')
   symbol=underlying[4:-3]
+  etf=self.etf_evidence(symbol,underlying)
+  if etf:return etf
   with self.db() as d:r=d.execute('SELECT at,body FROM evidence WHERE symbol=?',(symbol,)).fetchone()
   if r and 0<=self.clock()-r[0]<(86400 if json.loads(r[1]).get('status') in ('AVAILABLE','PARTIAL') else 21600):return json.loads(r[1])
   now=datetime.fromtimestamp(self.clock(),timezone.utc);out=dict(schema='company-fundamentals/v1',symbol=underlying,as_of=now.isoformat(),provider='NSE company Integrated Filing',status='UNAVAILABLE',metrics={},sources=[],missing=['Growth comparison','Valuation/TTM P/E','Cash flow','Balance-sheet debt/equity'],relationship='INSUFFICIENT_EVIDENCE')

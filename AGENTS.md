@@ -34,3 +34,25 @@ User requested project-wide persistence of these details on 25 October 2026.
 - Staged size approximately 44.43 MB including raw and merged copies. Resumable downloader: `scripts/stage_nifty50_two_years_fyers.py` (run from project root with `PYTHONPATH=. .venv/bin/python scripts/stage_nifty50_two_years_fyers.py`).
 - Staging checks found zero duplicate timestamps, conflicting timestamps, invalid OHLC rows or within-session gap candidates. Off-hours candles were preserved and flagged (2024-11-01 and 2026-09-07/08/09); they are not all verified special sessions. Full exchange-calendar completeness and cross-timeframe price agreement were not verified. Do not present this as a certified gap-free market dataset.
 - Reuse this archive for relevant research before downloading again. Read its current manifest/audits and apply session filtering suitable to the task. Preserve raw evidence; never fabricate missing candles or silently overwrite the archive. A rerun uses cached raw responses and is not a freshness update.
+
+## Every new card must include visibility and user assignment
+
+Explicit standing project preference, 27 October 2026. Applies to EVERY new dashboard card/section, every broker/account source snapshot, and all future development.
+
+- Register every newly developed card/section in the left sidebar **Visibility for all users** controls and in per-user section assignment/permissions. Include the Investment card. These controls are part of the feature acceptance requirements.
+- Use the shared section registry and existing visibility/permission mechanisms. Enforce user assignment in both the dashboard and applicable backend API routes; hiding navigation alone is insufficient.
+- Preserve saved global visibility choices and existing per-user assignments when adding sections. Do not reset saved choices or silently grant new sections to regular users.
+- Verify the actual hosted controls, per-user assignment, and show/hide enforcement before claiming completion. Cover both globally hidden and unassigned states, including direct navigation. Report any deployment or runtime verification limitation explicitly.
+- Do not start/stop runners, change trading settings, or submit orders to test visibility. Existing authorization boundaries remain in force.
+
+
+## Navigation grouping must reflect purpose
+
+Standing user instruction, 27 October 2026: analytical and portfolio-review cards belong in the top analytical sidebar section with Sector Rotation, Analysis Handoff, Screener and Investment. Holdings Review must appear there, outside and before Parsers. Keep parser tools under Parsers. When mounting cards dynamically, insert them beside the appropriate section rather than appending them after unrelated group headings. Apply consistently to all users and hosted account sources, preserving permission keys, saved visibility choices and broker selections. Verify rendered DOM grouping and order on the hosted dashboard.
+
+
+## Shared Sector Pulse indicator availability
+
+Standing user instruction, 20 November 2026: Sector Pulse V1 and application-provided shared indicators must always be available across all application users and broker chart workspaces. Publish shared indicators through the application catalog; do not rely on an administrator's browser-local Pine library to distribute them. Preserve personal chart settings, private scripts and applied revisions. Making an updated revision available does not authorize silently replacing users' applied scripts.
+
+Every shared-indicator release must update the canonical source and all maintained owner assets together, retain a stable catalog identity, invalidate asset caches, and verify catalog revision identity across the maintained sources plus hosted desktop and narrow views. Include new workspaces in the same distribution mechanism. Do not call a release complete based only on one user's saved chart.

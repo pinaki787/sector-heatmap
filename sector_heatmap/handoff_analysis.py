@@ -27,21 +27,27 @@ def opportunities(payload, provider, analysis_runs):
     route = instrument_route(payload)
     mode = payload.get('mode') if payload.get('mode') in {'intraday', 'swing'} else 'intraday'
     collection = provider.candidates(mode)
-    if provider.broker=='FYERS':
+    if provider.broker in {'FYERS','DHAN'}:
         from .handoff_screener import merge
-        collection=merge(collection,getattr(provider,'sectors',None),getattr(provider,'folder',None),auto=payload.get('handoff_schedule_mode')=='AUTO',master=getattr(provider,'cash_master',None))
+        collection=merge(collection,getattr(provider,'sectors',None),getattr(provider,'folder',None),auto=payload.get('handoff_schedule_mode')=='AUTO',master=getattr(provider,'cash_master',None),state_dir=getattr(provider,'screener_state_dir',None))
     candidates = [candidate for candidate in collection.get('candidates', []) if candidate.get('kind') == 'stock']
     cards, exclusions = ([], [])
     exclusions.extend((collection.get("scope") or {}).get("screener",{}).get("exclusions",[]))
     exclusions.extend(dict(kind='SCREENER_SOURCE',name=x.get('label'),reason=x.get('reason')) for x in (collection.get('scope') or {}).get('screener',{}).get('source_failures',[]))
     broker = provider.broker
     token = 'provider:owned'
-    positions_response = {'netPositions': provider.positions()}
     client = None
     from .exposure_guard import exclude_exposure
-    orders = provider.orders()
-    candidates, duplicate_candidates = exclude_exposure(candidates, positions_response.get('netPositions') or (positions_response.get('data') or {}).get('netPositions') or [], orders)
-    exclusions.extend(({'candidate_key': candidate['key'], 'name': candidate.get('name'), 'kind': 'OPEN_POSITION', 'reason': 'An open selected-broker position or pending order already exists for this underlying; duplicate exposure is excluded.'} for candidate in duplicate_candidates))
+    exposure_verified=True
+    try:
+        positions=provider.positions()
+        orders=provider.orders()
+        _, duplicate_candidates = exclude_exposure(candidates,positions,orders)
+    except (RuntimeError,ValueError):
+        exposure_verified=False
+        duplicate_candidates=[]
+        exclusions.append(dict(kind='ACCOUNT_EVIDENCE',reason='Selected execution account exposure is unavailable. Analysis is advisory; protected Live submission remains blocked.'))
+    # Exposure gates order submission, never the analytical recommendation.
     level_plans = {}
     for candidate in candidates:
         from .persistent_jobs import checkpoint
@@ -110,9 +116,14 @@ def opportunities(payload, provider, analysis_runs):
     from .persistent_jobs import checkpoint
     from .exposure_guard import exclude_handoff_cards
     checkpoint('Rechecking selected-broker exposure before saving Handoff cards.')
-    final_positions, final_orders = (provider.positions(), provider.orders())
-    candidates, cards, newly_exposed = exclude_handoff_cards(candidates, cards, final_positions, final_orders)
-    exclusions.extend(({'candidate_key': candidate['key'], 'name': candidate.get('name'), 'kind': 'OPEN_POSITION', 'reason': 'An open position or pending order appeared during analysis; this underlying is excluded.'} for candidate in newly_exposed))
+    try:
+        final_positions, final_orders = (provider.positions(), provider.orders())
+        _, _, newly_exposed = exclude_handoff_cards(candidates, cards, final_positions, final_orders)
+        exposure_verified=True
+    except (RuntimeError,ValueError):
+        exposure_verified=False
+        newly_exposed=[]
+    # Retain findings even when exposure appears while analysis is running.
     analysis_id = secrets.token_urlsafe(12)
     from .handoff_levels import report_levels
     for report_card in cards:
@@ -125,6 +136,9 @@ def opportunities(payload, provider, analysis_runs):
     for index, card in enumerate(cards):
         card['card_id'] = f'card-{index + 1}'
     result = {'schema': 'sector-pulse-auto-analysis/v1', 'generated_at': datetime.now().astimezone().isoformat(), 'analysis_id': analysis_id, 'status': 'READY', 'decision_support_only': True, 'order_authority': 'NONE', 'analysis_recipient': recipient, 'instrument_route': route, 'ai_review': {'status': 'UNAVAILABLE', 'recipient': recipient, 'transmitted': False, 'message': f'{recipient.title()} is not connected to this local dashboard. The cards below are transparent rule-engine proposals, not {recipient.title()} output.', 'recommendation_source': 'LOCAL_EVIDENCE_RULE_ENGINE'}, 'risk_policy': policy, 'source': {'broker': broker, 'mode': mode, 'analysis_updated_at': collection.get('updated_at'), 'market_session': collection.get('market_session')}, 'scope': {**(collection.get('scope') or {}), 'option_scan_limit': 12}, 'candidates': candidates, 'cards': cards, 'exclusions': exclusions}
+    result['exposure_verified']=exposure_verified
+    result['execution_blocked']=not exposure_verified
+    if not exposure_verified:result['scheduled_status']=dict(code='EXECUTION_ACCOUNT_UNAVAILABLE',message='Ranked analysis available; selected execution account positions/orders must be verified before Live submission.')
     analysis_runs[analysis_id] = {'created_at': datetime.now().timestamp(), 'cards': {card['card_id']: card for card in cards}, 'policy': policy, 'provider': provider, 'account_id': provider.execution.account['id']}
     for old_id, run in list(analysis_runs.items()):
         if datetime.now().timestamp() - run['created_at'] > 900:

@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),test=require('node:test'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.env.CHART_WORKSPACE_SOURCE||'chart-workspace.js','utf8');
+const start=source.indexOf('  function pineLiveResetRequired('),end=source.indexOf('  function heikinTailUpdateAllowed(',start);assert.ok(start>=0);
+const reset=vm.runInNewContext(source.slice(start,end)+';pineLiveResetRequired',{sameCandle:(a,b)=>!!b&&['time','close','provisional'].every(k=>a[k]===b[k])});
+const previous=()=>[{time:1,close:10,provisional:false},{time:2,close:11,provisional:true}];
+test('HA confirmation only remains incremental',()=>{const p=previous(),b=structuredClone(p);b[1].provisional=false;assert.equal(reset(p,b,false,'Heikin Ashi'),false)});
+test('HA confirmation and append remain incremental',()=>{const p=previous(),b=structuredClone(p);b[1].provisional=false;b.push({time:3,close:12,provisional:true});assert.equal(reset(p,b,false,'Heikin Ashi'),false)});
+test('standard candle confirmation keeps replay',()=>{const p=previous(),b=structuredClone(p);b[1].provisional=false;assert.equal(reset(p,b,false,'Candles'),true)});
+test('Renko confirmation keeps replay',()=>{const p=previous(),b=structuredClone(p);b[1].provisional=false;assert.equal(reset(p,b,false,'Renko'),true)});
+test('reference history change keeps replay',()=>{const p=previous();assert.equal(reset(p,p,true,'Heikin Ashi'),true)});
+test('older OHLC correction keeps replay',()=>{const p=previous(),b=structuredClone(p);b[0].close=15;assert.equal(reset(p,b,false,'Heikin Ashi'),true)});
+test('older confirmation keeps replay',()=>{const p=previous();p[0].provisional=true;const b=structuredClone(p);b[0].provisional=false;assert.equal(reset(p,b,false,'Heikin Ashi'),true)});
+test('shrinking history keeps replay',()=>{const p=previous();assert.equal(reset(p,p.slice(0,1),false,'Heikin Ashi'),true)});

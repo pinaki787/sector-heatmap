@@ -17,11 +17,11 @@ test('Dhan uses native owned adapters while saved FYERS and Delta use private tr
  assert.equal(router.route('manual','/api/trade-ticket/preview',accounts[0]),'https://portal.example/broker-workspace/dhan-owner/api/trade-ticket/preview');
  assert.equal(router.route('band','https://outside.example/api/ema-band/runner',accounts[0]),'https://outside.example/api/ema-band/runner');
 });
-test('selecting broker in Band, RSI and KAMA stays on existing page without runner actions',()=>{
+test('selecting a broker establishes the shared account without runner actions',()=>{
  for(const kind of ['band','rsi','kama']){
   const {router,accounts,location,events,window}=setup();let calls=0;window.fetch=()=>{calls++;};
-  router.onChange(kind,accounts[0]);assert.equal(location.href,'https://portal.example/');
-  assert.equal(calls,0);assert.equal(events[0].detail.kind,kind);
+  router.onChange(kind,accounts[0]);const url=new URL(location.href);assert.equal(url.searchParams.get('brokerAccount'),'dhan-owner');
+  assert.equal(calls,0);assert.equal(url.searchParams.get(kind+'Account'),'dhan-owner');
  }
 });
 test('late old-account response is rejected after account selection changes',async()=>{
@@ -97,18 +97,19 @@ test('Dhan account data uses native endpoints without rewriting analysis as FYER
  assert.equal(router.route('account','/api/account',accounts[0]),'https://portal.example/api/dhan/account?account_id=dhan-owner');
 });
 
-test('positions selection preserves the independently selected Renko broker and instance',()=>{
+test('positions selection establishes the shared broker and clears stale Renko context',()=>{
  const {router,accounts,location}=setup();
  location.href='https://portal.example/?renkoAccount=dhan-owner&renkoBroker=DHAN&renkoInstance=retained';
  router.onChange('account',accounts[1]);
- const p=new URLSearchParams(location.search);
- assert.equal(p.get('renkoAccount'),'dhan-owner');
- assert.equal(p.get('renkoBroker'),'DHAN');
- assert.equal(p.get('renkoInstance'),'retained');
+ const p=new URL(location.href).searchParams;
+ assert.equal(p.get('renkoAccount'),null);
+ assert.equal(p.get('renkoBroker'),'FYERS');
+ assert.equal(p.get('renkoInstance'),null);
  assert.equal(p.get('accountAccount'),'fyers-owner');
+ assert.equal(p.get('brokerAccount'),'fyers-owner');
 });
 
-test('FYERS parser scopes every endpoint to the selected account and rejects absent or unsupported accounts',async()=>{
+test('Trade Parser preserves private FYERS transport and routes Dhan to its native account adapter',async()=>{
  const {router,controls,window,accounts}=setup();
  const calls=[];window.fetch=async url=>{calls.push(url);return {ok:true}};
  controls.set('parser-broker-account',{value:'account:fyers-owner'});
@@ -120,7 +121,7 @@ test('FYERS parser scopes every endpoint to the selected account and rejects abs
  }
  controls.set('parser-broker-account',{value:''});
  await assert.rejects(router.fetch('parser','/api/trade-recommendation/submit-direct'),/configured broker account/);
- assert.throws(()=>router.route('parser','/api/trade-recommendation/quote',accounts[0]),/FYERS account/);
+ assert.equal(router.route('parser','/api/trade-recommendation/quote',accounts[0]),'https://portal.example/api/broker-parser/dhan-owner/quote');
  assert.equal(calls.length,6);
 });
 
@@ -130,4 +131,38 @@ test('Renko initialization binds the same account as a sector-origin page',()=>{
  assert.equal(router.initial('renko'),'dhan-owner');
  location.search+='&renkoAccount=fyers-owner';
  assert.equal(router.initial('renko'),'fyers-owner');
+});
+test('Dhan Screener refresh and analysis use exact owned native routes; execution is gated',()=>{
+ const {router,accounts}=setup();
+ assert.equal(router.kind('/api/chartink/refresh'),'screener');
+ for(const action of ['refresh','analyze'])assert.equal(router.route('screener','/api/chartink/'+action,accounts[0]),'https://portal.example/api/dhan/chartink/'+action+'?account_id=dhan-owner');
+ assert.throws(()=>router.route('screener','/api/chartink/analyze-options',accounts[0]),/read-only/);
+ assert.equal(router.route('screener','/api/chartink/refresh',accounts[1]),'https://portal.example/broker-workspace/fyers-owner/api/chartink/refresh');
+});
+test('Dhan Screener sends selected account and refuses mismatched account payload',async()=>{
+ const {router,accounts,controls,window}=setup();
+ controls.set('screener-analysis-broker-account',{value:'account:dhan-owner',selectedOptions:[{dataset:{savedBrokerAccount:'dhan-owner'}}]});
+ let seen;window.fetch=async(url,options)=>{seen={url,body:JSON.parse(options.body)};return{ok:true}};
+ await router.fetch('screener','/api/chartink/refresh',{method:'POST',body:JSON.stringify({url:'https://chartink.com/screener/sample'})});
+ assert.equal(seen.body.account_id,'dhan-owner');assert.equal(seen.body.broker,'DHAN');
+ assert.match(seen.url,/\/api\/dhan\/chartink\/refresh\?account_id=dhan-owner$/);
+ await assert.rejects(router.fetch('screener','/api/chartink/analyze',{body:JSON.stringify({account_id:'someone-else'})}),/differs/);
+});
+test('native parser uses exact private Dhan and Delta account paths, never admin/shared routes',()=>{
+ const {router,accounts}=setup();
+ assert.equal(router.route('parser','/api/trade-recommendation/parse',accounts[0]),'https://portal.example/api/broker-parser/dhan-owner/parse');
+ assert.equal(router.route('parser','/api/trade-recommendation/quote',accounts[2]),'https://portal.example/api/broker-parser/delta-owner/quote');
+ assert.throws(()=>router.route('parser','https://other.example/api/trade-recommendation/parse',accounts[0]),/private parser route/);
+});
+test('parser and live feed recognize an explicit account in home context',()=>{
+ const {router,location}=setup();location.search='?brokerAccount=dhan-owner';
+ assert.equal(router.initial('parser'),'dhan-owner');assert.equal(router.initial('account'),'dhan-owner');
+});
+test('Dhan historical P&L runs through its owned durable report endpoint',async()=>{
+ const {router,accounts,controls,window}=setup();controls.set('live-feed-broker-account',{value:'account:dhan-owner'});
+ let captured;window.fetch=async(url,options)=>{captured={url,body:JSON.parse(options.body)};return{ok:true}};
+ assert.equal(router.kind('/api/account-reports/analyze'),'account');
+ await router.fetch('account','/api/account-reports/analyze',{method:'POST',body:JSON.stringify({period:'annual'})});
+ assert.equal(captured.url,'https://portal.example/api/dhan/account-reports/analyze?account_id=dhan-owner');assert.equal(captured.body.account_id,'dhan-owner');
+ await assert.rejects(router.fetch('account','/api/account-reports/analyze',{body:JSON.stringify({account_id:'other'})}),/differs/);
 });

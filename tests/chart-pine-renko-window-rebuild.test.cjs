@@ -1,0 +1,12 @@
+const fs=require('node:fs'),vm=require('node:vm'),test=require('node:test'),assert=require('node:assert/strict');
+const s=fs.readFileSync(process.env.CHART_WORKSPACE_SOURCE||'chart-workspace.js','utf8'),a=s.indexOf('  function renkoCalculationRestartRequired('),b=s.indexOf('  function heikinTailUpdateAllowed(',a);assert.ok(a>=0&&b>a);
+const restart=vm.runInNewContext(s.slice(a,b)+';renkoCalculationRestartRequired');
+const bar=(i,provisional=false)=>({time:i,sourceTime:Math.floor(i/2),open:i,high:i+1,low:i,close:i+1,provisional,volume:NaN});
+test('initial evaluation does not request an extra restart',()=>assert.equal(restart(undefined,[bar(1)]),false));
+test('stable confirmed history with appended brick retains calculation anchor',()=>assert.equal(restart([bar(1),bar(2)],[bar(1),bar(2),bar(3)]),false));
+test('projected tail replacement retains confirmed basis',()=>{const p=[bar(1),bar(2,true)],n=[bar(1),bar(3,true)];assert.equal(restart(p,n),false)});
+test('confirmed geometry revision restarts calculation window',()=>{const p=[bar(1),bar(2)],n=[bar(1),bar(2)];n[0].close+=.5;assert.equal(restart(p,n),true)});
+test('confirmed history removal restarts window',()=>assert.equal(restart([bar(1),bar(2)],[bar(2)]),true));
+test('source timestamp revision restarts window',()=>{const p=[bar(1)],n=[bar(1)];n[0].sourceTime=100;assert.equal(restart(p,n),true)});
+test('unavailable Renko volume does not trigger restart',()=>assert.equal(restart([bar(1)],[bar(1)]),false));
+test('replacement of all-projected first brick restarts window',()=>assert.equal(restart([bar(1,true)],[bar(2,true)]),true));

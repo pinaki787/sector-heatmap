@@ -28,7 +28,7 @@ class HoldingActions:
         if report.get('broker')!='DHAN' or report.get('account_id')!=e.account['id']:
             raise PermissionError('Recommendation belongs to another broker account.')
         stamp=datetime.fromisoformat(report['as_of']).timestamp()
-        if not 0<=now-stamp<=600:raise ValueError('Recommendation is older than ten minutes. Run a fresh portfolio review.')
+        if row.get('decision_source')!='USER_MANUAL' and not 0<=now-stamp<=600:raise ValueError('Recommendation is older than ten minutes. Run a fresh portfolio review.')
         if row.get('kind')!='DELIVERY_EQUITY' or row.get('action') not in ('TRAIL','EXIT','BOOK_PROFIT'):
             raise ValueError('This recommendation has no executable holding action.')
         meta=row.get('native_identity') or {}
@@ -132,8 +132,16 @@ class HoldingActions:
                     warnings=['A fixed protective stop may fail to fill after a gap.','Broker acknowledgement is not a fill or guaranteed protection.',
                               'Existing orders and strategy ownership are checked again at submission.'])
     def prepare(self,report,row,payload):
+        manual=payload.get('manual_action')
+        if manual is not None:
+            if manual not in ('EXIT','BOOK_PROFIT'):raise ValueError('Choose Exit or Book profit for a manual holding action.')
+            if row.get('kind')!='DELIVERY_EQUITY':raise ValueError('Manual exits currently support verified Dhan cash delivery holdings only.')
+            if manual=='EXIT' and decimal(payload.get('quantity',row['quantity']))!=decimal(row['quantity']):
+                raise ValueError('Exit closes the full reviewed holding. Use Book profit to choose a partial quantity.')
+            row={**row,'action':manual,'advisory_action':row.get('action'),'decision_source':'USER_MANUAL'}
         with self.lock:
             plan=self._plan(report,row,payload)
+            if manual:plan.update(decision_source='USER_MANUAL',advisory_action=row.get('advisory_action'))
             pid='HOLD-'+secrets.token_hex(8).upper()
             plan.update(preview_id=pid,confirmation_phrase='CONFIRM '+pid,expires_at=self.clock()+120)
             self.previews={k:v for k,v in self.previews.items() if v['plan']['expires_at']>self.clock()}

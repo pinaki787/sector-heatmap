@@ -1,0 +1,66 @@
+
+// Observational dashboard inference. These proxies are not the private engine formulas.
+bool showDashboard=input.bool(true,"Show dashboard",group="02 — CHART VISIBILITY",display=display.none)
+string dashboardMode=input.string("Compact","Dashboard mode",options=["Compact","Detailed","Off"],group="00 | RESEARCH DASHBOARD",display=display.none)
+string dashboardPosition=input.string("Top Right","Dashboard position",options=["Top Right","Top Left","Bottom Right","Bottom Left"],group="00 | RESEARCH DASHBOARD",display=display.none)
+string gInference="INFERRED ENGINE SETTINGS"
+bool inferDashboard=input.bool(true,"Use inferred dashboard states",group=gInference,tooltip="Approximate states calibrated against exported observations. This does not establish exact Shakti Prime parity.",display=display.none)
+int inferredPeriod=input.int(123,"Shakti Gaussian period (inferred)",minval=5,maxval=500,group=gInference,display=display.none)
+int inferredATR=input.int(14,"Trend proxy ATR length",minval=1,group=gInference,display=display.none)
+float inferredFactor=input.float(5.7,"Trend proxy factor (inferred)",minval=0.1,step=0.1,group=gInference,display=display.none)
+float inferredBeta=(1-math.cos(2*math.pi/inferredPeriod))/(math.pow(2.0,1.0/3.0)-1)
+float inferredAlpha=-inferredBeta+math.sqrt(inferredBeta*inferredBeta+2*inferredBeta)
+var float inferredG1=na
+var float inferredG2=na
+var float inferredG3=na
+inferredG1:=na(inferredG1[1]) ? close : inferredAlpha*close+(1-inferredAlpha)*inferredG1[1]
+inferredG2:=na(inferredG2[1]) ? inferredG1 : inferredAlpha*inferredG1+(1-inferredAlpha)*inferredG2[1]
+inferredG3:=na(inferredG3[1]) ? inferredG2 : inferredAlpha*inferredG2+(1-inferredAlpha)*inferredG3[1]
+[inferredTrendLine,inferredTrendDirection]=ta.supertrend(inferredFactor,inferredATR)
+int inferredRenko=na(inferredTrendDirection) ? 0 : inferredTrendDirection<0 ? 1 : -1
+int inferredShakti=na(inferredG3[1]) ? 0 : inferredG3>inferredG3[1] ? 1 : inferredG3<inferredG3[1] ? -1 : 0
+int inferredSMA=na(sh) or na(sl) ? 0 : close>sh ? 1 : close<sl ? -1 : 0
+int inferredBullVotes=(inferredRenko==1 ? 1 : 0)+(inferredShakti==1 ? 1 : 0)+(inferredSMA==1 ? 1 : 0)
+int inferredBearVotes=(inferredRenko==-1 ? 1 : 0)+(inferredShakti==-1 ? 1 : 0)+(inferredSMA==-1 ? 1 : 0)
+int inferredVoteCount=math.max(inferredBullVotes,inferredBearVotes)
+string inferredRegime=inferredBullVotes==3 ? "STRONG BULL" : inferredBearVotes==3 ? "STRONG BEAR" : inferredBullVotes==2 ? "BULLISH" : inferredBearVotes==2 ? "BEARISH" : "MIXED"
+bool inferenceReady=chart.is_standard and bar_index>=math.max(200,inferredPeriod*2) and not na(sh) and not na(sl) and not na(inferredTrendLine)
+bool inferenceActive=inferDashboard and inferenceReady
+string dashboardAnchor=switch dashboardPosition
+    "Top Left" => position.top_left
+    "Bottom Right" => position.bottom_right
+    "Bottom Left" => position.bottom_left
+    => position.top_right
+color dashboardBg=color.rgb(12,17,28)
+color dashboardAlt=color.rgb(23,32,46)
+color dashboardBorder=color.rgb(78,69,53)
+color dashboardLabel=color.rgb(165,179,197)
+color dashboardPending=color.rgb(245,181,80)
+color dashboardBull=color.rgb(104,219,166)
+color dashboardBear=color.rgb(245,108,117)
+f_inferredColor(int direction) =>
+    direction>0 ? dashboardBull : direction<0 ? dashboardBear : dashboardLabel
+var table researchDashboard=table.new(dashboardAnchor,2,11,bgcolor=dashboardBg,frame_color=color.rgb(187,156,91),frame_width=2,border_color=dashboardBorder,border_width=1)
+f_dashboardRow(int row,string caption,string value,color valueColor) =>
+    color bg=row%2==0 ? dashboardAlt : dashboardBg
+    table.cell(researchDashboard,0,row,caption,text_color=dashboardLabel,text_size=size.small,bgcolor=bg)
+    table.cell(researchDashboard,1,row,value,text_color=valueColor,text_size=size.small,bgcolor=bg)
+if barstate.islast
+    table.clear(researchDashboard,0,0,1,10)
+    table.set_position(researchDashboard,dashboardAnchor)
+    if showDashboard and dashboardMode!="Off"
+        table.cell(researchDashboard,0,0,"RED BAR V3",text_color=color.white,text_size=size.small,bgcolor=color.rgb(41,38,32))
+        table.cell(researchDashboard,1,0,"RESEARCH COPY",text_color=color.rgb(221,194,139),text_size=size.small,bgcolor=color.rgb(41,38,32))
+        table.cell(researchDashboard,0,1,"SHAKTI PARITY",text_color=color.white,text_size=size.small,bgcolor=dashboardBg)
+        table.cell(researchDashboard,1,1,inferenceActive ? "INFERRED" : inferDashboard ? "WARMING / UNSUPPORTED" : "UNVERIFIED",text_color=dashboardPending,text_size=size.small,bgcolor=dashboardBg,tooltip="Renko row: candle Supertrend proxy, not reconstructed Renko. Shakti row: three-stage Gaussian slope. Regime/alignment: three-direction vote hypothesis. Exact private formulas remain unmatched; no original-indicator dependency.")
+        f_dashboardRow(2,"MARKET REGIME",inferenceActive ? inferredRegime : "UNVERIFIED",inferenceActive ? f_inferredColor(inferredBullVotes-inferredBearVotes) : dashboardPending)
+        f_dashboardRow(3,"RENKO TREND",inferenceActive ? inferredRenko==1 ? "BULLISH" : inferredRenko==-1 ? "BEARISH" : "NEUTRAL" : "UNVERIFIED",inferenceActive ? f_inferredColor(inferredRenko) : dashboardPending)
+        f_dashboardRow(4,"SHAKTI DIRECTION",inferenceActive ? inferredShakti==1 ? "RISING" : inferredShakti==-1 ? "FALLING" : "FLAT" : "UNVERIFIED",inferenceActive ? f_inferredColor(inferredShakti) : dashboardPending)
+        f_dashboardRow(5,"TREND ALIGNMENT",inferenceActive ? str.tostring(inferredVoteCount)+"/3" : "UNVERIFIED",inferenceActive ? f_inferredColor(inferredBullVotes-inferredBearVotes) : dashboardPending)
+        if dashboardMode=="Detailed"
+            string structure=na(sh) or na(sl) ? "UNAVAILABLE" : close>sh ? "BULLISH" : close<sl ? "BEARISH" : "INSIDE BAND"
+            f_dashboardRow(6,"SMA STRUCTURE",structure,na(sh) or na(sl) ? dashboardLabel : sc)
+            f_dashboardRow(7,"VOLATILITY","UNVERIFIED",dashboardPending)
+            f_dashboardRow(8,"PRICE EFFICIENCY","UNVERIFIED",dashboardPending)
+            f_dashboardRow(9,"CHART TYPE",chart.is_renko ? "RENKO" : "CANDLES / OTHER",dashboardLabel)
+            f_dashboardRow(10,"STATUS",barstate.isconfirmed ? "CONFIRMED" : "FORMING",dashboardLabel)

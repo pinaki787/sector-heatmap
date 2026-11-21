@@ -86,10 +86,14 @@ def analyze(workspace,payload):
     for row in rows:row['plan']=plan(row,ticks.get(row['symbol'][4:-3]),now)
     found={r['symbol'][4:-3]:r for r in rows};eligible=[r for r in rows if r['eligible']]
     eligible.sort(key=lambda r:(not r['quality_pass'],r['rule_status']=='EXTENDED_WAIT',r['distance_pct']))
-    result['rows']=eligible[:100]
+    result['rows']=eligible
     result['audit']=[found.get(s,dict(symbol='NSE:'+s+'-EQ',rule_status='UNAVAILABLE',reasons=['Not in current NSE EQ master' if s not in eq else 'No provider data returned'],missing=[],checks=[],conviction='NOT_ESTABLISHED')) for s in p['symbols']]
     result['coverage']=dict(eq_universe=len(eq),screened=len(rows),missing=len(eq-set(found)),eligible=len(eligible),displayed=len(result['rows']),excluded=len(rows)-len(eligible),missing_symbols=sorted(eq-set(found)))
-    checkpoint('Rule results saved. Preparing requested review.',result)
+    result['sources'].append(dict(title='Yahoo Finance daily price history for annual returns and daily swings',url='https://finance.yahoo.com/'))
+    result['limitations'].append('Annual horizons use Yahoo Finance daily closes from the completed end session and the last close on or before the calendar anniversary, within seven days. Dividends are excluded. Corporate-action adjustment is provider-supplied and unverified.')
+    checkpoint('Rule results saved. Collecting daily swing and annual return history.',result)
+    from .investment_returns import enrich
+    enrich(workspace,result,now)
     if p['mode']=='CODEX_CHATGPT':
         from .company_fundamentals import Provider
         from .codex_handoff import review

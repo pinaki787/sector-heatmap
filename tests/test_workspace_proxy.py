@@ -119,7 +119,7 @@ window.fetch('https://other.example/api/read');assert.equal(seen.pop(),'https://
 '''.replace('PREFIX_TEST',repr(prefix))
         subprocess.run([node,'-e',script],check=True,capture_output=True)
 
-    def test_regular_user_main_document_requires_owned_dhan_and_renko_permission(self):
+    def test_regular_user_home_shell_does_not_grant_chart_or_runner_api_access(self):
         from sector_heatmap.local_dashboard_auth import LocalDashboardAuth
         from types import SimpleNamespace
         auth=LocalDashboardAuth.__new__(LocalDashboardAuth)
@@ -131,13 +131,19 @@ window.fetch('https://other.example/api/read');assert.equal(seen.pop(),'https://
         handler=Handler('/?renkoBroker=DHAN&brokerAccount='+self.aid)
         self.assertTrue(auth.check(handler))
         user['features']=[]
-        self.assertFalse(auth.check(handler));self.assertEqual(handler.status,303)
-        user['features']=['renko-supertrend']
-        handler=Handler('/')
-        self.assertFalse(auth.check(handler));self.assertEqual(handler.status,303)
-        handler=Handler('/api/ema-band/runner')
+        self.assertTrue(auth.check(handler))
+        self.assertTrue(auth.check(Handler('/')))
         auth.json=lambda h,status,value:h.send_response(status)
-        self.assertFalse(auth.check(handler));self.assertEqual(handler.status,403)
+        for path in ('/api/chart-workspace/history', '/api/ema-band/runner'):
+            with self.subTest(path=path):
+                handler=Handler(path)
+                self.assertFalse(auth.check(handler))
+                self.assertEqual(handler.status,403)
+        user['features']=['chart-workspace']
+        self.assertTrue(auth.check(Handler('/api/chart-workspace/history')))
+        handler=Handler('/api/ema-band/runner')
+        self.assertFalse(auth.check(handler))
+        self.assertEqual(handler.status,403)
 
     def test_unknown_and_traversal_account_paths_do_not_connect(self):
         for aid in ('../accounts','x'*32,'a'*31):

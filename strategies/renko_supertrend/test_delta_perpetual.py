@@ -50,7 +50,7 @@ class PerpetualBoundaryTests(unittest.TestCase):
         for route in ('FUTURES','CASH_EQUITY',''):
             with self.assertRaises(ValueError):configuration({**cfg,'execution_route':route})
         with self.assertRaises(ValueError):fyers_configuration({**cfg,'underlying':'NSE:TEST','execution_route':'DELTA_PERPETUAL'})
-        with self.assertRaises(ValueError):configuration({**cfg,'execution_route':'DELTA_PERPETUAL','sideways_enabled':True})
+        self.assertTrue(configuration({**cfg,'execution_route':'DELTA_PERPETUAL','sideways_enabled':True})['sideways_enabled'])  # Unknown funding retains conservative loss protection.
     def test_exact_paxg_route_without_options_and_signed_units(self):
         with tempfile.TemporaryDirectory() as tmp:
             b=Broker(SimpleNamespace(clock=lambda:NOW,product=lambda s:product(),catalog=lambda:dict(instruments=[product()])),Path(tmp))

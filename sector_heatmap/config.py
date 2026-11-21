@@ -1,6 +1,9 @@
 from pathlib import Path
 import json
 import os
+import re
+import sqlite3
+from contextlib import closing
 import tempfile
 import time
 from urllib.parse import urlparse
@@ -81,13 +84,15 @@ def _workspace_profile():
         return None
     if not registry or not account_id:
         raise ValueError('Incomplete account workspace context.')
-    from .workspaces import WorkspaceStore
-    store = WorkspaceStore(registry)
-    with store.db() as db:
-        row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+    if not re.fullmatch(r'[a-f0-9]{32}', account_id):
+        raise ValueError('Invalid workspace identity.')
+    registry = Path(registry).resolve()
+    with closing(sqlite3.connect(registry.as_uri() + '?mode=ro', uri=True, timeout=15)) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute('SELECT broker FROM accounts WHERE id=?', (account_id,)).fetchone()
     if not row:
         raise ValueError('Unknown broker account workspace.')
-    folder = store.folder(dict(row)).resolve()
+    folder = (registry.parent / 'accounts' / account_id).resolve()
     if ROOT.resolve() != folder / 'source':
         raise ValueError('Broker configuration must be loaded from its own account workspace.')
     if row['broker'] != 'FYERS':

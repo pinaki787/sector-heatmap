@@ -117,15 +117,36 @@ def confirmed_export(state, include_rows=False):
     return result
 
 
-def publish_confirmed(runner):
-    state = runner.state
+def publish_confirmed(runner, *, engine=None, config=None, immutable_rows=False):
+    state = runner.state if engine is None else {
+        'run_id':runner.state.get('run_id'),'renko_engine':engine,
+        'config':config if config is not None else runner.state.get('config')}
     engine = state.get('renko_engine')
     if not engine or not state.get('run_id'):
         return
     key = (state['run_id'], id(engine), json.dumps(state.get('config'),sort_keys=True))
     if key == getattr(runner,'_published_confirmed_key',None):
         return
-    exported = confirmed_export(state, include_rows=True)
+    if immutable_rows:
+        # Ordered-price produce() retains old row objects without mutating them.
+        # Cache only explicitly immutable rows, within this runner/run.
+        # Strong references prevent ID reuse; retention is the current window.
+        # bind_confirmed() still deep-copies publications for every reader.
+        previous = getattr(runner, '_confirmed_row_cache', None)
+        prior = previous[1] if previous and previous[0] == state['run_id'] else {}
+        current = {}
+        rows = []
+        for row in engine.get('rows', []):
+            saved = prior.get(id(row))
+            frozen = saved[1] if saved and saved[0] is row else deepcopy(row)
+            current[id(row)] = (row, frozen)
+            rows.append(frozen)
+        exported = confirmed_export(state, include_rows=False)
+        exported['rows'] = rows
+        runner._confirmed_row_cache = (state['run_id'], current)
+    else:
+        runner._confirmed_row_cache = None
+        exported = confirmed_export(state, include_rows=True)
     exported['_engine'] = deepcopy({k:engine[k] for k in ('state','last','anchor')})
     exported['_config'] = deepcopy(state.get('config') or {})
     # The immutable publication is replaced atomically, never edited by readers.

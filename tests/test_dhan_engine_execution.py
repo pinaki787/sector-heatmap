@@ -17,7 +17,7 @@ class NativeEngineExecutionTests(unittest.TestCase):
         runner.state['renko_engine']={'anchor':{},'last':{'host_atr':1}}
         position=dict(symbol='NSE_FNO:1',direction='BULLISH',entry_side=1,lot_size=25,quantity=25,
             quantity_multiplier=1,tick_size=.05,entry_price=None,opened_at=None,entry_signal_timestamp=self.now-60)
-        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100)):
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100,ema30=100)):
             runner.submit(self.order,position,'RENKO_ENGINE_ENTRY')
         pending=runner.state['pending']
         self.assertIsNotNone(pending)

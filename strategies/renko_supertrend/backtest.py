@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from sector_heatmap.persistent_jobs import checkpoint
 from .signals import Engine
-from . import exit_indicators,market_structure,mtf_rsi,ema_proximity,trailing_stop,sideways,risk,zone_target
+from . import exit_indicators,market_structure,mtf_rsi,ema_proximity,trailing_stop,sideways,risk,zone_target,calibrated,zone_entry
 from .backtest_data import IST,in_session,session
 from .runner import configuration
 from .historical_lots import checked_lot
@@ -80,11 +80,11 @@ def run(request,source,now=None):
     execution_rows,execution_coverage=source.underlying(symbol,warm_first,last,1)
     execution_visible=[r for r in execution_rows if str(first)<=datetime.fromtimestamp(r['timestamp'],IST).date().isoformat()<=str(last)]
     if not execution_visible:raise ValueError('One-minute underlying history is required for session exits and synchronized premium execution.')
-    config=dict(c,chart_entry_guards=True,chart_zone_target_enabled=False)
+    config=dict(c,chart_entry_guards=True,chart_zone_target_enabled=False,chart_zone_entry_filter=False)
     if c.get('higher_timeframe_enabled'):config['_chart_higher_rows']=source.underlying(symbol,warm_first,last,FRAMES[c['supertrend_timeframe']])[0]
     if mtf_rsi.enabled(c):config['_chart_rsi_rows']={slot:source.underlying(symbol,warm_first,last,FRAMES[c[f'rsi_htf_{slot}_timeframe']])[0] for slot in mtf_rsi.SLOTS if c.get(f'rsi_htf_{slot}_enabled')}
     zones=[];timeline=[];zone_times=[]
-    if c.get('zone_target_enabled'):
+    if c.get('zone_target_enabled') or c.get('zone_entry_enabled'):
         zones=source.underlying(symbol,warm_first,last,5)[0];zone_target.zones(zones,timeline);zone_times=[r['timestamp']+300 for r in zones]
     issues=[];audit=[];trades=[];position=None;pending=None;used=0;losses={};lock=None;exposure=None;engine=Engine(config,tick_size=float(request.get('host_tick_size') or .05));exit_ema=None;prior_gap=None
     limitations=['Historical candle-price simulation, not executable bid/ask or confirmed fills.','Completed signal at bar close; entry and selected-indicator exit at the next exact host-bar open.','ATM means nearest strike in the nearest broker-reported unexpired expiry; lower strike breaks ties.','Lot size requires exact-contract broker-master evidence for the trade date; snapshots are never projected across dates.','The exact entry contract is retained until exit. No rolling ATM, synthetic option valuation or underlying P&L substitute.','Captured trade limit applies across this backtest run, matching the runner.','NSE/BSE regular sessions and the 15:10 strategy cutoff are enforced; nonregular sessions are excluded.','Only the 2026 NSE holiday calendar is currently verified; earlier years use broker-returned weekdays.']
@@ -92,6 +92,7 @@ def run(request,source,now=None):
     if c.get('supertrend_continuation_enabled'):issues.append(dict(type='UNSUPPORTED_CONTINUATION',message='The selected runtime continuation policy is not available to this historical replay.'))
     if not symbol.startswith(('NSE:','BSE:')):issues.append(dict(type='UNVERIFIED_HISTORICAL_SESSION',message='This research adapter currently verifies NSE/BSE regular intraday sessions only. MCX seasonal sessions and continuous-market execution require a verified historical calendar before performance can be reported.'))
     if c.get('execution_route')=='CASH_EQUITY' and c.get('cash_product')=='CNC':issues.append(dict(type='UNVERIFIED_CARRY_FORWARD',message='Cash carry-forward requires a verified overnight corporate-action and cost policy. This replay supports regular intraday exposure only; the selected holding policy was not silently changed.'))
+    if c.get('calibrated_enabled'):limitations.append('Calibrated ATR limits freeze from entry underlying price and completed ATR; historical trigger checks sample one-minute opens, not guaranteed intraminute option fills.')
     blocked=bool(issues)
     if c.get('trailing_enabled') or c.get('spot_target') is not None or c.get('spot_stop') is not None:limitations.append('Hard boundaries and trailing are sampled at historical one-minute opens using synchronized real premiums; intervening tick paths and slippage are unknown.')
     def problem(kind,at,message,**kw):
@@ -100,7 +101,7 @@ def run(request,source,now=None):
         nonlocal position,lock,exposure,exit_ema
         p=position;at=bar['timestamp'];q=p['quotes'].get(at)
         if q is None or q.get('volume',0)<=0:problem('MISSING_HELD_CONTRACT',at,'Exact held-contract exit premium is missing.',contract=p['contract']['symbol']);return False
-        trade=dict(entry_at=p['entry_at'],exit_at=at,direction=p['direction'],underlying=symbol,underlying_entry=p['spot'],underlying_exit=bar['open'],contract=p['contract']['symbol'],strike=p['contract'].get('strike'),expiry=p['contract'].get('expiry'),option_type=p['contract'].get('option_type'),quantity=p['quantity'],lot_size=p['lot_size'],lot_size_source=p['lot_size_source'],lot_size_provenance=p.get('lot_size_provenance'),lot_size_gap=p.get('lot_size_gap'),entry_premium=p['entry_premium'],exit_premium=q['open'],gross_pnl=None,charges=None,net_pnl=None,exit_reason=why,entry_indicators=p['signal'],holding_minutes=(at-p['entry_at'])/60)
+        trade=dict(entry_at=p['entry_at'],exit_at=at,direction=p['direction'],underlying=symbol,underlying_entry=p['spot'],underlying_exit=bar['open'],contract=p['contract']['symbol'],strike=p['contract'].get('strike'),expiry=p['contract'].get('expiry'),option_type=p['contract'].get('option_type'),quantity=p['quantity'],lot_size=p['lot_size'],lot_size_source=p['lot_size_source'],lot_size_provenance=p.get('lot_size_provenance'),lot_size_gap=p.get('lot_size_gap'),entry_premium=p['entry_premium'],exit_premium=q['open'],gross_pnl=None,charges=None,net_pnl=None,exit_reason=why,entry_indicators=p['signal'],holding_minutes=(at-p['entry_at'])/60,calibrated_levels=p.get('calibrated_levels'))
         if p['quantity'] is not None:
             try:
                 simulated=framework_trade(p['history'],p['entry_at'],at,p['quantity'],p['direction'] if c['execution_route']=='CASH_EQUITY' else 'BULLISH');trade.update({k:v for k,v in simulated.items() if k!='curve'})
@@ -153,7 +154,7 @@ def run(request,source,now=None):
             if previous_execution is not None and position['day']==day and at-previous_execution!=60:
                 problem('MISSING_EXPOSURE_HISTORY',at,'Missing one-minute underlying data during held exposure; replay stopped.');break
             forced=deadline is not None and minute>=deadline
-            why='SESSION_CUTOFF' if forced else risk.hard_exit(bar['open'],position['direction'],c)
+            why='SESSION_CUTOFF' if forced else risk.hard_exit(bar['open'],position['direction'],calibrated.effective(c,position))
             if not why and c.get('trailing_enabled'):
                 price=q['open'] if c.get('trailing_basis')=='OPTION_PREMIUM_PERCENT' else bar['open']
                 position['trail'],hit=trailing_stop.advance(position.get('trail'),c,position['direction'],price,at,at,at,position['entry_at'])
@@ -168,6 +169,14 @@ def run(request,source,now=None):
             if at==plan['expected'] and minute<deadline and not lock and used<c['max_trades'] and not blocked:
                 try:
                     sig=plan['signal'];fast=sig['ema10']+2/(c['ema_fast_length']+1)*(bar['open']-sig['ema10']);slow=sig['ema30']+2/(c['ema_slow_length']+1)*(bar['open']-sig['ema30'])
+                    if c.get('zone_entry_enabled'):
+                        j=bisect.bisect_right(zone_times,at)-1
+                        if j<15:raise ValueError('Completed zone history warmup unavailable.')
+                        decision=zone_entry.check_known(timeline[j],c,sig['direction'],bar['open'],sig['host_atr'])
+                        if not decision['allowed']:
+                            if c.get('zone_entry_rearm',True):engine.state['ema_qualified']=None
+                            raise ValueError(decision['reason'])
+                        sig['zone_entry_filter']=decision
                     ema_proximity.check(c,bar['open'],fast,sig['host_atr'],dict(sig,preflight_ema30=slow),sig['direction'])
                     why=risk.hard_exit(bar['open'],sig['direction'],c)
                     if why:raise ValueError('Entry already breaches selected hard boundary.')
@@ -183,7 +192,7 @@ def run(request,source,now=None):
                     cost=q['open']*qty if qty else None
                     realized=sum(t['net_pnl'] or 0 for t in trades)
                     if cost is not None and (cost>capital+realized or c.get('max_premium') is not None and cost>c['max_premium'] or c.get('daily_budget') is not None and cost+losses.get(day,0)>c['daily_budget']):raise ValueError('Captured capital/premium/daily budget blocks this research entry.')
-                    position=dict(contract=contract,history=history,quotes=quotes,quantity=qty,lot_size=lot,lot_size_source=lot_source,lot_size_provenance=contract.get('lot_size_provenance'),lot_size_gap=contract.get('lot_size_gap'),entry_at=at,spot=bar['open'],entry_premium=q['open'],direction=sig['direction'],signal={k:sig.get(k) for k in ('timestamp','direction','close','ema10','ema30','ema100','rsi14','rsi14_slope','adx','entry_diagnostic')},day=day);used+=1
+                    position=dict(contract=contract,history=history,quotes=quotes,quantity=qty,lot_size=lot,lot_size_source=lot_source,lot_size_provenance=contract.get('lot_size_provenance'),lot_size_gap=contract.get('lot_size_gap'),entry_at=at,spot=bar['open'],entry_premium=q['open'],direction=sig['direction'],signal={k:sig.get(k) for k in ('timestamp','direction','close','ema10','ema30','ema100','rsi14','rsi14_slope','adx','entry_diagnostic','zone_entry_filter')},day=day);position['calibrated_levels']=calibrated.plan(c,bar['open'],sig.get('host_atr'),sig['direction'],signal_at=sig['timestamp']);used+=1
                 except ValueError as error:
                     text=str(error);kind='ENTRY_FILTER' if any(x in text for x in ('proximity','too far','Momentum','capital/','boundary','CNC')) else 'MISSING_OPTION_EVIDENCE'
                     audit.append(dict(at=at,type=kind,reason=text,underlying_price=bar['open'],direction=plan['signal']['direction']))

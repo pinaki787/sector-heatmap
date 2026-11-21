@@ -1,0 +1,75 @@
+//@version=5
+indicator("Shadow Candle", overlay=true, max_lines_count=500, max_labels_count=500)
+
+daysBack = input.int(3, "Days to show", minval=1, maxval=20)
+r1 = input.float(0.46, "Fib level 1")
+r2 = input.float(0.50, "Fib level 2")
+r3 = input.float(0.56, "Fib level 3")
+c1 = input.color(color.orange, "Colour 46%")
+c2 = input.color(color.yellow, "Colour 50%")
+c3 = input.color(color.aqua, "Colour 56%")
+lblCol = input.color(color.white, "Label background")
+lblSize = input.string(size.normal, "Label size", options=[size.small, size.normal, size.large])
+lblGap = input.int(15, "Label spacing between days (bars)", minval=1)
+
+isMcx = str.contains(syminfo.prefix, "MCX")
+refTF = isMcx ? "840" : "360"
+
+shortCandle() =>
+    var float h = na
+    var float l = na
+    var int t = na
+    newDay = ta.change(time("D")) != 0
+    if newDay
+        h := high[1]
+        l := low[1]
+        t := time[1]
+    [h, l, t]
+
+[sH, sL, sT] = request.security(syminfo.tickerid, refTF, shortCandle(), lookahead=barmerge.lookahead_off)
+
+var array<line> lns = array.new<line>()
+var array<label> dayLbls = array.new<label>()
+var array<line> liveLines = array.new<line>()
+var label liveLbl = na
+
+lv(float ratio) => sL + (sH - sL) * ratio
+
+dayText() => str.format_time(sT, "dd-MMM", "Asia/Kolkata") + "   " + str.tostring(r3 * 100, "#.##") + "%: " + str.tostring(lv(r3), format.mintick) + ",  " + str.tostring(r2 * 100, "#.##") + "%: " + str.tostring(lv(r2), format.mintick) + ",  " + str.tostring(r1 * 100, "#.##") + "%: " + str.tostring(lv(r1), format.mintick)
+
+drawLine(float ratio, color col) =>
+    ln = line.new(sT, lv(ratio), time, lv(ratio), xloc=xloc.bar_time, color=col, width=2)
+    array.push(lns, ln)
+    array.push(liveLines, ln)
+
+newSet = not na(sT) and (na(sT[1]) or sT != sT[1])
+if newSet
+    array.clear(liveLines)
+    drawLine(r1, c1)
+    drawLine(r2, c2)
+    drawLine(r3, c3)
+    liveLbl := label.new(time, lv(r2), dayText(), xloc=xloc.bar_time, style=label.style_label_left, color=lblCol, textcolor=color.black, size=lblSize)
+    array.push(dayLbls, liveLbl)
+    while array.size(lns) > daysBack * 3
+        line.delete(array.shift(lns))
+    while array.size(dayLbls) > daysBack
+        label.delete(array.shift(dayLbls))
+
+if array.size(liveLines) == 3
+    line.set_y1(array.get(liveLines, 0), lv(r1))
+    line.set_y2(array.get(liveLines, 0), lv(r1))
+    line.set_y1(array.get(liveLines, 1), lv(r2))
+    line.set_y2(array.get(liveLines, 1), lv(r2))
+    line.set_y1(array.get(liveLines, 2), lv(r3))
+    line.set_y2(array.get(liveLines, 2), lv(r3))
+    label.set_y(liveLbl, lv(r2))
+    label.set_text(liveLbl, dayText())
+
+barMs = timeframe.in_seconds() * 1000
+if array.size(lns) > 0
+    for j = 0 to array.size(lns) - 1
+        line.set_x2(array.get(lns, j), time)
+nL = array.size(dayLbls)
+if nL > 0
+    for k = 0 to nL - 1
+        label.set_x(array.get(dayLbls, k), time + k * lblGap * barMs)

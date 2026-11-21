@@ -1,0 +1,19 @@
+[Unit]
+Description=Sector Pulse external Delta dashboard recovery (no live rearm)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/trading/sector-heatmap
+ExecStart=/home/trading/sector-heatmap/.venv/bin/python -m sector_heatmap.workspace_supervisor --registry /home/trading/sector-heatmap/.private/dashboard-login/registry.sqlite3 --root /home/trading/sector-heatmap --account a6ef4c9bcecd21d54c4a07e2b9b137a7 --portal-port 8080
+Restart=on-failure
+RestartSec=5
+# Supervisor maintenance must never terminate a recovered broker dashboard.
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target

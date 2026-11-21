@@ -39,7 +39,9 @@ def balance(state,rate=1):
 def preflight(state,order,contract,quote,rate=1):
     if state.get('config',{}).get('mode')!='PAPER':raise ValueError('Virtual capital is Paper only.')
     bid,ask=quote.get('bid'),quote.get('ask')
-    if not all(isinstance(x,(int,float)) and math.isfinite(x) and x>0 for x in (bid,ask)) or ask<bid or (ask-bid)/ask>.03:raise ValueError('Fresh executable Paper quote and spread within 3% required.')
+    if not all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) and x>0 for x in (bid,ask)) or ask<bid:raise ValueError('Usable positive non-crossed Paper bid/ask quote required.')
+    from .spread_policy import enabled
+    if enabled(state.get('config',{})) and (ask-bid)/ask>.03:raise ValueError('Executable quote spread exceeds the enabled 3% limit.')
     funds=balance(state,rate)
     commitment=amount(contract,order['qty'],ask)
     fee_rate=funds['fee_rate']

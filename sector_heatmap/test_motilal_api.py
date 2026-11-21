@@ -74,6 +74,19 @@ class FeedTests(unittest.TestCase):
         return header+body
     def test_login_and_subscription_packet_lengths(self):
         self.assertEqual(len(login_packet('CLIENT1')),114);self.assertEqual(len(subscription_packet('NSEFO',35000)),10)
+    def test_ncdex_market_data_keeps_its_native_symbol(self):
+        token = 35000  # Same token as the NSEFO subscription in setUp.
+        self.assertEqual(subscription_packet('NCDEX', token), struct.pack('<cHcciB', b'D', 7, b'D', b'D', token, 1))
+        self.assertEqual(subscription_packet('NCDEX', token, False)[-1], 0)
+        observed = []
+        self.feed.on_tick = observed.append
+        self.feed.subscribe('NCDEX', token)
+        frame = self.packet(kind=b'A')
+        self.feed.ingest(b'D' + frame[1:])
+        self.assertEqual([(tick['symbol'], tick['ltp']) for tick in observed], [('MO:NCDEX:35000', 100)])
+        with self.assertRaises(ValueError):
+            self.feed.price('NSEFO', token)
+
     def test_fragmented_packet_retains_exact_depth(self):
         packet=self.packet();self.feed.ingest(packet[:12]);self.feed.ingest(packet[12:])
         quote=self.feed.quote('NSEFO',35000);self.assertEqual(quote['bid'],100);self.assertEqual(quote['ask'],100.5)
@@ -192,3 +205,26 @@ class ConnectionGenerationTests(unittest.TestCase):
         feed.subscribe('NSE',1);feed.connected=True
         feed.ingest(self.packet(now,price=101));feed.ingest(self.packet(now-5,price=99))
         self.assertEqual(feed.quotes[(b'N',1)]['ltp'],101)
+
+
+class NativeBookTests(unittest.TestCase):
+    def test_only_explicit_success_with_no_records_is_an_empty_book(self):
+        from .motilal_service import Service
+
+        service = object.__new__(Service)
+        service.ready = Mock()
+        service.client = Mock()
+        service.account = {"account_ref": "CLIENT1", "id": "fixture"}
+        empty = dict(status="SUCCESS", errorcode="", message="No Records Found", data=None, _timing={})
+        service.client.request.return_value = empty
+        for operation in ("positions", "orders"):
+            self.assertEqual(service.book(operation)["data"], [])
+        for invalid in (
+            {**empty, "message": "Report unavailable"},
+            {**empty, "errorcode": "FAILED"},
+            {**empty, "data": [{"clientcode": "OTHER"}]},
+            {k: v for k, v in empty.items() if k != "data"},
+        ):
+            service.client.request.return_value = invalid
+            with self.assertRaises(PermissionError):
+                service.book("positions")

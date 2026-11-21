@@ -10,9 +10,10 @@ function connectionSelection({workspace,accounts=[],selectedAccount=null,selecte
 }
 if(typeof window==='undefined'&&typeof module!=='undefined'&&module.exports){module.exports={connectionSelection};return;}
 let key='',version=0,last=0,connectionContext=null,contextRequest=null;
-let dhanPending='';
+let dhanPending='',lastSelectedAccountId='';
 const reauthShown=new Set();
 function offerDhanReauthentication(account){
+ if(document.querySelector('#sp-chart-workspace[open], #chart-workspace.view.active'))return;
  if(reauthShown.has(account.id)||document.visibilityState==='hidden')return;
  reauthShown.add(account.id);
  const dialog=document.createElement('dialog');
@@ -25,14 +26,28 @@ function offerDhanReauthentication(account){
 
 function selection(){
  const context=root.BrokerForms?.context?.()||root.SectorPulseWorkspace||connectionContext;
- if(context?.workspace?.id)return connectionSelection({workspace:context.workspace,accounts:root.BrokerForms?.accounts?.()||[]});
+ const params=new URLSearchParams(location.search);
  const view=document.querySelector('.view.active')?.id;
- const kind={ sectors:'sector', handoff:'handoff',broker:'account',screener:'screener', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
+ const accounts=root.BrokerForms?.accounts?.()||context?.accounts||[];
+ const chartSource=view==='chart-workspace'?params.get('chartSource'):null;
+ if(chartSource==='yahoo')return {account:null,broker:'YAHOO'};
+ const sharedId=chartSource||params.get('brokerAccount')||context?.workspace?.id;
+ if(sharedId){
+  const account=accounts.find(a=>a.id===sharedId)||(context?.workspace?.id===sharedId?context.workspace:null);
+  return {account,broker:account?.broker||'UNKNOWN'};
+ }
+ if(context?.workspace?.id)return connectionSelection({workspace:context.workspace,accounts:root.BrokerForms?.accounts?.()||[]});
+ const kind={ holdings:'holdings', 'trade-parser':'parser',sectors:'sector', handoff:'handoff',broker:'account',screener:'screener', 'ema-band':'band','ema-cross':'rsi',kama:'kama','renko-supertrend':'renko'}[view]||(view?.includes('renko')?'renko':null);
  let account=view==='renko-engine'?root.RenkoEngine?.selectedAccount?.():kind?root.BrokerForms?.account(kind):null;
  let broker=account?.broker||'FYERS';
  if(kind==='renko'&&view!=='renko-engine')broker=document.getElementById('renko-broker')?.value||broker;
  if(view==='delta-india')broker='DELTA_INDIA';
- if(!account&&!kind&&view!=='renko-engine'){account=root.BrokerForms?.accounts?.().find(a=>a.broker===broker&&a.configured)||null;}
+ if(!account&&!kind&&view!=='renko-engine'){
+  const owned=accounts;
+  account=owned.find(a=>a.id===lastSelectedAccountId&&a.configured)||owned.find(a=>a.configured)||null;
+  broker=account?.broker||broker;
+ }
+ if(account)lastSelectedAccountId=account.id;
  if(broker.startsWith('account:'))broker=account?.broker||'UNKNOWN';
  return {account,broker};
 }
@@ -46,6 +61,12 @@ function fyersConnect(connect,account){
   try{
    const response=await fetch('/broker-workspace/'+id+'/api/auth/start');
    const data=await response.json();
+   if(response.ok&&data.authenticated===true){
+    const status=document.getElementById('selected-broker-connection');
+    if(status)status.textContent='FYERS · Connected';
+    connect.hidden=true;connect.textContent='Connect to FYERS';
+    return;
+   }
    if(!response.ok||!data.url)throw Error(data.error||'Unable to start FYERS login');
    location.assign(data.url);
   }catch(error){connect.textContent='Connect to FYERS';const panel=document.getElementById('selected-broker-connection');if(panel){panel.hidden=false;panel.textContent=error.message;}}
@@ -70,7 +91,15 @@ async function update(){
  if(!panel){panel=document.createElement('div');panel.id='selected-broker-connection';panel.setAttribute('role','status');panel.style.cssText='display:grid;gap:6px;margin:8px 0';card.insertBefore(panel,document.getElementById('configured-broker-accounts'));}
  let connect=document.getElementById('selected-broker-connect');if(!connect){connect=document.createElement('a');connect.id='selected-broker-connect';connect.className='button';connect.textContent='Connect';panel.after(connect);}connect.hidden=true;connect.href='/accounts';connect.onclick=null;
  panel.hidden=false;
- if(!account){panel.textContent='Select a saved broker account';connect.hidden=false;connect.textContent='Configure broker account';return;}
+ if(broker==='YAHOO'){panel.textContent='Yahoo Finance · Historical data';return;}
+ if(!account){
+  const owned=root.BrokerForms?.accounts?.()||connectionContext?.accounts||[];
+  panel.textContent=owned.length?'Select a saved broker account':'Loading broker accounts…';
+  return;
+ }
+ if(account.configured===false){
+  panel.textContent='Broker account setup is incomplete';connect.hidden=false;connect.textContent='Configure broker account';return;
+ }
  const name={DHAN:'Dhan',DELTA_INDIA:'Delta India',FYERS:'FYERS',MOTILAL_OSWAL:'Motilal Oswal'}[broker]||broker;
  connect.textContent='Connect to '+name;if(broker==='FYERS')fyersConnect(connect,account);
  panel.textContent=name+' · Checking…';
@@ -95,13 +124,17 @@ async function update(){
    const data=await response.json();if(data.credentials==='CONFIGURED'){const auth=await fetch((account?'/broker-workspace/'+account.id:'')+'/api/delta-india/verify-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});message=auth.ok?'Connected':'Not connected';}else message='Not connected';
   }else{
    const response=await fetch('/broker-workspace/'+account.id+'/api/auth/status');if(!response.ok)throw Error();
-   const data=await response.json();message=data.connected===true||data.authenticated===true?'Connected':'Not connected';
+   const data=await response.json();
+   message=data.connected===true||data.authenticated===true?'Connected'
+    :data.reauthentication_required===true||String(data.message).includes('no current access token')?'Sign-in required'
+    :'Status unavailable — retrying';
   }
-  if(generation===version){panel.textContent=name+' · '+message;connect.hidden=message==='Connected';}
- }catch(error){if(generation===version){panel.textContent=name+(broker==='DHAN'?' · Status unavailable — retrying':' · Not connected');connect.hidden=broker==='DHAN';}}
+  if(generation===version){panel.textContent=name+' · '+message;connect.hidden=message==='Connected'||message.startsWith('Status unavailable');}
+ }catch(error){if(generation===version){panel.textContent=name+' · Status unavailable — retrying';connect.hidden=true;}}
 }
 root.addEventListener('broker-account-change',()=>{key='';update();});
-root.addEventListener('broker-accounts-ready',update);
+root.addEventListener('broker-accounts-ready',()=>{key='';update();});
+root.addEventListener('chart-source-change',()=>{key='';update();});
 document.addEventListener('change',()=>{if(selection().broker!=='DHAN')key='';update();});
 document.addEventListener('click',()=>queueMicrotask(update));
 update();

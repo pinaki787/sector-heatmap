@@ -29,34 +29,44 @@ def owned_folder():
  import os
  aid=os.environ.get("SECTOR_PULSE_WORKSPACE_ID");broker=os.environ.get("SECTOR_PULSE_WORKSPACE_BROKER")
  if not aid:return None
- if broker!="FYERS":return None
+ if broker not in {"FYERS","DHAN"}:return None
  source=Path.cwd().resolve();folder=source.parent
  if source.name!="source" or folder.name!=aid:raise PermissionError("Screener selection must use its owned account source.")
  return folder
 
-def check_permissions(folder):
+def check_permissions(folder,broker="FYERS"):
  folder=Path(folder)
  if folder.parent.name!="accounts":return  # isolated test stores have no registry
  registry=folder.parent.parent/"registry.sqlite3"
  if not registry.exists():raise PermissionError("Owned Screener account registry unavailable.")
  with sqlite3.connect(registry.resolve().as_uri()+"?mode=ro",uri=True) as db:
   row=db.execute("SELECT u.id,u.admin,a.broker FROM accounts a JOIN users u ON a.user_id=u.id WHERE a.id=?",(folder.name,)).fetchone()
-  if not row or row[2]!="FYERS":raise PermissionError("Owned FYERS Screener account required.")
+  if broker not in {"FYERS","DHAN"} or not row or row[2]!=broker:raise PermissionError("Owned selected-broker Screener account required.")
   if not row[1]:
    features={r[0] for r in db.execute("SELECT feature FROM user_features WHERE user_id=?",(row[0],))}
    if not {"screener","handoff"}<=features:raise PermissionError("Both Screener and Handoff permissions are required.")
 
 class Store:
- def __init__(self,folder):
-  self.folder=Path(folder);self.path=self.folder/"handoff-screener.sqlite3"
+ def __init__(self,folder,broker="FYERS",*,state_dir=None):
+  if broker not in {"FYERS","DHAN"}:raise ValueError("Supported owned Screener broker required.")
+  self.broker=broker
+  self.folder=Path(folder)
+  self.selection_path=self.folder/"handoff-screener.sqlite3"
+  self.path=(Path(state_dir) if state_dir is not None else self.folder)/"handoff-screener.sqlite3"
   with self.db() as db:db.executescript("""CREATE TABLE IF NOT EXISTS selection(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT);
   CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY,body TEXT,updated REAL);
   CREATE TABLE IF NOT EXISTS progress(cycle TEXT PRIMARY KEY,body TEXT,updated REAL);""")
   self.path.chmod(0o600)
  def db(self):return sqlite3.connect(self.path,timeout=20)
  def get(self):
-  with self.db() as db:r=db.execute("SELECT body FROM selection WHERE id=1").fetchone()
-  return json.loads(r[0]) if r else dict(enabled=False,auto_enabled=False,broker="FYERS",sources=[],symbols=[],revision="NONE")
+  from contextlib import closing
+  r=None
+  if self.selection_path.exists():
+   with closing(sqlite3.connect(self.selection_path.resolve().as_uri()+"?mode=ro",uri=True,timeout=20)) as db:
+    r=db.execute("SELECT body FROM selection WHERE id=1").fetchone()
+  value=json.loads(r[0]) if r else dict(enabled=False,auto_enabled=False,broker=self.broker,sources=[],symbols=[],revision="NONE")
+  if value.get("broker")!=self.broker:raise PermissionError("Saved Screener selection belongs to another broker.")
+  return value
  def save(self,payload):
   if set(payload)-{"enabled","auto_enabled","sources","symbols","selection_origin"}:raise ValueError("Unsupported Screener selection field.")
   if type(payload.get("enabled")) is not bool or type(payload.get("auto_enabled")) is not bool:raise ValueError("Explicit Handoff analysis and Auto inclusion choices required.")
@@ -71,7 +81,7 @@ class Store:
    sources.append(dict(id=ident,label=label,url=url,symbols=members))
   if len(sources)>MAX_SOURCES or len({s["id"] for s in sources})!=len(sources):raise ValueError("Choose at most five unique Screener sources.")
   if len(symbols)>MAX_SYMBOLS or payload["enabled"] and (not symbols or not sources):raise ValueError("Choose one to 150 symbols and at least one source.")
-  value=dict(enabled=payload["enabled"],auto_enabled=payload["auto_enabled"],broker="FYERS",symbols=symbols,sources=sources,selection_origin=str(payload.get("selection_origin") or "EXPLICIT_USER_SELECTION")[:80])
+  value=dict(enabled=payload["enabled"],auto_enabled=payload["auto_enabled"],broker=self.broker,symbols=symbols,sources=sources,selection_origin=str(payload.get("selection_origin") or "EXPLICIT_USER_SELECTION")[:80])
   value["revision"]=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest();value["updated_at"]=datetime.now(IST).isoformat()
   with self.db() as db:db.execute("INSERT OR REPLACE INTO selection VALUES(1,?)",(json.dumps(value),))
   return value
@@ -110,7 +120,10 @@ def _fetch_source_once(url,session_factory=None):
  if configured:columns.extend(v.strip() for v in html.unescape(configured.group(1)).split(",") if v.strip())
  response=session.post("https://chartink.com/screener/process",data=dict(scan_clause=scan,column_clause=",".join(dict.fromkeys(columns))),headers={"X-CSRF-TOKEN":csrf.group(1),"X-Requested-With":"XMLHttpRequest","Referer":url},timeout=30,allow_redirects=False)
  response.raise_for_status();value=response.json();rows=value.get("data");total=value.get("recordsTotal")
- if not isinstance(rows,list) or type(total) is not int or total<0 or total!=len(rows) or total>2000:raise ValueError("Screener returned incomplete or unbounded executed membership.")
+ if not isinstance(rows,list) or type(total) is not int or total<0 or total!=len(rows) or total>2000:
+  received=len(rows) if isinstance(rows,list) else 'invalid'
+  declared=total if type(total) is int else 'invalid'
+  raise ValueError(f"Screener returned incomplete or unbounded executed membership: received {received} of {declared} declared rows; no current membership accepted.")
  return dict(status="READY",symbols=list(dict.fromkeys(ticker(row.get("nsecode")) for row in rows)),checked_at=datetime.now(IST).isoformat(),executed_membership=True)
 
 def fetch_source(url,session_factory=None):
@@ -157,7 +170,7 @@ def fresh_saved_evidence(folder,now):
     result.setdefault(x,frames)
  return result
 
-def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_source,master=None):
+def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_source,master=None,state_dir=None):
  """Fresh complete selected universe; persistent per-bar evidence resumes safely."""
  from .analysis import calculate_timeframe_state,mtf_alignment
  from .analysis_config import TIMEFRAMES
@@ -168,8 +181,9 @@ def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_sou
  for row in base:row["provenance"]=[dict(kind="SECTOR",label=row.get("parent_sector") or "Sector rotation")]
  if folder is None:
   result["candidates"]=base;return result
- check_permissions(folder)
- store=Store(folder);selection=store.get();scope=dict(enabled=selection["enabled"],auto_enabled=selection["auto_enabled"],selected=len(selection["symbols"]),selection_revision=selection["revision"],sources=[],analyzed=0,matched=0,exclusions=[],status="DISABLED")
+ broker=getattr(getattr(sectors,"provider",None),"broker","FYERS")
+ check_permissions(folder,broker)
+ store=Store(folder,broker,state_dir=state_dir);selection=store.get();scope=dict(enabled=selection["enabled"],auto_enabled=selection["auto_enabled"],selected=len(selection["symbols"]),selection_revision=selection["revision"],sources=[],analyzed=0,matched=0,exclusions=[],status="DISABLED")
  result["scope"]["screener"]=scope
  if not selection["enabled"] or auto and not selection["auto_enabled"]:
   result["candidates"]=base;return result
@@ -179,7 +193,7 @@ def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_sou
  if complete:
   scope.update(complete["scope"]);screened=complete["candidates"]
  else:
-  lock=(folder/"handoff-screener-analysis.lock").open("a")
+  lock=(store.path.parent/"handoff-screener-analysis.lock").open("a")
   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:
    lock.close()
@@ -203,6 +217,7 @@ def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_sou
   store.progress(cycle,scope)
   try:
    symbols=["NSE:"+x+"-EQ" for x in membership]
+   if broker!="FYERS" and master is None:raise ValueError("Selected native broker master is required; no alternate provider.")
    lookup=(master or FyersCmMaster()).lookup(symbols) if symbols else {}
    imported=fresh_saved_evidence(folder,now);scope['fresh_saved_evidence_reused']=0
    benchmark=sectors._timeframe_candles(BENCHMARK_SYMBOL) if symbols and len(imported)<len(symbols) else {}
@@ -243,13 +258,13 @@ def merge(collection,sectors,folder=None,*,auto=False,now=None,fetcher=fetch_sou
  return result
 
 
-def guard_entry_source(candidate,folder,now=None):
+def guard_entry_source(candidate,folder,now=None,broker="FYERS"):
  """Final Auto preflight rechecks only explicitly selected source memberships."""
  now=now or datetime.now(IST)
  provenance=[x for x in candidate.get("provenance",[]) if x.get("kind")=="SCREENER"]
  if not provenance:return
- check_permissions(folder)
- store=Store(folder);selection=store.get()
+ check_permissions(folder,broker)
+ store=Store(folder,broker);selection=store.get()
  if not selection["enabled"] or not selection["auto_enabled"] or candidate.get("screener_selection_revision")!=selection["revision"]:raise ValueError("Screener selection changed or Auto inclusion was removed; fresh analysis required.")
  x=ticker(candidate.get("symbol"))
  if x not in selection["symbols"]:raise ValueError("Underlying is no longer explicitly selected for Screener Handoff.")
@@ -267,7 +282,8 @@ def guard_separate_submission(underlyings):
  """One execution owner: selected Auto names cannot also use manual batch flow."""
  folder=owned_folder()
  if folder is None:return
- selection=Store(folder).get()
+ import os
+ selection=Store(folder,os.environ.get("SECTOR_PULSE_WORKSPACE_BROKER","FYERS")).get()
  if not selection["enabled"] or not selection["auto_enabled"]:return
  path=folder/"handoff-schedule.sqlite3"
  if not path.exists():return

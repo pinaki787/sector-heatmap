@@ -1,10 +1,13 @@
 """Loopback-only, account-owned Motilal dashboard and native order route."""
+from datetime import datetime
 import hmac
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 from urllib.parse import urlparse,parse_qs
+from zoneinfo import ZoneInfo
 from .motilal_api import MotilalError
 from .motilal_service import Service
 from .workspace_guard import WorkspaceGuard
@@ -26,7 +29,7 @@ def handler_factory(guard,service):
             self.send_response(status)
             for key,value in {'Content-Type':mime,'Content-Length':str(len(data)),'Cache-Control':'no-store',
                 'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',
-                'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"}.items():self.send_header(key,value)
+                'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"}.items():self.send_header(key,value)
             self.end_headers();self.wfile.write(data)
         def identity(self,mutation=False):
             user,account=guard.authorize(self.headers,mutation)
@@ -44,10 +47,114 @@ def handler_factory(guard,service):
                 user,account=self.identity();path=urlparse(self.path).path
                 if path in {'/','/index.html','/workspace-entry'}:self.response(200,(ROOT/'motilal-oswal.html').read_bytes());return
                 files={'/motilal-oswal.js':('motilal-oswal.js','text/javascript'),'/workspace-portal.css':('workspace-portal.css','text/css')}
+                files.update({name: (name.lstrip('/'), 'text/css' if name.endswith('.css') else 'text/javascript')
+                              for name in ('/chart-workspace.js', '/chart-workspace-studies.js',
+                                           '/chart-workspace.css', '/vendor/lightweight-charts-4.2.3.js')})
                 if path in files:
                     name,mime=files[path];self.response(200,(ROOT/name).read_bytes(),mime);return
+                if path == '/workspace-bootstrap.js':
+                    context = {**guard.context(user, account), 'chart_workspace_available': True, 'chart_ncdex_available': True}
+                    body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', chr(92)+'u003c') + ';').encode()
+                    self.response(200, body, 'text/javascript')
+                    return
+                if path == '/api/chart-workspace/symbols':
+                    from .chart_workspace import require_chart
+                    require_chart(user, guard.store, path)
+                    query = parse_qs(urlparse(self.path).query)
+                    search_text = query.get('q', [''])[0][:120].strip().upper()
+                    venue, separator, ticker = search_text.partition(':')
+                    venue = venue if separator and venue in ('NSE', 'BSE', 'NSEFO', 'BSEFO', 'NSECD', 'MCX', 'NCDEX') else ''
+                    ticker = ticker.strip() if venue else search_text
+                    suffix = ticker.rpartition('-')[2] if venue in ('NSE', 'BSE') else ''
+                    board = suffix if suffix in ('INDEX', 'EQ') else ''
+                    if board:
+                        ticker = ticker.rpartition('-')[0].strip()
+                    terms = ticker.split()
+                    compact = re.sub(r'[^A-Z0-9]', '', ticker)
+                    segment = query.get('segment', [''])[0]
+                    offset = query.get('offset', ['0'])[0]
+                    segments = ('INDEX_NSE', 'INDEX_BSE', 'NSE', 'BSE', 'NSEFO', 'BSEFO', 'NSECD', 'MCX', 'NCDEX')
+                    if segment and segment not in segments:
+                        raise ValueError('Invalid Motilal chart segment.')
+                    if not offset.isascii() or not offset.isdecimal() or len(offset) > 7:
+                        raise ValueError('Invalid catalog offset.')
+                    service.ready()
+                    matches = {}
+                    exact_matches = set()
+                    unavailable = []
+                    selected_segments = (segment,) if segment else segments
+                    today = datetime.fromtimestamp(service.clock(), ZoneInfo('Asia/Kolkata')).date().isoformat()
+                    for exchange in selected_segments:
+                        try:
+                            rows = (service.master.indices(exchange[6:]) if exchange.startswith('INDEX_')
+                                    else service.master.rows(exchange, market_data=True) if exchange == 'NCDEX'
+                                    else service.master.rows(exchange))
+                        except MotilalError as error:
+                            if error.auth_required or segment:
+                                raise
+                            unavailable.append(exchange)
+                            continue
+                        except ValueError:
+                            if segment:
+                                raise
+                            unavailable.append(exchange)
+                            continue
+                        for row in rows:
+                            expiry = row.get('expiry')
+                            if row.get('suspended') or (expiry and expiry < today):
+                                continue
+                            is_index = row['instrument'] == 'INDEX'
+                            if venue and not row['exchange'].startswith(venue):
+                                continue
+                            if board and (row['exchange'] != venue or is_index != (board == 'INDEX')):
+                                continue
+                            underlying = row.get('underlying') or ''
+                            text = f"{row['symbol']} {row['name']} {underlying}".upper()
+                            index_alias = is_index and compact and compact == re.sub(r'[^A-Z0-9]', '', row['name'].upper())
+                            if not index_alias and not all(term in text for term in terms):
+                                continue
+                            identity = row['symbol']
+                            if index_alias or search_text == identity or ticker in (row['name'].upper(), underlying.upper()):
+                                exact_matches.add(identity)
+                            matches[identity] = {
+                                'id': identity, 'symbol': row['name'], 'exchange': row['exchange'],
+                                'instrument': row['instrument'], 'tick_size': row.get('tick_size'),
+                            }
+                    ordered = sorted(matches.values(), key=lambda row: (row['id'] not in exact_matches, row['symbol'], row['id']))
+                    start = int(offset)
+                    if len(unavailable) == len(selected_segments):
+                        self.send_json(503, {'error': 'Motilal instrument catalogs are unavailable.'})
+                        return
+                    self.send_json(200, {'symbols': ordered[start:start+100], 'total': len(ordered),
+                                         'unavailable_segments': unavailable})
+                    return
+                if path in {'/api/chart-workspace/history', '/api/chart-workspace/live'}:
+                    from .chart_workspace import motilal_chart, require_chart
+                    require_chart(user, guard.store, path)
+                    query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                    if any(len(query.get(key, [])) > 1 for key in ('interval', 'after', 'before', 'symbol')):
+                        raise ValueError('Use one chart interval, symbol, and history cursor per request.')
+                    before = query.get('before', [None])[0]
+                    interval = query.get('interval', ['5'])[0]
+                    symbol = query.get('symbol', [None])[0]
+                    if symbol == '':
+                        raise ValueError('Select a Motilal chart instrument.')
+                    after = query.get('after', [None])[0]
+                    live = path.endswith('/live')
+                    try:
+                        payload = motilal_chart(service, interval, after, live, symbol=symbol, before=before)
+                    except MotilalError as error:
+                        if error.auth_required:
+                            self.send_json(401, {'error': str(error), 'auth_required': True})
+                        else:
+                            self.send_json(503, {'error': 'Motilal chart market data is unavailable.'})
+                    except (OSError, RuntimeError):
+                        self.send_json(503, {'error': 'Motilal chart market data is unavailable.'})
+                    else:
+                        self.send_json(200, payload)
+                    return
                 if path=='/api/workspace-context':
-                    self.send_json(200,{**guard.context(user,account),'csrf':user['csrf'],'visible':guard.store.sidebar_visibility().get('broker',True),
+                    self.send_json(200,{**guard.context(user,account),'chart_ncdex_available':True,'csrf':user['csrf'],'visible':guard.store.sidebar_visibility().get('broker',True),
                         'permitted':bool(user.get('admin') or 'broker' in user.get('features',[]))});return
                 if path=='/api/motilal/saved-login':self.send_json(200,login().status(user,cookie_token(self.headers)));return
                 if path=='/api/motilal/status':self.send_json(200,service.status());return

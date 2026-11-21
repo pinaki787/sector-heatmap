@@ -93,7 +93,7 @@ class LocalDashboardAuth:
 
     def context(self, headers):
         user=self.authorize(headers)
-        return dict(workspace=None,admin=bool(user['admin']),username=user['username'],
+        return dict(workspace=None,admin=bool(user['admin']),username=user['username'],parser_native_supported=True,
                     allowed_features=user.get('features',[]),sidebar_visibility=self.store.sidebar_visibility(),renko_visibility=self.store.renko_visibility())
 
     def check(self, handler, mutation=False):
@@ -103,13 +103,27 @@ class LocalDashboardAuth:
             except PermissionError:pass
         try:
             user=self.authorize(handler.headers,mutation)
+            # Dhan API-key consent returns to the registered site root. Route it
+            # to the account UI before the dashboard gate; exchange still checks
+            # account ownership, CSRF, pending session binding and returned client ID.
+            if not mutation and path in {'/','/index.html','/workspace-entry'}:
+                query=parse_qs(urlparse(handler.path).query,keep_blank_values=True)
+                if 'tokenId' in query:
+                    tokens=query['tokenId']
+                    if len(tokens)!=1 or not tokens[0] or len(tokens[0])>4096 or any(c in tokens[0] for c in '\r\n\x00'):
+                        self.json(handler,400,{'error':'Invalid Dhan authorization callback.'});return False
+                    handler.send_response(303)
+                    handler.send_header('Location','/accounts?tokenId='+quote(tokens[0],safe=''))
+                    handler.send_header('Cache-Control','no-store')
+                    handler.send_header('Referrer-Policy','no-referrer')
+                    handler.send_header('Content-Length','0');handler.end_headers();return False
             if not mutation and not path.startswith('/api/'):
                 candidate=(self.root/path.lstrip('/')).resolve()
                 relative=candidate.relative_to(self.root.resolve()) if candidate.is_relative_to(self.root.resolve()) else None
                 if relative and all(not part.startswith('.') for part in relative.parts) and candidate.is_file() and candidate.suffix in ('.js','.css','.svg','.png','.woff','.woff2','.ico'):
                     return True
             if not user['admin']:
-                if path in {'/dhan-orders.html','/dhan-orders.js','/dhan-strategies.html','/dhan-strategies.js','/workspace-bootstrap.js','/api/workspace-context'} or path.startswith(('/api/investment/','/api/jobs','/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+                if path in {'/dhan-orders.html','/dhan-orders.js','/dhan-strategies.html','/dhan-strategies.js','/workspace-bootstrap.js','/api/workspace-context'} or path.startswith(('/api/chart-workspace/','/api/broker-parser/','/api/investment/','/api/jobs','/api/renko-engine/','/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
                     from .section_permissions import allowed
                     if path=='/api/workspace-context' or not path.startswith('/api/') or allowed(user,path):return True
                 if not mutation and path in {'/','/index.html','/workspace-entry'}:
@@ -120,7 +134,11 @@ class LocalDashboardAuth:
                         from .section_permissions import allowed
                         feature_path={'renko':'/api/renko-supertrend/runner','band':'/api/ema-band/runner','rsi':'/api/ema-crossover/runner','kama':'/api/kama/runner'}[kind]
                         if (kind=='renko' or account['broker'] in ('FYERS','DHAN')) and allowed(user,feature_path):return True
-                    handler.send_response(303);handler.send_header('Location','/accounts');handler.send_header('Content-Length','0');handler.end_headers();return False
+                    # The home shell contains no shared account data. Keep all
+                    # API authorization below/above this gate unchanged.
+                    if query.get('brokerAccount'):
+                        self.store.account(user,query['brokerAccount'][0])
+                    return True
                 self.json(handler,403,{'error':'Open your own broker account workspace.'});return False
             return True
         except PermissionError:

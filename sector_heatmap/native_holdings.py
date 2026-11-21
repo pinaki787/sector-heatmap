@@ -20,6 +20,24 @@ def quote_time(value):
     return None
 
 
+
+
+class DhanSessionEvidenceError(ValueError):
+    pass
+
+
+def complete_cash_session(rows,session):
+    """Only a complete 375-minute regular NSE/BSE session may form a daily fallback."""
+    from datetime import time as day_time,date
+    start=datetime.combine(date.fromisoformat(session),day_time(9,15),tzinfo=IST)
+    first=int(start.timestamp());expected=list(range(first,first+375*60,60))
+    bars=[r for r in rows if first<=r['timestamp']<first+375*60]
+    if [r['timestamp'] for r in bars]!=expected:
+        missing=len(set(expected)-{r['timestamp'] for r in bars})
+        raise DhanSessionEvidenceError('Dhan daily candle for '+session+' is unpublished; intraday fallback is incomplete ('+str(len(bars))+'/375 minutes; '+str(missing)+' missing).')
+    return dict(timestamp=datetime.combine(start.date(),day_time(0),tzinfo=IST).timestamp(),open=bars[0]['open'],high=max(r['high'] for r in bars),low=min(r['low'] for r in bars),close=bars[-1]['close'],volume=sum(r['volume'] for r in bars),source='DHAN_COMPLETE_INTRADAY_SESSION',source_minutes=375,session=session)
+
+
 class DhanHoldings:
     broker='DHAN'
     scope='Dhan demat/T1 holdings and nonzero open trading positions, shown separately; quantities are not a combined exposure total'
@@ -79,7 +97,23 @@ class DhanHoldings:
         meta=row.get('native_identity') or self.contracts[row['symbol']]
         start=datetime.fromtimestamp(now,IST).date()-timedelta(days=365);end=datetime.fromtimestamp(now,IST).date()+timedelta(days=1)
         raw=self.client.request('POST','/charts/historical',{**meta,'expiryCode':0,'oi':False,'fromDate':start.isoformat(),'toDate':end.isoformat()})
-        return DhanCandleHistoryProvider.parse(raw)
+        daily=DhanCandleHistoryProvider.parse(raw)
+        self.chart_daily_history=daily
+        from .market_calendar import market_session
+        from datetime import time as day_time,date
+        expected=market_session(datetime.fromtimestamp(now,IST))['last_completed_session']
+        if daily and datetime.fromtimestamp(daily[-1]['timestamp'],IST).date().isoformat()==expected:return daily
+        if meta.get('exchangeSegment') not in ('NSE_EQ','BSE_EQ') or row.get('kind')!='DELIVERY_EQUITY':return daily
+        target=date.fromisoformat(expected)
+        prior=market_session(datetime.combine(target,day_time(9),tzinfo=IST))['last_completed_session']
+        if not daily or datetime.fromtimestamp(daily[-1]['timestamp'],IST).date().isoformat()!=prior:
+            raise DhanSessionEvidenceError('Dhan daily history is missing sessions before '+expected+'; a single-session fallback cannot repair that gap.')
+        if now<datetime.combine(target,day_time(15,35),tzinfo=IST).timestamp():
+            raise DhanSessionEvidenceError('Completed-session intraday fallback waits until 15:35 IST.')
+        # Dhan range starts are exclusive at an exact minute. Widen then session-filter.
+        response=self.client.request('POST','/charts/intraday',{**meta,'interval':'1','oi':False,'fromDate':expected+' 09:00:00','toDate':expected+' 15:31:00'})
+        minute_rows=DhanCandleHistoryProvider.parse(response)
+        return [*daily,complete_cash_session(minute_rows,expected)]
 
 
 class MotilalHoldings:

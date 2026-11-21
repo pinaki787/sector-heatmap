@@ -9,13 +9,22 @@ from .sector_service import SectorAnalysisService
 
 class Provider:
     broker="FYERS"
-    def __init__(self,account,folder):
+    def __init__(self,account,folder,*,state_dir=None):
         self.folder=folder
         self.execution=SimpleNamespace(account=account)
-        self.client=_current_client()
+        self.screener_state_dir=state_dir
+        candle_provider=None
+        if state_dir is None:
+            self.client=_current_client()
+        else:
+            from .fyers_transport import client
+            from .sector_service import CandleHistoryProvider
+            self.client=_current_client(
+                lambda client_id,value:client(client_id=client_id,token=value,log_path=str(state_dir)))
+            candle_provider=CandleHistoryProvider(self.client)
         from .config import load_config
         self.sectors=SectorAnalysisService(load_config()["FYERS_ACCESS_TOKEN"],
-            state_file=folder/"source/.private/handoff-analysis-history.json")
+            state_file=folder/"source/.private/handoff-analysis-history.json",provider=candle_provider)
         self.cash_master=FyersCmMaster();self.option_master=FyersFoMaster()
         self.live=[];self.refreshed=0
 

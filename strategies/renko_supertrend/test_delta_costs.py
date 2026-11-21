@@ -16,7 +16,8 @@ class NativeCostsTests(unittest.TestCase):
         self.assertEqual(cost['currency'],'USD')
     def test_recorded_commission_has_precedence_over_estimate(self):
         cost=order_cost({**self.row(),'native_commission':'0.001'})
-        self.assertAlmostEqual(cost['total'],.00118)
+        self.assertAlmostEqual(cost['total'],.001)
+        self.assertAlmostEqual(cost['commission']+cost['gst'],.001)
     def test_missing_fee_evidence_is_not_free_or_fyers_costs(self):
         row=self.row();row.pop('native_fee_policy')
         self.assertIsNone(order_cost(row));self.assertIsNone(ledger_costs([row])['BUY'])
@@ -29,3 +30,12 @@ class NativeCostsTests(unittest.TestCase):
         self.assertEqual((lock['high'],lock['low']),(110,100))
     def test_nonfinite_and_negative_commissions_fail_closed(self):
         for value in ['NaN','-1',True]:self.assertIsNone(order_cost({**self.row(),'native_commission':value}))
+
+    def test_actual_external_close_does_not_charge_gst_twice(self):
+        rows=[{**self.row(),'native_commission':'.016933'},
+              {**self.row('SELL',3.8),'native_commission':'.015694'}]
+        trade=dict(orders=rows,entry_filled=10,exit_filled=10,remaining_quantity=0,
+                   realized_pnl=-.03,quantity_multiplier=.01)
+        cost=trade_costs(trade,ledger_costs(rows))
+        self.assertAlmostEqual(cost['incurred']['total'],.032627)
+        self.assertAlmostEqual(cost['realized_net'],-.062627)

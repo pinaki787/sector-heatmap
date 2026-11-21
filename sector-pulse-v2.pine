@@ -1,0 +1,422 @@
+//@version=6
+indicator("Sector Pulse — Shadow Candle", shorttitle="Shadow Candle", overlay=true, precision=2, max_lines_count=500, max_labels_count=100, max_boxes_count=500)
+
+string gSource = "Source and session"
+string market = input.string("Auto", "Market classification", options=["Auto", "NSE/BSE", "Foreign gold", "MCX", "Crypto", "Manual"], group=gSource, display=display.none)
+string manualTf = input.timeframe("360", "Manual reference timeframe", group=gSource, display=display.none)
+string sourceSession = input.string("Chart", "Source trading session", options=["Chart", "Regular", "Extended"], group=gSource, display=display.none)
+string boundary = input.string("Exchange trading day", "Daily boundary", options=["Exchange trading day", "Custom daily reset"], group=gSource, display=display.none)
+string zone = input.string("Etc/UTC", "Custom reset timezone (IANA)", group=gSource, display=display.none)
+int resetHour = input.int(0, "Custom reset hour", minval=0, maxval=23, group=gSource, display=display.none)
+int resetMinute = input.int(0, "Custom reset minute", minval=0, maxval=59, group=gSource, display=display.none)
+string gLevels = "Range levels — measured upward from low"
+float p1 = input.float(46, "Level 1 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+float p2 = input.float(50, "Level 2 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+float p3 = input.float(56, "Level 3 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+int keep = input.int(3, "Completed sessions to retain", minval=1, maxval=40, group="Display", display=display.none)
+bool showFinal = input.bool(true, "Plot Shadow Candle", group="Display", display=display.none)
+bool showFull = input.bool(false, "Also plot complete reference-candle range", group="Display", display=display.none)
+bool showLabels = input.bool(true, "Show SC label", group="Display", display=display.none)
+int labelOffset = input.int(3, "SC label offset (future bars)", minval=1, maxval=20, group="Display", display=display.none)
+bool showSourceBoxes = input.bool(true, "Box source candle on lower timeframes", group="Display", display=display.none)
+color sourceBoxColor = input.color(color.rgb(99, 102, 241), "Source candle box", group="Display", display=display.none)
+int sourceBoxTransparency = input.int(90, "Source box transparency (%)", minval=70, maxval=98, group="Display", display=display.none)
+bool showSourceMarkers = input.bool(false, "Show historical source markers", group="Display", display=display.none)
+bool showPanel = input.bool(true, "Show compact current levels", group="Display", display=display.none)
+bool showGradient = input.bool(true, "Gradient fill inside closing-candle range", group="Display", display=display.none)
+int fillOpacity = input.int(88, "Gradient transparency near middle (%)", minval=70, maxval=98, group="Display", display=display.none)
+color bullColor = input.color(color.rgb(22, 163, 74), "Bullish zone", group="Display", display=display.none)
+color bearColor = input.color(color.rgb(220, 38, 38), "Bearish zone", group="Display", display=display.none)
+string gRsi = "RSI SMA price-cross threshold"
+bool showRsiAverage = input.bool(true, "Show RSI SMA crossover price", group=gRsi, display=display.none)
+int rsiLength = input.int(14, "RSI length", minval=2, group=gRsi, display=display.none)
+int rsiSmaLength = input.int(14, "RSI SMA length", minval=1, group=gRsi, display=display.none)
+color rsiAverageColor = input.color(color.rgb(168, 85, 247), "RSI SMA line", group=gRsi, display=display.none)
+bool showGap = input.bool(true, "Previous close / day open gap Fib", group="Gap Fibonacci", display=display.none)
+color gapColor = input.color(color.rgb(217, 119, 6), "Gap levels and fill", group="Gap Fibonacci", display=display.none)
+string gPrevious = "Previous completed periods"
+bool showPreviousDay = input.bool(true, "Previous day high / low", group=gPrevious, display=display.none)
+bool showPreviousWeek = input.bool(true, "Previous week high / low", group=gPrevious, display=display.none)
+bool showPreviousMonth = input.bool(true, "Previous month high / low", group=gPrevious, display=display.none)
+color dayColor = input.color(color.rgb(79, 70, 229), "Daily levels", group=gPrevious, display=display.none)
+color weekColor = input.color(color.rgb(14, 116, 144), "Weekly levels", group=gPrevious, display=display.none)
+color monthColor = input.color(color.rgb(147, 51, 234), "Monthly levels", group=gPrevious, display=display.none)
+color edge = input.color(color.silver, "High / low", group="Display", display=display.none)
+color c1 = input.color(color.orange, "Level 1", group="Display", display=display.none)
+color c2 = input.color(color.yellow, "Level 2", group="Display", display=display.none)
+color c3 = input.color(color.aqua, "Level 3", group="Display", display=display.none)
+
+string symbolText = str.upper(syminfo.ticker)
+string prefix = str.upper(syminfo.prefix)
+bool gold = str.contains(symbolText, "GOLD") or str.contains(symbolText, "XAU")
+bool crypto = syminfo.type == "crypto" or prefix == "DELTAIN"
+bool indian = prefix == "NSE" or prefix == "BSE"
+bool mcx = str.contains(prefix, "MCX")
+string autoMarket = mcx ? "MCX" : indian ? "NSE/BSE" : gold ? "Foreign gold" : crypto ? "Crypto" : "Unknown"
+string selected = market == "Auto" ? autoMarket : market
+string refTf = selected == "Foreign gold" ? "1320" : selected == "Crypto" ? "1380" : selected == "MCX" ? "840" : selected == "NSE/BSE" ? "360" : manualTf
+if barstate.isfirst
+    if selected == "Unknown"
+        runtime.error("Unclassified symbol: choose a market classification or Manual reference timeframe.")
+    if not chart.is_standard or ((showFinal or showFull) and (not timeframe.isintraday or timeframe.in_seconds() > timeframe.in_seconds(refTf)))
+        runtime.error("Shadow Candle requires a standard intraday chart at or below its reference timeframe. Disable both shadow/reference plots for previous-period levels alone on higher timeframes.")
+
+// The custom boundary groups native HTF bars; it does not re-anchor their openings.
+customKey(int t) =>
+    int y = year(t, zone)
+    int m = month(t, zone)
+    int d = dayofmonth(t, zone)
+    int today = timestamp(zone, y, m, d, resetHour, resetMinute)
+    t >= today ? today : timestamp(zone, y, m, d - 1, resetHour, resetMinute)
+
+source() =>
+    int key = boundary == "Exchange trading day" ? time_tradingday : customKey(time)
+    var float fullH = na
+    var float fullL = na
+    var int fullT = na
+    var int fullC = na
+    if na(key[1]) or key != key[1]
+        fullH := na
+        fullL := na
+        fullT := na
+        fullC := na
+    if time_close - time >= timeframe.in_seconds() * 1000
+        fullH := high
+        fullL := low
+        fullT := time
+        fullC := time_close
+    // Only previous-bar prices/state leave the reference context.
+    [high[1], low[1], time[1], time_close[1], time_close("1D")[1], key[1], key, fullH[1], fullL[1], fullT[1], fullC[1]]
+
+string requestTicker = ticker.new(syminfo.prefix, syminfo.ticker, sourceSession == "Regular" ? session.regular : sourceSession == "Extended" ? session.extended : syminfo.session)
+[h, l, sourceOpen, sourceClose, scheduledClose, priorKey, currentKey, fullHigh, fullLow, fullOpen, fullClose] = request.security(requestTicker, refTf, source(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+bool finalBar = not na(priorKey) and priorKey != currentKey
+bool atClose = boundary == "Exchange trading day" ? sourceClose == scheduledClose : sourceClose == currentKey
+bool shortened = sourceClose - sourceOpen < timeframe.in_seconds(refTf) * 1000
+bool validFinal = atClose and shortened
+var int lastSource = na
+var bool missingFinal = false
+var int lockedClose = na
+var int lockedScheduled = na
+var float lockedHigh = na
+var float lockedLow = na
+var float lockedFullHigh = na
+var float lockedFullLow = na
+var int lockedFullOpen = na
+var int lockedFullClose = na
+var array<box> sourceBoxes = array.new<box>()
+var array<line> finalLines = array.new<line>()
+var array<line> fullLines = array.new<line>()
+var array<line> activeFinal = array.new<line>()
+var array<line> activeFull = array.new<line>()
+var array<label> labels = array.new<label>()
+var label rangeTag = na
+var line tagLeader = na
+// Each color segment is frozen at its own confirmed close; old segments never change regime.
+type ZoneBand
+    int sourceKey
+    int startTime
+    int endTime
+    float hi
+    float lo
+    color tint
+    array<box> layers
+var array<ZoneBand> bandHistory = array.new<ZoneBand>()
+var array<int> sessionHistory = array.new<int>()
+var ZoneBand currentBand = na
+var int regime = 0
+
+zoneColor(int state) =>
+    state > 0 ? bullColor : state < 0 ? bearColor : c2
+
+deleteBand(ZoneBand band) =>
+    for layer in band.layers
+        box.delete(layer)
+    array.clear(band.layers)
+
+endBand(ZoneBand band, int ended) =>
+    band.endTime := ended
+    for layer in band.layers
+        box.set_right(layer, ended)
+
+makeBand(int started, int key, float hi, float lo, int state) =>
+    int boxCount = 0
+    for prior in bandHistory
+        boxCount += array.size(prior.layers)
+    // Compact the oldest gradients to their SAME state tint before approaching TV's object cap.
+    // This changes only gradient resolution, never the recorded bullish/bearish timing.
+    while boxCount > 427
+        bool compacted = false
+        for prior in bandHistory
+            int count = array.size(prior.layers)
+            if count > 1
+                deleteBand(prior)
+                array.push(prior.layers, box.new(prior.startTime, prior.hi, prior.endTime, prior.lo, xloc=xloc.bar_time, border_color=na, bgcolor=color.new(prior.tint, fillOpacity)))
+                boxCount -= count - 1
+                compacted := true
+                break
+        if not compacted
+            ZoneBand oldest = array.shift(bandHistory)
+            boxCount -= array.size(oldest.layers)
+            deleteBand(oldest)
+    color tint = zoneColor(state)
+    ZoneBand band = ZoneBand.new(key, started, started, hi, lo, tint, array.new<box>())
+    for slice = 0 to 11
+        float a = slice * 100.0 / 12
+        float b = (slice+1) * 100.0 / 12
+        float mid = (a+b)/2
+        color bottomColor = state == 0 ? c1 : tint
+        color topColor = state == 0 ? c3 : tint
+        color shade = mid <= p2 ? color.from_gradient(mid, 0, p2, color.new(bottomColor, 98), color.new(tint, fillOpacity)) : color.from_gradient(mid, p2, 100, color.new(tint, fillOpacity), color.new(topColor, 98))
+        array.push(band.layers, box.new(started, lo+(hi-lo)*b/100, started, lo+(hi-lo)*a/100, xloc=xloc.bar_time, border_color=na, bgcolor=shade))
+    array.push(bandHistory, band)
+    band
+
+finishSet(array<line> active) =>
+    if array.size(active) > 0
+        for ln in active
+            line.set_x2(ln, time)
+    array.clear(active)
+
+drawSet(float hi, float lo, int opened, int closed, bool complete, array<line> history, array<line> active) =>
+    array<float> prices = array.from(hi, lo, lo + (hi-lo)*p1/100, lo + (hi-lo)*p2/100, lo + (hi-lo)*p3/100)
+    array<color> colors = array.from(edge, edge, c1, c2, c3)
+    for i = 0 to 4
+        color col = complete ? color.new(array.get(colors, i), 45) : array.get(colors, i)
+        line ln = line.new(time, array.get(prices, i), time_close, array.get(prices, i), xloc=xloc.bar_time, color=col, width=i < 2 ? 2 : 1, style=complete ? line.style_dashed : line.style_solid)
+        array.push(history, ln)
+        array.push(active, ln)
+    if showSourceMarkers
+        string identity = complete ? "Complete " + refTf + "m reference candle" : "Shadow Candle"
+        string labelText = identity + "\n" + str.format_time(opened, "dd MMM HH:mm", syminfo.timezone) + " → " + str.format_time(closed, "dd MMM HH:mm", syminfo.timezone) + "\nH " + str.tostring(hi, "#.##") + "  L " + str.tostring(lo, "#.##") + "\n" + str.tostring(p1, "#.##") + "% " + str.tostring(lo + (hi-lo)*p1/100, "#.##") + " | " + str.tostring(p2, "#.##") + "% " + str.tostring(lo + (hi-lo)*p2/100, "#.##") + " | " + str.tostring(p3, "#.##") + "% " + str.tostring(lo + (hi-lo)*p3/100, "#.##")
+        array.push(labels, label.new(time, lo, "", xloc=xloc.bar_time, style=label.style_circle, color=complete ? color.new(color.purple, 25) : color.new(color.rgb(30, 41, 59), 15), textcolor=color.white, size=size.tiny, tooltip=labelText))
+    while array.size(history) > keep * 5
+        line.delete(array.shift(history))
+    while array.size(labels) > keep * (showFinal and showFull ? 2 : 1)
+        label.delete(array.shift(labels))
+
+if finalBar and (na(lastSource) or sourceOpen != lastSource)
+    lastSource := sourceOpen
+    missingFinal := not validFinal
+    lockedClose := sourceClose
+    lockedScheduled := scheduledClose
+    lockedHigh := validFinal ? h : na
+    lockedLow := validFinal ? l : na
+    lockedFullHigh := fullHigh
+    lockedFullLow := fullLow
+    lockedFullOpen := fullOpen
+    lockedFullClose := fullClose
+    if not na(currentBand)
+        endBand(currentBand, time)
+    currentBand := na
+    regime := 0
+    array.push(sessionHistory, sourceOpen)
+    while array.size(sessionHistory) > keep
+        array.shift(sessionHistory)
+    while array.size(bandHistory) > 0
+        ZoneBand oldest = array.get(bandHistory, 0)
+        if oldest.sourceKey < array.get(sessionHistory, 0)
+            deleteBand(array.shift(bandHistory))
+        else
+            break
+    if not na(rangeTag)
+        label.delete(rangeTag)
+        rangeTag := na
+    if not na(tagLeader)
+        line.delete(tagLeader)
+        tagLeader := na
+    finishSet(activeFinal)
+    finishSet(activeFull)
+    // Confirmed source bounds, drawn back over ONLY its constituent chart candles.
+    if showSourceBoxes and validFinal and timeframe.in_seconds() < timeframe.in_seconds(refTf)
+        array.push(sourceBoxes, box.new(sourceOpen, h, sourceClose, l, xloc=xloc.bar_time, border_color=color.new(sourceBoxColor, 35), border_width=1, bgcolor=color.new(sourceBoxColor, sourceBoxTransparency)))
+        while array.size(sourceBoxes) > keep
+            box.delete(array.shift(sourceBoxes))
+    if showFinal and validFinal
+        drawSet(h, l, sourceOpen, sourceClose, false, finalLines, activeFinal)
+        if showGradient
+            currentBand := makeBand(time, sourceOpen, h, l, 0)
+        if showLabels
+            string details = "Shadow Candle\n" + str.format_time(sourceOpen, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(sourceClose, "HH:mm", syminfo.timezone) + "\nHigh " + str.tostring(h, "#.##") + " · Low " + str.tostring(l, "#.##")
+            rangeTag := label.new(time_close, l, "SC", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.rgb(30, 41, 59), 10), textcolor=color.white, size=size.tiny, tooltip=details)
+            tagLeader := line.new(time_close, l, time_close, l, xloc=xloc.bar_time, color=edge, style=line.style_dotted)
+    if showFull and not na(fullHigh)
+        drawSet(fullHigh, fullLow, fullOpen, fullClose, true, fullLines, activeFull)
+// Use chart-bar confirmation outside request.security. Forming ticks cannot change regime.
+// A transition begins at time_close; the earlier portion of this bar/session is untouched.
+if not na(currentBand)
+    endBand(currentBand, time_close)
+if showFinal and not missingFinal and not na(lockedHigh) and barstate.isconfirmed
+    int nextRegime = close > lockedHigh ? 1 : close < lockedLow ? -1 : 0
+    if nextRegime != regime
+        if not na(currentBand)
+            endBand(currentBand, time_close)
+        regime := nextRegime
+        if showGradient
+            currentBand := makeBand(time_close, lastSource, lockedHigh, lockedLow, regime)
+if not na(rangeTag)
+    int labelTime = time_close + int(timeframe.in_seconds() * 1000) * labelOffset
+    label.set_x(rangeTag, labelTime)
+    if not na(tagLeader)
+        line.set_xy1(tagLeader, time_close, lockedLow)
+        line.set_xy2(tagLeader, labelTime, lockedLow)
+        line.set_color(tagLeader, regime == 0 ? edge : zoneColor(regime))
+    label.set_color(rangeTag, color.new(regime == 0 ? color.rgb(30, 41, 59) : zoneColor(regime), 10))
+if array.size(activeFinal) > 0
+    for ln in activeFinal
+        line.set_x2(ln, time_close)
+if array.size(activeFull) > 0
+    for ln in activeFull
+        line.set_x2(ln, time_close)
+
+
+// Confirmed prior exchange candles. Current-period time is calendar metadata only.
+// Daily means previous TRADING session, weekly/monthly mean completed exchange periods.
+[pdh, pdl, daySource, dayStart] = request.security(requestTicker, "1D", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[pwh, pwl, weekSource, weekStart] = request.security(requestTicker, "1W", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[pmh, pml, monthSource, monthStart] = request.security(requestTicker, "1M", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+var array<line> periodLines = array.new<line>(6, na)
+var array<label> periodTags = array.new<label>(6, na)
+array<float> periodPrices = array.from(pdh, pdl, pwh, pwl, pmh, pml)
+array<int> periodStarts = array.from(dayStart, dayStart, weekStart, weekStart, monthStart, monthStart)
+array<int> sourceStarts = array.from(daySource, daySource, weekSource, weekSource, monthSource, monthSource)
+array<string> periodNames = array.from("PDH", "PDL", "PWH", "PWL", "PMH", "PML")
+array<color> periodColors = array.from(dayColor, dayColor, weekColor, weekColor, monthColor, monthColor)
+array<bool> enabledPeriods = array.from(showPreviousDay, showPreviousDay, showPreviousWeek, showPreviousWeek, showPreviousMonth, showPreviousMonth)
+// Separate nearby labels horizontally; line/label price anchors are NEVER displaced.
+float upperPrice = na
+float lowerPrice = na
+for i = 0 to 5
+    float price = array.get(periodPrices, i)
+    if array.get(enabledPeriods, i) and not na(price)
+        upperPrice := na(upperPrice) ? price : math.max(upperPrice, price)
+        lowerPrice := na(lowerPrice) ? price : math.min(lowerPrice, price)
+float proximity = math.max((upperPrice-lowerPrice)*0.04, syminfo.mintick*10)
+array<int> lanes = array.new<int>(6, 0)
+for i = 0 to 5
+    float price = array.get(periodPrices, i)
+    if array.get(enabledPeriods, i) and not na(price)
+        int lane = showLabels and showFinal and not na(lockedLow) and math.abs(price-lockedLow) < proximity ? 1 : 0
+        if i > 0
+            for j = 0 to i-1
+                if array.get(enabledPeriods, j) and math.abs(price-array.get(periodPrices, j)) < proximity
+                    lane := math.max(lane, array.get(lanes, j)+1)
+        array.set(lanes, i, lane)
+        int futureTime = time_close + int(timeframe.in_seconds()*1000)*(labelOffset + lane*24)
+        line periodLine = array.get(periodLines, i)
+        label periodTag = array.get(periodTags, i)
+        color tint = array.get(periodColors, i)
+        string caption = array.get(periodNames, i)
+        string detail = caption + " · previous completed " + (i < 2 ? "trading day" : i < 4 ? "week" : "month") + "\nFrom " + str.format_time(array.get(sourceStarts, i), "dd MMM yyyy", syminfo.timezone) + "\n" + str.tostring(price, "#,###.##")
+        if na(periodLine)
+            periodLine := line.new(array.get(periodStarts, i), price, futureTime, price, xloc=xloc.bar_time, color=tint, style=i%2 == 0 ? line.style_dashed : line.style_dotted)
+            periodTag := label.new(bar_index + labelOffset + lane*24, price, caption, xloc=xloc.bar_index, style=label.style_label_left, color=tint, textcolor=color.white, size=size.tiny, tooltip=detail)
+            array.set(periodLines, i, periodLine)
+            array.set(periodTags, i, periodTag)
+        else
+            line.set_xy1(periodLine, array.get(periodStarts, i), price)
+            line.set_xy2(periodLine, futureTime, price)
+            label.set_xy(periodTag, bar_index + labelOffset + lane*24, price)
+            label.set_tooltip(periodTag, detail)
+
+// Exchange daily endpoints are frozen: 0% previous close, 100% current day open.
+[previousClose, dailyOpen, gapStart] = request.security(requestTicker, "1D", [close[1], open, time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+var array<line> gapLines = array.new<line>(5, na)
+var array<label> gapTags = array.new<label>(5, na)
+var box gapFill = na
+if barstate.islast
+    bool hasGap = showGap and not na(previousClose) and not na(dailyOpen) and math.abs(dailyOpen-previousClose) >= syminfo.mintick
+    array<float> gapRatios = array.from(0.0, 100.0, p1, p2, p3)
+    // Dedicated future columns keep the narrow gap Fib labels readable at true prices.
+    for i = 0 to 4
+        line gl = array.get(gapLines, i)
+        label gt = array.get(gapTags, i)
+        if hasGap
+            float ratio = array.get(gapRatios, i)
+            float price = previousClose + (dailyOpen-previousClose)*ratio/100
+            int labelBar = bar_index + labelOffset + 48 + i*10
+            string caption = i == 0 ? "PDC" : i == 1 ? "DO" : str.tostring(ratio, "#.##") + "%"
+            color tint = i < 2 ? gapColor : i == 2 ? c1 : i == 3 ? c2 : c3
+            string details = "Gap " + (dailyOpen > previousClose ? "up" : "down") + " · " + caption + "\n" + str.tostring(price, "#,###.##") + "\n0% previous trading-day close → 100% current exchange day open"
+            if na(gl)
+                gl := line.new(gapStart, price, time_close, price, xloc=xloc.bar_time, color=color.new(tint, 20), style=line.style_dashed)
+                gt := label.new(labelBar, price, caption, xloc=xloc.bar_index, style=label.style_label_left, color=tint, textcolor=color.white, size=size.tiny, tooltip=details)
+                array.set(gapLines, i, gl)
+                array.set(gapTags, i, gt)
+            else
+                line.set_xy1(gl, gapStart, price)
+                line.set_xy2(gl, time_close, price)
+                label.set_xy(gt, labelBar, price)
+                label.set_text(gt, caption)
+                label.set_tooltip(gt, details)
+        else
+            line.delete(gl)
+            label.delete(gt)
+            array.set(gapLines, i, na)
+            array.set(gapTags, i, na)
+    if not na(gapFill)
+        box.delete(gapFill)
+        gapFill := na
+    if hasGap
+        gapFill := box.new(gapStart, math.max(previousClose, dailyOpen), time_close, math.min(previousClose, dailyOpen), xloc=xloc.bar_time, border_color=na, bgcolor=color.new(gapColor, 94))
+
+// Compact current-level panel; detailed source evidence belongs in hover tooltips.
+var table panel = table.new(position.bottom_right, 3, 5, border_width=0, frame_width=0)
+if barstate.isfirst
+    table.merge_cells(panel, 0, 0, 2, 0)
+    table.merge_cells(panel, 0, 2, 2, 2)
+
+panelRow(int row, float hi, float lo) =>
+    array<float> ratios = array.from(p1, p2, p3)
+    array<color> colors = array.from(c1, c2, c3)
+    for i = 0 to 2
+        float ratio = array.get(ratios, i)
+        string caption = str.tostring(ratio, "#.##") + "%  " + str.tostring(lo + (hi-lo)*ratio/100, "#,###.##")
+        table.cell(panel, i, row, caption, text_color=row == 1 and regime != 0 ? zoneColor(regime) : array.get(colors, i), bgcolor=color.new(color.rgb(15, 23, 42), 7), text_size=size.small)
+
+if barstate.islast
+    table.clear(panel, 0, 0, 2, 4)
+    if showPanel
+        // Reserve room above TradingView event icons at the bottom edge.
+        table.cell(panel, 0, 4, "", height=4, bgcolor=color.new(color.white, 100))
+        if showFinal
+            string title = na(lastSource) ? "Shadow Candle · waiting" : missingFinal ? "Shadow Candle · unavailable" : "" + str.format_time(lastSource, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(lockedClose, "HH:mm", syminfo.timezone)
+            string evidence = selected + " / " + refTf + " min / " + sourceSession + " session\nH " + str.tostring(lockedHigh, "#.##") + " · L " + str.tostring(lockedLow, "#.##") + "\nConfirmed source; published next session. Zone color changes only after a chart candle closes outside the range; inside is neutral."
+            table.cell(panel, 0, 0, title, text_color=color.white, bgcolor=color.new(color.rgb(30, 41, 59), 10), text_size=size.small, tooltip=evidence)
+            if not missingFinal and not na(lockedHigh)
+                panelRow(1, lockedHigh, lockedLow)
+        if showFull and not na(lockedFullHigh)
+            string title = "Reference " + refTf + "m · " + str.format_time(lockedFullOpen, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(lockedFullClose, "HH:mm", syminfo.timezone)
+            table.cell(panel, 0, 2, title, text_color=color.white, bgcolor=color.new(color.purple, 35), text_size=size.small, tooltip="Optional complete reference candle; dashed lines.")
+            panelRow(3, lockedFullHigh, lockedFullLow)
+
+// Inverse Wilder RSI. RSI(c) == SMA(RSI(c), M) iff RSI(c) equals
+// the average of the PREVIOUS M-1 RSI values. This target is fixed before this bar.
+float chartRsi = ta.rsi(close, rsiLength)
+float rsiAverage = ta.sma(chartRsi, rsiSmaLength)
+float priorRsiTarget = ta.sma(chartRsi[1], math.max(rsiSmaLength-1, 1))
+float upState = ta.rma(math.max(ta.change(close), 0), rsiLength)
+float downState = ta.rma(math.max(-ta.change(close), 0), rsiLength)
+float priorGain = (rsiLength-1)*upState[1]
+float priorLoss = (rsiLength-1)*downState[1]
+float rsiCrossPrice = na
+bool invertibleRsi = rsiSmaLength > 1 and not na(priorRsiTarget) and priorRsiTarget > 0 and priorRsiTarget < 100 and not na(priorGain) and not na(priorLoss) and priorGain+priorLoss > 0
+if invertibleRsi
+    float targetRs = priorRsiTarget/(100-priorRsiTarget)
+    float delta = priorGain <= targetRs*priorLoss ? targetRs*priorLoss-priorGain : priorLoss-priorGain/targetRs
+    float candidate = close[1]+delta
+    rsiCrossPrice := candidate > 0 ? candidate : na
+plot(showRsiAverage ? rsiCrossPrice : na, "RSI SMA crossover price", color=rsiAverageColor, linewidth=2, style=plot.style_linebr)
+plot(showRsiAverage ? chartRsi : na, "RSI · raw", display=display.data_window)
+plot(showRsiAverage ? rsiAverage : na, "RSI SMA · raw", display=display.data_window)
+// Read-only diagnostic in Data Window: zero means same-bar sides agree.
+float crossMismatch = not na(rsiCrossPrice) and math.abs(chartRsi-rsiAverage) > 0.00000001 ? ((close > rsiCrossPrice) == (chartRsi > rsiAverage) ? 0 : 1) : na
+plot(showRsiAverage ? crossMismatch : na, "RSI cross-side mismatch (0 = match)", display=display.data_window)
+var label rsiTag = na
+if barstate.islast
+    if not na(rsiTag)
+        label.delete(rsiTag)
+        rsiTag := na
+    if showRsiAverage
+        string details = "RSI " + str.tostring(chartRsi, "#.##") + " · SMA " + str.tostring(rsiAverage, "#.##") + "\n" + (not na(rsiCrossPrice) ? "Close above/below this price means RSI above/below its SMA on this same chart candle. Threshold " + str.tostring(rsiCrossPrice, "#.##") : "Threshold unavailable: warm-up, extreme RSI, flat states, SMA length 1, or no positive-price solution.") + "\nThis is an inverse-RSI crossover threshold; it does not reproduce the oscillator average's shape."
+        rsiTag := label.new(bar_index + labelOffset + 12, not na(rsiCrossPrice) ? rsiCrossPrice : close, not na(rsiCrossPrice) ? "RSI SMA" : "RSI SMA n/a", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(rsiAverageColor, 15), textcolor=color.white, size=size.tiny, tooltip=details)

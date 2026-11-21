@@ -63,6 +63,10 @@ def configuration(payload):
     contracts=whole(payload.get('lots'), 'Delta contracts', True)
     if contracts>100000:raise ValueError('Delta quantity exceeds 100000 whole contracts.')
     config = renko_configuration({**payload, 'lots':min(contracts,100), 'execution_route': 'OPTIONS', 'underlying': 'NSE:DELTA-VALIDATION'})
+    if config.get('line_entry_enabled'):
+        import json
+        if json.loads(config['line_entry_definition'])['symbol']!=symbol:raise ValueError('Entry line belongs to a different instrument.')
+        if route!= 'OPTIONS':raise ValueError('Drawn-line call/put entries require Delta options.')
     config['lots']=contracts
     config.update(execution_route=route)
     if route == FUTURES_ROUTE:config['collateral_policy']='FULL_NOTIONAL'

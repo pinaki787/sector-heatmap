@@ -47,6 +47,7 @@ import pandas as pd
 import certifi
 from fyers_apiv3 import fyersModel
 from sector_heatmap.fyers_transport import client as ipv4_fyers_client
+from sector_heatmap.chart_trade_admission import place_fyers_entry,serialized_fyers_strategy_entry
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -385,7 +386,7 @@ def place_order(symbol, qty, side):
         "side": side, "productType": "INTRADAY", "limitPrice": 0, "stopPrice": 0,
         "validity": "DAY", "disclosedQty": 0, "offlineOrder": False,
     }
-    resp = fyers.place_order(order)
+    resp = place_fyers_entry(fyers.place_order,order) if side==1 else fyers.place_order(order)
     log(f"  Order response for {symbol} ({'BUY' if side==1 else 'SELL'} {qty}): {resp}")
     if resp.get("s") != "ok":
         raise RuntimeError(f"Order placement FAILED for {symbol}: {resp}")
@@ -441,6 +442,7 @@ def clear_premium_chart():
         os.remove(CHART_FILE)
 
 
+@serialized_fyers_strategy_entry
 def enter_position():
     spot = get_spot_ltp()
     atm_strike, ce_symbol, pe_symbol, expiry_date_str = get_nearest_weekly_expiry_and_atm_symbols(spot)

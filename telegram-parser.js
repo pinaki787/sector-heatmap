@@ -2,7 +2,7 @@
  'use strict';
  const root=window,$=id=>document.getElementById(id),navRoot=document.querySelector('.nav');
  if(!navRoot)return;
- const old=document.querySelector('[data-view="trade-parser"]');if(old)old.textContent='FYERS Trade Parser';
+ const old=document.querySelector('[data-view="trade-parser"]');if(old)old.textContent='Trade Parser';
  let nav=navRoot.querySelector('[data-view="telegram-parser"]');
  if(!nav){nav=document.createElement('button');nav.type='button';nav.dataset.view='telegram-parser';nav.textContent='Telegram Trade Parser';nav.setAttribute('aria-pressed','false');navRoot.append(nav);}
  let parsers=navRoot.querySelector('.parsers-nav');

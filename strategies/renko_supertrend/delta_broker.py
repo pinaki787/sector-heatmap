@@ -1,3 +1,4 @@
+from strategies.ema_crossover.spread_policy import enabled as spread_filter_enabled
 """Independent Delta market stream and native broker adapter for shared Renko.
 
 Construction is inert. Public stream subscription does not authorize execution.
@@ -28,6 +29,9 @@ def history_file_lock(path, symbol, resolution):
 
 
 class Broker:
+    subscribe_quotes = True
+    candle_resolutions = {TIMEFRAMES[name]: resolution for name, resolution in RESOLUTIONS.items()}
+
     observe = FyersRenkoBroker.observe
     forming = FyersRenkoBroker.forming
     live_price = FyersRenkoBroker.live_price
@@ -139,9 +143,9 @@ class Broker:
     def subscribe_all(self):
         with self.lock:
             if not self.connected or not self.socket: return
-            channels = [dict(name='ob_l1',symbols=sorted(self.symbols))]
-            for timeframe,resolution in RESOLUTIONS.items():
-                symbols = sorted(s for s,n in self.frame_seconds if n==TIMEFRAMES[timeframe])
+            channels = [dict(name='ob_l1',symbols=sorted(self.symbols))] if self.subscribe_quotes else []
+            for seconds,resolution in self.candle_resolutions.items():
+                symbols = sorted(s for s,n in self.frame_seconds if n==seconds)
                 if symbols: channels.append(dict(name='candlestick_'+resolution,symbols=symbols))
             self.socket.send(json.dumps(dict(type='subscribe',payload=dict(channels=channels))))
 
@@ -162,23 +166,29 @@ class Broker:
                     return
                 if not str(kind).startswith('candlestick_'): return
                 resolution = message.get('res') or str(kind).split('_',1)[1]
-                timeframe = next((k for k,v in RESOLUTIONS.items() if v==resolution),None)
-                if not timeframe: return
-                seconds=TIMEFRAMES[timeframe]; opening=float(message['cst'])/1e6 if message.get('cst') is not None else int(stamp)//seconds*seconds
+                seconds = next((k for k,v in self.candle_resolutions.items() if v==resolution),None)
+                if seconds is None: return
+                opening=float(message['cst'])/1e6 if message.get('cst') is not None else int(stamp)//seconds*seconds
                 if opening!=int(stamp)//seconds*seconds: return
                 values={k:float(message[key]) for k,key in [('open','o'),('high','h'),('low','l'),('close','c')]}
                 if not all(math.isfinite(v) and v>0 for v in values.values()) or values['high']<max(values['open'],values['close']) or values['low']>min(values['open'],values['close']): return
                 volume=None if message.get('v') is None else float(message['v'])
                 if volume is not None and (not math.isfinite(volume) or volume<0): return
                 old=self.ticks.get(symbol)
-                if old and stamp<old['exch_feed_time']: return
+                frame_key=(symbol,seconds,opening)
+                previous_frame=self.forming_bars.get(frame_key)
+                if previous_frame and stamp<previous_frame['stream_exchange_at']: return
                 row=dict(timestamp=opening,**values,volume=volume,is_forming=True,host_open_verified=True,stream_exchange_at=stamp)
-                self.forming_bars[(symbol,seconds,opening)]=row
+                self.forming_bars[frame_key]=row
+                # A different candle channel can arrive later with an earlier
+                # exchange timestamp. Retain its own OHLC without rewinding the
+                # executable symbol tick or notifying runners of an older price.
+                newer_tick=not old or stamp>=old['exch_feed_time']
                 raw=dict(symbol=symbol,ltp=values['close'],exch_feed_time=stamp,received_at=received)
-                self.ticks[symbol]=raw
+                if newer_tick: self.ticks[symbol]=raw
                 # Keep a bounded forming cache; completed evidence comes from REST.
                 if len(self.forming_bars)>200: self.forming_bars.pop(next(iter(self.forming_bars)))
-            if self.on_tick: self.on_tick(raw)
+            if newer_tick and self.on_tick: self.on_tick(raw)
         except (ValueError,TypeError,KeyError,OverflowError): return
 
     def start(self):
@@ -325,7 +335,7 @@ class Broker:
 
     def preflight(self, order, config):
         self.validate_order(order); self.authenticated_client(); quote=self.quote(order['symbol'])
-        if (quote['ask']-quote['bid'])/quote['ask']>.03: raise ValueError('Entry spread exceeds 3%.')
+        if spread_filter_enabled(config) and (quote['ask']-quote['bid'])/quote['ask']>.03: raise ValueError('Entry spread exceeds 3%.')
         self.reconcile_position(order['symbol'],0)
         if any(r['symbol']==order['symbol'] and r['status'] not in (1,2,5,7) for r in self.orders()): raise ValueError('Existing Delta order blocks entry.')
         wallets=self.delta._private('GET','/v2/wallet/balances')['result']; meta=self.contract(order['symbol'])
@@ -336,6 +346,24 @@ class Broker:
             raise ValueError('Verified same-currency balance must cover full premium/notional, fees/GST and 1% reserve; broker leverage is unchanged.')
 
     def place(self, order):
+        # Native submit persists its intent before any POST. Hold its lock through
+        # classification: absence here proves a pre-submission rejection only in
+        # this call, never permission to discard an older unknown pending intent.
+        with self.delta.lock:
+            try:
+                return self._place(order)
+            except Exception:
+                if order['orderTag'] in self.delta.live['orders']:
+                    raise  # Durable intent exists: retain unknown-ack recovery.
+                identity=getattr(getattr(self,'execution',None),'account_identity',None)
+                if identity:
+                    from .delta_no_send import record
+                    try:record(self.delta,order,identity)
+                    except OSError:pass  # Still a definitive same-call rejection; no invented receipt.
+                return dict(s='error', code=400,
+                            message='Delta pre-submission validation failed; no order sent.')
+
+    def _place(self, order):
         self.validate_order(order); self.authenticated_client()
         result=self.execution.submit(order['symbol'],order['qty'],order['side'],self.quote(order['symbol']),order['orderTag'],getattr(self,'signal_symbol',None),getattr(self,'execution_reason','RENKO'),reduce_only=order.get('reduce_only'))
         if result['status']=='REJECTED': return dict(s='error',code=400,message='Delta rejected native IOC order.')

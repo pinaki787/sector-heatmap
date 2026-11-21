@@ -6,7 +6,7 @@ test('uses saved runner gate evidence, not passing visible ADX or staged setting
  const a=assessment(base(),view,now);assert.match(a.reason,/gap is not strictly widening/);assert.equal(a.link,true);assert.ok(a.checks.includes('PASS · ADX 40.0 > 25'));assert.ok(a.checks.some(x=>x.startsWith('PENDING · Proximity')));assert.doesNotMatch(a.reason,/sideways/i);
 });
 test('no entry never implies sideways; only a recorded active quick-loss lock is shown',()=>{
- const s=base();s.sideways_status={enabled:true};assert.doesNotMatch(assessment(s,view,now).reason,/sideways/i);s.sideways_status.lock={active:true};const a=assessment(s,view,now);assert.equal(a.title,'Quick-loss range lock');assert.match(a.reason,/does not classify/);assert.equal(a.link,undefined);
+ const s=base();s.config.sideways_enabled=true;s.sideways_status={enabled:true};assert.doesNotMatch(assessment(s,view,now).reason,/sideways/i);s.sideways_status.lock={active:true};const a=assessment(s,view,now);assert.equal(a.title,'Quick-loss range lock');assert.match(a.reason,/does not classify/);assert.equal(a.link,undefined);
 });
 test('stale, disconnected or older-candle evidence cannot claim a current gate block',()=>{
  for(const mutate of [s=>s.updated_at=1700,s=>s.last_signal.timestamp=1200,s=>s.stream.connected=false]){const s=base();mutate(s);const a=assessment(s,view,now);assert.equal(a.fresh,false);assert.doesNotMatch(a.reason,/gap is not/);assert.equal(a.link,undefined);}
@@ -25,7 +25,7 @@ test('only same-run same-candle execution evidence supplies execution eligibilit
  const s=base();s.execution_signals=[{run_id:'old',underlying:'BTCUSD',timestamp:1500,eligible:false,reason:'OLD ERROR'}];assert.doesNotMatch(assessment(s,view,now).reason,/OLD ERROR/);s.execution_signals[0].run_id='current';assert.match(assessment(s,view,now).reason,/OLD ERROR/);s.status='BLOCKED';s.message='Entry too far from EMA10: 20 points; maximum 10.';assert.match(assessment(s,view,now).reason,/Blocked at runner preflight: Entry too far/);
 });
 test('qualifying setup alone does not claim entry, retest waiting is an alternative path',()=>{
- const s=base();Object.assign(s.last_signal,{entry_qualified:true,entry_diagnostic:'QUALIFIED',ema_widening:true});const a=assessment(s,view,now);assert.match(a.reason,/waiting for a fresh entry event/);assert.ok(a.checks.some(x=>x.includes('No confirmed retest entry')));s.config.use_adx=false;assert.ok(assessment(s,view,now).checks.includes('OFF · ADX gate'));
+ const s=base();Object.assign(s.last_signal,{entry_qualified:true,entry_diagnostic:'QUALIFIED',ema_widening:true});const a=assessment(s,view,now);assert.match(a.reason,/waiting for a fresh entry event/);assert.ok(a.checks.some(x=>x.includes('No confirmed retest entry')));s.config.use_adx=false;assert.ok(!assessment(s,view,now).checks.some(row=>row.includes('ADX gate')||row.startsWith('OFF ·')));
 });
 
 test('routine history revision explanation retains completed rule evidence',()=>{
@@ -68,4 +68,15 @@ test('split policy explains active caps without replacing the baseline setting',
  assert.match(a.rules,/retest 0.5 ATR \/ first momentum 1.5 ATR/);
  s.execution_signals=[{run_id:'current',underlying:'BTCUSD',timestamp:1500,status:'BLOCKED',reason:'Momentum entry chased beyond signal close: maximum 0.25 completed ATR.'}];
  assert.ok(assessment(s,view,now).checks.some(x=>x.startsWith('BLOCKED · Momentum')));
+});
+test('selected Supertrend exposes direction and reversal while disabled gates stay absent',()=>{
+ const s=base();Object.assign(s.config,{supertrend_enabled:true,ema_fast_enabled:false,ema_slow_enabled:false,ema_third_enabled:false,ema_widening_enabled:false,use_adx:false,rsi_slope_enabled:false,retest_enabled:false,ema_proximity_enabled:false});
+ let a=assessment(s,view,now);assert.ok(a.checks.some(x=>x.includes('Supertrend direction: Bearish')));assert.ok(a.checks.some(x=>x.startsWith('WAIT · Supertrend reversal entry')));assert.ok(!a.checks.some(x=>/ADX|RSI/.test(x)));
+ s.last_signal.cross_direction='BEARISH';a=assessment(s,view,now);assert.ok(a.checks.some(x=>x.startsWith('PASS · Supertrend reversal entry')));
+ s.config.supertrend_enabled=false;a=assessment(s,view,now);assert.ok(!a.checks.some(x=>x.includes('Supertrend direction')));
+});
+
+test('disabled quick-loss filter never presents a retained historical lock as the active blocker',()=>{
+ const s=base();s.config.sideways_enabled=false;s.sideways_status={enabled:false,lock:{active:true}};
+ assert.notEqual(assessment(s,view,now).title,'Quick-loss range lock');
 });

@@ -1,5 +1,5 @@
 """Local user registry and isolated broker workspaces. Never starts a strategy."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from http.cookies import SimpleCookie
 import hashlib
 import hmac
@@ -48,7 +48,9 @@ class WorkspaceStore:
             CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
                 broker TEXT NOT NULL, label TEXT NOT NULL, account_ref TEXT NOT NULL,
                 port INTEGER UNIQUE NOT NULL, live_enabled INTEGER NOT NULL DEFAULT 0,
-                credential_identity TEXT UNIQUE, UNIQUE(broker, account_ref));
+                credential_identity TEXT, UNIQUE(user_id, broker, account_ref), UNIQUE(user_id, broker, credential_identity));
+            CREATE TABLE IF NOT EXISTS deleted_accounts(id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+                port INTEGER NOT NULL, deleted_at REAL NOT NULL, registration TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS user_features(user_id TEXT NOT NULL,feature TEXT NOT NULL,PRIMARY KEY(user_id,feature));
             CREATE TABLE IF NOT EXISTS user_notification_emails(user_id TEXT PRIMARY KEY,email TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,enabled_at REAL NOT NULL DEFAULT 0);
@@ -59,7 +61,35 @@ class WorkspaceStore:
             columns={r[1] for r in db.execute('PRAGMA table_info(user_notification_emails)')}
             if 'enabled' not in columns:db.execute('ALTER TABLE user_notification_emails ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0')
             if 'enabled_at' not in columns:db.execute('ALTER TABLE user_notification_emails ADD COLUMN enabled_at REAL NOT NULL DEFAULT 0')
+        self._scope_account_uniqueness()
         self.path.chmod(0o600)
+
+    def _scope_account_uniqueness(self):
+        """Migrate legacy global constraints atomically, retaining every account ID."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            unique=[]
+            for index in db.execute("PRAGMA index_list(accounts)").fetchall():
+                if index[2]:
+                    unique.append(tuple(r[2] for r in db.execute('PRAGMA index_info("'+index[1]+'")')))
+            if ('broker','account_ref') not in unique and ('credential_identity',) not in unique:
+                return
+            columns=['id','user_id','broker','label','account_ref','port','live_enabled','credential_identity']
+            if [r[1] for r in db.execute('PRAGMA table_info(accounts)')]!=columns:
+                raise ValueError('Account registry schema requires reviewed migration.')
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='accounts'").fetchone():
+                raise ValueError('Account registry triggers require reviewed migration.')
+            db.execute("""CREATE TABLE accounts_scoped_migration(
+                id TEXT PRIMARY KEY,user_id TEXT NOT NULL,broker TEXT NOT NULL,
+                label TEXT NOT NULL,account_ref TEXT NOT NULL,port INTEGER UNIQUE NOT NULL,
+                live_enabled INTEGER NOT NULL DEFAULT 0,credential_identity TEXT,
+                UNIQUE(user_id,broker,account_ref),UNIQUE(user_id,broker,credential_identity))""")
+            names=','.join(columns)
+            db.execute('INSERT INTO accounts_scoped_migration('+names+') SELECT '+names+' FROM accounts')
+            if db.execute('SELECT COUNT(*) FROM accounts_scoped_migration').fetchone()[0]!=db.execute('SELECT COUNT(*) FROM accounts').fetchone()[0]:
+                raise ValueError('Account registry migration count mismatch.')
+            db.execute('DROP TABLE accounts')
+            db.execute('ALTER TABLE accounts_scoped_migration RENAME TO accounts')
 
     def sidebar_visibility(self):
         from .section_permissions import FEATURES
@@ -269,7 +299,7 @@ class WorkspaceStore:
             raise ValueError('Enter a label and broker account reference (2–80 letters/digits).')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            port = db.execute('SELECT COALESCE(MAX(port),8099)+1 FROM accounts').fetchone()[0]
+            port = db.execute('SELECT COALESCE(MAX(port),8099)+1 FROM (SELECT port FROM accounts UNION ALL SELECT port FROM deleted_accounts)').fetchone()[0]
             if port > 8999:
                 raise ValueError('Workspace port allocation exhausted.')
             aid = secrets.token_hex(16)
@@ -277,7 +307,7 @@ class WorkspaceStore:
                 db.execute('INSERT INTO accounts(id,user_id,broker,label,account_ref,port) VALUES(?,?,?,?,?,?)',
                            (aid,user['id'],broker,label,account_ref,port))
             except sqlite3.IntegrityError:
-                raise ValueError('This broker account reference is already registered.') from None
+                raise ValueError('This broker account reference is already registered for your user.') from None
         return self.account(user, aid)
 
     def folder(self, account):
@@ -337,7 +367,7 @@ class WorkspaceStore:
             try:
                 db.execute('UPDATE accounts SET credential_identity=?,live_enabled=? WHERE id=?', (digest,int(live_enabled),aid))
             except sqlite3.IntegrityError:
-                raise ValueError('This broker application/key already belongs to another workspace.') from None
+                raise ValueError('This broker application/key already belongs to another workspace for your user.') from None
             private_write(path,json.dumps(credentials))
         return self.account(user, aid)
 
@@ -359,7 +389,7 @@ def isolated_environment(account, folder, registry, portal_port):
     env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'AppData'),XDG_CONFIG_HOME=str(home/'.config'),
                HEATMAP_PORT=str(account['port']),FYERS_TOKEN_FILE=str(home/'.fyers/token.json'),
                SECTOR_PULSE_WORKSPACE_REGISTRY=str(registry),SECTOR_PULSE_WORKSPACE_ID=account['id'],
-               SECTOR_PULSE_WORKSPACE_BROKER=account['broker'],SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
+               SECTOR_PULSE_WORKSPACE_BROKER=account['broker'],SECTOR_PULSE_WORKSPACE_USER_ID=account.get('user_id',''),SECTOR_PULSE_PORTAL_PORT=str(portal_port),PYTHONNOUSERSITE='1',TZ='Asia/Kolkata')
     env.update({k:'0' for k in LIVE_KEYS})
     if account['live_enabled']:
         if account['broker']=='MOTILAL_OSWAL':env['MOTILAL_ENABLE_LIVE_ORDERS']='1'
@@ -427,6 +457,49 @@ class WorkspaceRuntime:
                 path.unlink(missing_ok=True)
             return {'disconnected': True, 'account_id': aid}
 
+    def delete(self, user, aid, confirmation):
+        """Archive registration only. Never stop processes or erase trading evidence."""
+        from .service_restart import stopped_state_paths
+        from .file_lock import lock_file
+        with self.lock, ExitStack() as locks:
+            account = self.store.account(user, aid)
+            if confirmation != account['account_ref']:
+                raise ValueError('Type the account reference exactly to confirm deletion.')
+            if self.running(aid):
+                raise ValueError('Delete blocked: dashboard is running. Stop it through Server resources after reconciling runners, positions and pending orders.')
+            folder = self.store.folder(account)
+            bounce = folder/'bounce-status.json'
+            if bounce.exists() and json.loads(bounce.read_text()).get('status') in {'CHECKING','RESTARTING','WAITING'}:
+                raise ValueError('Delete blocked: dashboard restart is in progress.')
+            try:
+                sources = [folder/'source']
+                if account['broker'] == 'DHAN':
+                    sources.append(self.source)
+                paths = sorted({path for source in sources for path in stopped_state_paths(source)})
+                for path in paths:
+                    handle = locks.enter_context(open(path.with_suffix('.lock'), 'a'))
+                    try:
+                        lock_file(handle.fileno(), blocking=False)
+                    except OSError:
+                        raise ValueError('A runner owns this account; wait for it to stop.') from None
+                for source in sources:
+                    stopped_state_paths(source)
+                # Dhan can also run through the shared dashboard. Fail closed while
+                # shared runners own exposure; deletion must never orphan a runner.
+                if account['broker'] == 'DHAN':
+                    stopped_state_paths(self.source)
+            except ValueError as error:
+                raise ValueError('Delete blocked: reconcile active or unreadable runner state first. '+str(error)) from None
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT * FROM accounts WHERE id=? AND user_id=?', (aid,user['id'])).fetchone()
+                if not row:
+                    raise PermissionError('Broker workspace is unavailable for this user.')
+                db.execute('INSERT INTO deleted_accounts VALUES(?,?,?,?,?)',
+                           (aid,user['id'],row['port'],self.store.clock(),json.dumps(dict(row))))
+                db.execute('DELETE FROM accounts WHERE id=? AND user_id=?', (aid,user['id']))
+            return {'deleted': True, 'account_id': aid, 'records_retained': True}
+
     def reconnect(self, user, aid):
         with self.lock:
             account = self.store.account(user, aid)
@@ -480,16 +553,19 @@ class WorkspaceRuntime:
         # Refresh only reviewed public source; account credentials and journals stay local.
         if (self.source/'.git').exists():
             inventory=subprocess.check_output(['git','ls-files','-z'],cwd=self.source).decode().split('\0')
-            inventory += ['strategies/renko_supertrend/manual_trend.py','holdings-review.js','sector_heatmap/holdings_analysis.py','sector_heatmap/broker_diagnostics.py','sector_heatmap/screener_paging.py','sector_heatmap/advisory_jobs.py','sector_heatmap/runner_job_history.py','runner-jobs.js','user-guide.html','sector_heatmap/dhan_account_login.py','sector_heatmap/network_policy.py','sitecustomize.py','sector_heatmap/premium_exit_mapping.py','strategies/renko_supertrend/dhan_costs.py','sector_heatmap/dhan_handoff.py','sector_heatmap/dhan_recovery.py','sector_heatmap/dhan_sector_analysis.py','strategies/renko_supertrend/manual_brick.py','sector_heatmap/fyers_transport.py','sector_heatmap/fyers_oauth_routing.py','renko-engine.js','broker-connection-status.js','strategies/renko_engine/__init__.py','strategies/renko_engine/rules.py','strategies/renko_engine/runner.py','strategies/renko_engine/service.py','strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py', 'strategies/renko_supertrend/indicator_families.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js','sector_heatmap/dhan_execution.py','dhan-orders.html','dhan-orders.js','broker-account-options.js', 'broker-form-routing.js', 'sector_heatmap/dhan_form_routes.py', 'sector_heatmap/dhan_indicator_runners.py', 'sector_heatmap/workspace_proxy.py', 'sector_heatmap/dhan_strategy_broker.py', 'sector_heatmap/dhan_mcx.py', 'sector_heatmap/dhan_strategy_service.py', 'dhan-strategies.html', 'dhan-strategies.js','strategies/renko_supertrend/rsi_level.py']
+            inventory += ['strategies/renko_supertrend/manual_trend.py','holdings-review.js','sector_heatmap/holdings_analysis.py','sector_heatmap/broker_diagnostics.py','sector_heatmap/screener_paging.py','sector_heatmap/advisory_jobs.py','sector_heatmap/runner_job_history.py','runner-jobs.js','user-guide.html','sector_heatmap/account_parser.py','sector_heatmap/recommendation_text.py','sector_heatmap/dhan_account_reports.py','sector_heatmap/dhan_account_login.py','sector_heatmap/network_policy.py','sitecustomize.py','sector_heatmap/premium_exit_mapping.py','strategies/renko_supertrend/dhan_costs.py','sector_heatmap/dhan_handoff.py','sector_heatmap/dhan_recovery.py','sector_heatmap/dhan_sector_analysis.py','strategies/renko_supertrend/manual_brick.py','sector_heatmap/fyers_transport.py','sector_heatmap/fyers_oauth_routing.py','renko-engine.js','broker-connection-status.js','strategies/renko_engine/__init__.py','strategies/renko_engine/rules.py','strategies/renko_engine/runner.py','strategies/renko_engine/service.py','strategies/renko_supertrend/exit_indicators.py','strategies/renko_supertrend/indicator_selection.py', 'strategies/renko_supertrend/indicator_families.py','sector_heatmap/section_permissions.py','sector_heatmap/local_dashboard_auth.py','dashboard-login.html','dashboard-login.js','sector_heatmap/dhan_execution.py','dhan-orders.html','dhan-orders.js','broker-account-options.js', 'broker-form-routing.js', 'sector_heatmap/dhan_form_routes.py', 'sector_heatmap/dhan_indicator_runners.py', 'sector_heatmap/workspace_proxy.py', 'sector_heatmap/dhan_strategy_broker.py', 'sector_heatmap/dhan_mcx.py', 'sector_heatmap/dhan_strategy_service.py', 'dhan-strategies.html', 'dhan-strategies.js','strategies/renko_supertrend/rsi_level.py']
+            inventory += ['sector_heatmap/screener_auto.py']
             inventory += ['sector_heatmap/workspace_bounce.py','strategies/ema_crossover/external_close.py','sector_heatmap/screener_routes.py']
             inventory += ['motilal-oswal.html','motilal-oswal.js'] + ['sector_heatmap/motilal_'+name+'.py' for name in ['api','feed','history','history_seed','calendar','master','execution','service','server','strategy_broker','strategy_service','analysis','shared_routes','shared_tickets']]
             inventory += ['sector_heatmap/stock_expiry_policy.py']
-            inventory += ['investment.js','investment.css','sector_heatmap/investment.py','sector_heatmap/investment_rs.py','sector_heatmap/investment_plan.py']
+            inventory += ['investment.js','investment-exports.js','investment.css','sector_heatmap/investment.py','sector_heatmap/investment_returns.py','sector_heatmap/investment_rs.py','sector_heatmap/investment_plan.py','sector_heatmap/investment_entry.py']
+            inventory += ['seasonality.js','sector_heatmap/seasonality.py','holdings-portfolio.js','sector_heatmap/holdings_sectors.py']
             inventory += ['sector_heatmap/company_fundamentals.py','sector_heatmap/fundamental_feedback.py','fundamental-report.js']
             inventory += ['sector_heatmap/combined_sector_worker.py','sector_heatmap/combined_screener_worker.py','sector_heatmap/combined_screener_analysis.py']
             inventory += ['sector_heatmap/holdings_native_trailing.py','sector_heatmap/holdings_trailing.py','sector_heatmap/holdings_actions.py','sector_heatmap/holdings_sessions.py','sector_heatmap/holdings_chart.py','sector_heatmap/holdings_analysis.py','analysis-trailing.js','holdings-trailing.js','holdings-review-tools.js']
             inventory += ['sector_heatmap/handoff_product_retry.py']
             inventory += ['sector_heatmap/handoff_authorization.py']
+            inventory += ['strategies/renko_supertrend/calibrated.py','strategies/renko_supertrend/zone_entry.py']
             inventory += ['sector_heatmap/handoff_screener.py','sector_heatmap/handoff_priority.py','handoff-screener.js']
             inventory += ['sector_heatmap/handoff_entry_conditions.py','sector_heatmap/handoff_entry_queue.py']
             inventory += ['handoff-exit-monitor.js','sector_heatmap/handoff_exit_monitor.py','sector_heatmap/handoff_exit_broker.py']
@@ -498,6 +574,36 @@ class WorkspaceRuntime:
             inventory += ['dashboard-help.js','resource-restarts.js','resource-monitor.js','sector_heatmap/service_restart.py']
             inventory += ['strategies/renko_supertrend/mtf_rsi.py']
             inventory += ['strategies/renko_supertrend/confirmed_feed.py']
+            inventory += [
+                'index.html', 'chart-workspace.js', 'chart-workspace-studies.js', 'chart-workspace.css',
+                'vendor/lightweight-charts-4.2.3.js',
+                'sector_heatmap/chart_workspace.py', 'sector_heatmap/chart_trade_stream.py',
+            ]
+            inventory += [
+                'chart-trade-ticket.js','chart-trade-ticket.css','chart-trading.js',
+                'sector_heatmap/chart_trading.py','sector_heatmap/chart_trade_admission.py',
+                'sector_heatmap/chart_trade_plan.py','sector_heatmap/chart_trade_previews.py',
+                'sector_heatmap/chart_trade_native.py','sector_heatmap/chart_trade_ownership.py',
+                'sector_heatmap/chart_trade_monitor.py','sector_heatmap/chart_trade_fyers.py',
+                'sector_heatmap/chart_trade_fyers_history.py',
+                'sector_heatmap/chart_trade_reconciliation.py','sector_heatmap/chart_trade_delta.py',
+                'sector_heatmap/chart_trade_delta_exits.py','sector_heatmap/dhan_protection.py',
+                'sector_heatmap/chart_trade_dhan.py','sector_heatmap/chart_trade_dhan_evidence.py',
+                'sector_heatmap/chart_trade_dhan_reconciliation.py','sector_heatmap/chart_trade_dhan_exits.py',
+                'sector_heatmap/chart_trade_dhan_sessions.py','sector_heatmap/chart_trade_dhan_trigger.py',
+                'sector_heatmap/chart_trade_dhan_conditions.py','sector_heatmap/chart_trade_dhan_worker.py',
+                'sector_heatmap/chart_trade_dhan_controller.py','strategies/renko_supertrend/line_entry.py',
+                'sector_heatmap/multi_account_ticket.py','sector_heatmap/ncdex_calendar.py',
+                'sector_heatmap/restart_state_read.py','sector_heatmap/yahoo_chart.py',
+                'strategies/renko_supertrend/chart_recovery.py','strategies/renko_supertrend/delta_external_close.py',
+                'strategies/renko_supertrend/delta_no_send.py','strategies/renko_supertrend/entry_pipeline.py',
+                'strategies/renko_supertrend/entry_qualification.py','strategies/renko_supertrend/journal_scope.py',
+                'strategies/renko_supertrend/option_premium.py','strategies/renko_supertrend/swing_breakout.py',
+
+            ]
+            inventory += ['strategies/renko_supertrend/brick_basis.py','strategies/renko_supertrend/anti_chop.py']
+            inventory += ['strategies/renko_supertrend/trend_reentry.py', 'strategies/renko_supertrend/binding.py', 'strategies/renko_supertrend/loss_range.py', 'sector_heatmap/dhan_screener.py', 'strategies/ema_crossover/spread_policy.py', 'strategies/renko_supertrend/live_chart.py', 'strategies/renko_supertrend/price_basis.py', 'strategies/renko_supertrend/brick_entry.py']
+            inventory += ['sector_heatmap/broker_diagnostics.py', 'sector_heatmap/chart_feed_recovery.py', 'sector_heatmap/closed_pnl.py', 'sector_heatmap/codex_handoff.py', 'sector_heatmap/company_fundamentals.py', 'sector_heatmap/dhan_account_login.py', 'sector_heatmap/dhan_mcx.py', 'sector_heatmap/dhan_recovery.py', 'sector_heatmap/dhan_screener.py', 'sector_heatmap/dhan_sector_analysis.py', 'sector_heatmap/fundamental_feedback.py', 'sector_heatmap/handoff_ai.py', 'sector_heatmap/handoff_entry_conditions.py', 'sector_heatmap/handoff_exit_broker.py', 'sector_heatmap/handoff_exit_monitor.py', 'sector_heatmap/handoff_outcomes.py', 'sector_heatmap/market_handoff.py', 'sector_heatmap/motilal_analysis.py', 'sector_heatmap/motilal_api.py', 'sector_heatmap/motilal_calendar.py', 'sector_heatmap/motilal_execution.py', 'sector_heatmap/motilal_feed.py', 'sector_heatmap/motilal_history.py', 'sector_heatmap/motilal_history_seed.py', 'sector_heatmap/motilal_master.py', 'sector_heatmap/motilal_service.py', 'sector_heatmap/motilal_shared_routes.py', 'sector_heatmap/motilal_strategy_broker.py', 'sector_heatmap/motilal_strategy_service.py', 'sector_heatmap/notification_recipients.py', 'sector_heatmap/resource_monitor.py', 'sector_heatmap/runner_job_audit.py', 'sector_heatmap/screener_routes.py', 'sector_heatmap/telegram_execution.py', 'sector_heatmap/workspace_disconnect.py']
             public=[]
             for name in sorted(set(inventory)):
                 path=Path(name)

@@ -20,7 +20,7 @@ def update(engine,candle):
     atr5=rma(s,'brick_host_atr5',tr,5)
     regime=rma(s,'brick_regime',tr,15);low=rma(s,'brick_low',tr,9)
     ratio=atr/regime if atr is not None and regime else 1
-    auto=atr5/12 if str(engine.underlying).upper().startswith(('NSE:','BSE:')) and atr5 is not None else (atr*1.5 if ratio>1.2 and atr is not None else low*.7 if ratio<.8 and low is not None else atr)
+    auto=atr5/12 if cfg['brick_mode']=='Auto' and str(engine.underlying).upper().startswith(('NSE:','BSE:')) and atr5 is not None else (atr*1.5 if ratio>1.2 and atr is not None else low*.7 if ratio<.8 and low is not None else atr)
     from . import session_auto
     session_reference=session_auto.apply_observation(s,engine.raw_config,c['timestamp'],engine.tick_size) if session_auto.selected(engine.raw_config) else None
     if session_auto.selected(engine.raw_config):
@@ -57,13 +57,13 @@ def update(engine,candle):
         for key in committed:
             if key not in original or committed[key]!=original[key]:s[key]=committed[key]
     host_rows=(s.get('basis_host_filter_rows',[])+[c])[-1000:]
-    if cfg.get('manual_trend_enabled') or cfg.get('calibrated_enabled'):s['basis_host_filter_rows']=host_rows
+    if cfg.get('manual_trend_enabled') or cfg.get('calibrated_enabled') or engine.raw_config.get('market_structure_enabled'):s['basis_host_filter_rows']=host_rows
     inner_cfg={**engine.raw_config,'strategy_basis':'CANDLESTICK','brick_mode':'Manual','manual_brick':box or engine.tick_size,'chart_entry_guards':False,'_brick_input':True,'anti_chop_enabled':False,'manual_trend_enabled':False,'calibrated_enabled':False}
     inner=getattr(engine,'_brick_inner',None)
     if inner is None:
         inner=Engine(inner_cfg,engine.tick_size,s.get('brick_indicator_state'))
         engine._brick_inner=inner
-    output=[];exit_consumed=False
+    output=[];exit_consumed=False;structure_evidence={}
     for i,event in enumerate(events):
         event['timestamp']=c['timestamp']+(i+1)/(len(events)+2)
         inner.raw_config['_external_anti_chop']=gates
@@ -85,6 +85,13 @@ def update(engine,candle):
             result.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,entry_diagnostic='WAITING_BRICK_SUPERTREND_ALIGNMENT')
             inner.state['ema_qualified']=None
         result.update(source_timestamp=c['timestamp'],source_close=c['close'],box=box,brick_direction='BULLISH' if bullish else 'BEARISH',ema_exit=inner.state['brick_exit_ema'],ema_exit_enabled=engine.raw_config.get('ema_exit_enabled',False),strategy_basis='RENKO')
+        if engine.raw_config.get('market_structure_enabled'):
+            from . import market_structure
+            side=result['direction']
+            if side not in structure_evidence:
+                structure_evidence[side]=market_structure.check(host_rows,side,engine.host_seconds,c['timestamp']+engine.host_seconds)
+            result['market_structure']=deepcopy(structure_evidence[side])
+        result['host_atr']=atr
         output.append(result)
     s['brick_indicator_state']=deepcopy(inner.state)
     last=deepcopy(output[-1] if output else s.get('brick_last') or dict(ema10=None,ema30=None,ema100=None,supertrend=None,pine_direction=1,direction='NEUTRAL',entry_qualified=False,entry_diagnostic='WAITING_COMPLETED_RENKO_BRICK',entry_direction=None,cross_direction=None,buy_signal=False,sell_signal=False,raw_supertrend_cross_direction=None,synthetic_open=None,synthetic_close=None))
@@ -95,9 +102,9 @@ def update(engine,candle):
     else:last.update(entry_qualified=False,entry_direction=None,entry_buy_signal=False,entry_sell_signal=False,cross_direction=None,raw_supertrend_cross_direction=None,buy_signal=False,sell_signal=False,lifecycle_event=None,lifecycle_reason=None,entry_diagnostic='WAITING_COMPLETED_RENKO_BRICK')
     for key in ('open','high','low','close'):
         if last.get(key) is None:last[key]=c[key]
-    last.update(timestamp=c['timestamp'],host_open=c['open'],host_high=c['high'],host_low=c['low'],host_close=c['close'],host_atr=atr,box=box,auto_box=auto,brick_events=[{k:r.get(k) for k in ('timestamp','open','high','low','close','box','supertrend','pine_direction','direction','ema10','ema30','ema100','ema_exit','rsi14','rsi14_slope','entry_direction','entry_qualified','entry_diagnostic','supertrend_slope_filter','lifecycle_event','lifecycle_reason','lifecycle_event_at','brick_direction','source_timestamp','source_close')} for r in output],brick_count=len(output),strategy_basis='RENKO',has_completed_brick=bool(output))
+    last.update(timestamp=c['timestamp'],host_open=c['open'],host_high=c['high'],host_low=c['low'],host_close=c['close'],host_atr=atr,box=box,auto_box=auto,brick_events=[deepcopy(r) for r in output],brick_count=len(output),strategy_basis='RENKO',has_completed_brick=bool(output))
     # Exits inspect every newly available brick, never an unchanged prior brick.
-    last['brick_exit_events']=[{k:r.get(k) for k in ('close','ema_exit','brick_direction','raw_supertrend_cross_direction')} for r in output]
+    last['brick_exit_events']=[{k:r.get(k) for k in ('close','ema_exit','sma','sma_length','brick_direction','raw_supertrend_cross_direction')} for r in output]
     if session_auto.selected(engine.raw_config):last['session_auto']=deepcopy(session_reference)
     s.update(previous=c,count=s.get('count',0)+1)
     for key in ('ema10','ema30','ema100'):s[key]=last.get(key)

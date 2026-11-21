@@ -1,6 +1,8 @@
 """Authenticate every request made to an isolated account dashboard."""
 import json
 import os
+import re
+from urllib.parse import urlsplit,parse_qs
 from pathlib import Path
 from .file_lock import lock_file
 from .workspaces import WorkspaceStore, cookie_token
@@ -21,6 +23,12 @@ class WorkspaceGuard:
         with guard.store.db() as db:
             row=db.execute('SELECT * FROM accounts WHERE id=?',(aid,)).fetchone()
         if not row or row['port']!=guard.port:raise ValueError('Workspace port/account mismatch.')
+        expected_user=os.getenv('SECTOR_PULSE_WORKSPACE_USER_ID')
+        expected_broker=os.getenv('SECTOR_PULSE_WORKSPACE_BROKER')
+        if expected_user and row['user_id']!=expected_user:
+            raise ValueError('Workspace user/account mismatch.')
+        if expected_broker and row['broker']!=expected_broker:
+            raise ValueError('Workspace broker/account mismatch.')
         folder=guard.store.folder(dict(row))
         if Path(__file__).resolve().parents[1] != folder/'source':
             raise ValueError('Account dashboard must run from its isolated source directory.')
@@ -43,14 +51,32 @@ class WorkspaceGuard:
         account=self.store.account(user,self.account_id)
         return user,account
 
+    def validate_account_binding(self,account,path,payload=None):
+        selected=[]
+        if payload and payload.get('account_id') is not None:selected.append(payload['account_id'])
+        selected.extend(parse_qs(urlsplit(path).query,keep_blank_values=True).get('account_id',[]))
+        route=re.match(r'^/api/(?:broker-parser|renko-motilal|renko-dhan|ema-dhan|band-dhan|kama-dhan|renko-engine)/([a-f0-9]{32})(?:/|$)',urlsplit(path).path)
+        if route:selected.append(route.group(1))
+        if any(value!=account['id'] for value in selected):
+            raise PermissionError('Action account differs from this private workspace.')
+
     def validate_action(self,account,path,payload):
+        self.validate_account_binding(account,path,payload)
         bounce=self.store.folder(account)/'bounce-status.json'
         if bounce.exists():
             try:phase=json.loads(bounce.read_text()).get('status')
             except (OSError,ValueError):raise PermissionError('Dashboard maintenance state is unreadable; refresh after operator review.') from None
             if phase in {'CHECKING','RESTARTING','WAITING'}:
                 raise PermissionError('Broker dashboard bounce in progress; wait until it is ready.')
-        if path=='/api/investment/analyze':return  # Public research; no broker execution.
+        if path.startswith('/api/chart-workspace/trading/'):
+            from .chart_trading import broker_active
+            action=path.rsplit('/',1)[-1]
+            actions={'prepare','arm','status'} | ({'cancel-condition'} if account['broker']=='DHAN' else set())
+            if (action not in actions or not broker_active(account['broker'])
+                    or payload.get('account_id')!=account['id'] or payload.get('broker')!=account['broker']):
+                raise PermissionError('Chart trading must use its exact private account and active broker adapter.')
+            return
+        if path in ('/api/investment/analyze','/api/investment/seasonality/analyze'):return  # Public research; no broker execution.
         if account['broker']=='MOTILAL_OSWAL':
             if not path.startswith('/api/motilal/') or payload.get('broker','MOTILAL_OSWAL')!='MOTILAL_OSWAL':
                 raise PermissionError('This action has no Motilal adapter; it cannot use another broker route.')
@@ -96,6 +122,7 @@ class WorkspaceGuard:
     def check(self,handler,mutation=False):
         try:
             user,account=self.authorize(handler.headers,mutation)
+            self.validate_account_binding(account,handler.path)
             if handler.path.split('?',1)[0].startswith('/api/whatsapp/'):
                 raise PermissionError('Native WhatsApp uses the shared desktop session and is unavailable in isolated user workspaces.')
             from .section_permissions import allowed

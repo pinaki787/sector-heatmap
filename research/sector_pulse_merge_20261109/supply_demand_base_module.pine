@@ -1,0 +1,101 @@
+
+// Supply/demand from compact multi-candle BASES and subsequent confirmed departures.
+// Automatic bounds use the whole base; manual rectangles are independent approximations.
+string sdGroup = "SD — Automatic supply and demand"
+bool sdEnabled = input.bool(true, "Automatic supply / demand zones", group=sdGroup, display=display.none)
+int sdBaseBars = input.int(3, "Consolidation base candles", minval=2, maxval=12, group=sdGroup, display=display.none)
+float sdBaseWidth = input.float(1.6, "Maximum base range (ATR)", minval=0.2, step=0.1, group=sdGroup, display=display.none)
+float sdBodyLimit = input.float(0.8, "Maximum base candle body (ATR)", minval=0.1, step=0.1, group=sdGroup, display=display.none)
+float sdDrift = input.float(0.8, "Maximum base net drift (ATR)", minval=0.1, step=0.1, group=sdGroup, display=display.none)
+float sdDeparture = input.float(0.4, "Minimum departure body / distance (ATR)", minval=0.1, step=0.1, group=sdGroup, display=display.none)
+bool sdCandidates = input.bool(true, "Show unconfirmed bases after an incoming impulse", group=sdGroup, display=display.none)
+int sdKeep = input.int(16, "Zones retained", minval=2, maxval=24, group=sdGroup, display=display.none)
+int sdExpiry = input.int(1500, "Expire after chart bars", minval=10, maxval=5000, group=sdGroup, display=display.none)
+bool sdShowEnded = input.bool(false, "Retain invalidated / expired zones", group=sdGroup, display=display.none)
+color sdSupply = input.color(color.rgb(220,38,38), "Supply", group=sdGroup, display=display.none)
+color sdDemand = input.color(color.rgb(22,163,74), "Demand", group=sdGroup, display=display.none)
+type SDZone
+    float hi
+    float lo
+    bool supply
+    int baseStart
+    int baseEnd
+    int detectedTime
+    int confirmedTime
+    int born
+    int state
+    int tests
+    bool touching
+    bool departed
+    box drawing
+var array<SDZone> sdZones = array.new<SDZone>()
+float sdAtr = ta.atr(14)
+float sdBaseHigh = ta.highest(high[1], sdBaseBars)
+float sdBaseLow = ta.lowest(low[1], sdBaseBars)
+float sdBaseMaxBody = ta.highest(math.abs(close[1]-open[1]), sdBaseBars)
+float sdBasisAtr = sdAtr[1]
+bool sdSameSession = time_tradingday[1] == time_tradingday[sdBaseBars] and time_tradingday == time_tradingday[1]
+bool sdBaseReady = not na(sdBasisAtr) and sdBasisAtr > 0 and sdSameSession and sdBaseHigh > sdBaseLow and sdBaseHigh-sdBaseLow <= sdBasisAtr*sdBaseWidth and sdBaseMaxBody <= sdBasisAtr*sdBodyLimit and math.abs(close[1]-open[sdBaseBars]) <= sdBasisAtr*sdDrift
+bool sdDownDeparture = sdBaseReady and close < sdBaseLow and close < open and (sdBaseLow-close >= sdBasisAtr*sdDeparture or open-close >= sdBasisAtr*sdDeparture)
+bool sdUpDeparture = sdBaseReady and close > sdBaseHigh and close > open and (close-sdBaseHigh >= sdBasisAtr*sdDeparture or close-open >= sdBasisAtr*sdDeparture)
+float sdIncoming = close[sdBaseBars+1]-close[sdBaseBars+4]
+sdCaption(SDZone z) =>
+    string state = z.state == 2 ? "INVALIDATED" : z.state == 3 ? "EXPIRED" : z.state == -1 ? "CANDIDATE · BASE" : z.touching ? "RETESTING" : z.tests > 0 ? "RETESTED" : "FRESH"
+    "AUTO " + (z.supply ? "SUPPLY" : "DEMAND") + " · " + state + "\n" + str.tostring(z.lo,"#.##") + "–" + str.tostring(z.hi,"#.##") + " | " + (timeframe.isminutes ? timeframe.period+"m" : timeframe.period)
+sdCreate(bool supply, bool confirmed) =>
+    bool overlap = false
+    for z in sdZones
+        if z.state < 2 and z.supply == supply and sdBaseHigh >= z.lo and sdBaseLow <= z.hi
+            overlap := true
+    if not overlap
+        color tint = supply ? sdSupply : sdDemand
+        box drawing = box.new(time_close, sdBaseHigh, time_close, sdBaseLow, xloc=xloc.bar_time, border_color=tint, border_style=confirmed ? line.style_solid : line.style_dashed, bgcolor=color.new(tint,confirmed ? 88 : 94), text_color=tint, text_size=size.small, text_halign=text.align_right)
+        SDZone z = SDZone.new(sdBaseHigh, sdBaseLow, supply, time[sdBaseBars], time_close[1], time_close, confirmed ? time_close : na, bar_index, confirmed ? 0 : -1, 0, false, confirmed, drawing)
+        box.set_text(drawing,sdCaption(z))
+        array.push(sdZones,z)
+        while array.size(sdZones)>sdKeep
+            box.delete(array.shift(sdZones).drawing)
+bool sdRetestEvent = false
+bool sdInvalidEvent = false
+if sdEnabled and chart.is_standard and barstate.isconfirmed
+    for z in sdZones
+        if z.state < 2
+            bool invalid = z.supply ? close > z.hi : close < z.lo
+            bool expired = bar_index-z.born >= sdExpiry
+            bool touches = high >= z.lo and low <= z.hi
+            if invalid or expired
+                z.state := invalid ? 2 : 3
+                z.touching := false
+                sdInvalidEvent := sdInvalidEvent or invalid
+                box.set_border_style(z.drawing,line.style_dashed)
+                box.set_bgcolor(z.drawing,color.new(color.gray,sdShowEnded ? 95 : 100))
+                box.set_border_color(z.drawing,color.new(color.gray,sdShowEnded ? 50 : 100))
+                box.set_text_color(z.drawing,color.new(color.gray,sdShowEnded ? 0 : 100))
+            else if z.state == -1
+                bool departed = z.supply ? close < z.lo and open-close >= sdAtr*sdDeparture : close > z.hi and close-open >= sdAtr*sdDeparture
+                if departed
+                    z.state := 0
+                    z.departed := true
+                    z.confirmedTime := time_close
+                    box.set_border_style(z.drawing,line.style_solid)
+                    box.set_bgcolor(z.drawing,color.new(z.supply ? sdSupply : sdDemand,88))
+            else
+                if touches and not z.touching and z.departed
+                    z.tests += 1
+                    z.state := 1
+                    sdRetestEvent := true
+                z.touching := touches and z.departed
+            box.set_right(z.drawing,time_close)
+            box.set_text(z.drawing,sdCaption(z))
+    if sdDownDeparture
+        sdCreate(true,true)
+    if sdUpDeparture
+        sdCreate(false,true)
+    // An incoming impulse permits a candidate only; no support/resistance is asserted.
+    if sdCandidates and sdBaseReady and not sdDownDeparture and not sdUpDeparture and close >= sdBaseLow and close <= sdBaseHigh
+        if sdIncoming < -sdBasisAtr*0.8
+            sdCreate(false,false)
+        if sdIncoming > sdBasisAtr*0.8
+            sdCreate(true,false)
+alertcondition(sdRetestEvent,"Supply/demand retest","A confirmed chart candle retested an automatic base/departure zone. Retest is not confirmation of support/resistance.")
+alertcondition(sdInvalidEvent,"Supply/demand invalidation","A confirmed close invalidated an automatic supply/demand zone.")

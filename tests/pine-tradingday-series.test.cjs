@@ -1,0 +1,11 @@
+const test=require("node:test"),assert=require("node:assert/strict"),vm=require("node:vm"),fs=require("node:fs");
+class Series{constructor(data){this.data=data}get(offset){return this.data[this.data.length-1-offset]??NaN}}
+const context=vm.createContext({y:Series,Ai:(time,zone)=>{const parts=Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:zone,year:"numeric",month:"numeric",day:"numeric"}).formatToParts(time).filter(p=>p.type!=="literal").map(p=>[p.type,Number(p.value)]));return parts;}});vm.runInContext(fs.readFileSync("scripts/pine_tradingday_series.js","utf8"),context);const run=context.spPineTradingDaySeries;
+const D=86400000,day=Date.UTC(2026,10,17);
+function fixture(type="crypto",zone="UTC"){return {pine:{syminfo:{type,timezone:zone}},data:{closeTime:{data:[day+23*3600000,day+D]}}}}
+test("same-bar close timestamp changes recompute the current value",()=>{const c=fixture();const series=run(c);c.data.closeTime.data[1]=day+D+23*3600000;assert.equal(run(c),series);assert.equal(series.get(0),day+D);assert.equal(series.get(1),day)});
+test("history truncation rebuilds without retaining future values",()=>{const c=fixture();run(c);c.data.closeTime.data.length=1;const series=run(c);assert.equal(series.data.length,1);assert.equal(series.get(0),day);assert.ok(Number.isNaN(series.get(1)))});
+test("symbol type changes rebuild metadata history",()=>{const c=fixture("stock");assert.equal(run(c).get(0),day+D);c.pine.syminfo.type="crypto";assert.equal(run(c).get(0),day)});
+test("exchange timezone changes rebuild the local calendar date",()=>{const c=fixture();assert.equal(run(c).get(0),day);c.pine.syminfo.timezone="Asia/Kolkata";assert.equal(run(c).get(0),day+D)});
+test("secondary contexts retain independent histories",()=>{const a=fixture(),b=fixture();b.data.closeTime.data=[day+2*D];const sa=run(a),sb=run(b);assert.notEqual(sa,sb);assert.equal(sa.get(0),day);assert.equal(sb.get(0),day+D)});
+test("new bars append history and repeated reads retain the series identity",()=>{const c=fixture();const a=run(c);c.data.closeTime.data.push(day+D+23*3600000);assert.equal(run(c),a);assert.equal(run(c).data.length,3);assert.equal(a.get(0),day+D);assert.equal(a.get(2),day)});

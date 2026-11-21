@@ -1,0 +1,892 @@
+string sc_gSource = "SC — Source and session"
+string sc_market = input.string("Auto", "Market classification", options=["Auto", "NSE/BSE", "Foreign gold", "MCX", "Crypto", "Manual"], group=sc_gSource, display=display.none)
+string sc_manualTf = input.timeframe("360", "Manual reference timeframe", group=sc_gSource, display=display.none)
+string sc_sourceSession = input.string("Chart", "Source trading session", options=["Chart", "Regular", "Extended"], group=sc_gSource, display=display.none)
+string sc_boundary = input.string("Exchange trading day", "Daily boundary", options=["Exchange trading day", "Custom daily reset"], group=sc_gSource, display=display.none)
+string sc_zone = input.string("Etc/UTC", "Custom reset timezone (IANA)", group=sc_gSource, display=display.none)
+sc_int sc_resetHour = input.sc_int(0, "Custom reset hour", minval=0, maxval=23, group=sc_gSource, display=display.none)
+sc_int sc_resetMinute = input.sc_int(0, "Custom reset minute", minval=0, maxval=59, group=sc_gSource, display=display.none)
+string sc_gLevels = "Range levels — measured upward from low"
+float sc_p1 = 44.0
+float sc_p2 = 50.0
+float sc_p3 = 56.0
+sc_int sc_keep = input.sc_int(30, "Completed sessions to retain", minval=1, maxval=30, group="SC — Display", display=display.none)
+bool sc_showFinal = input.bool(true, "Plot Shadow Candle", group="SC — Display", display=display.none)
+bool sc_showFull = input.bool(false, "Also plot complete reference-candle range", group="SC — Display", display=display.none)
+bool sc_showLabels = input.bool(true, "Show SC label", group="SC — Display", display=display.none)
+sc_int sc_labelOffset = input.sc_int(3, "SC label offset (future bars)", minval=1, maxval=20, group="SC — Display", display=display.none)
+bool sc_showSourceBoxes = input.bool(true, "Box source candle on lower timeframes", group="SC — Display", display=display.none)
+color sc_sourceBoxColor = input.color(color.rgb(99, 102, 241), "Source candle box", group="SC — Display", display=display.none)
+sc_int sc_sourceBoxTransparency = input.sc_int(90, "Source box transparency (%)", minval=70, maxval=98, group="SC — Display", display=display.none)
+bool sc_showSourceMarkers = input.bool(false, "Show historical source markers", group="SC — Display", display=display.none)
+bool sc_showPanel = input.bool(true, "Show full Shadow Candle table", group="SC — Display", display=display.none)
+bool sc_showGradient = input.bool(true, "Gradient fill inside closing-candle range", group="SC — Display", display=display.none)
+sc_int sc_fillOpacity = input.sc_int(88, "Gradient transparency near middle (%)", minval=70, maxval=98, group="SC — Display", display=display.none)
+color sc_bullColor = input.color(color.rgb(22, 163, 74), "Bullish zone", group="SC — Display", display=display.none)
+color sc_bearColor = input.color(color.rgb(220, 38, 38), "Bearish zone", group="SC — Display", display=display.none)
+string sc_gRsi = "SC — RSI SMA price-cross threshold"
+bool sc_lockFifteen = input.bool(true, "Lock RSI SMA calculation to 15 minutes", group=sc_gRsi, tooltip="Carry the moving 15-minute RSI SMA crossover-price curve onto lower chart timeframes. Each threshold uses only prior completed 15-minute candles, so it is known at the interval open and stays constant until the next 15-minute interval. This does not freeze the RSI for the day. Shadow Candle Fib stays anchored to the previous completed session.", display=display.none)
+bool sc_colorRsiByClose = input.bool(true, "Green / red RSI SMA by candle close", group=sc_gRsi, display=display.none)
+bool sc_showRsiFill = input.bool(true, "Gradient between RSI SMA and candles", group=sc_gRsi, display=display.none)
+sc_int sc_rsiFillTransparency = input.sc_int(85, "RSI gradient transparency (%)", minval=0, maxval=98, group=sc_gRsi, display=display.none)
+bool sc_showRsiAverage = input.bool(true, "Show RSI SMA crossover price", group=sc_gRsi, display=display.none)
+sc_int sc_rsiLength = input.sc_int(14, "RSI length", minval=2, group=sc_gRsi, display=display.none)
+sc_int sc_rsiSmaLength = input.sc_int(14, "RSI SMA length", minval=1, group=sc_gRsi, display=display.none)
+color sc_rsiAverageColor = input.color(color.rgb(168, 85, 247), "RSI SMA line", group=sc_gRsi, display=display.none)
+bool sc_showGap = input.bool(true, "Previous close / day open gap Fib", group="SC — Gap Fibonacci", display=display.none)
+color sc_gapColor = input.color(color.rgb(217, 119, 6), "Gap levels and fill", group="SC — Gap Fibonacci", display=display.none)
+string sc_gPrevious = "SC — Previous completed periods"
+bool sc_showPreviousDay = input.bool(true, "Previous day high / low", group=sc_gPrevious, display=display.none)
+bool sc_showPreviousWeek = input.bool(true, "Previous week high / low", group=sc_gPrevious, display=display.none)
+bool sc_showPreviousMonth = input.bool(true, "Previous month high / low", group=sc_gPrevious, display=display.none)
+color sc_dayColor = input.color(color.rgb(79, 70, 229), "Daily levels", group=sc_gPrevious, display=display.none)
+color sc_weekColor = input.color(color.rgb(14, 116, 144), "Weekly levels", group=sc_gPrevious, display=display.none)
+color sc_monthColor = input.color(color.rgb(147, 51, 234), "Monthly levels", group=sc_gPrevious, display=display.none)
+color sc_edge = input.color(color.silver, "High / low", group="SC — Display", display=display.none)
+color sc_c1 = input.color(color.orange, "Level 1", group="SC — Display", display=display.none)
+color sc_c2 = input.color(color.yellow, "Level 2", group="SC — Display", display=display.none)
+color sc_c3 = input.color(color.aqua, "Level 3", group="SC — Display", display=display.none)
+bool sc_showHistoricalSc = input.bool(true, "Show historical SC levels", group="SC — Display", tooltip="Show older Shadow Candle levels, range fills, source boxes and SC labels. The latest Shadow Candle stays visible. History and breakout target calculations remain active.", display=display.none)
+bool sc_enableRsiOverlay = input.bool(true, "Enable RSI overlay", group=sc_gRsi, tooltip="Master switch for all Shadow Candle RSI visuals and diagnostics. Your RSI subsettings are preserved. The separate chart RSI indicator is unaffected.", display=display.none)
+
+string sc_gRedBars = "SC — 5-minute X / red / blended ranges"
+bool sc_enableRedBars = input.bool(true, "Enable 5-minute candle ranges", group=sc_gRedBars, tooltip="Four separate confirmed ranges: first regular-session 5m X; next red 5m candle; All markets: six-candle 12:30–13:00 IST blend; all markets except NSE/BSE: six-candle 17:30–18:00 IST blend. All new candle-range times are IST. No reversal signals.", display=display.none)
+bool sc_showRangeLabels = input.bool(true, "Show X / R / M / E source labels", group=sc_gRedBars, display=display.none)
+sc_int sc_redHistory = input.sc_int(12, "Candle-range sessions to retain", minval=1, maxval=36, group=sc_gRedBars, tooltip="Separate from SC history. The effective limit is the smaller of this setting, SC retention and available Pine drawing capacity. Effective limit appears in each X/R/M tooltip. Oldest complete sessions are removed first.", display=display.none)
+bool sc_showRedHistory = input.bool(false, "Show prior-session candle ranges", group=sc_gRedBars, tooltip="Keep the latest session readable. ON also displays retained older X/R/M/E ranges; calculations and archive remain active while OFF.", display=display.none)
+sc_int sc_scTargetPage = input.sc_int(1, "SC target table page", minval=1, maxval=20, group="SC — Display", tooltip="The latest base SC is always pinned first. Revealed historical targets from the current breakout chain are ordered by reveal time, two per page. The table displays page/count when more targets exist; no target is silently discarded.", display=display.none)
+sc_int sc_rbReservedLines = sc_keep * (5 * ((sc_showFinal ? 1 : 0) + (sc_showFull ? 1 : 0)) + 1) + 11
+sc_int sc_rbKeep = math.max(1, math.min(sc_redHistory, sc_keep, sc_int(math.floor((330-sc_rbReservedLines)/12.0))))
+
+string sc_symbolText = str.sc_upper(syminfo.ticker)
+string sc_prefix = str.sc_upper(syminfo.sc_prefix)
+bool sc_gold = str.contains(sc_symbolText, "GOLD") or str.contains(sc_symbolText, "XAU")
+bool sc_crypto = syminfo.type == "crypto" or sc_prefix == "DELTAIN"
+bool sc_indian = sc_prefix == "NSE" or sc_prefix == "BSE"
+bool sc_mcx = str.contains(sc_prefix, "MCX")
+string sc_autoMarket = sc_mcx ? "MCX" : sc_indian ? "NSE/BSE" : sc_gold ? "Foreign gold" : sc_crypto ? "Crypto" : "Unknown"
+string sc_selected = sc_market == "Auto" ? sc_autoMarket : sc_market
+string sc_refTf = sc_selected == "Foreign gold" ? "1320" : sc_selected == "Crypto" ? "1380" : sc_selected == "MCX" ? "840" : sc_selected == "NSE/BSE" ? "360" : sc_manualTf
+bool sc_supported = chart.is_standard and timeframe.isintraday and timeframe.in_seconds() <= timeframe.in_seconds(sc_refTf) and sc_selected != "Unknown"
+sc_showFinal := sc_showFinal and sc_supported
+sc_showFull := sc_showFull and sc_supported
+
+// The custom boundary groups native HTF bars; it does not re-anchor their openings.
+sc_customKey(sc_int sc_t) =>
+    sc_int sc_y = year(sc_t, sc_zone)
+    sc_int sc_m = month(sc_t, sc_zone)
+    sc_int sc_d = dayofmonth(sc_t, sc_zone)
+    sc_int sc_today = timestamp(sc_zone, sc_y, sc_m, sc_d, sc_resetHour, sc_resetMinute)
+    sc_t >= sc_today ? sc_today : timestamp(sc_zone, sc_y, sc_m, sc_d - 1, sc_resetHour, sc_resetMinute)
+
+sc_source() =>
+    sc_int sc_key = sc_boundary == "Exchange trading day" ? time_tradingday : sc_customKey(time)
+    var float sc_fullH = na
+    var float sc_fullL = na
+    var sc_int sc_fullT = na
+    var sc_int sc_fullC = na
+    if na(sc_key[1]) or sc_key != sc_key[1]
+        sc_fullH := na
+        sc_fullL := na
+        sc_fullT := na
+        sc_fullC := na
+    if time_close - time >= timeframe.in_seconds() * 1000
+        sc_fullH := high
+        sc_fullL := low
+        sc_fullT := time
+        sc_fullC := time_close
+    // Only previous-bar prices/state leave the reference context.
+    [high[1], low[1], time[1], time_close[1], time_close("1D")[1], sc_key[1], sc_key, sc_fullH[1], sc_fullL[1], sc_fullT[1], sc_fullC[1], open[1], close[1]]
+
+string sc_requestTicker = ticker.new(syminfo.sc_prefix, syminfo.ticker, sc_sourceSession == "Regular" ? session.regular : sc_sourceSession == "Extended" ? session.extended : syminfo.session)
+[sc_h, sc_l, sc_sourceOpen, sc_sourceClose, sc_scheduledClose, sc_priorKey, sc_currentKey, sc_fullHigh, sc_fullLow, sc_fullOpen, sc_fullClose, sc_sourceOhlcOpen, sc_sourceOhlcClose] = request.security(sc_requestTicker, sc_refTf, sc_source(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+// Publish the just-completed session-end reference candle immediately.
+// lookahead_off exposes it only at its closing chart bar; chart confirmation
+// prevents forming ticks from committing candidate OHLC or replacing the prior set.
+[sc_closeH, sc_closeL, sc_closeO, sc_closeC, sc_closeT, sc_closeEnd, sc_closeScheduled] = request.security(sc_requestTicker, sc_refTf, [high, low, open, close, time, time_close, time_close("1D")], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+bool sc_candidateAtSessionEnd = sc_boundary == "Exchange trading day" ? sc_closeEnd == sc_closeScheduled : sc_closeEnd == sc_customKey(sc_closeEnd)
+// A feed can end its final lower-timeframe bar before the native reference
+// interval's scheduled endpoint. Release the fully elapsed candle only on
+// the confirmed final session bar of the dataset, never on forming history.
+[sc_endH, sc_endL, sc_endO, sc_endC, sc_endT, sc_endClose, sc_endScheduled] = request.security(sc_requestTicker, sc_refTf, [high, low, open, close, time, time_close, time_close("1D")], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+bool sc_endAtSessionEnd = sc_boundary == "Exchange trading day" ? sc_endClose == sc_endScheduled : sc_endClose == sc_customKey(sc_endClose)
+bool sc_elapsedFinalHistory = barstate.islastconfirmedhistory and sc_endClose <= timenow and sc_endScheduled <= timenow and time >= sc_endT and time_close <= sc_endClose and sc_endAtSessionEnd and sc_endClose-sc_endT < timeframe.in_seconds(sc_refTf)*1000
+if sc_elapsedFinalHistory
+    sc_closeH := sc_endH
+    sc_closeL := sc_endL
+    sc_closeO := sc_endO
+    sc_closeC := sc_endC
+    sc_closeT := sc_endT
+    sc_closeEnd := sc_endClose
+    sc_closeScheduled := sc_endScheduled
+bool sc_confirmedFinalNow = sc_elapsedFinalHistory or (barstate.isconfirmed and time_close == sc_closeEnd and sc_closeEnd <= timenow and sc_candidateAtSessionEnd and sc_closeEnd-sc_closeT < timeframe.in_seconds(sc_refTf)*1000)
+if sc_confirmedFinalNow
+    sc_h := sc_closeH
+    sc_l := sc_closeL
+    sc_sourceOpen := sc_closeT
+    sc_sourceClose := sc_closeEnd
+    sc_scheduledClose := sc_closeScheduled
+    sc_sourceOhlcOpen := sc_closeO
+    sc_sourceOhlcClose := sc_closeC
+bool sc_finalBar = sc_confirmedFinalNow or (not na(sc_priorKey) and sc_priorKey != sc_currentKey)
+bool sc_atClose = sc_confirmedFinalNow or (sc_boundary == "Exchange trading day" ? sc_sourceClose == sc_scheduledClose : sc_sourceClose == sc_currentKey)
+bool sc_shortened = sc_sourceClose - sc_sourceOpen < timeframe.in_seconds(sc_refTf) * 1000
+bool sc_validFinal = sc_atClose and sc_shortened
+var sc_int sc_lastSource = na
+var bool sc_missingFinal = false
+var sc_int sc_lockedClose = na
+var sc_int sc_lockedScheduled = na
+var float sc_lockedHigh = na
+var float sc_lockedLow = na
+var float sc_lockedFullHigh = na
+var float sc_lockedFullLow = na
+var sc_int sc_lockedFullOpen = na
+var sc_int sc_lockedFullClose = na
+var array<box> sc_sourceBoxes = array.new<box>()
+var array<line> sc_finalLines = array.new<line>()
+var array<line> sc_fullLines = array.new<line>()
+var array<line> sc_activeFinal = array.new<line>()
+var array<line> sc_activeFull = array.new<line>()
+var array<label> sc_labels = array.new<label>()
+var label sc_rangeTag = na
+var line sc_tagLeader = na
+// One retained record, label and leader per confirmed source candle.
+type sc_SCReference
+    sc_int sc_opened
+    sc_int sc_closed
+    float sc_hi
+    float sc_lo
+    label sc_tag
+    line sc_leader
+    sc_int sc_visitedChain
+    sc_int sc_approach
+    bool sc_broken
+    sc_int sc_anchorAt
+    sc_int sc_brokenAt
+    sc_int sc_brokenDirection
+var array<sc_SCReference> sc_scArchive = array.new<sc_SCReference>()
+var sc_SCReference sc_activeSc = na
+var sc_int sc_scChainKey = na
+// Each color segment is frozen at its own confirmed close; old segments never change regime.
+type sc_ZoneBand
+    sc_int sourceKey
+    sc_int sc_startTime
+    sc_int sc_endTime
+    float sc_hi
+    float sc_lo
+    color sc_tint
+    array<box> sc_layers
+var array<sc_ZoneBand> sc_bandHistory = array.new<sc_ZoneBand>()
+var array<sc_int> sc_sessionHistory = array.new<sc_int>()
+var sc_ZoneBand sc_currentBand = na
+var sc_int sc_regime = 0
+
+sc_zoneColor(sc_int sc_state) =>
+    sc_state > 0 ? sc_bullColor : sc_state < 0 ? sc_bearColor : sc_c2
+
+sc_deleteBand(sc_ZoneBand sc_band) =>
+    for sc_layer in sc_band.sc_layers
+        box.delete(sc_layer)
+    array.clear(sc_band.sc_layers)
+
+sc_endBand(sc_ZoneBand sc_band, sc_int sc_ended) =>
+    sc_band.sc_endTime := sc_ended
+    for sc_layer in sc_band.sc_layers
+        box.set_right(sc_layer, sc_ended)
+
+sc_makeBand(sc_int sc_started, sc_int sc_key, float sc_hi, float sc_lo, sc_int sc_state) =>
+    sc_int sc_boxCount = 0
+    for sc_prior in sc_bandHistory
+        sc_boxCount += array.size(sc_prior.sc_layers)
+    // Compact the oldest gradients to their SAME state tint before approaching TV's object cap.
+    // This changes only gradient resolution, never the recorded bullish/bearish timing.
+    while sc_boxCount > 100
+        bool sc_compacted = false
+        for sc_prior in sc_bandHistory
+            sc_int sc_count = array.size(sc_prior.sc_layers)
+            if sc_count > 1
+                sc_deleteBand(sc_prior)
+                array.push(sc_prior.sc_layers, box.new(sc_prior.sc_startTime, sc_prior.sc_hi, sc_prior.sc_endTime, sc_prior.sc_lo, xloc=xloc.bar_time, border_color=na, bgcolor=color.new(sc_prior.sc_tint, sc_fillOpacity)))
+                sc_boxCount -= sc_count - 1
+                sc_compacted := true
+                break
+        if not sc_compacted
+            sc_ZoneBand sc_oldest = array.shift(sc_bandHistory)
+            sc_boxCount -= array.size(sc_oldest.sc_layers)
+            sc_deleteBand(sc_oldest)
+    color sc_tint = sc_zoneColor(sc_state)
+    sc_ZoneBand sc_band = sc_ZoneBand.new(sc_key, sc_started, sc_started, sc_hi, sc_lo, sc_tint, array.new<box>())
+    for sc_slice = 0 to 11
+        float sc_a = sc_slice * 100.0 / 12
+        float sc_b = (sc_slice+1) * 100.0 / 12
+        float sc_mid = (sc_a+sc_b)/2
+        color sc_bottomColor = sc_state == 0 ? sc_c1 : sc_tint
+        color sc_topColor = sc_state == 0 ? sc_c3 : sc_tint
+        color sc_shade = sc_mid <= sc_p2 ? color.from_gradient(sc_mid, 0, sc_p2, color.new(sc_bottomColor, 98), color.new(sc_tint, sc_fillOpacity)) : color.from_gradient(sc_mid, sc_p2, 100, color.new(sc_tint, sc_fillOpacity), color.new(sc_topColor, 98))
+        array.push(sc_band.sc_layers, box.new(sc_started, sc_lo+(sc_hi-sc_lo)*sc_b/100, sc_started, sc_lo+(sc_hi-sc_lo)*sc_a/100, xloc=xloc.bar_time, border_color=na, bgcolor=sc_shade))
+    array.push(sc_bandHistory, sc_band)
+    sc_band
+
+sc_finishSet(array<line> sc_active) =>
+    if array.size(sc_active) > 0
+        for sc_ln in sc_active
+            line.set_x2(sc_ln, sc_confirmedFinalNow ? sc_sourceClose : time)
+    array.clear(sc_active)
+
+sc_drawSet(float sc_hi, float sc_lo, sc_int sc_opened, sc_int sc_closed, bool sc_complete, array<line> sc_history, array<line> sc_active) =>
+    array<float> sc_prices = array.from(sc_hi, sc_lo, sc_lo + (sc_hi-sc_lo)*sc_p1/100, sc_lo + (sc_hi-sc_lo)*sc_p2/100, sc_lo + (sc_hi-sc_lo)*sc_p3/100)
+    array<color> sc_colors = array.from(sc_edge, sc_edge, sc_c1, sc_c2, sc_c3)
+    for sc_i = 0 to 4
+        color sc_col = sc_complete ? color.new(array.get(sc_colors, sc_i), 45) : array.get(sc_colors, sc_i)
+        sc_int sc_publishedAt = sc_confirmedFinalNow ? sc_closed : time
+        sc_int sc_displayedUntil = barstate.islast ? time_close + sc_int(timeframe.in_seconds()*1000)*sc_labelOffset : time_close
+        line sc_ln = line.new(sc_publishedAt, array.get(sc_prices, sc_i), sc_displayedUntil, array.get(sc_prices, sc_i), xloc=xloc.bar_time, color=sc_col, width=sc_i < 2 ? 2 : 1, style=sc_complete ? line.style_dashed : line.style_solid)
+        array.push(sc_history, sc_ln)
+        array.push(sc_active, sc_ln)
+    if sc_showSourceMarkers
+        string sc_identity = sc_complete ? "Complete " + sc_refTf + "m reference candle" : "Shadow Candle"
+        string sc_labelText = sc_identity + "\n" + str.format_time(sc_opened, "dd MMM HH:mm", syminfo.timezone) + " → " + str.format_time(sc_closed, "dd MMM HH:mm", syminfo.timezone) + "\nH " + str.tostring(sc_hi, "#.##") + "  L " + str.tostring(sc_lo, "#.##") + "\n" + str.tostring(sc_p1, "#.##") + "% " + str.tostring(sc_lo + (sc_hi-sc_lo)*sc_p1/100, "#.##") + " | " + str.tostring(sc_p2, "#.##") + "% " + str.tostring(sc_lo + (sc_hi-sc_lo)*sc_p2/100, "#.##") + " | " + str.tostring(sc_p3, "#.##") + "% " + str.tostring(sc_lo + (sc_hi-sc_lo)*sc_p3/100, "#.##")
+        array.push(sc_labels, label.new(time, sc_lo, "", xloc=xloc.bar_time, style=label.style_circle, color=sc_complete ? color.new(color.purple, 25) : color.new(color.rgb(30, 41, 59), 15), textcolor=color.white, size=size.tiny, tooltip=sc_labelText))
+    while array.size(sc_history) > sc_keep * 5
+        line.delete(array.shift(sc_history))
+    while array.size(sc_labels) > sc_keep * (sc_showFinal and sc_showFull ? 2 : 1)
+        label.delete(array.shift(sc_labels))
+
+sc_scDetails(sc_SCReference sc_sc) =>
+    "Historical Shadow Candle\n" + str.format_time(sc_sc.sc_opened, "dd MMM yyyy HH:mm", syminfo.timezone) + "–" + str.format_time(sc_sc.sc_closed, "HH:mm", syminfo.timezone) + "\nHigh " + str.tostring(sc_sc.sc_hi, "#.##") + " · Low " + str.tostring(sc_sc.sc_lo, "#.##")
+
+sc_freezeSc(sc_SCReference sc_sc, sc_int sc_ended) =>
+    if not na(sc_sc.sc_tag)
+        label.set_x(sc_sc.sc_tag, sc_ended)
+    if not na(sc_sc.sc_leader)
+        line.set_x2(sc_sc.sc_leader, sc_ended)
+
+sc_revealSc(sc_SCReference sc_sc, sc_int sc_direction, sc_int sc_started) =>
+    sc_sc.sc_approach := sc_direction
+    sc_sc.sc_anchorAt := sc_started
+    sc_sc.sc_broken := false
+    sc_sc.sc_brokenAt := na
+    sc_sc.sc_brokenDirection := 0
+    sc_int sc_future = sc_started + sc_int(timeframe.in_seconds()*1000)*sc_labelOffset
+    color sc_tint = sc_direction > 0 ? sc_bullColor : sc_bearColor
+    string sc_caption = "SC " + (sc_direction > 0 ? "↑ " : "↓ ") + str.format_time(sc_sc.sc_opened, "dd MMM", syminfo.timezone)
+    string sc_details = sc_scDetails(sc_sc) + "\nRevealed after confirmed " + (sc_direction > 0 ? "upward" : "downward") + " break at " + str.format_time(sc_started, "dd MMM HH:mm", syminfo.timezone) + "\nNearest archived range still beyond the breakout close; original SC retained."
+    if sc_showLabels
+        if na(sc_sc.sc_tag)
+            sc_sc.sc_tag := label.new(sc_future, sc_sc.sc_lo, sc_caption, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(sc_tint, 10), textcolor=color.white, size=size.tiny, tooltip=sc_details)
+        else
+            label.set_xy(sc_sc.sc_tag, sc_future, sc_sc.sc_lo)
+            label.set_text(sc_sc.sc_tag, sc_caption)
+            label.set_color(sc_sc.sc_tag, color.new(sc_tint, 10))
+            label.set_tooltip(sc_sc.sc_tag, sc_details)
+    if na(sc_sc.sc_leader)
+        sc_sc.sc_leader := line.new(sc_started, sc_sc.sc_lo, sc_future, sc_sc.sc_lo, xloc=xloc.bar_time, color=sc_tint, style=line.style_dotted)
+    else
+        line.set_xy1(sc_sc.sc_leader, sc_started, sc_sc.sc_lo)
+        line.set_xy2(sc_sc.sc_leader, sc_future, sc_sc.sc_lo)
+        line.set_color(sc_sc.sc_leader, sc_tint)
+    sc_sc
+
+// Advance SC targets only from completed native 5m events on every chart.
+sc_scAdvance(sc_SCReference sc_initialSc, float sc_sourcePrice, sc_int sc_ended) =>
+    sc_SCReference sc_currentSc = sc_initialSc
+    if sc_showFinal and not na(sc_currentSc) and not na(sc_ended) and sc_ended > sc_currentSc.sc_anchorAt
+        if not sc_currentSc.sc_broken
+            sc_int sc_direction = sc_currentSc.sc_approach >= 0 and sc_sourcePrice > sc_currentSc.sc_hi ? 1 : sc_currentSc.sc_approach <= 0 and sc_sourcePrice < sc_currentSc.sc_lo ? -1 : 0
+            if sc_direction != 0
+                sc_currentSc.sc_broken := true
+                sc_currentSc.sc_brokenAt := sc_ended
+                sc_currentSc.sc_brokenDirection := sc_direction
+                sc_freezeSc(sc_currentSc, sc_ended)
+                if not na(sc_currentSc.sc_tag)
+                    label.set_tooltip(sc_currentSc.sc_tag, sc_scDetails(sc_currentSc) + "\nBroken " + (sc_direction > 0 ? "above" : "below") + " on confirmed 5m close " + str.format_time(sc_ended, "dd MMM HH:mm", syminfo.timezone) + "\nThis original SC is retained.")
+                sc_SCReference sc_nextSc = na
+                float sc_nearest = na
+                for sc_candidate in sc_scArchive
+                    bool sc_unvisited = na(sc_candidate.sc_visitedChain) or sc_candidate.sc_visitedChain != sc_scChainKey
+                    bool sc_older = sc_candidate.sc_opened < sc_scChainKey
+                    bool sc_ahead = sc_direction > 0 ? sc_candidate.sc_lo > sc_sourcePrice : sc_candidate.sc_hi < sc_sourcePrice
+                    if sc_older and sc_unvisited and sc_ahead
+                        float sc_distance = sc_direction > 0 ? sc_candidate.sc_lo-sc_sourcePrice : sc_sourcePrice-sc_candidate.sc_hi
+                        if na(sc_nearest) or sc_distance <= sc_nearest
+                            sc_nearest := sc_distance
+                            sc_nextSc := sc_candidate
+                if not na(sc_nextSc)
+                    sc_nextSc.sc_visitedChain := sc_scChainKey
+                    sc_revealSc(sc_nextSc, sc_direction, sc_ended)
+                    sc_currentSc := sc_nextSc
+    sc_currentSc
+
+if sc_finalBar and (na(sc_lastSource) or sc_sourceOpen != sc_lastSource)
+    sc_SCReference sc_freshSc = na
+    sc_lastSource := sc_sourceOpen
+    sc_missingFinal := not sc_validFinal
+    sc_lockedClose := sc_sourceClose
+    sc_lockedScheduled := sc_scheduledClose
+    sc_lockedHigh := sc_validFinal ? sc_h : na
+    sc_lockedLow := sc_validFinal ? sc_l : na
+    sc_lockedFullHigh := sc_fullHigh
+    sc_lockedFullLow := sc_fullLow
+    sc_lockedFullOpen := sc_fullOpen
+    sc_lockedFullClose := sc_fullClose
+    if not na(sc_currentBand)
+        sc_endBand(sc_currentBand, sc_confirmedFinalNow ? sc_sourceClose : time)
+    sc_currentBand := na
+    sc_regime := 0
+    array.push(sc_sessionHistory, sc_sourceOpen)
+    while array.size(sc_sessionHistory) > sc_keep
+        array.shift(sc_sessionHistory)
+    while array.size(sc_bandHistory) > 0
+        sc_ZoneBand sc_oldest = array.get(sc_bandHistory, 0)
+        if sc_oldest.sourceKey < array.get(sc_sessionHistory, 0)
+            sc_deleteBand(array.shift(sc_bandHistory))
+        else
+            break
+    // Retire the active pointer without deleting its retained source label.
+    if not na(sc_activeSc)
+        sc_freezeSc(sc_activeSc, sc_confirmedFinalNow ? sc_sourceClose : time)
+    sc_rangeTag := na
+    sc_tagLeader := na
+    sc_activeSc := na
+    if sc_validFinal
+        sc_scChainKey := sc_sourceOpen
+        sc_freshSc := sc_SCReference.new(sc_sourceOpen, sc_sourceClose, sc_h, sc_l, na, na, sc_scChainKey, 0, false, sc_sourceClose, na, 0)
+        array.push(sc_scArchive, sc_freshSc)
+        sc_activeSc := sc_freshSc
+    while array.size(sc_scArchive) > sc_keep
+        sc_SCReference sc_expired = array.shift(sc_scArchive)
+        if not na(sc_expired.sc_tag)
+            label.delete(sc_expired.sc_tag)
+        if not na(sc_expired.sc_leader)
+            line.delete(sc_expired.sc_leader)
+    sc_finishSet(sc_activeFinal)
+    sc_finishSet(sc_activeFull)
+    // Confirmed source bounds, drawn back over ONLY its constituent chart candles.
+    if sc_showSourceBoxes and sc_validFinal and timeframe.in_seconds() <= timeframe.in_seconds(sc_refTf)
+        // Native reference OHLC equals the blended constituent-candle group.
+        // Freeze its OWN direction; later breakout regimes never recolor this source box.
+        color sc_sourceTint = sc_sourceOhlcClose > sc_sourceOhlcOpen ? sc_bullColor : sc_sourceOhlcClose < sc_sourceOhlcOpen ? sc_bearColor : sc_sourceBoxColor
+        array.push(sc_sourceBoxes, box.new(sc_sourceOpen, sc_h, sc_sourceClose, sc_l, xloc=xloc.bar_time, border_color=color.new(sc_sourceTint, 35), border_width=1, bgcolor=color.new(sc_sourceTint, sc_sourceBoxTransparency)))
+        while array.size(sc_sourceBoxes) > sc_keep
+            box.delete(array.shift(sc_sourceBoxes))
+    if sc_showFinal and sc_validFinal
+        sc_drawSet(sc_h, sc_l, sc_sourceOpen, sc_sourceClose, false, sc_finalLines, sc_activeFinal)
+        if sc_showGradient
+            sc_currentBand := sc_makeBand(sc_confirmedFinalNow ? sc_sourceClose : time, sc_sourceOpen, sc_h, sc_l, 0)
+        if sc_showLabels
+            string sc_details = "Shadow Candle\n" + str.format_time(sc_sourceOpen, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(sc_sourceClose, "HH:mm", syminfo.timezone) + "\nBlended O " + str.tostring(sc_sourceOhlcOpen, "#.##") + " · C " + str.tostring(sc_sourceOhlcClose, "#.##") + "\nHigh " + str.tostring(sc_h, "#.##") + " · Low " + str.tostring(sc_l, "#.##")
+            sc_rangeTag := label.new(time_close, sc_l, "SC", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.rgb(30, 41, 59), 10), textcolor=color.white, size=size.tiny, tooltip=sc_details)
+            sc_tagLeader := line.new(time_close, sc_l, time_close, sc_l, xloc=xloc.bar_time, color=sc_edge, style=line.style_dotted)
+            sc_freshSc.sc_tag := sc_rangeTag
+            sc_freshSc.sc_leader := sc_tagLeader
+            label.set_text(sc_rangeTag, "SC · " + str.format_time(sc_sourceOpen, "dd MMM", syminfo.timezone))
+    if sc_showFull and not na(sc_fullHigh)
+        sc_drawSet(sc_fullHigh, sc_fullLow, sc_fullOpen, sc_fullClose, true, sc_fullLines, sc_activeFull)
+// Use chart-bar confirmation outside request.security. Forming ticks cannot change regime.
+// A transition begins at time_close; the earlier portion of this bar/session is untouched.
+if not na(sc_currentBand)
+    sc_endBand(sc_currentBand, time_close)
+if sc_showFinal and not sc_missingFinal and not na(sc_lockedHigh) and barstate.isconfirmed
+    sc_int sc_nextRegime = close > sc_lockedHigh ? 1 : close < sc_lockedLow ? -1 : 0
+    if sc_nextRegime != sc_regime
+        if not na(sc_currentBand)
+            sc_endBand(sc_currentBand, time_close)
+        sc_regime := sc_nextRegime
+        if sc_showGradient
+            sc_currentBand := sc_makeBand(time_close, sc_lastSource, sc_lockedHigh, sc_lockedLow, sc_regime)
+// Only the current SC advances. Earlier SC labels/levels remain frozen.
+if not na(sc_activeSc) and sc_showFinal
+    if not sc_activeSc.sc_broken
+        sc_int sc_labelTime = time_close + sc_int(timeframe.in_seconds()*1000)*sc_labelOffset
+        if sc_showLabels and not na(sc_activeSc.sc_tag)
+            label.set_xy(sc_activeSc.sc_tag, sc_labelTime, sc_activeSc.sc_lo)
+        if not na(sc_activeSc.sc_leader)
+            line.set_xy1(sc_activeSc.sc_leader, sc_activeSc.sc_anchorAt, sc_activeSc.sc_lo)
+            line.set_xy2(sc_activeSc.sc_leader, sc_labelTime, sc_activeSc.sc_lo)
+        if sc_activeSc.sc_approach == 0
+            color sc_tint = sc_regime == 0 ? color.rgb(30, 41, 59) : sc_zoneColor(sc_regime)
+            if not na(sc_activeSc.sc_tag)
+                label.set_color(sc_activeSc.sc_tag, color.new(sc_tint, 10))
+            if not na(sc_activeSc.sc_leader)
+                line.set_color(sc_activeSc.sc_leader, sc_regime == 0 ? sc_edge : sc_tint)
+if array.size(sc_activeFinal) > 0
+    for sc_ln in sc_activeFinal
+        line.set_x2(sc_ln, barstate.islast ? time_close + sc_int(timeframe.in_seconds()*1000)*sc_labelOffset : time_close)
+if array.size(sc_activeFull) > 0
+    for sc_ln in sc_activeFull
+        line.set_x2(sc_ln, barstate.islast ? time_close + sc_int(timeframe.in_seconds()*1000)*sc_labelOffset : time_close)
+
+
+// Confirmed prior exchange candles. Current-period time is calendar metadata only.
+// Daily means previous TRADING session, weekly/monthly mean completed exchange periods.
+[sc_pdh, sc_pdl, sc_daySource, sc_dayStart] = request.security(sc_requestTicker, "1D", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[sc_pwh, sc_pwl, sc_weekSource, sc_weekStart] = request.security(sc_requestTicker, "1W", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[sc_pmh, sc_pml, sc_monthSource, sc_monthStart] = request.security(sc_requestTicker, "1M", [high[1], low[1], time[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+var array<line> sc_periodLines = array.new<line>(6, na)
+var array<label> sc_periodTags = array.new<label>(6, na)
+array<float> sc_periodPrices = array.from(sc_pdh, sc_pdl, sc_pwh, sc_pwl, sc_pmh, sc_pml)
+array<sc_int> sc_periodStarts = array.from(sc_dayStart, sc_dayStart, sc_weekStart, sc_weekStart, sc_monthStart, sc_monthStart)
+array<sc_int> sc_sourceStarts = array.from(sc_daySource, sc_daySource, sc_weekSource, sc_weekSource, sc_monthSource, sc_monthSource)
+array<string> sc_periodNames = array.from("PDH", "PDL", "PWH", "PWL", "PMH", "PML")
+array<color> sc_periodColors = array.from(sc_dayColor, sc_dayColor, sc_weekColor, sc_weekColor, sc_monthColor, sc_monthColor)
+array<bool> sc_enabledPeriods = array.from(sc_showPreviousDay, sc_showPreviousDay, sc_showPreviousWeek, sc_showPreviousWeek, sc_showPreviousMonth, sc_showPreviousMonth)
+// Separate nearby labels horizontally; line/label price anchors are NEVER displaced.
+float sc_upperPrice = na
+float sc_lowerPrice = na
+for sc_i = 0 to 5
+    float sc_price = array.get(sc_periodPrices, sc_i)
+    if array.get(sc_enabledPeriods, sc_i) and not na(sc_price)
+        sc_upperPrice := na(sc_upperPrice) ? sc_price : math.max(sc_upperPrice, sc_price)
+        sc_lowerPrice := na(sc_lowerPrice) ? sc_price : math.min(sc_lowerPrice, sc_price)
+float sc_proximity = math.max((sc_upperPrice-sc_lowerPrice)*0.04, syminfo.mintick*10)
+array<sc_int> sc_lanes = array.new<sc_int>(6, 0)
+for sc_i = 0 to 5
+    float sc_price = array.get(sc_periodPrices, sc_i)
+    if array.get(sc_enabledPeriods, sc_i) and not na(sc_price)
+        sc_int sc_lane = sc_showLabels and sc_showFinal and not na(sc_lockedLow) and math.abs(sc_price-sc_lockedLow) < sc_proximity ? 1 : 0
+        if sc_i > 0
+            for sc_j = 0 to sc_i-1
+                if array.get(sc_enabledPeriods, sc_j) and math.abs(sc_price-array.get(sc_periodPrices, sc_j)) < sc_proximity
+                    sc_lane := math.max(sc_lane, array.get(sc_lanes, sc_j)+1)
+        array.set(sc_lanes, sc_i, sc_lane)
+        sc_int sc_futureTime = time_close + sc_int(timeframe.in_seconds()*1000)*(sc_labelOffset + sc_lane*24)
+        line sc_periodLine = array.get(sc_periodLines, sc_i)
+        label sc_periodTag = array.get(sc_periodTags, sc_i)
+        color sc_tint = array.get(sc_periodColors, sc_i)
+        string sc_caption = array.get(sc_periodNames, sc_i)
+        string sc_detail = sc_caption + " · previous completed " + (sc_i < 2 ? "trading day" : sc_i < 4 ? "week" : "month") + "\nFrom " + str.format_time(array.get(sc_sourceStarts, sc_i), "dd MMM yyyy", syminfo.timezone) + "\n" + str.tostring(sc_price, "#,###.##")
+        if na(sc_periodLine)
+            sc_periodLine := line.new(array.get(sc_periodStarts, sc_i), sc_price, sc_futureTime, sc_price, xloc=xloc.bar_time, color=sc_tint, style=sc_i%2 == 0 ? line.style_dashed : line.style_dotted)
+            sc_periodTag := label.new(bar_index + sc_labelOffset + sc_lane*24, sc_price, sc_caption, xloc=xloc.bar_index, style=label.style_label_left, color=sc_tint, textcolor=color.white, size=size.tiny, tooltip=sc_detail)
+            array.set(sc_periodLines, sc_i, sc_periodLine)
+            array.set(sc_periodTags, sc_i, sc_periodTag)
+        else
+            line.set_xy1(sc_periodLine, array.get(sc_periodStarts, sc_i), sc_price)
+            line.set_xy2(sc_periodLine, sc_futureTime, sc_price)
+            label.set_xy(sc_periodTag, bar_index + sc_labelOffset + sc_lane*24, sc_price)
+            label.set_tooltip(sc_periodTag, sc_detail)
+
+// Exchange daily endpoints are frozen: 0% previous close, 100% current day open.
+[sc_previousClose, sc_dailyOpen, sc_gapStart] = request.security(sc_requestTicker, "1D", [close[1], open, time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+var array<line> sc_gapLines = array.new<line>(5, na)
+var array<label> sc_gapTags = array.new<label>(5, na)
+var box sc_gapFill = na
+if barstate.islast
+    bool sc_hasGap = sc_showGap and not na(sc_previousClose) and not na(sc_dailyOpen) and math.abs(sc_dailyOpen-sc_previousClose) >= syminfo.mintick
+    array<float> sc_gapRatios = array.from(0.0, 100.0, sc_p1, sc_p2, sc_p3)
+    // Dedicated future columns keep the narrow gap Fib labels readable at true prices.
+    for sc_i = 0 to 4
+        line sc_gl = array.get(sc_gapLines, sc_i)
+        label sc_gt = array.get(sc_gapTags, sc_i)
+        if sc_hasGap
+            float sc_ratio = array.get(sc_gapRatios, sc_i)
+            float sc_price = sc_previousClose + (sc_dailyOpen-sc_previousClose)*sc_ratio/100
+            sc_int sc_labelBar = bar_index + sc_labelOffset + 48 + sc_i*10
+            string sc_caption = sc_i == 0 ? "PDC" : sc_i == 1 ? "DO" : str.tostring(sc_ratio, "#.##") + "%"
+            color sc_tint = sc_i < 2 ? sc_gapColor : sc_i == 2 ? sc_c1 : sc_i == 3 ? sc_c2 : sc_c3
+            string sc_details = "Gap " + (sc_dailyOpen > sc_previousClose ? "up" : "down") + " · " + sc_caption + "\n" + str.tostring(sc_price, "#,###.##") + "\n0% previous trading-day close → 100% current exchange day open"
+            if na(sc_gl)
+                sc_gl := line.new(sc_gapStart, sc_price, time_close, sc_price, xloc=xloc.bar_time, color=color.new(sc_tint, 20), style=line.style_dashed)
+                sc_gt := label.new(sc_labelBar, sc_price, sc_caption, xloc=xloc.bar_index, style=label.style_label_left, color=sc_tint, textcolor=color.white, size=size.tiny, tooltip=sc_details)
+                array.set(sc_gapLines, sc_i, sc_gl)
+                array.set(sc_gapTags, sc_i, sc_gt)
+            else
+                line.set_xy1(sc_gl, sc_gapStart, sc_price)
+                line.set_xy2(sc_gl, time_close, sc_price)
+                label.set_xy(sc_gt, sc_labelBar, sc_price)
+                label.set_text(sc_gt, sc_caption)
+                label.set_tooltip(sc_gt, sc_details)
+        else
+            line.delete(sc_gl)
+            label.delete(sc_gt)
+            array.set(sc_gapLines, sc_i, na)
+            array.set(sc_gapTags, sc_i, na)
+    if not na(sc_gapFill)
+        box.delete(sc_gapFill)
+        sc_gapFill := na
+    if sc_hasGap
+        sc_gapFill := box.new(sc_gapStart, math.max(sc_previousClose, sc_dailyOpen), time_close, math.min(sc_previousClose, sc_dailyOpen), xloc=xloc.bar_time, border_color=na, bgcolor=color.new(sc_gapColor, 94))
+
+// Inverse Wilder RSI. RSI(c) == SMA(RSI(c), M) iff RSI(c) equals
+// the average of the PREVIOUS M-1 RSI values. This target is fixed before this bar.
+float sc_chartRsi = ta.rsi(close, sc_rsiLength)
+float sc_rsiAverage = ta.sma(sc_chartRsi, sc_rsiSmaLength)
+float sc_priorRsiTarget = ta.sma(sc_chartRsi[1], math.max(sc_rsiSmaLength-1, 1))
+float sc_upState = ta.rma(math.max(ta.change(close), 0), sc_rsiLength)
+float sc_downState = ta.rma(math.max(-ta.change(close), 0), sc_rsiLength)
+float sc_priorGain = (sc_rsiLength-1)*sc_upState[1]
+float sc_priorLoss = (sc_rsiLength-1)*sc_downState[1]
+float sc_rsiCrossPrice = na
+bool sc_invertibleRsi = sc_rsiSmaLength > 1 and not na(sc_priorRsiTarget) and sc_priorRsiTarget > 0 and sc_priorRsiTarget < 100 and not na(sc_priorGain) and not na(sc_priorLoss) and sc_priorGain+sc_priorLoss > 0
+if sc_invertibleRsi
+    float sc_targetRs = sc_priorRsiTarget/(100-sc_priorRsiTarget)
+    float sc_delta = sc_priorGain <= sc_targetRs*sc_priorLoss ? sc_targetRs*sc_priorLoss-sc_priorGain : sc_priorLoss-sc_priorGain/sc_targetRs
+    float sc_candidate = close[1]+sc_delta
+    sc_rsiCrossPrice := sc_candidate > 0 ? sc_candidate : na
+plot(sc_showRsiAverage ? sc_rsiCrossPrice : na, "RSI SMA crossover price", color=sc_rsiAverageColor, linewidth=2, style=plot.style_linebr)
+plot(sc_showRsiAverage ? sc_chartRsi : na, "RSI · raw", display=display.data_window)
+plot(sc_showRsiAverage ? sc_rsiAverage : na, "RSI SMA · raw", display=display.data_window)
+// Read-only diagnostic in Data Window: zero means same-bar sides agree.
+float sc_crossMismatch = not na(sc_rsiCrossPrice) and math.abs(sc_chartRsi-sc_rsiAverage) > 0.00000001 ? ((close > sc_rsiCrossPrice) == (sc_chartRsi > sc_rsiAverage) ? 0 : 1) : na
+plot(sc_showRsiAverage ? sc_crossMismatch : na, "RSI cross-side mismatch (0 = match)", display=display.data_window)
+var label sc_rsiTag = na
+if barstate.islast
+    if not na(sc_rsiTag)
+        label.delete(sc_rsiTag)
+        sc_rsiTag := na
+    if sc_showRsiAverage
+        string sc_details = "RSI " + str.tostring(sc_chartRsi, "#.##") + " · SMA " + str.tostring(sc_rsiAverage, "#.##") + "\n" + (not na(sc_rsiCrossPrice) ? "Close above/below this price means RSI above/below its SMA on this same chart candle. Threshold " + str.tostring(sc_rsiCrossPrice, "#.##") : "Threshold unavailable: warm-up, extreme RSI, flat states, SMA length 1, or no positive-price solution.") + "\nThis is an inverse-RSI crossover threshold; it does not reproduce the oscillator average's shape."
+        sc_rsiTag := label.new(bar_index + sc_labelOffset + 12, not na(sc_rsiCrossPrice) ? sc_rsiCrossPrice : close, not na(sc_rsiCrossPrice) ? "RSI SMA" : "RSI SMA n/a", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(sc_rsiAverageColor, 15), textcolor=color.white, size=size.tiny, tooltip=sc_details)
+
+// Display-only history filter. Input changes recalculate original object colors.
+if barstate.islast and not sc_showHistoricalSc
+    for sc_ln in sc_finalLines
+        if not array.includes(sc_activeFinal, sc_ln)
+            line.set_color(sc_ln, na)
+    for sc_ln in sc_fullLines
+        if not array.includes(sc_activeFull, sc_ln)
+            line.set_color(sc_ln, na)
+    for sc_bx in sc_sourceBoxes
+        if box.get_left(sc_bx) != sc_lastSource
+            box.set_bgcolor(sc_bx, na)
+            box.set_border_color(sc_bx, na)
+    for sc_band in sc_bandHistory
+        if sc_band.sourceKey != sc_lastSource
+            for sc_bx in sc_band.sc_layers
+                box.set_bgcolor(sc_bx, na)
+                box.set_border_color(sc_bx, na)
+    for sc_sc in sc_scArchive
+        if sc_sc.sc_opened != sc_lastSource
+            if not na(sc_sc.sc_tag)
+                label.set_text(sc_sc.sc_tag, "")
+                label.set_color(sc_sc.sc_tag, na)
+                label.set_textcolor(sc_sc.sc_tag, na)
+            if not na(sc_sc.sc_leader)
+                line.set_color(sc_sc.sc_leader, na)
+    for sc_marker in sc_labels
+        if label.get_x(sc_marker) < sc_lastSource
+            label.set_color(sc_marker, na)
+            label.set_textcolor(sc_marker, na)
+
+// Independent five-minute source stream. Never consume an unfinished candle.
+sc_rbFive() =>
+    sc_int sc_k = sc_boundary == "Exchange trading day" ? time_tradingday : sc_customKey(time)
+    sc_int sc_localMinute = hour(time, "Asia/Kolkata")*60 + minute(time, "Asia/Kolkata")
+    bool sc_first = sc_selected == "NSE/BSE" ? session.isfirstbar_regular : not na(sc_k[1]) and sc_k != sc_k[1]
+    sc_int sc_ended = sc_selected == "NSE/BSE" or sc_boundary == "Exchange trading day" ? time_close("1D") : timestamp(sc_zone, year(sc_k, sc_zone), month(sc_k, sc_zone), dayofmonth(sc_k, sc_zone)+1, sc_resetHour, sc_resetMinute)
+    [open, high, low, close, time, time_close, sc_k, sc_ended, sc_first]
+sc_rbFivePrevious() =>
+    [sc_o, sc_hi, sc_lo, sc_c, sc_t, sc_ended, sc_k, sc_sessionEnd, sc_first] = sc_rbFive()
+    [sc_o[1], sc_hi[1], sc_lo[1], sc_c[1], sc_t[1], sc_ended[1], sc_k[1], sc_sessionEnd[1], sc_first[1]]
+type sc_CandleRangeSet
+    sc_int sc_dayKey
+    string sc_kind
+    sc_int sc_started
+    sc_int sc_published
+    float sc_o
+    float sc_hi
+    float sc_lo
+    float sc_c
+    array<line> sc_levels
+    box sc_upper
+    box sc_lower
+    label sc_tag
+var array<sc_CandleRangeSet> sc_rbSets = array.new<sc_CandleRangeSet>()
+var array<sc_int> sc_rbDays = array.new<sc_int>()
+type sc_CandleRangeState
+    sc_int sc_key
+    sc_int sc_lastT
+    bool sc_xDone
+    bool sc_redDone
+    sc_int sc_middayCount
+    sc_int sc_middayLast
+    float sc_middayO
+    float sc_middayH
+    float sc_middayL
+    sc_int sc_eveningCount
+    sc_int sc_eveningLast
+    float sc_eveningO
+    float sc_eveningH
+    float sc_eveningL
+var sc_CandleRangeState sc_rbState = sc_CandleRangeState.new(na, na, false, false, 0, na, na, na, na, 0, na, na, na, na)
+sc_rbDelete(sc_CandleRangeSet sc_item) =>
+    for sc_ln in sc_item.sc_levels
+        line.delete(sc_ln)
+    box.delete(sc_item.sc_upper)
+    box.delete(sc_item.sc_lower)
+    label.delete(sc_item.sc_tag)
+sc_rbDraw(string sc_kind, float sc_o, float sc_hi, float sc_lo, float sc_c, sc_int sc_started, sc_int sc_published, sc_int sc_dayKey, sc_int sc_sessionEnd) =>
+    float sc_middle = sc_lo + (sc_hi-sc_lo)*sc_p2/100
+    sc_int sc_right = math.max(sc_published+300000, sc_sessionEnd)
+    color sc_tint = sc_kind == "X" ? color.rgb(79, 70, 229) : sc_kind == "R" ? sc_bearColor : sc_kind == "M" ? color.rgb(14, 116, 144) : color.rgb(37, 99, 235)
+    color sc_boundaryTint = sc_kind == "X" ? sc_tint : sc_bearColor
+    array<line> sc_levels = array.new<line>()
+    array<float> sc_ratios = array.from(sc_p1, sc_p2, sc_p3)
+    array<color> sc_tints = array.from(sc_c1, sc_c2, sc_c3)
+    for sc_i = 0 to 2
+        float sc_price = sc_lo+(sc_hi-sc_lo)*array.get(sc_ratios, sc_i)/100
+        array.push(sc_levels, line.new(sc_published, sc_price, sc_right, sc_price, xloc=xloc.bar_time, color=sc_boundaryTint, style=line.style_solid, width=2))
+    box sc_upper = box.new(sc_published, sc_hi, sc_right, sc_middle, xloc=xloc.bar_time, border_color=sc_boundaryTint, border_width=2, border_style=line.style_solid, bgcolor=color.new(sc_boundaryTint, 91))
+    box sc_lower = box.new(sc_published, sc_middle, sc_right, sc_lo, xloc=xloc.bar_time, border_color=sc_boundaryTint, border_width=2, border_style=line.style_solid, bgcolor=color.new(sc_boundaryTint, 95))
+    string sc_title = sc_kind == "X" ? "First completed 5m candle" : sc_kind == "R" ? "First red 5m candle after X" : sc_kind == "M" ? "Six-candle midday blend (all colors)" : "Six-candle evening blend (17:30–18:00 India time)"
+    string sc_detail = sc_title + "\nSource " + str.format_time(sc_started, "dd MMM HH:mm", "Asia/Kolkata") + "–" + str.format_time(sc_published, "HH:mm", "Asia/Kolkata") + "\nPublished only after source completion\nO " + str.tostring(sc_o, "#.##") + " · H " + str.tostring(sc_hi, "#.##") + " · L " + str.tostring(sc_lo, "#.##") + " · C " + str.tostring(sc_c, "#.##") + "\n" + str.tostring(sc_p1) + "% " + str.tostring(sc_lo+(sc_hi-sc_lo)*sc_p1/100, "#.##") + " · " + str.tostring(sc_p2) + "% " + str.tostring(sc_middle, "#.##") + " · " + str.tostring(sc_p3) + "% " + str.tostring(sc_lo+(sc_hi-sc_lo)*sc_p3/100, "#.##") + "\n5m range history: " + str.tostring(sc_rbKeep) + " sessions (drawing budget); SC history remains separate."
+    label sc_tag = sc_showRangeLabels ? label.new(sc_published, sc_hi, sc_kind, xloc=xloc.bar_time, style=label.style_label_down, color=sc_tint, textcolor=color.white, size=size.tiny, tooltip=sc_detail) : na
+    array.push(sc_rbSets, sc_CandleRangeSet.new(sc_dayKey, sc_kind, sc_started, sc_published, sc_o, sc_hi, sc_lo, sc_c, sc_levels, sc_upper, sc_lower, sc_tag))
+sc_rbConsume(sc_CandleRangeState sc_state, float sc_o, float sc_hi, float sc_lo, float sc_c, sc_int sc_t, sc_int sc_ended, sc_int sc_k, sc_int sc_sessionEnd, bool sc_first) =>
+    sc_int sc_localMinute = hour(sc_t, "Asia/Kolkata")*60 + minute(sc_t, "Asia/Kolkata")
+    bool sc_eligible = sc_selected != "NSE/BSE" or (sc_first or (sc_state.sc_xDone and sc_state.sc_key == sc_k and sc_t < sc_sessionEnd))
+    if not na(sc_t) and (na(sc_state.sc_lastT) or sc_t > sc_state.sc_lastT) and sc_ended <= timenow
+        if na(sc_state.sc_key) or sc_k != sc_state.sc_key
+            sc_state.sc_key := sc_k
+            sc_state.sc_xDone := false
+            sc_state.sc_redDone := false
+            sc_state.sc_middayCount := 0
+            sc_state.sc_middayLast := na
+            sc_state.sc_eveningCount := 0
+            sc_state.sc_eveningLast := na
+            array.push(sc_rbDays, sc_k)
+            while array.size(sc_rbDays) > sc_rbKeep
+                sc_int sc_expired = array.shift(sc_rbDays)
+                while array.size(sc_rbSets) > 0
+                    sc_CandleRangeSet sc_oldest = array.get(sc_rbSets, 0)
+                    if sc_oldest.sc_dayKey == sc_expired
+                        sc_rbDelete(array.shift(sc_rbSets))
+                    else
+                        break
+        if sc_first and not sc_state.sc_xDone
+            sc_rbDraw("X", sc_o, sc_hi, sc_lo, sc_c, sc_t, sc_ended, sc_k, sc_sessionEnd)
+            sc_state.sc_xDone := true
+        else if sc_eligible and sc_state.sc_xDone and not sc_state.sc_redDone and sc_c < sc_o
+            sc_rbDraw("R", sc_o, sc_hi, sc_lo, sc_c, sc_t, sc_ended, sc_k, sc_sessionEnd)
+            sc_state.sc_redDone := true
+        sc_int sc_minutes = hour(sc_t, "Asia/Kolkata")*60 + minute(sc_t, "Asia/Kolkata")
+        if sc_minutes >= 750 and sc_minutes < 780 and sc_ended-sc_t == 300000
+            if sc_minutes == 750
+                sc_state.sc_middayCount := 1
+                sc_state.sc_middayO := sc_o
+                sc_state.sc_middayH := sc_hi
+                sc_state.sc_middayL := sc_lo
+                sc_state.sc_middayLast := sc_t
+            else if sc_state.sc_middayCount > 0 and sc_t-sc_state.sc_middayLast == 300000
+                sc_state.sc_middayCount += 1
+                sc_state.sc_middayH := math.max(sc_state.sc_middayH, sc_hi)
+                sc_state.sc_middayL := math.min(sc_state.sc_middayL, sc_lo)
+                sc_state.sc_middayLast := sc_t
+            else
+                sc_state.sc_middayCount := 0
+            if sc_minutes == 775 and sc_state.sc_middayCount == 6
+                sc_rbDraw("M", sc_state.sc_middayO, sc_state.sc_middayH, sc_state.sc_middayL, sc_c, sc_t-1500000, sc_ended, sc_k, sc_sessionEnd)
+        sc_int sc_indiaMinute = hour(sc_t, "Asia/Kolkata")*60 + minute(sc_t, "Asia/Kolkata")
+        if sc_selected != "NSE/BSE" and sc_indiaMinute >= 1050 and sc_indiaMinute < 1080 and sc_ended-sc_t == 300000
+            if sc_indiaMinute == 1050
+                sc_state.sc_eveningCount := 1
+                sc_state.sc_eveningO := sc_o
+                sc_state.sc_eveningH := sc_hi
+                sc_state.sc_eveningL := sc_lo
+                sc_state.sc_eveningLast := sc_t
+            else if sc_state.sc_eveningCount > 0 and sc_t-sc_state.sc_eveningLast == 300000
+                sc_state.sc_eveningCount += 1
+                sc_state.sc_eveningH := math.max(sc_state.sc_eveningH, sc_hi)
+                sc_state.sc_eveningL := math.min(sc_state.sc_eveningL, sc_lo)
+                sc_state.sc_eveningLast := sc_t
+            else
+                sc_state.sc_eveningCount := 0
+            if sc_indiaMinute == 1075 and sc_state.sc_eveningCount == 6
+                sc_rbDraw("E", sc_state.sc_eveningO, sc_state.sc_eveningH, sc_state.sc_eveningL, sc_c, sc_t-1500000, sc_ended, sc_k, sc_sessionEnd)
+        sc_state.sc_lastT := sc_t
+    sc_state.sc_lastT
+// Higher charts receive EVERY 5m intrabar, not the last sampled one only.
+[sc_rbO, sc_rbH, sc_rbL, sc_rbC, sc_rbT, sc_rbEnd, sc_rbKey, sc_rbSessionEnd, sc_rbFirst] = request.security_lower_tf(sc_requestTicker, "5", sc_rbFive(), ignore_invalid_timeframe=true)
+[sc_rbPrevO, sc_rbPrevH, sc_rbPrevL, sc_rbPrevC, sc_rbPrevT, sc_rbPrevEnd, sc_rbPrevKey, sc_rbPrevSessionEnd, sc_rbPrevFirst] = request.security(sc_requestTicker, "5", sc_rbFivePrevious(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+[sc_rbCurrO, sc_rbCurrH, sc_rbCurrL, sc_rbCurrC, sc_rbCurrT, sc_rbCurrEnd, sc_rbCurrKey, sc_rbCurrSessionEnd, sc_rbCurrFirst] = request.security(sc_requestTicker, "5", sc_rbFive(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+if sc_enableRedBars
+    if timeframe.in_seconds() >= 300
+        if array.size(sc_rbT) > 0
+            for sc_i = 0 to array.size(sc_rbT)-1
+                if array.get(sc_rbEnd, sc_i) <= timenow and (not barstate.isrealtime or array.get(sc_rbEnd, sc_i) <= timenow)
+                    sc_rbConsume(sc_rbState, array.get(sc_rbO, sc_i), array.get(sc_rbH, sc_i), array.get(sc_rbL, sc_i), array.get(sc_rbC, sc_i), array.get(sc_rbT, sc_i), array.get(sc_rbEnd, sc_i), array.get(sc_rbKey, sc_i), array.get(sc_rbSessionEnd, sc_i), array.get(sc_rbFirst, sc_i))
+    else
+        // Previous confirmed source is safe on 1m/2m/3m, including nondividing intervals.
+        sc_rbConsume(sc_rbState, sc_rbPrevO, sc_rbPrevH, sc_rbPrevL, sc_rbPrevC, sc_rbPrevT, sc_rbPrevEnd, sc_rbPrevKey, sc_rbPrevSessionEnd, sc_rbPrevFirst)
+        // Capture a just-closed 5m source even when its close falls inside a 2m/3m
+        // chart candle or is the final session candle. Timestamp guards exclude
+        // developing source prices; rbConsume deduplicates both source streams.
+        if not na(sc_rbCurrEnd) and sc_rbCurrEnd <= time_close and sc_rbCurrEnd <= timenow
+            sc_rbConsume(sc_rbState, sc_rbCurrO, sc_rbCurrH, sc_rbCurrL, sc_rbCurrC, sc_rbCurrT, sc_rbCurrEnd, sc_rbCurrKey, sc_rbCurrSessionEnd, sc_rbCurrFirst)
+
+// SC confirmation uses the same native 5m feed, independently of red-bar visibility.
+var sc_int sc_scLastFiveEnd = na
+if timeframe.in_seconds() >= 300
+    if array.size(sc_rbEnd) > 0
+        for sc_i = 0 to array.size(sc_rbEnd)-1
+            sc_int sc_ended = array.get(sc_rbEnd, sc_i)
+            if not na(sc_ended) and sc_ended <= timenow and (na(sc_scLastFiveEnd) or sc_ended > sc_scLastFiveEnd)
+                sc_activeSc := sc_scAdvance(sc_activeSc, array.get(sc_rbC, sc_i), sc_ended)
+                sc_scLastFiveEnd := sc_ended
+else
+    if not na(sc_rbPrevEnd) and sc_rbPrevEnd <= time_close and sc_rbPrevEnd <= timenow and (na(sc_scLastFiveEnd) or sc_rbPrevEnd > sc_scLastFiveEnd)
+        sc_activeSc := sc_scAdvance(sc_activeSc, sc_rbPrevC, sc_rbPrevEnd)
+        sc_scLastFiveEnd := sc_rbPrevEnd
+    if not na(sc_rbCurrEnd) and sc_rbCurrEnd <= time_close and sc_rbCurrEnd <= timenow and (na(sc_scLastFiveEnd) or sc_rbCurrEnd > sc_scLastFiveEnd)
+        sc_activeSc := sc_scAdvance(sc_activeSc, sc_rbCurrC, sc_rbCurrEnd)
+        sc_scLastFiveEnd := sc_rbCurrEnd
+if not na(sc_activeSc)
+    sc_rangeTag := sc_activeSc.sc_tag
+    sc_tagLeader := sc_activeSc.sc_leader
+
+// Latest completed oscillator readings, independent of chart timeframe.
+sc_rsiOscValues() =>
+    float sc_oscillator = ta.rsi(close, sc_rsiLength)
+    float sc_average = ta.sma(sc_oscillator, sc_rsiSmaLength)
+    [sc_oscillator, sc_average, sc_average[1], time_close]
+sc_rsiOscPrevious() =>
+    [sc_oscillator, sc_average, sc_priorAverage, sc_ended] = sc_rsiOscValues()
+    [sc_oscillator[1], sc_average[1], sc_priorAverage[1], sc_ended[1]]
+[sc_osc5Prev, sc_avg5Prev, sc_avg5PriorPrev, sc_osc5PrevEnd] = request.security(sc_requestTicker, "5", sc_rsiOscPrevious(), gaps=barmerge.gaps_off, lookahead=timeframe.in_seconds() > 300 ? barmerge.lookahead_off : barmerge.lookahead_on)
+[sc_osc15Prev, sc_avg15Prev, sc_avg15PriorPrev, sc_osc15PrevEnd] = request.security(sc_requestTicker, "15", sc_rsiOscPrevious(), gaps=barmerge.gaps_off, lookahead=timeframe.in_seconds() > 900 ? barmerge.lookahead_off : barmerge.lookahead_on)
+[sc_osc30Prev, sc_avg30Prev, sc_avg30PriorPrev, sc_osc30PrevEnd] = request.security(sc_requestTicker, "30", sc_rsiOscPrevious(), gaps=barmerge.gaps_off, lookahead=timeframe.in_seconds() > 1800 ? barmerge.lookahead_off : barmerge.lookahead_on)
+[sc_osc5Current, sc_avg5Current, sc_avg5PriorCurrent, sc_osc5CurrentEnd] = request.security(sc_requestTicker, "5", sc_rsiOscValues(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[sc_osc15Current, sc_avg15Current, sc_avg15PriorCurrent, sc_osc15CurrentEnd] = request.security(sc_requestTicker, "15", sc_rsiOscValues(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[sc_osc30Current, sc_avg30Current, sc_avg30PriorCurrent, sc_osc30CurrentEnd] = request.security(sc_requestTicker, "30", sc_rsiOscValues(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+sc_closedOsc(float sc_previousRsi, float sc_previousAverage, float sc_previousPriorAverage, sc_int sc_previousEnd, float sc_currentRsi, float sc_currentAverage, float sc_currentPriorAverage, sc_int sc_currentEnd) =>
+    bool sc_completed = not na(sc_currentEnd) and sc_currentEnd <= timenow and sc_currentEnd <= time_close
+    [sc_completed ? sc_currentRsi : sc_previousRsi, sc_completed ? sc_currentAverage : sc_previousAverage, sc_completed ? sc_currentPriorAverage : sc_previousPriorAverage, sc_completed ? sc_currentEnd : sc_previousEnd]
+[sc_tableOsc5, sc_tableAvg5, sc_tablePriorAvg5, sc_tableEnd5] = sc_closedOsc(sc_osc5Prev, sc_avg5Prev, sc_avg5PriorPrev, sc_osc5PrevEnd, sc_osc5Current, sc_avg5Current, sc_avg5PriorCurrent, sc_osc5CurrentEnd)
+[sc_tableOsc15, sc_tableAvg15, sc_tablePriorAvg15, sc_tableEnd15] = sc_closedOsc(sc_osc15Prev, sc_avg15Prev, sc_avg15PriorPrev, sc_osc15PrevEnd, sc_osc15Current, sc_avg15Current, sc_avg15PriorCurrent, sc_osc15CurrentEnd)
+[sc_tableOsc30, sc_tableAvg30, sc_tablePriorAvg30, sc_tableEnd30] = sc_closedOsc(sc_osc30Prev, sc_avg30Prev, sc_avg30PriorPrev, sc_osc30PrevEnd, sc_osc30Current, sc_avg30Current, sc_avg30PriorCurrent, sc_osc30CurrentEnd)
+
+// Latest locked SC is pinned; revealed targets belong ONLY to this chain.
+sc_scTableRow(table sc_target, sc_int sc_row, sc_int sc_opened, sc_int sc_ended, float sc_hi, float sc_lo, string sc_caption, color sc_tint, string sc_identity) =>
+    bool sc_available = not na(sc_hi) and not na(sc_lo)
+    string sc_detail = sc_identity + (not na(sc_opened) ? "\nSource " + str.format_time(sc_opened, "dd MMM yyyy HH:mm", "Asia/Kolkata") + "–" + str.format_time(sc_ended, "HH:mm", "Asia/Kolkata") + " IST" : "") + (sc_available ? "\nH " + str.tostring(sc_hi, "#,###.00") + " · L " + str.tostring(sc_lo, "#,###.00") : "\nSource unavailable") + "\nState uses current price against full high/low; equality is In range."
+    table.cell(sc_target, 0, sc_row, sc_caption, text_color=color.white, bgcolor=sc_tint, text_size=size.tiny, tooltip=sc_detail)
+    array<float> sc_ratios = array.from(sc_p1, sc_p2, sc_p3)
+    for sc_col = 0 to 2
+        table.cell(sc_target, sc_col+1, sc_row, sc_available ? str.tostring(sc_lo+(sc_hi-sc_lo)*array.get(sc_ratios, sc_col)/100, "#,###.##") : "—", text_color=color.rgb(30,41,59), bgcolor=color.white, text_size=size.tiny, tooltip=sc_detail)
+    string sc_state = not sc_available or na(close) ? "—" : close > sc_hi ? "Bullish" : close < sc_lo ? "Bearish" : "In range"
+    color sc_stateColor = not sc_available or na(close) ? color.gray : close > sc_hi ? sc_bullColor : close < sc_lo ? sc_bearColor : color.rgb(180,120,10)
+    table.cell(sc_target, 4, sc_row, sc_state, text_color=sc_stateColor, bgcolor=color.white, text_size=size.tiny, tooltip=sc_detail)
+var table sc_rbPanel = na
+if barstate.islast and not sc_showPanel and not na(sc_rbPanel)
+    table.delete(sc_rbPanel)
+    sc_rbPanel := na
+if barstate.islast and sc_showPanel
+    array<sc_SCReference> sc_chainTargets = array.new<sc_SCReference>()
+    array<sc_int> sc_revealTimes = array.new<sc_int>()
+    for sc_item in sc_scArchive
+        if not na(sc_scChainKey) and not na(sc_item.sc_visitedChain) and sc_item.sc_visitedChain == sc_scChainKey and sc_item.sc_opened != sc_lastSource and sc_item.sc_approach != 0 and not na(sc_item.sc_anchorAt)
+            array.push(sc_chainTargets, sc_item)
+            array.push(sc_revealTimes, sc_item.sc_anchorAt)
+    array<sc_int> sc_targetOrder = array.sort_indices(sc_revealTimes, order.ascending)
+    sc_int sc_targetCount = array.size(sc_chainTargets)
+    sc_int sc_pageCount = math.max(1, sc_int(math.ceil(sc_targetCount/2.0)))
+    sc_int sc_targetPage = math.min(sc_scTargetPage, sc_pageCount)
+    sc_int sc_firstTarget = (sc_targetPage-1)*2
+    sc_int sc_visibleTargets = math.max(0, math.min(2, sc_targetCount-sc_firstTarget))
+    bool sc_pagedTargets = sc_targetCount > 2
+    sc_int sc_xStart = 2 + sc_visibleTargets + (sc_pagedTargets ? 1 : 0)
+    sc_int sc_latestRedRow = sc_xStart+4
+    sc_int sc_rsiHeader = sc_xStart+5
+    sc_int sc_prevHeader = sc_rsiHeader+3
+    sc_int sc_footerRow = sc_prevHeader+4
+    if not na(sc_rbPanel)
+        table.delete(sc_rbPanel)
+    sc_rbPanel := table.new(showDashboard and dashboardMode != "Off" and dashboardAnchor == position.middle_right ? position.middle_left : position.middle_right, 5, sc_footerRow+1, border_width=1, border_color=color.new(color.gray,55), frame_width=1, frame_color=color.new(color.gray,55))
+    table.merge_cells(sc_rbPanel, 0, sc_footerRow, 4, sc_footerRow)
+    for sc_row = sc_rsiHeader to sc_rsiHeader+2
+        table.merge_cells(sc_rbPanel, 0, sc_row, 1, sc_row)
+    table.cell(sc_rbPanel, 0, 0, "Levels · IST", text_color=color.white, bgcolor=color.rgb(30,41,59), text_size=size.tiny)
+    array<float> sc_ratios = array.from(sc_p1, sc_p2, sc_p3)
+    for sc_col = 0 to 2
+        table.cell(sc_rbPanel, sc_col+1, 0, str.tostring(array.get(sc_ratios,sc_col), "#.##")+"%", text_color=color.white, bgcolor=color.rgb(30,41,59), text_size=size.tiny)
+    table.cell(sc_rbPanel, 4, 0, "State", text_color=color.white, bgcolor=color.rgb(30,41,59), text_size=size.tiny, tooltip="Live price compared with full source high/low, not the three Fib levels.")
+    sc_scTableRow(sc_rbPanel, 1, sc_lastSource, sc_lockedClose, not sc_missingFinal ? sc_lockedHigh : na, not sc_missingFinal ? sc_lockedLow : na, "SC" + (not na(sc_lastSource) ? " " + str.format_time(sc_lastSource,"dd MMM","Asia/Kolkata") : " · —"), color.rgb(30,41,59), "Latest completed Shadow Candle; matches the locked latest-SC panel.")
+    if sc_visibleTargets > 0
+        for sc_i = 0 to sc_visibleTargets-1
+            sc_SCReference sc_item = array.get(sc_chainTargets, array.get(sc_targetOrder, sc_firstTarget+sc_i))
+            sc_scTableRow(sc_rbPanel, 2+sc_i, sc_item.sc_opened, sc_item.sc_closed, sc_item.sc_hi, sc_item.sc_lo, "→SC " + str.format_time(sc_item.sc_opened,"dd MMM","Asia/Kolkata"), sc_item.sc_approach > 0 ? sc_bullColor : sc_bearColor, "Historical SC revealed in the current breakout chain. Original SC remains pinned above. Revealed " + str.format_time(sc_item.sc_anchorAt,"dd MMM HH:mm","Asia/Kolkata")+" IST.")
+    if sc_pagedTargets
+        sc_int sc_pageRow = 2+sc_visibleTargets
+        table.merge_cells(sc_rbPanel, 0, sc_pageRow, 4, sc_pageRow)
+        table.cell(sc_rbPanel, 0, sc_pageRow, "SC targets " + str.tostring(sc_firstTarget+1)+"–"+str.tostring(sc_firstTarget+sc_visibleTargets)+"/"+str.tostring(sc_targetCount)+" · page "+str.tostring(sc_targetPage)+"/"+str.tostring(sc_pageCount), text_color=color.gray, bgcolor=color.white, text_size=size.tiny, tooltip="Use Inputs → SC target table page to view every revealed target. Latest base SC stays pinned on each page. Two targets per page keep the table readable.")
+    array<string> sc_names = array.from("X","R","M","E")
+    for sc_row = 0 to 3
+        string sc_kind = array.get(sc_names,sc_row)
+        sc_CandleRangeSet sc_found = na
+        for sc_item in sc_rbSets
+            if sc_item.sc_dayKey == sc_rbState.sc_key and sc_item.sc_kind == sc_kind
+                sc_found := sc_item
+        color sc_tint = sc_kind == "X" ? color.rgb(79,70,229) : sc_kind == "R" ? sc_bearColor : sc_kind == "M" ? color.rgb(14,116,144) : color.rgb(37,99,235)
+        string sc_caption = sc_kind + (not na(sc_found) ? " " + str.format_time(sc_found.sc_started,"HH:mm","Asia/Kolkata")+"–"+str.format_time(sc_found.sc_published,"HH:mm","Asia/Kolkata") : " · —")
+        string sc_detail = not na(sc_found) ? "Source " + str.format_time(sc_found.sc_started,"dd MMM yyyy HH:mm","Asia/Kolkata")+"–"+str.format_time(sc_found.sc_published,"HH:mm","Asia/Kolkata")+" IST\nO "+str.tostring(sc_found.sc_o,"#.##")+" · H "+str.tostring(sc_found.sc_hi,"#.##")+" · L "+str.tostring(sc_found.sc_lo,"#.##")+" · C "+str.tostring(sc_found.sc_c,"#.##") : "No completed set. X: first regular opening 5m; R: next red; M: six candles 12:30–13:00 IST everywhere; E: six candles 17:30–18:00 IST except NSE/BSE. Incomplete windows are unavailable."
+        table.cell(sc_rbPanel,0,sc_xStart+sc_row,sc_caption,text_color=color.white,bgcolor=sc_tint,text_size=size.tiny,tooltip=sc_detail)
+        for sc_col = 0 to 2
+            table.cell(sc_rbPanel,sc_col+1,sc_xStart+sc_row,not na(sc_found) ? str.tostring(sc_found.sc_lo+(sc_found.sc_hi-sc_found.sc_lo)*array.get(sc_ratios,sc_col)/100,"#,###.##") : "—",text_color=sc_tint,bgcolor=color.white,text_size=size.tiny,tooltip=sc_detail)
+        string sc_state = na(sc_found) or na(close) ? "—" : close > sc_found.sc_hi ? "Bullish" : close < sc_found.sc_lo ? "Bearish" : "In range"
+        color sc_stateColor = na(sc_found) or na(close) ? color.gray : close > sc_found.sc_hi ? sc_bullColor : close < sc_found.sc_lo ? sc_bearColor : color.rgb(180,120,10)
+        table.cell(sc_rbPanel,4,sc_xStart+sc_row,sc_state,text_color=sc_stateColor,bgcolor=color.white,text_size=size.tiny,tooltip=sc_detail+"\nCurrent price "+str.tostring(close,"#,###.00")+"; State uses full source high/low, inclusive boundaries In range.")
+    sc_CandleRangeSet sc_latestRed = na
+    if sc_enableRedBars
+        for sc_candidate in sc_rbSets
+            if sc_candidate.sc_kind != "X" and sc_candidate.sc_published <= timenow and sc_candidate.sc_published <= time_close
+                if na(sc_latestRed) or sc_candidate.sc_published > sc_latestRed.sc_published or (sc_candidate.sc_published == sc_latestRed.sc_published and sc_candidate.sc_kind != "R")
+                    sc_latestRed := sc_candidate
+    string sc_latestState = na(sc_latestRed) or na(close) ? "—" : close > sc_latestRed.sc_hi ? "Bullish" : close < sc_latestRed.sc_lo ? "Bearish" : "In range"
+    color sc_latestColor = na(sc_latestRed) or na(close) ? color.gray : close > sc_latestRed.sc_hi ? sc_bullColor : close < sc_latestRed.sc_lo ? sc_bearColor : color.rgb(180,120,10)
+    string sc_latestCaption = na(sc_latestRed) ? "Unavailable" : sc_latestRed.sc_kind+" "+str.format_time(sc_latestRed.sc_started,"dd MMM HH:mm","Asia/Kolkata")+"–"+str.format_time(sc_latestRed.sc_published,"HH:mm","Asia/Kolkata")
+    string sc_latestDetail = "Decision uses the newest completed R/M/E range by publication time; X is excluded. Earlier rows describe their own source ranges."
+    if not na(sc_latestRed)
+        sc_latestDetail += "\n"+sc_latestCaption+" IST\nHigh "+str.tostring(sc_latestRed.sc_hi,"#,###.00")+" · Low "+str.tostring(sc_latestRed.sc_lo,"#,###.00")+"\nCurrent price "+str.tostring(close,"#,###.00")+"; above high Bullish, below low Bearish, inclusive boundaries In range."
+    table.merge_cells(sc_rbPanel,1,sc_latestRedRow,3,sc_latestRedRow)
+    table.cell(sc_rbPanel,0,sc_latestRedRow,"Latest red",text_color=color.white,bgcolor=color.rgb(153,27,27),text_size=size.tiny,tooltip=sc_latestDetail)
+    table.cell(sc_rbPanel,1,sc_latestRedRow,sc_latestCaption,text_color=color.rgb(30,41,59),bgcolor=color.rgb(254,242,242),text_size=size.tiny,tooltip=sc_latestDetail)
+    table.cell(sc_rbPanel,4,sc_latestRedRow,sc_latestState,text_color=sc_latestColor,bgcolor=color.white,text_size=size.tiny,tooltip=sc_latestDetail)
+    table.cell(sc_rbPanel,0,sc_rsiHeader,"RSI · closed",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.tiny,tooltip="RSI oscillator values 0–100 on each latest completed native candle; separate from the price-threshold overlay.")
+    array<string> sc_oscFrames = array.from("5m","15m","30m")
+    array<float> sc_oscReadings = array.from(sc_tableOsc5,sc_tableOsc15,sc_tableOsc30)
+    array<float> sc_oscAverages = array.from(sc_tableAvg5,sc_tableAvg15,sc_tableAvg30)
+    array<float> sc_oscPriorAverages = array.from(sc_tablePriorAvg5,sc_tablePriorAvg15,sc_tablePriorAvg30)
+    array<sc_int> sc_oscEnds = array.from(sc_tableEnd5,sc_tableEnd15,sc_tableEnd30)
+    table.cell(sc_rbPanel,0,sc_rsiHeader+1,"RSI",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.tiny)
+    table.cell(sc_rbPanel,0,sc_rsiHeader+2,"RSI SMA",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.tiny)
+    for sc_col = 0 to 2
+        float sc_reading = array.get(sc_oscReadings,sc_col)
+        float sc_average = array.get(sc_oscAverages,sc_col)
+        float sc_priorAverage = array.get(sc_oscPriorAverages,sc_col)
+        bool sc_slopeAvailable = not na(sc_average) and not na(sc_priorAverage)
+        sc_int sc_direction = sc_slopeAvailable ? (sc_average > sc_priorAverage ? 1 : sc_average < sc_priorAverage ? -1 : 0) : 0
+        color sc_slopeColor = not sc_enableRsiOverlay or not sc_slopeAvailable or sc_direction == 0 ? color.gray : sc_direction > 0 ? sc_bullColor : sc_bearColor
+        string sc_rsiValue = not sc_enableRsiOverlay ? "Off" : not na(sc_reading) ? str.tostring(sc_reading,"0.00") : "—"
+        string sc_smaValue = not sc_enableRsiOverlay ? "Off" : not na(sc_average) ? str.tostring(sc_average,"0.00")+(sc_slopeAvailable ? (sc_direction > 0 ? " ↑" : sc_direction < 0 ? " ↓" : " →") : "") : "—"
+        string sc_detail = "RSI "+str.tostring(sc_rsiLength)+" / SMA "+str.tostring(sc_rsiSmaLength)+" · "+array.get(sc_oscFrames,sc_col)+"\nLatest completed candle ends "+(not na(array.get(sc_oscEnds,sc_col)) ? str.format_time(array.get(sc_oscEnds,sc_col),"dd MMM HH:mm","Asia/Kolkata")+" IST" : "unavailable")+"\nArrow compares completed RSI SMA with its previous completed value, not RSI direction. Master Enable RSI overlay controls these readings."
+        table.cell(sc_rbPanel,sc_col+2,sc_rsiHeader,array.get(sc_oscFrames,sc_col),text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.tiny)
+        table.cell(sc_rbPanel,sc_col+2,sc_rsiHeader+1,sc_rsiValue,text_color=sc_enableRsiOverlay ? color.rgb(30,41,59) : color.gray,bgcolor=color.white,text_size=size.tiny,tooltip=sc_detail)
+        table.cell(sc_rbPanel,sc_col+2,sc_rsiHeader+2,sc_smaValue,text_color=sc_slopeColor,bgcolor=color.white,text_size=size.tiny,tooltip=sc_detail)
+    for sc_row = sc_prevHeader to sc_prevHeader+3
+        table.merge_cells(sc_rbPanel,1,sc_row,2,sc_row)
+        table.merge_cells(sc_rbPanel,3,sc_row,4,sc_row)
+    table.cell(sc_rbPanel,0,sc_prevHeader,"Period",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.small,tooltip="Previous completed day, week and month only; never the forming period.")
+    table.cell(sc_rbPanel,1,sc_prevHeader,"High",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.small)
+    table.cell(sc_rbPanel,3,sc_prevHeader,"Low",text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.small)
+    array<string> sc_prevNames = array.from("Prev day","Prev week","Prev month")
+    array<float> sc_prevHighs = array.from(sc_pdh,sc_pwh,sc_pmh)
+    array<float> sc_prevLows = array.from(sc_pdl,sc_pwl,sc_pml)
+    array<sc_int> sc_prevSources = array.from(sc_daySource,sc_weekSource,sc_monthSource)
+    for sc_row = 0 to 2
+        string sc_detail = array.get(sc_prevNames,sc_row)+" · completed source "+(not na(array.get(sc_prevSources,sc_row)) ? str.format_time(array.get(sc_prevSources,sc_row),"dd MMM yyyy","Asia/Kolkata") : "unavailable")+". Independent of chart-line visibility. Missing values show —."
+        table.cell(sc_rbPanel,0,sc_prevHeader+1+sc_row,array.get(sc_prevNames,sc_row),text_color=color.white,bgcolor=color.rgb(30,41,59),text_size=size.small,tooltip=sc_detail)
+        table.cell(sc_rbPanel,1,sc_prevHeader+1+sc_row,not na(array.get(sc_prevHighs,sc_row)) ? str.tostring(array.get(sc_prevHighs,sc_row),"#,###.##") : "—",text_color=color.rgb(30,41,59),bgcolor=color.white,text_size=size.small,tooltip=sc_detail)
+        table.cell(sc_rbPanel,3,sc_prevHeader+1+sc_row,not na(array.get(sc_prevLows,sc_row)) ? str.tostring(array.get(sc_prevLows,sc_row),"#,###.##") : "—",text_color=color.rgb(30,41,59),bgcolor=color.white,text_size=size.small,tooltip=sc_detail)
+    table.cell(sc_rbPanel,0,sc_footerRow,"History: "+str.tostring(sc_rbKeep)+" · "+(sc_showRedHistory ? "shown" : "hidden"),text_color=color.gray,bgcolor=color.white,text_size=size.tiny)
+    if not sc_showRedHistory
+        for sc_item in sc_rbSets
+            if sc_item.sc_dayKey != sc_rbState.sc_key
+                for sc_ln in sc_item.sc_levels
+                    line.set_color(sc_ln,na)
+                box.set_bgcolor(sc_item.sc_upper,na)
+                box.set_border_color(sc_item.sc_upper,na)
+                box.set_bgcolor(sc_item.sc_lower,na)
+                box.set_border_color(sc_item.sc_lower,na)
+                if not na(sc_item.sc_tag)
+                    label.set_text(sc_item.sc_tag, "")
+                    label.set_color(sc_item.sc_tag, na)

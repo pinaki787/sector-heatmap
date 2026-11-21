@@ -10,6 +10,22 @@ class DhanHandoff:
         self.client = execution._client()
         sectors.provider.prepare()
 
+    @property
+    def folder(self):
+        return self.execution.folder
+
+    @property
+    def cash_master(self):
+        provider=self.sectors.provider
+        class NativeLookup:
+            def lookup(self,symbols):
+                result={}
+                for symbol in symbols:
+                    try:result[symbol]=provider.resolve(symbol)
+                    except ValueError:continue
+                return result
+        return NativeLookup()
+
     def candidates(self, mode):
         snap = self.sectors.snapshot(mode)
         live = [dict(row, drivers=row.get('constituent_movers', [])) for row in snap.get('sectors', [])]

@@ -1,7 +1,7 @@
 
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {mergeChartRows,runnerChartAlignment,chartHistoricalEvents,chartAnalysisAvailable}=require('../renko-supertrend.js');
-const prior={timestamp:1,direction:'BULLISH',supertrend:10,ema10:11,ema30:12,lifecycle_event:'BUY'};
+const prior={timestamp:1,close:15,entry_qualified:true,direction:'BULLISH',supertrend:10,ema10:11,ema30:12,lifecycle_event:'BUY'};
 test('incremental history is merged before runner comparison without changing cached rows',()=>{
  const rows=[prior],data={incremental:true,initialization_anchor:1,rows:[{timestamp:2,supertrend:13}]};
  const merged=mergeChartRows(data,rows);

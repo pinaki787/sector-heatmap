@@ -119,3 +119,13 @@ input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; padding: 0;
 
 /* Per-user outbound email destination; existing section choices remain independent. */
 .notification-email-form{display:grid;gap:.6rem;min-width:220px;max-width:320px}.notification-email-form input{width:100%;box-sizing:border-box}.notification-email-form small{line-height:1.45;color:var(--muted,#63768b)}.notification-email-form .permission-save{justify-self:start}
+
+/* Account removal is a distinct, restrained destructive action. */
+.account .actions { grid-column: 1 / -1; }
+.account-delete { color: var(--negative); background: #321f2d; border: 1px solid #804153; }
+.account-delete:hover { background: #482839; }
+.delete-account-dialog { width: min(540px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
+.delete-account-dialog::backdrop { background: rgb(3 9 18 / .8); }
+.delete-account-dialog .delete-account-identity { color: var(--text); overflow-wrap: anywhere; }
+.delete-account-dialog .actions { justify-content: flex-end; }
+.delete-account-dialog h2 { margin-bottom: 12px; }

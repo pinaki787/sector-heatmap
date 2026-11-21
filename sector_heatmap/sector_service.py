@@ -21,7 +21,7 @@ from .analysis_config import (
     TIMEFRAMES,
 )
 from .config import _atomic_private_write
-from .indicators import resample_weekly
+from .indicators import resample_weekly, ema
 from .market_calendar import IST, market_session, trading_elapsed_seconds, is_trading_day, NSE_SPECIAL_SESSIONS, REGULAR_CLOSE
 from .market_data import is_token_error
 from .official_weights import OFFICIAL_WEIGHT_SET
@@ -104,6 +104,19 @@ class CandleHistoryProvider:
             candles = completed_weekly(candles, self.now())
         with self.lock:
             self.cache[key] = (current, deepcopy(candles),window)
+        return candles
+
+    def participation_daily(self, symbol):
+        key = (symbol, "participation_daily")
+        moment = self.now()
+        window = (moment.date().isoformat(), moment.time() >= clock_time(15,30))
+        current = time.monotonic()
+        with self.lock:
+            cached = self.cache.get(key)
+            if cached and cached[2] == window and current-cached[0] < 3600:
+                return deepcopy(cached[1])
+        candles = self._download(symbol, "D", 450)
+        with self.lock:self.cache[key] = (current,deepcopy(candles),window)
         return candles
 
     def _download(self, symbol, resolution, lookback_days):
@@ -311,6 +324,38 @@ class SectorAnalysisService:
             raw_sector_states.append((sector, timeframe_states))
             self._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=index, total=total_symbols)
 
+        # Daily stock participation is shared by both modes; index volume is not traded volume.
+        constituent_metrics = {}
+        daily_benchmark = benchmark_candles.get("daily", [])
+        daily_cache = {}
+        for sector, _ in raw_sector_states:
+            rows = []
+            errors = []
+            for member in sector.constituents:
+                symbol = equity_symbol(member.ticker)
+                if symbol not in daily_cache:
+                    self._set_refresh_state("LOADING_BARS", "Loading constituent breadth and volume: " + member.ticker, completed=total_symbols, total=total_symbols)
+                    try:
+                        candles = self.provider.participation_daily(symbol) if hasattr(self.provider,"participation_daily") else self.provider.get(symbol,"daily")
+                        expected = daily_benchmark[-1]["timestamp"] if daily_benchmark else None
+                        if len(candles) < 21 or candles[-1]["timestamp"] != expected:
+                            raise ValueError("Insufficient or unaligned constituent daily history")
+                        closes = [c["close"] for c in candles]
+                        row = {"close": closes[-1], "change": closes[-1]-closes[-2], "volume": candles[-1].get("volume"), "average_volume20": sum(c.get("volume",0) for c in candles[-21:-1])/20}
+                        for length in (20,50,200):
+                            row["ema"+str(length)] = ema(closes,length)[-1] if len(closes)>=length else None
+                        rs = calculate_timeframe_state("daily", candles, daily_benchmark).get("relative_strength_score")
+                        if rs is not None:row["relative_strength_score"] = rs
+                        daily_cache[symbol] = row
+                    except FyersAuthenticationError:
+                        raise
+                    except Exception as error:
+                        LOGGER.warning("Constituent participation unavailable for %s: %s",symbol,error)
+                        daily_cache[symbol] = None
+                if daily_cache[symbol] is not None:rows.append(daily_cache[symbol])
+                else:errors.append(member.ticker)
+            constituent_metrics[sector.sector_id] = {"breadth": rows, "volume": rows, "coverage": {"available":len(rows),"total":len(sector.constituents),"missing":errors,"basis":"Completed daily constituent candles","asof":daily_benchmark[-1]["timestamp"] if daily_benchmark else None}}
+
         self._set_refresh_state("CALCULATING_INDICATORS", "Calculating indicators, ranks and rotation", completed=total_symbols, total=total_symbols)
         current = self.now()
         now = current.isoformat()
@@ -318,7 +363,7 @@ class SectorAnalysisService:
         new_snapshots = {}
         for mode in MTF_MODES:
             previous_ranks = {sector_id: history[-1].get("rank") for sector_id in SECTOR_BY_ID if (history := self.store.sector_history(mode, sector_id))}
-            sectors = [calculate_sector(sector, states, mode) for sector, states in raw_sector_states]
+            sectors = [calculate_sector(sector, states, mode, constituent_metrics.get(sector.sector_id)) for sector, states in raw_sector_states]
             sectors = rank_sectors(sectors, previous_ranks)
             events = []
             for sector in sectors:

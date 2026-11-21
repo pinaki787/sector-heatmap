@@ -40,4 +40,15 @@ def apply(payload):
     if not result['supertrend_family_enabled'] or not result['ema_family_enabled']:result['retest_enabled']=False
     result['indicator_family_applied']={name:result[name+'_family_enabled'] for name in FAMILIES}
     result['indicator_family_choices']=choices
+    mode=result.get('strategy_mode','SUPERTREND')
+    if mode not in ('SIMPLE_BRICK','SUPERTREND'):raise ValueError('Choose Simple Brick Only or Supertrend mode.')
+    if mode=='SIMPLE_BRICK':
+        # Display destinations and subordinate saved choices remain independent.
+        for keys in FAMILIES.values():
+            for key in keys:result[key]=False
+        for key in ('anti_chop_enabled','manual_trend_enabled','calibrated_enabled','zone_entry_enabled','line_entry_enabled'):
+            result[key]=False
+        result['sma_entry_enabled']=True
+        result['renko_brick_exit_enabled']=not result.get('sma_exit_enabled', False)
+        result['trend_reentry_enabled']=True
     return result

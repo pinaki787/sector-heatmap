@@ -9,12 +9,34 @@ def settings(payload):
         raise ValueError('Exit indicator switches must be booleans.')
     return result
 
+def sma_reason(config, event, direction):
+    length = config.get('sma_length', 5)
+    close, average = event.get('close'), event.get('sma')
+    if not config.get('sma_exit_enabled') or event.get('sma_length') != length or close is None or average is None:
+        return None
+    adverse = close < average if direction == 'BULLISH' else close > average
+    return f'SMA{length}_CONFIRMED_BREACH' if adverse else None
+
+
 def reason(config,sig,direction):
     from .indicator_families import apply
     config=apply(config)
     # Any selected exit can close a position; unselected entry rules cannot.
     opposite='BEARISH' if direction=='BULLISH' else 'BULLISH'
-    if sig.get('is_forming'):return None
+    if sig.get('is_forming') or sig.get('provisional'):return None
+    if config.get('sma_exit_enabled'):
+        if config.get('strategy_basis') == 'RENKO' and not sig.get('has_completed_brick'):
+            return None
+        for event in sig.get('brick_exit_events') or [sig]:
+            exit_reason = sma_reason(config, event, direction)
+            if exit_reason:
+                return exit_reason
+        if config.get('strategy_mode') == 'SIMPLE_BRICK':
+            return None
+    if config.get('strategy_mode')=='SIMPLE_BRICK':
+        if not sig.get('has_completed_brick'):return None
+        events=sig.get('brick_exit_events') or [sig]
+        return 'OPPOSITE_RENKO_BRICK_CLOSE' if any(e.get('brick_direction')==opposite for e in events) else None
     if config.get('strategy_basis')=='RENKO':
         for event in sig.get('brick_exit_events',[]):
             if config.get('supertrend_exit_enabled',True) and event.get('raw_supertrend_cross_direction')==opposite:return 'RENKO_ST_EXIT'

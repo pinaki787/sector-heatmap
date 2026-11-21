@@ -52,6 +52,7 @@ class Runtime:
     def status(self,user,aid):
         item=self.entry(user,aid)
         value=item["schedule"].status()
+        value['runtime_revision']='shared-broker-handoff-20261030-v1'
         try:
             if item["bridge"] is None:raise PermissionError()
             item["bridge"].identity()
@@ -59,6 +60,7 @@ class Runtime:
         except PermissionError:bound=False
         scheduler_running=bool(item["thread"] and item["thread"].is_alive())
         observer_running=bool(item["observer_thread"] and item["observer_thread"].is_alive())
+        value["supported_candidate_scopes"]=["MERGED","SCREENER_EQUITY"] if value["broker"]=="FYERS" else ["MERGED"]
         value.update(authorization_basis="BROKER_SESSION_AND_SAVED_OWNER_GRANT" if getattr(item["bridge"],"background",False) else "DASHBOARD_SESSION",session_bound=bound,scheduler_running=scheduler_running,observer_running=observer_running,runtime_error=item["error"],
                      observer_error=item["observer_error"],
                      activation="READY" if bound and scheduler_running else "NOT_RUNNING" if bound else "AUTH_REQUIRED",
@@ -104,18 +106,21 @@ class Runtime:
 
     def configure(self,user,aid,token,payload):
         account=self.owned(user,aid);item=self.entry(user,aid)
+        scope=payload.get("candidate_scope",item["schedule"].policy().get("candidate_scope","MERGED"))
+        if scope=="SCREENER_EQUITY":
+            from .handoff_screener import Store,check_permissions
+            folder=self.store.folder(account)
+            check_permissions(folder,account["broker"])
+            selection=Store(folder,account["broker"]).get()
+            if payload.get("enabled") is not False and (not selection["enabled"] or not selection["auto_enabled"] or not selection["symbols"]):
+                raise ValueError("Save a nonempty Screener selection eligible for Auto first.")
         bridge=self.bridge_factory(self.root,self.store,user,account,token)
         bridge.identity()
         old=item["bridge"];item["bridge"]=bridge
         try:result=item["schedule"].configure(payload)
         except Exception:item["bridge"]=old;raise
-        # Only the selected owned broker owns the shared configured pool.
-        if result["enabled"]:
-            for other in self.store.accounts(user):
-                if other["id"]==aid or other["broker"] not in {"FYERS","DHAN","MOTILAL_OSWAL"}:continue
-                path=self.store.folder(other)/"handoff-schedule.sqlite3"
-                if not path.exists():continue
-                self.entry(user,other["id"])["schedule"].configure({"enabled":False})
+        # Each immutable account owns its policy, capital pool, claims and lifecycle.
+        # Saving this account must never pause or reconfigure another account.
         from .handoff_authorization import save
         if self.bridge_factory is OwnedBridge:
             save(self.store,account,user,result["enabled"])

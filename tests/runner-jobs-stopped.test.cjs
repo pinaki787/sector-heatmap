@@ -6,7 +6,7 @@ test('stopped exposure and pending orders are separate from running and clean hi
  assert.equal(inventoryGroup({state:{shutdown_pending:true}}),'running');
  assert.equal(inventoryGroup({state:{running:false}}),'history');
 });
-test('unchecked history hides stopped exposure; select running excludes it',async()=>{
+test('history starts hidden; explicitly showing history and selecting running excludes stopped exposure',async()=>{
  const dom=new JSDOM('<nav></nav>',{url:'https://portal.example/',runScripts:'outside-only'}),w=dom.window;
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.setInterval=()=>0;w.AbortSignal.timeout=()=>undefined;
  w.BrokerForms={ready:Promise.resolve(),accounts:()=>[{id:'mine',label:'Mine',broker:'MOTILAL_OSWAL',configured:true}]};
@@ -14,10 +14,10 @@ test('unchecked history hides stopped exposure; select running excludes it',asyn
  w.fetch=async(url,o)=>{assert.notEqual(o.method,'POST');return {ok:true,json:async()=>({instances:states})};};
  w.eval(fs.readFileSync('runner-jobs.js','utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await new Promise(setImmediate);
  w.document.querySelector('nav button').click();await new Promise(setImmediate);
- assert.equal(w.document.querySelector('[data-count]').textContent,'1 running · 2 stopped requiring review');
+ assert.equal(w.document.querySelector('[data-count]').textContent,'1 running · 2 stopped requiring review · 1 stopped / saved');
  assert.equal(w.document.querySelectorAll('article[data-inventory-group="attention"]').length,0);
  assert.equal(w.document.querySelectorAll('article[data-inventory-group="history"]').length,0);
- w.document.querySelector('[data-select-all]').click();
+ w.document.querySelector('[data-select-running]').click();
  assert.equal(w.document.querySelectorAll('article input:checked').length,1);
  assert.equal(w.document.querySelector('article[data-inventory-group="running"] input').checked,true);
  const history=w.document.querySelector('[data-history]');history.checked=true;history.dispatchEvent(new w.Event('change'));

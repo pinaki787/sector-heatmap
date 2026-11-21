@@ -63,8 +63,10 @@ test('chart status reports forming-candle failure separately from broker and run
 
 test('actual EMA exit markers use local fill candle and recorded applied period, not current chart lines',()=>{
  const s={config:{underlying:'MCX:TEST',timeframe:'1 minute',mode:'PAPER'},order_history:[{tag:'EXIT1',is_entry:false,filled_at:901,underlying_symbol:'MCX:TEST',status:'FILLED',mode:'PAPER',reason:'EMA10_CONFIRMED_BREACH',submitted_at:900,indicator_snapshot:{settings:{ema_exit_length:10},indicators:{timestamp:600,direction:'BEARISH',ema10:100,ema30:200}}}]};
- const marker=executionMarkers([],s,'MCX:TEST','1 minute')[0];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'SELL EXIT');
- s.order_history[0].status='PENDING';assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]);
+ assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]); // Exit without owned filled entry is unproven.
+ s.order_history[0].lifecycle_id='owned';s.order_history.unshift({lifecycle_id:'owned',is_entry:true,filled_at:601,underlying_symbol:'MCX:TEST',status:'FILLED',indicator_snapshot:{indicators:{direction:'BEARISH'}}});
+ const marker=executionMarkers([],s,'MCX:TEST','1 minute')[1];assert.equal(marker.time,900);assert.equal(marker.position,'belowBar');assert.equal(marker.text,'FILL SELL EXIT');
+ s.order_history[0].status='PENDING';s.order_history[1].status='PENDING';assert.deepEqual(executionMarkers([],s,'MCX:TEST','1 minute'),[]);
 });
 
 const {overrideState}=require('../renko-supertrend.js');

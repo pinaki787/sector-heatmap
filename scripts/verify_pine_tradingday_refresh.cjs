@@ -1,0 +1,14 @@
+const fs=require("node:fs"),vm=require("node:vm"),assert=require("node:assert/strict");
+const D=86400000,day=Math.floor(Date.now()/D)*D-3*D;
+const bars=[0,82800000,D,D+82800000].map((offset,i)=>({openTime:day+offset,closeTime:day+[82800000,D,D+82800000,2*D][i],open:100,high:110,low:90,close:105,volume:10}));
+const ctx=vm.createContext({console,setTimeout,clearTimeout,structuredClone});ctx.self=ctx;let yes,no,last;
+ctx.postMessage=d=>{if(!d.ok)no(Error(d.error));else if(d.plots){last=d.plots;yes(last)}else if(d.type==="updated")yes(last)};
+vm.runInContext(fs.readFileSync(process.argv[2],"utf8"),ctx);
+const send=data=>new Promise((resolve,reject)=>{yes=resolve;no=reject;ctx.onmessage({data}).catch(reject)});
+const source="//@version=6\nindicator(\"Metadata refresh\")\nplot(time_tradingday,\"day\")\nplot(time_tradingday[1],\"previous\")";
+const tail=p=>[p.day.data.at(-1).value,p.previous.data.at(-1).value];
+(async()=>{const results=[];let p=await send({source,symbolInfo:{tickerid:"DELTAIN:BTCUSD",ticker:"BTCUSD",prefix:"DELTAIN",type:"crypto",timezone:"UTC",session:"24x7",mintick:.5},frames:{"1380":bars},timeframe:"1380",count:4});assert.deepEqual(tail(p),[day+D,day+D]);results.push({step:"initial",values:tail(p)});
+ bars.at(-1).closeTime+=D;bars.at(-1).close+=.25;p=await send({type:"refresh"});assert.deepEqual(tail(p),[day+2*D,day+D]);results.push({step:"same_bar_revision",values:tail(p)});
+ p=await send({type:"refresh",reset:true});assert.deepEqual(tail(p),[day+2*D,day+D]);results.push({step:"full_reset",values:tail(p)});
+ bars.at(-1).closeTime-=D;bars.at(-1).close-=.25;await send({type:"refresh"});bars.push({openTime:day+2*D,closeTime:day+3*D,open:105,high:112,low:100,close:109,volume:12});p=await send({type:"refresh",count:5});assert.deepEqual(tail(p),[day+2*D,day+D]);results.push({step:"new_bar",values:tail(p)});
+ console.log(JSON.stringify({status:"PASS",scope:"Synthetic timestamp revision and new-bar worker refresh; no broker requests",results},null,2));})().catch(e=>{console.error(e);process.exitCode=1});

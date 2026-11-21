@@ -3,6 +3,7 @@ import hashlib
 from .fyers_execution import _current_client
 from .parser_quote import fetch_parser_quote
 from .config import load_config
+from .chart_trade_admission import place_fyers_entry,ChartOrderNotSent
 
 class ParserProtectionBroker:
     def snapshot(self):
@@ -22,5 +23,8 @@ class ParserProtectionBroker:
         quote=fetch_parser_quote(symbol,load_config().get('FYERS_ACCESS_TOKEN',''))
         if quote.get('freshness')!='FRESH':raise ValueError('Fresh FYERS price required before protection.')
         return quote['ltp']
-    def place_entry(self,order):return _current_client().place_order(order)
+    def place_entry(self,order):
+        try:sender=_current_client().place_order
+        except Exception as error:raise ChartOrderNotSent("FYERS entry client is unavailable before placement.") from error
+        return place_fyers_entry(sender,order)
     def place_oco(self,order):return _current_client().place_gtt_order(order)

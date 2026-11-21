@@ -39,6 +39,41 @@ async function notificationApi(path,data){
   const response=await fetch('/api/notification-admin/'+path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':currentUser?.csrf||''},body:JSON.stringify(data)});
   const result=await response.json();if(!response.ok)throw Error(result.error||'Notification settings unavailable.');return result;
 }
+const chartBrokers = {FYERS: 'FYERS', DHAN: 'Dhan', MOTILAL_OSWAL: 'Motilal Oswal', DELTA_INDIA: 'Delta India'};
+
+$('global-chart-form').onsubmit = async event => {
+  event.preventDefault();
+  const id = $('global-chart-source').value;
+  const status = $('global-chart-status');
+  const yahoo = id === 'yahoo';
+  if (!yahoo && !/^[a-f0-9]{32}$/.test(id)) return;
+  const button = $('global-chart-form').querySelector('button');
+  button.disabled = true;
+  status.textContent = 'Opening chart…';
+  try {
+    const opened = yahoo ? {status: 'READY'} : await api('open', {account_id: id});
+    if (opened.status !== 'READY') throw new Error(opened.status === 'STARTING'
+      ? 'The selected workspace is starting. Try again shortly.' : 'The selected workspace could not open.');
+    const ticker = yahoo ? $('global-chart-ticker').value.trim().toUpperCase() : undefined;
+    if (yahoo && !/^[A-Z0-9^][A-Z0-9.^=-]{0,29}$/.test(ticker)) throw new Error('Enter a valid Yahoo Finance ticker.');
+    const chart = new URL('/', location.origin);
+    chart.searchParams.set('view', 'chart-workspace');
+    chart.searchParams.set('chartSource', id);
+    if (ticker) chart.searchParams.set('symbol', ticker);
+    location.assign(chart.href);
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+function updateChartTicker() {
+  $('global-chart-ticker-label').hidden = $('global-chart-source').value !== 'yahoo';
+}
+
+$('global-chart-source').addEventListener('change', updateChartTicker);
+
 async function refresh() {
   currentUser = await api('me');
   $('signin').hidden = true; $('workspace').hidden = false;
@@ -90,6 +125,26 @@ async function refresh() {
     if(location.pathname==='/user-master')$('admin').scrollIntoView({block:'start'});
   }
   const {accounts} = await api('accounts');
+  const chartVisibility = await api('sidebar-visibility').catch(() => ({}));
+  const chartAllowed = chartVisibility['chart-workspace'] === true
+    && (currentUser.admin || currentUser.features?.includes('chart-workspace'));
+  const chartSource = $('global-chart-source');
+  const selectedSource = chartSource.value;
+  chartSource.replaceChildren(new Option('Choose a broker account', ''));
+  chartSource.options[0].disabled = true;
+  chartSource.add(new Option('Yahoo Finance · Historical OHLC', 'yahoo'));
+  for (const account of accounts) {
+    if (!Object.hasOwn(chartBrokers, account.broker) || account.disconnected) continue;
+    chartSource.add(new Option(chartBrokers[account.broker] + ' · ' + account.label, account.id));
+  }
+  chartSource.value = [...chartSource.options].some(option => option.value === selectedSource) ? selectedSource : '';
+  updateChartTicker();
+  $('global-chart').hidden = !chartAllowed;
+  if (chartAllowed && location.hash === '#global-chart') {
+    $('global-chart').scrollIntoView({ block: 'start' });
+    chartSource.focus({ preventScroll: true });
+  }
+
   $('accounts').replaceChildren();
   if (!accounts.length) {
     const p = document.createElement('p'); p.textContent = 'No broker accounts yet. Add your first account below.'; $('accounts').append(p);
@@ -106,7 +161,7 @@ async function refresh() {
     const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open dashboard';
     open.onclick = async () => {
       if (account.broker === 'DHAN') {
-        window.open('/?brokerForm=rsi&brokerAccount=' + encodeURIComponent(account.id), '_blank', 'noopener');
+        window.open('/?brokerAccount=' + encodeURIComponent(account.id), '_blank', 'noopener');
         return;
       }
       open.disabled = true; message('Opening ' + account.label + '…');
@@ -161,6 +216,12 @@ async function refresh() {
       };
       actions.append(disconnect);
       if(account.disconnected){test.disabled=true;open.disabled=true;result.textContent='Disconnected';}
+    }
+    if(currentUser?.account_delete){
+      const remove=document.createElement('button');remove.type='button';remove.className='quiet account-delete';remove.textContent='Delete';
+      remove.setAttribute('aria-label','Delete '+account.label);
+      remove.onclick=()=>confirmAccountDelete(account,remove,result);
+      actions.append(remove);
     }
     if (currentUser.admin) {
       const restart = document.createElement('a');
@@ -280,7 +341,7 @@ async function completeDhanLogin(){
  message('Dhan authentication completed. Token saved privately for your account'+(result.expiry?' · expires '+result.expiry:'')+'. Use Test Connection to verify API access.');
  await refresh();
 }
-refresh().then(async()=>{await completeDhanLogin().catch(e=>message(e.message));const aid=new URLSearchParams(location.search).get('reauth_dhan');if(aid){const {accounts}=await api('accounts');const account=accounts.find(a=>a.id===aid&&a.broker==='DHAN');if(!account)throw Error('Select your own saved Dhan account.');edit(account);$('dhan-connect').click();}}).catch(() => { currentUser = null; $('signin').hidden = false; $('workspace').hidden = true; });
+refresh().then(async()=>{await completeDhanLogin().catch(e=>message(e.message));const query=new URLSearchParams(location.search);const reauth=query.get('reauth_dhan');const aid=reauth||query.get('edit_dhan');if(aid){const {accounts}=await api('accounts');const account=accounts.find(a=>a.id===aid&&a.broker==='DHAN');if(!account)throw Error('Select your own saved Dhan account.');edit(account);if(reauth)$('dhan-connect').click();}}).catch(() => { currentUser = null; $('signin').hidden = false; $('workspace').hidden = true; });
 
 $('save-connection-name').onclick=async()=>{
  const button=$('save-connection-name');button.disabled=true;
@@ -292,3 +353,31 @@ $('save-connection-name').onclick=async()=>{
  }catch(error){message(error.message);}
  finally{button.disabled=false;}
 };
+
+function confirmAccountDelete(account,button,result){
+  const dialog=document.createElement('dialog');dialog.className='delete-account-dialog';
+  const form=document.createElement('form');form.method='dialog';
+  const title=document.createElement('h2');title.id='delete-account-title';title.textContent='Delete broker account?';
+  dialog.setAttribute('aria-labelledby',title.id);
+  const identity=document.createElement('p');identity.className='delete-account-identity';identity.textContent=account.label+' · '+account.broker.replaceAll('_',' ')+' · '+account.account_ref;
+  const explanation=document.createElement('p');explanation.textContent='Removes this account from Accounts and blocks dashboard access. Trading history, journals and audit records are retained. Broker positions and orders are unchanged. Running dashboards or active runners must be stopped and reconciled first.';
+  const label=document.createElement('label');label.textContent='Type '+account.account_ref+' to confirm';
+  const input=document.createElement('input');input.autocomplete='off';input.spellcheck=false;input.required=true;label.append(input);
+  const actions=document.createElement('div');actions.className='actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='quiet';cancel.textContent='Cancel';cancel.onclick=()=>dialog.close();
+  const submit=document.createElement('button');submit.type='submit';submit.className='account-delete';submit.textContent='Delete account';submit.disabled=true;
+  input.oninput=()=>{submit.disabled=input.value!==account.account_ref;};
+  const error=document.createElement('p');error.setAttribute('role','alert');
+  form.onsubmit=async event=>{
+    event.preventDefault();submit.disabled=true;cancel.disabled=true;input.disabled=true;button.disabled=true;
+    try{
+      await api('delete',{account_id:account.id,confirmation:input.value});
+      if(currentAccount?.id===account.id){currentAccount=null;$('configuration').hidden=true;}
+      if(sessionStorage.getItem('dhan-login-account')===account.id)sessionStorage.removeItem('dhan-login-account');
+      dialog.close();await refresh();message('Deleted '+account.label+'. Trading history, journals and audit records retained.');
+    }catch(e){error.textContent=e.message;}
+    finally{submit.disabled=input.value!==account.account_ref;cancel.disabled=false;input.disabled=false;button.disabled=false;}
+  };
+  actions.append(cancel,submit);form.append(title,identity,explanation,label,error,actions);dialog.append(form);
+  dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();input.focus();
+}

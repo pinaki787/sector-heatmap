@@ -6,6 +6,11 @@ from sector_heatmap.combined_reports import slot,screen_section,handoff_section,
 from sector_heatmap.notification_destinations import telegram_destination
 from sector_heatmap.market_calendar import IST
 class CombinedTests(unittest.TestCase):
+ def test_rotation_interval_slots(self):
+  now=datetime(2026,10,23,10,38,tzinfo=IST)
+  self.assertEqual(slot(now,300000),'2026-10-23T10:35:00+05:30')
+  self.assertEqual(slot(now,900000),'2026-10-23T10:30:00+05:30')
+  with self.assertRaises(ValueError):slot(now,12345)
  def test_market_slots_and_closed_session(self):
   now=datetime(2026,10,23,10,34,tzinfo=IST)
   self.assertEqual(slot(now),"2026-10-23T10:30:00+05:30")

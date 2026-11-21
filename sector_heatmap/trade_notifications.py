@@ -389,6 +389,14 @@ class Outbox:
                 if blocked:
                     with self.db:self.db.execute("UPDATE delivery SET state='SKIPPED',error=? WHERE event=? AND channel=?",(blocked,event_id,channel))
                     continue
+            if base_channel=="telegram":
+                from .notification_sessions import gate as session_gate
+                held,reason=session_gate(event,created,now=self.clock())
+                if held:
+                    with self.db:
+                        self.db.execute("UPDATE delivery SET state=?,error=?,updated=? WHERE event=? AND channel=?",
+                                        (held,reason,self.clock(),event_id,channel))
+                    continue
             from .notification_controls import gate
             preference_path=None if owner==primary else PRIVATE/"user-preferences"/(hashlib.sha256(str(owner).encode()).hexdigest()+".json")
             held, reason = gate(base_channel, event, created,path=preference_path)

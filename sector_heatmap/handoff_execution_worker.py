@@ -75,9 +75,9 @@ class Worker:
             row=db.execute("SELECT body FROM receipts WHERE fingerprint=? AND state=?",(fingerprint,"SUBMITTING")).fetchone()
         if not row:raise PermissionError("No durable pending submission receipt.")
         receipt=json.loads(row[0]);plan=receipt["plan"]
-        if self.account['broker']=='FYERS' and p['mode']=='AUTO':
+        if self.account['broker'] in {'FYERS','DHAN'} and p['mode']=='AUTO':
             from .handoff_screener import guard_entry_source
-            guard_entry_source(plan.get('report_card',{}).get('candidate',{}),self.folder)
+            guard_entry_source(plan.get('report_card',{}).get('candidate',{}),self.folder,broker=self.account['broker'])
         if p["mode"]=="MANUAL":
             auth=receipt.get("authorization") or {}
             if auth.get("mode")!="MANUAL" or auth.get("user_id")!=self.account.get("user_id") or auth.get("preview_id")!=preview_id or auth.get("policy_revision")!=p.get("revision") or datetime.now(IST).timestamp()>=auth.get("expires_at",0):

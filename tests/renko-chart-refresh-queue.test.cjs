@@ -9,7 +9,7 @@ test('completed broker candle catches up stopped research, without treating quie
 });
 test('real load entry and finally preserve one boundary refresh received while busy',async()=>{
  const source=fs.readFileSync('renko-supertrend.js','utf8');
- const start=source.indexOf('    async function load(){'),body=source.indexOf('      try{',start);
+ const start=source.indexOf('    async function load(liveData=null){'),body=source.indexOf('      try{',start);
  const prefix=source.slice(start,body);
  const final=source.match(/finally\{busy=false;if\(seq!==version\|\|historyRefreshPending\)\{historyRefreshPending=false;load\(\);\}\}/)[0];
  const releases=[],ctx={restoreChartStyle(){},paintChartBasis(){},isBatchChartView:true,batchChartFrames:new Map(),busy:false,el:()=>({value:'GOLDM'}),historyRefreshPending:false,historyRetry:null,clearTimeout(){},connectStream(){},version:1,fetchChart:()=>new Promise(resolve=>releases.push(resolve))};

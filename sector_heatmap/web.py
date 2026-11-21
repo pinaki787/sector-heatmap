@@ -1,4 +1,5 @@
 from copy import deepcopy
+from .chart_trade_admission import serialized_fyers_entry,place_fyers_entry
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -64,6 +65,7 @@ FYERS_MASTER_SOURCES = {
     "BSE_FO": "https://public.fyers.in/sym_details/BSE_FO.csv",
     "MCX_COM": "https://public.fyers.in/sym_details/MCX_COM.csv",
 }
+FYERS_CHART_EXTRA_MASTERS = ("NSE_CD", "NSE_COM")
 EMA_DIRECTION_TO_OPTION_TYPE = {"BULLISH": "CE", "BEARISH": "PE"}
 EMA_MAX_TRADE_LOSS = 3000.0
 EMA_IST = ZoneInfo("Asia/Kolkata")
@@ -882,7 +884,10 @@ def run_server():
     from .local_dashboard_auth import LocalDashboardAuth
     local_auth = None if workspace_guard else LocalDashboardAuth.configured(ROOT, port)
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
-    feed = FyersLiveFeed(token) if token else None
+    from .chart_workspace import FyersChartBars
+    workspace_chart_bars = (FyersChartBars() if workspace_guard
+                            else None)
+    feed = FyersLiveFeed(token, chart_bars=workspace_chart_bars) if token else None
     if feed: feed.start()
     sector_analysis = SectorAnalysisService(token)
     sector_analysis.start()
@@ -983,82 +988,7 @@ def run_server():
         matches.sort(key=lambda item: ema_master_search_rank(item, needle))
         return {"matches": matches[:20], "status": state}
 
-    def parse_trade_recommendation(text):
-        """Parse a pasted human recommendation into a *non-executable* review ticket.
-
-        This intentionally does not create an order preview.  A message can be
-        incomplete or refer to more than one active option expiry, so a parser
-        result is useful only after an exact FYERS-master match is established.
-        """
-        raw = str(text or "").strip()
-        if not raw:
-            raise ValueError("Paste a trade recommendation to parse.")
-        if len(raw) > 12_000:
-            raise ValueError("Trade recommendation text is limited to 12,000 characters.")
-        normalized = re.sub(r"\s+", " ", raw.upper())
-        action_match = re.search(r"\b(BUY|SELL|SHORT)\b", normalized)
-        # Advisory messages often omit an action; the agreed parser default is
-        # BUY, while an explicit SELL or SHORT always overrides it.
-        action = {"SHORT": "SELL"}.get(action_match.group(1), action_match.group(1)) if action_match else "BUY"
-        # Common advisor format: "MCX CRUDEOIL 17-SEP CE 9100".  It puts
-        # expiry and option side before the strike, unlike broker symbols.
-        dated_option_match = re.search(r"\b(?:MCX\s+)?([A-Z][A-Z0-9& .-]{0,30}?)\s+(\d{1,2})[-\s]+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[-\s]+(\d{2,4}))?\s+(CE|PE|C|P|CALL|PUT)\s+(\d{3,7}(?:\.\d+)?)\b", normalized)
-        side_before_strike_match = re.search(r"\b(?:MCX\s+)?([A-Z][A-Z0-9& .-]{0,30}?)\s+(CE|PE|C|P|CALL|PUT)\s+(\d{3,7}(?:\.\d+)?)\b", normalized)
-        option_match = re.search(r"\b([A-Z][A-Z0-9& .-]{0,38}?)\s+(\d{3,7}(?:\.\d+)?)\s*(CE|PE|C|P|CALL|PUT)\b", normalized)
-        option_type = None
-        underlying = None
-        strike = None
-        if dated_option_match:
-            underlying = re.sub(r"\b(?:COMMODITY|OPTIONS?|INTRADAY|BUY|SELL|SHORT|MCX|TRADE)\b", "", dated_option_match.group(1)).strip(" .-")
-            strike = float(dated_option_match.group(6))
-            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(dated_option_match.group(5), dated_option_match.group(5))
-        elif side_before_strike_match:
-            underlying = re.sub(r"\b(?:COMMODITY|OPTIONS?|INTRADAY|BUY|SELL|SHORT|MCX|TRADE)\b", "", side_before_strike_match.group(1)).strip(" .-")
-            strike = float(side_before_strike_match.group(3))
-            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(side_before_strike_match.group(2), side_before_strike_match.group(2))
-        elif option_match:
-            underlying = re.sub(r"\b(?:BUY|SELL|SHORT|TRADE|CALL|PUT)\b", "", option_match.group(1)).strip(" .-")
-            strike = float(option_match.group(2))
-            option_type = {"C": "CE", "CALL": "CE", "P": "PE", "PUT": "PE"}.get(option_match.group(3), option_match.group(3))
-        else:
-            symbols = re.findall(r"\b[A-Z][A-Z0-9&-]{1,29}\b", normalized)
-            ignored = {"BUY", "SELL", "SHORT", "ENTRY", "ABOVE", "AT", "SL", "STOP", "LOSS", "TARGET", "TARGETS", "CMP", "CALL", "PUT"}
-            underlying = next((item for item in symbols if item not in ignored), None)
-
-        def amount(pattern):
-            match = re.search(pattern, normalized)
-            return float(match.group(1)) if match else None
-
-        entry_match = re.search(r"\b(ENTRY|ABOVE|BELOW|BREAKOUT|TRIGGER|AT|CMP)\s*(?:PRICE\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)", normalized)
-        entry = float(entry_match.group(2)) if entry_match else None
-        # Advisor language such as BUY ABOVE or SELL BELOW is a trigger, not an
-        # immediately executable limit.  Preserve that distinction through the
-        # review ticket and the eventual FYERS order payload.
-        entry_instruction = "STOP_LIMIT" if entry_match and entry_match.group(1) in {"ABOVE", "BELOW", "BREAKOUT", "TRIGGER"} else "LIMIT"
-        stop_loss = amount(r"\b(?:SL|STOP(?:\s+LOSS)?|STOPLOSS)\s*(?:AT\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)")
-        targets = []
-        for match in re.finditer(r"\b(?:(?:TARGET|TGT|TP)(?:\s*[1-9](?!\d))?|T[1-9])\s*(?:AT\s*)?(?:RS\.?\s*)?[:=@-]?\s*(\d+(?:\.\d+)?)", normalized):
-            value = float(match.group(1))
-            if value not in targets:
-                targets.append(value)
-        block = re.search(r"\b(?:TARGETS?|TGTS?)\s*(?:AT\s*)?[:=@-]?\s*([0-9.,/\- ]+)", normalized)
-        if block:
-            for value in re.findall(r"\d+(?:\.\d+)?", block.group(1)):
-                number = float(value)
-                if number not in targets:
-                    targets.append(number)
-
-        expiry_hint = None
-        month_names = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
-        expiry_match = re.search(rf"\b(\d{{1,2}})[-\s]*({month_names})(?:[-\s]*(\d{{2,4}}))?\b", normalized)
-        if expiry_match:
-            expiry_hint = {"day": int(expiry_match.group(1)), "month": expiry_match.group(2), "year": expiry_match.group(3)}
-        return {
-            "source_text": raw, "action": action, "underlying": underlying, "option_type": option_type,
-            "strike": strike, "entry": entry, "entry_instruction": entry_instruction, "stop_loss": stop_loss, "targets": targets,
-            "expiry_hint": expiry_hint,
-            "missing": [name for name, value in (("action", action), ("underlying", underlying), ("entry", entry), ("stop loss", stop_loss)) if value is None],
-        }
+    from .recommendation_text import parse_text as parse_trade_recommendation
 
     def trade_recommendation_contracts(parsed):
         """Map a parsed underlying to active FYERS master rows; never construct symbols."""
@@ -1113,6 +1043,14 @@ def run_server():
     def trade_recommendation_preview(payload):
         parsed = parse_trade_recommendation(payload.get("text"))
         candidates = trade_recommendation_contracts(parsed)
+        if payload.get('amount_review') is True:
+            exchange=next((v for v in ('MCX','BSE','NSE') if re.search(r'\b'+v+r'\b',str(payload.get('text') or '').upper())),None)
+            if exchange:candidates=[c for c in candidates if c.get('segment','').startswith(exchange)]
+            if not parsed.get('option_type'):
+                if re.search(r'\bFUT(?:URE)?S?\b',str(payload.get('text') or '').upper()):raise ValueError('Futures amount review requires a dedicated native contract ticket.')
+                candidates=[c for c in candidates if c.get('segment') in {'NSE_CM','BSE_CM'}]
+
+
         if len(candidates) == 1:
             mapping = {"status": "EXACT", "contract": candidates[0], "message": "One active FYERS-master contract matches the recommendation."}
         elif candidates and parsed.get("option_type") and not parsed.get("expiry_hint"):
@@ -1224,12 +1162,25 @@ def run_server():
                 limit_price = tick_round(trigger_price + tick_size if side == 1 else trigger_price - tick_size)
             if (side == 1 and limit_price <= trigger_price) or (side == -1 and limit_price >= trigger_price):
                 raise ValueError("For BUY stop-limit, limit must be above trigger; for SELL stop-limit, limit must be below trigger.")
+        amount_margin=None
+        if payload.get('amount_review') is True:
+            if side!=1:raise ValueError('This FYERS amount route supports bought cash/options only. No short or holdings sale is inferred.')
+            if not contract['symbol'].startswith(('NSE:','BSE:')):raise ValueError('This FYERS amount parser route supports NSE/BSE only.')
+            from .fyers_execution import _fresh_depth_quote
+            _fresh_depth_quote(client,contract['symbol'],datetime.now().astimezone())
+            positions,orders=client.positions(),client.orderbook()
+            if positions.get('s')!='ok' or orders.get('s')!='ok':raise ValueError('Fresh FYERS positions and orderbook are required.')
+            if any(r.get('symbol')==contract['symbol'] and float(r.get('netQty') or 0)!=0 for r in positions.get('netPositions',[])):raise ValueError('Existing FYERS position blocks duplicate amount entry.')
+            if any(r.get('symbol')==contract['symbol'] and r.get('status') not in (1,2,5,7) for r in orders.get('orderBook',[])):raise ValueError('Pending FYERS order blocks duplicate amount entry.')
+            amount_margin=limit_price*lot_size*lots*1.01
+            budget=float(payload.get('manual_amount_budget') or 0)
+            if not math.isfinite(budget) or budget<=0 or amount_margin>budget or funds is None or amount_margin>funds:raise ValueError('FYERS amount/funds cannot cover full order value plus reserve.')
         now = datetime.now().astimezone()
         preview_id = f"PARSER-{now.strftime('%m%d%H%M%S')}-{secrets.token_hex(3).upper()}"
         order = {
             "symbol": contract["symbol"], "qty": lot_size * lots, "type": 4 if entry_mode == "STOP_LIMIT" else 1,
             "side": side,
-            "productType": "MARGIN", "limitPrice": limit_price, "stopPrice": trigger_price if entry_mode == "STOP_LIMIT" else 0,
+            "productType": (payload.get("amount_product") or "MARGIN") if payload.get("amount_review") is True else "MARGIN", "limitPrice": limit_price, "stopPrice": trigger_price if entry_mode == "STOP_LIMIT" else 0,
             "validity": "DAY", "disclosedQty": 0, "offlineOrder": False,
         }
         protection = protection_plan(parsed, contract, order, payload.get("protection_target")) if payload.get("protect_after_fill") is True else None
@@ -1246,7 +1197,8 @@ def run_server():
                   "available_funds": funds, "live_submission_enabled": parser_live_submission_enabled,
                   "entry_mode": entry_mode, "protection": protection, "protection_worker_enabled": parser_protection_enabled(), "lifecycle_version": 1,
                   "message": f"Review the exact FYERS {'STOP-LIMIT' if entry_mode == 'STOP_LIMIT' else 'LIMIT'} order and confirm it before submission. Stop/target fields alone create no protection. Review explicit post-fill protection consent and worker availability in this ticket."}
-        parser_order_previews[preview_id] = {"ticket": ticket, "payload": {"text": payload.get("text"), "lots": lots, "entry_mode": entry_mode, "trigger_price": trigger_price, "limit_price": limit_price, "protect_after_fill": payload.get("protect_after_fill") is True, "protection_target": payload.get("protection_target")}}
+        if amount_margin is not None:ticket.update(margin_required=amount_margin,submission_eligible=True)
+        parser_order_previews[preview_id] = {"ticket": ticket, "payload": {"text": payload.get("text"), "lots": lots, "entry_mode": entry_mode, "trigger_price": trigger_price, "limit_price": limit_price, "protect_after_fill": payload.get("protect_after_fill") is True, "protection_target": payload.get("protection_target"), "amount_review":payload.get("amount_review") is True,"manual_amount_budget":payload.get("manual_amount_budget"),"amount_product":payload.get("amount_product")}}
         return ticket
 
     def submit_trade_recommendation_direct(payload):
@@ -1263,6 +1215,7 @@ def run_server():
             return submit_trade_recommendation_order({"preview_id": ticket["preview_id"], "confirmation": ticket["confirmation_phrase"]})
         return parser_submissions.submit(str(payload.get("submission_id") or ""), payload, submit_once)
 
+    @serialized_fyers_entry
     def submit_trade_recommendation_order(payload):
         preview_id = str(payload.get("preview_id") or "")
         stored = parser_order_previews.get(preview_id)
@@ -1292,7 +1245,7 @@ def run_server():
             return {"status": result["status"], "broker": "FYERS", "lifecycle_id": result["id"], "message": result["message"]}
         token = load_config().get("FYERS_ACCESS_TOKEN", "")
         app_id, access_token = token.split(":", 1)
-        response = ipv4_fyers_client(client_id=app_id, token=access_token).place_order(old_order)
+        response = place_fyers_entry(ipv4_fyers_client(client_id=app_id, token=access_token).place_order,old_order)
         if not isinstance(response, dict) or response.get("s") != "ok" or not response.get("id"):
             parser_order_previews.pop(preview_id, None)
             raise ValueError("FYERS did not confirm entry acceptance. Check the broker orderbook before retrying; no protection was created.")
@@ -1399,6 +1352,110 @@ def run_server():
     ema_daily_reference_cache = {}
     rsi_table = RsiTable()
     delta_india = DeltaIndia(ROOT / ".private" / "delta-india-paper.json",credentials=load_config)
+    dhan_chart_stream = None
+    dhan_chart_key = None
+    dhan_chart_symbols = set()
+    dhan_profile_key = None
+    dhan_profile_until = 0
+    dhan_chart_lock = threading.Lock()
+
+    def chart_dhan_client(service):
+        nonlocal dhan_profile_key, dhan_profile_until
+        from .chart_workspace import require_dhan_data
+        client = service._client()
+        key = (service.account["id"], hashlib.sha256(client.headers["access-token"].encode()).digest())
+        with dhan_chart_lock:
+            if dhan_profile_key != key or time.monotonic() >= dhan_profile_until:
+                require_dhan_data(client)
+                dhan_profile_key = key
+                dhan_profile_until = time.monotonic() + 60
+        return client, key
+
+    def chart_dhan_history(service, interval, after, *, symbol=None, before=None):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from .chart_workspace import fetch_dhan_history, resolve_dhan_chart_symbol
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        client, _ = chart_dhan_client(service)
+        options = resolve_dhan_chart_symbol(service.master, symbol, now) if symbol else {}
+        return fetch_dhan_history(client, interval, after, now, before=before, **options)
+
+    def chart_dhan_snapshot(service, minutes, *, symbol=None):
+        nonlocal dhan_chart_stream, dhan_chart_key
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from .chart_workspace import DhanChartStream, resolve_dhan_chart_symbol
+        client, account_key = chart_dhan_client(service)
+        key = account_key
+        with dhan_chart_lock:
+            if dhan_chart_stream is None or dhan_chart_key != key or (
+                    not dhan_chart_stream.thread.is_alive() and time.monotonic() - dhan_chart_stream.started >= 15):
+                if symbol:
+                    resolve_dhan_chart_symbol(service.master, symbol, datetime.now(ZoneInfo("Asia/Kolkata")))
+                if dhan_chart_stream:
+                    dhan_chart_stream.stop()
+                dhan_chart_stream = DhanChartStream(client, symbol=symbol, account_id=service.account["id"])
+                dhan_chart_key = key
+                dhan_chart_symbols.clear()
+                dhan_chart_symbols.add(symbol)
+            if symbol not in dhan_chart_symbols and symbol:
+                resolve_dhan_chart_symbol(service.master, symbol, datetime.now(ZoneInfo("Asia/Kolkata")))
+            result = dhan_chart_stream.snapshot(minutes, symbol=symbol)
+            dhan_chart_symbols.add(symbol)
+            return result
+
+    def chart_dhan_execution_tick(service,symbol):
+        # Reuses this selected account's existing chart socket and subscriptions.
+        # This performs market-data reads only; it cannot arm or send an order.
+        chart_dhan_snapshot(service,1,symbol=symbol)
+        with dhan_chart_lock:
+            if dhan_chart_stream is None or not dhan_chart_key or dhan_chart_key[0]!=service.account["id"]:
+                return None
+            return dhan_chart_stream.execution_tick(symbol)
+
+    delta_workspace_stream = None
+    delta_workspace_trades = {}
+    delta_chart_activity = {}
+    delta_workspace_stream_lock = threading.Lock()
+
+    def chart_delta_snapshot(minutes, *, symbol="BTCUSD", trade_delta=False):
+        nonlocal delta_workspace_stream
+        from .chart_workspace import DELTA_CHART_SYMBOLS, DELTA_INTERVALS, delta_live_snapshot, subscribe_delta_chart, trade_interval
+        from .chart_trade_stream import DeltaChartTrades
+        if symbol not in DELTA_CHART_SYMBOLS:
+            delta_india.product(symbol, chart=True)
+        if trade_delta or (isinstance(minutes, str) and trade_interval(minutes)):
+            with delta_workspace_stream_lock:
+                now = time.monotonic()
+                entry = delta_workspace_trades.get(symbol)
+                if entry is None:
+                    if len(delta_workspace_trades) >= 8:
+                        oldest = min(delta_workspace_trades, key=lambda name: delta_workspace_trades[name][1])
+                        old_stream, last_used = delta_workspace_trades[oldest]
+                        if now - last_used < 90:
+                            raise RuntimeError("All Delta chart trade streams are currently in use.")
+                        old_stream.stop()
+                        del delta_workspace_trades[oldest]
+                    stream = DeltaChartTrades(symbol)
+                    stream.thread.start()
+                else:
+                    stream = entry[0]
+                delta_workspace_trades[symbol] = (stream, now)
+            if trade_delta:
+                width = minutes * 60 if isinstance(minutes, int) else 86400 if minutes == "1D" else int(minutes[:-1])
+                return stream.snapshot(minutes, delta_width=width)
+            return stream.snapshot(minutes)
+        from strategies.renko_supertrend.delta_broker import Broker
+        with delta_workspace_stream_lock:
+            if delta_workspace_stream is None:
+                stream = Broker(delta_india, ROOT / ".private" / "chart-workspace-delta")
+                stream.subscribe_quotes = False
+                stream.candle_resolutions = {interval * 60: resolution for interval, resolution in DELTA_INTERVALS.items()}
+                delta_workspace_stream = stream
+            subscribe_delta_chart(delta_workspace_stream, delta_chart_activity, symbol, time.monotonic())
+            delta_workspace_stream.start()
+            return delta_live_snapshot(delta_workspace_stream, minutes, symbol=symbol)
+
     from .delta_backtest_server import ensure_research_worker
     ensure_research_worker()  # Public-data research has its own process; broker runners are untouched.
     from .telegram_subscriber import TelegramConnections
@@ -1980,6 +2037,7 @@ def run_server():
             lot_size, tick_size = int(float(contract_row[3])), float(contract_row[4])
             return {"symbol": str(row["symbol"]), "description": str(contract_row[1]), "quantity": quantity, "lots": max(1, quantity // lot_size), "entry_price": entry, "stop_price": None, "target_price": None, "profit_protection_pct": config["profit_protection_pct"], "profit_peak_price": entry, "profit_protection_stop": None, "direction": "BULLISH" if str(contract_row[16]).upper() == "CE" else "BEARISH", "adopted_manual_position": True, "opened_at": datetime.now().astimezone().isoformat(), "lot_size": lot_size, "tick_size": tick_size}
 
+        @serialized_fyers_entry
         def submit_live_entry(ticket):
             if os.getenv("SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS") != "1":
                 raise RuntimeError("Live FYERS submission is disabled. Set SECTOR_PULSE_ENABLE_FYERS_LIVE_ORDERS=1 to allow the EMA Band runner to place real orders.")
@@ -1987,7 +2045,7 @@ def run_server():
             order = {"symbol": ticket["symbol"], "qty": ticket["quantity"], "type": 1, "side": 1,
                      "productType": "MARGIN", "limitPrice": ticket["limit_price"], "stopPrice": 0,
                      "validity": "DAY", "disclosedQty": 0, "offlineOrder": False}
-            response = client.place_order(order)
+            response = place_fyers_entry(client.place_order,order)
             order_ids = _ema_order_ids(response)
             if not order_ids:
                 raise RuntimeError(f"FYERS did not accept the EMA Band entry order: {response}")
@@ -2267,6 +2325,21 @@ def run_server():
             except Exception:
                 # Preserve the last successful cache; status exposes freshness.
                 pass
+            if os.environ.get("SECTOR_PULSE_WORKSPACE_BROKER") == "FYERS":
+                for segment in FYERS_CHART_EXTRA_MASTERS:
+                    path = ema_master_dir / f"{segment}.csv"
+                    try:
+                        if path.exists() and time.time() - path.stat().st_mtime < 86400:
+                            continue
+                        response = requests.get(f"https://public.fyers.in/sym_details/{segment}.csv", timeout=90)
+                        response.raise_for_status()
+                        if not response.text[:32].partition(",")[0].isdigit():
+                            continue
+                        temporary = path.with_suffix(".tmp")
+                        temporary.write_text(response.text, encoding="utf-8")
+                        temporary.replace(path)
+                    except (requests.RequestException, OSError):
+                        pass
             threading.Event().wait(3600)
 
     threading.Thread(target=ema_master_refresh_loop, daemon=True, name="ema-band-master-refresh").start()
@@ -2286,13 +2359,27 @@ def run_server():
     fyers_execution = FyersExecutionService(execution_halt=automation_policy.halt)
     from .handoff_exit_broker import start_owned as start_handoff_exit_monitor
     handoff_exit_monitor = start_handoff_exit_monitor()
-    from .dhan_execution import DhanExecutionService
+    from .dhan_execution import DhanExecutionService, DhanMaster
     dhan_strategy_services = {}
     engine_services = {}
     engine_services_lock = threading.RLock()
     dhan_sector_services = {}
+    chart_dhan_master = DhanMaster()
     dhan_services = {}
     dhan_services_lock = threading.RLock()
+
+    def selected_dhan_execution(account,store):
+        if account.get("broker")!="DHAN":
+            raise PermissionError("Select the registered Dhan account.")
+        with dhan_services_lock:
+            service=dhan_services.get(account["id"])
+            if service is None:
+                service=DhanExecutionService(account,store.folder(account),execution_halt=automation_policy.halt,
+                    execution_allowed=lambda:not (automation_policy.current().get("profile") or {}).get("kill_switch_engaged",False))
+                dhan_services[account["id"]]=service
+            service.account=dict(account)
+            return service
+
     from .motilal_shared_routes import Routes as MotilalRoutes
     motilal_routes=MotilalRoutes(ROOT,allowed=lambda:not (automation_policy.current().get('profile') or {}).get('kill_switch_engaged',False))
     motilal_batches={}
@@ -2659,12 +2746,13 @@ def run_server():
         return {key: value for key, value in instrument.items() if key != "quote"} | {
                 "limit_price": limit_price, "worst_case_risk": round(worst_case_risk, 2)}
 
+    @serialized_fyers_entry
     def kama_submit_live_entry(client, config, signal, quote):
         ticket = kama_live_entry_preflight(client, config, signal, quote)
         order = {"symbol": ticket["symbol"], "qty": ticket["quantity"], "type": 1, "side": ticket["side"],
                  "productType": "INTRADAY", "limitPrice": ticket["limit_price"], "stopPrice": 0,
                  "validity": "DAY", "disclosedQty": 0, "offlineOrder": False}
-        response = client.place_order(order)
+        response = place_fyers_entry(client.place_order,order)
         order_ids = _ema_order_ids(response)
         if not order_ids:
             raise RuntimeError("FYERS did not accept the KAMA live entry order.")
@@ -2889,7 +2977,7 @@ def run_server():
             return {"ready": False, "authenticated": False, "message": str(error)}
         token = str(cfg.get("FYERS_ACCESS_TOKEN") or "")
         if ":" not in token:
-            return {"ready": True, "authenticated": False,
+            return {"ready": True, "authenticated": False, "reauthentication_required": True,
                     "message": "FYERS callback is ready; no current access token is available."}
         app_id, access_token = token.split(":", 1)
         try:
@@ -2899,8 +2987,11 @@ def run_server():
         if isinstance(profile, dict) and profile.get("s") == "ok":
             return {"ready": True, "authenticated": True,
                     "message": "FYERS session is already valid; no browser login is needed."}
-        return {"ready": True, "authenticated": False,
-                "message": "FYERS callback is ready, but the saved session is expired or could not be validated. Login is required."}
+        expired = is_token_error(profile)
+        return {"ready": True, "authenticated": False, "reauthentication_required": expired,
+                "status_unavailable": not expired,
+                "message": ("The FYERS session has expired. Sign in again." if expired
+                            else "FYERS session status could not be verified. The dashboard will check again.")}
 
     analysis_runs = {}
     screener_analysis_cache = {}
@@ -2914,7 +3005,7 @@ def run_server():
         previous_analysis = state.get("sector_analysis")
         if previous_analysis:
             previous_analysis.running = False
-        replacement = FyersLiveFeed(token)
+        replacement = FyersLiveFeed(token, chart_bars=workspace_chart_bars)
         replacement.start()
         state["feed"] = replacement
         replacement_analysis = SectorAnalysisService(token)
@@ -3223,7 +3314,7 @@ def run_server():
         route = instrument_route(payload)
         mode = payload.get("mode") if payload.get("mode") in {"intraday", "swing"} else "intraday"
         collection = provider.candidates(mode) if provider else alignment_candidates(mode)
-        if provider is None or provider.broker=='FYERS':
+        if provider is None or provider.broker in {'FYERS','DHAN'}:
             from .handoff_screener import merge
             collection=merge(collection,provider.sectors if provider else state['sector_analysis'],getattr(provider,'folder',None) if provider else None,auto=payload.get('handoff_schedule_mode')=='AUTO',master=getattr(provider,'cash_master',None) if provider else None)
         candidates = [candidate for candidate in collection.get("candidates", []) if candidate.get("kind") == "stock"]
@@ -3508,6 +3599,18 @@ def run_server():
     renko_instances_lock=threading.RLock()
     renko_instances={}
     renko_manifest=ROOT/'.private'/'renko-instances.json'
+    # Isolated standalone AI runtime. Constructing/status/prepare never activates it.
+    ai_options_services={}
+    ai_options_services_lock=threading.RLock()
+    def ai_options_service(legacy):
+        from strategies.nifty_ai_options.ui_bridge import Service
+        owner=workspace_guard.account_id if workspace_guard else None
+        if not owner:raise PermissionError('AI Renko options require a private FYERS account workspace.')
+        with ai_options_services_lock:
+            key=(owner,id(legacy))
+            if key not in ai_options_services:ai_options_services[key]=Service(owner,legacy)
+            return ai_options_services[key]
+
     def renko_instance_owners(broker,exclude=None):
         result=set()
         if broker=='FYERS':
@@ -3566,6 +3669,8 @@ def run_server():
                 manager=RenkoAdoptionManager(folder/'adoptions',lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,lambda:renko_instance_owners(broker,key))
                 manager.intent_lock=renko_default_bundle[3].intent_lock;manager.guard(runner)
                 component=(runner,adapter,chart_adapter,manager,RenkoChartHistory(folder/'chart-history',tail_provider=shared_renko_tail),order_stream,context,context_lock,wake)
+            runner.bound_broker=broker;runner.bound_instrument=instrument;runner.bound_instance=key
+            runner.bound_account=workspace_guard.account_id if workspace_guard else None
             renko_instances[key]={'broker':broker,'instrument':instrument,'component':component}
             if persist:
                 runner.save_preferences({'settings':{'symbol':instrument,'timeframe':'5 minutes','mode':'PAPER'}})
@@ -3714,6 +3819,13 @@ def run_server():
                     run=analysis_runs.get(str(payload.get('analysis_id') or ''))
                     if not run or run.get('account_id')!=execution.account['id']:raise PermissionError('Analysis account mismatch or expired.')
                     run['provider']=provider;value=size_analysis_opportunity(payload)
+            elif action=='chartink/refresh':
+                value=fetch_chartink_source(payload.get('url'))
+                value.update(broker='MOTILAL_OSWAL',account_id=execution.account['id'],read_only=True)
+                if value.get('status')=='READY':
+                    value.update(chartink_candidate_sectors(value.get('candidates',[]),value.get('source_sectors')))
+                    value.update(market_data_schema=1,market_data={},market_data_as_of=None,market_data_available=0,
+                                 market_data_provider='MOTILAL_OSWAL_READ_ONLY',market_data_error='Source membership refreshed. Native prices are checked during selected-symbol analysis.')
             elif action=='chartink/analyze':value=motilal_routes.screener(execution,payload)
             elif action=='chartink/analyze-options':value=motilal_routes.screener_options(execution,payload)
             elif action.startswith('trade-ticket/'):
@@ -3732,6 +3844,50 @@ def run_server():
             else:raise ValueError('Unsupported Motilal shared action.')
             self.send_json(200,value)
 
+        def private_parser(self, path, payload=None):
+            parts=path[len('/api/broker-parser/'):].split('/')
+            if len(parts)<2:raise ValueError('Select a private parser account.')
+            aid,action=parts[0],'/'.join(parts[1:])
+            if workspace_guard:
+                user,account=self.workspace_identity;store=workspace_guard.store
+                if account['id']!=aid:raise PermissionError('Parser account differs from this workspace.')
+            elif local_auth:
+                user=local_auth.authorize(self.headers,payload is not None);store=local_auth.store
+                account=store.account(user,aid)
+            else:raise PermissionError('Sign in and select your private broker account.')
+            if payload and (payload.get('account_id',aid)!=aid or payload.get('broker',account['broker'])!=account['broker']):raise PermissionError('Parser request differs from the selected broker account.')
+            folder=store.folder(account)
+            if (folder/'disconnected.json').exists():raise PermissionError('Reconnect the selected broker account from Accounts.')
+            if not (folder/'credentials.json').exists():raise ValueError('Save this broker account’s connection settings first.')
+            # Native desktop WhatsApp is not a shared server identity. Do not read
+            # or adopt the server/global reader or another account’s queue.
+            if action.startswith('whatsapp/'):
+                if action!='whatsapp/status':raise ValueError('No private WhatsApp reader is configured for this account. Paste a message you verified into Trade Parser.')
+                self.send_json(200,dict(account_id=aid,broker=account['broker'],running=False,source_ready=False,queue=[],config=dict(group='',interval=60),blocker='No private WhatsApp reader is configured for this account. Paste a message you verified into Trade Parser; other users’ WhatsApp sessions are never used.'));return
+            if action=='lifecycle':
+                self.send_json(200,dict(account_id=aid,broker=account['broker'],enabled=False,entries=[],message='No parser protection worker is integrated for this broker. Parsed stops and targets remain advisory.'));return
+            if not hasattr(self.server,'account_parsers'):self.server.account_parsers={}
+            parser=self.server.account_parsers.get(aid)
+            if parser is None:
+                from .account_parser import AccountParser
+                if account['broker']=='DHAN':execution=self.dhan_service(aid)
+                elif account['broker']=='MOTILAL_OSWAL':execution=motilal_routes.execution(store,user,aid)
+                elif account['broker']=='DELTA_INDIA':
+                    from .delta_india import DeltaIndia
+                    execution=DeltaIndia(folder/'parser-delta-state.json',credentials=lambda:json.loads((folder/'credentials.json').read_text()))
+                else:raise ValueError('Use the selected private FYERS parser route.')
+                parser=AccountParser(account,execution);self.server.account_parsers[aid]=parser
+            parser.account=dict(account)
+            if account['broker'] in ('DHAN','MOTILAL_OSWAL'):parser.execution.account=dict(account)
+            if account['broker']=='MOTILAL_OSWAL':parser.execution=motilal_routes.execution(store,user,aid)
+            if action=='parse':result=parser.parse(payload)
+            elif action=='quote':result=parser.quote(payload)
+            elif action=='ai-analysis':result=parser.analysis(payload)
+            elif action=='prepare-order':result=parser.prepare(payload,user['csrf'])
+            elif action=='submit-order':result=parser.submit(payload,user['csrf'])
+            else:raise ValueError('Unsupported parser action; no order was sent.')
+            self.send_json(200,result)
+
         def dhan_service(self, account_id=None):
             if workspace_guard:
                 user, account = self.workspace_identity
@@ -3746,13 +3902,7 @@ def run_server():
                 raise PermissionError('Sign in and configure your private Dhan broker account.')
             if account['broker'] != 'DHAN':
                 raise PermissionError('Select your own Dhan account for this order.')
-            with dhan_services_lock:
-                service = dhan_services.get(account['id'])
-                if service is None:
-                    service = DhanExecutionService(account, store.folder(account), execution_halt=automation_policy.halt, execution_allowed=lambda:not (automation_policy.current().get('profile') or {}).get('kill_switch_engaged',False))
-                    dhan_services[account['id']] = service
-                service.account = dict(account)
-                return service
+            return selected_dhan_execution(account,store)
 
         def dhan_handoff(self, account_id):
             execution=self.dhan_service(account_id)
@@ -3887,6 +4037,8 @@ def run_server():
                     aid=account_from_state((query.get('state') or [''])[0])
                     if aid:
                         self.path='/broker-workspace/'+aid+'/callback'+('?' + urlparse(self.path).query if urlparse(self.path).query else '')
+                from .multi_account_ticket import handle as multi_ticket_handle
+                if multi_ticket_handle(local_auth,self):return
                 if workspace_proxy(local_auth,self):return
                 if not local_auth.check(self): return
                 if self.path.split('?',1)[0] in ('/','/index.html','/workspace-entry'):
@@ -3905,10 +4057,22 @@ def run_server():
             if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
                 context = workspace_guard.context(*self.workspace_identity) if workspace_guard else (local_auth.context(self.headers) if local_auth else {'workspace':None})
                 context['holdings_review_available'] = True
+                context['chart_workspace_available'] = bool(
+                    workspace_guard and self.workspace_identity[1]['broker'] in {'FYERS', 'DHAN', 'DELTA_INDIA'}
+                )
+                context['delta_chart_symbol_selection'] = bool(workspace_guard and self.workspace_identity[1]['broker'] == 'DELTA_INDIA')
                 body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';' + ('document.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src="/dashboard-login.js";document.head.append(s);});' if local_auth else '')).encode()
                 self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path.split('?', 1)[0] == '/api/workspace-context':
-                self.send_json(200, workspace_guard.context(*self.workspace_identity) if workspace_guard else local_auth.context(self.headers) if local_auth else {'workspace': None}); return
+                context = workspace_guard.context(*self.workspace_identity) if workspace_guard else local_auth.context(self.headers) if local_auth else {'workspace': None}
+                if workspace_guard and self.workspace_identity[1]["broker"] == "DELTA_INDIA":
+                    context["chart_trade_catalog_available"] = True
+                    context["chart_trade_delta_available"] = True
+                from .chart_trading import broker_active
+                context["chart_trading_available"] = bool(workspace_guard and broker_active(self.workspace_identity[1]["broker"]))
+                context["chart_trading_products"] = ["MARGIN"] if workspace_guard and self.workspace_identity[1]["broker"]=="DELTA_INDIA" else ["INTRADAY","CNC","MARGIN","MTF"]
+                self.send_json(200, context)
+                return
             if workspace_guard and self.path.split('?', 1)[0] == '/workspace-entry':
                 self.send_response(302); self.send_header('Location', '/'); self.end_headers(); return
             path = self.path.split("?", 1)[0]
@@ -3916,6 +4080,80 @@ def run_server():
                 try:self.motilal_shared(path)
                 except PermissionError as error:self.send_json(403,dict(error=str(error)))
                 except Exception as error:self.send_json(409,dict(error=str(error)))
+                return
+            if path == "/api/chart-workspace/pine-worker.js" and local_auth and not workspace_guard:
+                from .chart_workspace import serve_pine_worker
+                serve_pine_worker(self, local_auth, ROOT / ".private" / "chart-pine-worker.js")
+                return
+            if path == "/api/chart-workspace/live":
+                from .chart_workspace import serve_live
+                serve_live(self, local_auth, workspace_guard, workspace_chart_bars, state.get("feed"), chart_delta_snapshot,
+                           lambda minutes, **options: chart_dhan_snapshot(self.dhan_service(), minutes, **options))
+                return
+            if path == "/api/chart-workspace/yahoo-history" and local_auth and not workspace_guard:
+                from .yahoo_chart import serve
+                serve(self, local_auth)
+                return
+            if path == "/api/chart-workspace/symbols" and workspace_guard:
+                from .chart_workspace import require_chart, search_dhan_chart_symbols, search_cached_fyers_chart_symbols
+                user, account = self.workspace_identity
+                try:
+                    require_chart(user, workspace_guard.store, path)
+                    if account['broker'] == 'FYERS':
+                        params = parse_qs(urlparse(self.path).query)
+                        query = params.get('q', [''])[0][:120]
+                        offset = params.get('offset', ['0'])[0]
+                        if not offset.isascii() or not offset.isdecimal() or len(offset) > 7:
+                            self.send_json(400, {'error': 'Invalid catalog offset.'})
+                            return
+                        segments = (*FYERS_MASTER_SOURCES, *FYERS_CHART_EXTRA_MASTERS)
+                        selected = params.get('segment', [''])[0]
+                        if selected and selected not in segments:
+                            self.send_json(400, {'error': 'Invalid FYERS chart segment.'})
+                            return
+                        paths = (ema_master_dir / f"{segment}.csv"
+                                    for segment in ((selected,) if selected else segments))
+                        self.send_json(200, search_cached_fyers_chart_symbols(paths, query, offset=int(offset)))
+                        return
+                    if account['broker'] == 'DHAN':
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        params = parse_qs(urlparse(self.path).query)
+                        query = params.get('q', [''])[0][:120]
+                        segment = params.get('segment', [''])[0]
+                        if segment not in ('', 'IDX_I', 'NSE_EQ', 'BSE_EQ', 'NSE_FNO', 'BSE_FNO', 'NSE_CURRENCY', 'BSE_CURRENCY', 'MCX_COMM'):
+                            self.send_json(400, {'error': 'Invalid Dhan chart segment.'})
+                            return
+                        offset = params.get('offset', ['0'])[0]
+                        if not offset.isascii() or not offset.isdecimal() or len(offset) > 7:
+                            self.send_json(400, {'error': 'Invalid catalog offset.'})
+                            return
+                        self.send_json(200, search_dhan_chart_symbols(
+                            chart_dhan_master, query, datetime.now(ZoneInfo("Asia/Kolkata")), offset=int(offset), segment_filter=segment))
+                        return
+                    if account['broker'] != 'DELTA_INDIA':
+                        self.send_json(404, {'error': 'Chart catalog unavailable for this broker.'})
+                        return
+                    instruments = delta_india.catalog(chart=True)['instruments']
+                    self.send_json(200, {'symbols': [
+                        {key: row[key] for key in ('symbol', 'description', 'tick_size', 'contract_type')}
+                        for row in instruments
+                    ]})
+                except PermissionError as error:
+                    self.send_json(403, {'error': str(error)})
+                except (OSError, RuntimeError, ValueError):
+                    self.send_json(503, {'error': 'Selected broker instrument catalog is unavailable.'})
+                return
+            if path == "/api/chart-workspace/catalog":
+                from .chart_catalog import serve_delta_chart_catalog
+                serve_delta_chart_catalog(self, workspace_guard, delta_india)
+                return
+            if path == "/api/chart-workspace/history":
+                from .chart_workspace import fetch_delta_history, fetch_fyers_history, serve_history
+                serve_history(self, local_auth, workspace_guard,
+                              lambda interval, after, **options: fetch_fyers_history(ema_readonly_client(), interval, after=after, include_forming=True, **options),
+                              lambda interval, after, **options: fetch_delta_history(delta_india, interval, after, **options),
+                              lambda interval, after, **options: chart_dhan_history(self.dhan_service(), interval, after, **options))
                 return
             if path == "/api/resources":
                 try:
@@ -3928,6 +4166,25 @@ def run_server():
                     self.send_json(403, {'error': str(error)})
                 except Exception:
                     self.send_json(503, {'error': 'Server telemetry unavailable. Check Linux/sysstat availability.'})
+                return
+            if path in ('/api/renko-delta/journal','/api/renko-delta/journal.xlsx',
+                        '/api/renko-supertrend/journal','/api/renko-supertrend/journal.xlsx'):
+                try:
+                    from strategies.renko_supertrend.journal_scope import journal_scope
+                    query=parse_qs(urlparse(self.path).query)
+                    broker='DELTA_INDIA' if path.startswith('/api/renko-delta/') else 'FYERS'
+                    value=journal_scope(renko_instance_rows(),broker,
+                        (query.get('instance') or ['default'])[0],(query.get('mode') or ['ALL'])[0])
+                    if path.endswith('.xlsx'):
+                        from strategies.renko_supertrend.journal_export import export_xlsx
+                        body=export_xlsx(value,ROOT)
+                        self.send_response(200)
+                        self.send_header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                        self.send_header('Content-Disposition','attachment; filename="renko-trading-journal.xlsx"')
+                        self.send_header('Content-Length',str(len(body)))
+                        self.end_headers();self.wfile.write(body)
+                    else:self.send_json(200,value)
+                except Exception as error:self.send_json(409,{'error':str(error)})
                 return
             try:
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
@@ -3944,6 +4201,11 @@ def run_server():
             if delta_renko.get(self,path): return
             if path == '/api/renko-instances':
                 self.send_json(200,{'instances':renko_instance_rows()});return
+            if path.startswith('/api/broker-parser/'):
+                try:self.private_parser(path)
+                except PermissionError as error:self.send_json(403,{'error':str(error)})
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
             if path == "/api/trade-recommendation/lifecycle":
                 self.send_json(200, {"enabled": parser_protection_enabled(), "entries": parser_lifecycle.rows()}); return
             if path == "/api/whatsapp/status":
@@ -3989,7 +4251,7 @@ def run_server():
                     query=parse_qs(urlparse(self.path).query)
                     symbol=str((query.get('symbol') or [''])[0])
                     if path=="/api/delta-india/status":result=delta_india.status()
-                    elif path=="/api/delta-india/instruments":result=delta_india.catalog()
+                    elif path=="/api/delta-india/instruments":result=delta_india.catalog(chart=query.get("scope") == ["chart"])
                     elif path=="/api/delta-india/chart-option":result=delta_india.chart_option(symbol,str((query.get('direction') or [''])[0]))
                     elif path=="/api/delta-india/quote":result=delta_india.ticker(symbol)
                     elif path=="/api/delta-india/journal.xlsx":
@@ -4026,6 +4288,22 @@ def run_server():
                 try:self.send_json(200,renko_adoptions.inventory())
                 except Exception as error:self.send_json(409,{'error':str(error)})
                 return
+            if path == '/api/renko-supertrend/ai-options/chart-source':
+                try:
+                    query={k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()}
+                    self.send_json(200,ai_options_service(renko_supertrend).chart_source(query))
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/ai-options/search':
+                try:
+                    query=parse_qs(urlparse(self.path).query)
+                    self.send_json(200,ai_options_service(renko_supertrend).search((query.get('q') or [''])[0],(query.get('market') or ['ALL'])[0],(query.get('route') or ['OPTIONS'])[0]))
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/ai-options/status':
+                try:self.send_json(200,ai_options_service(renko_supertrend).snapshot())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
             if path == "/api/renko-supertrend/runner":
                 self.send_json(200, renko_supertrend.snapshot())
                 return
@@ -4054,8 +4332,9 @@ def run_server():
                     raw = {key:query[key][0] for key in renko_supertrend_settings({}) if key in query}
                     from strategies.renko_supertrend.indicator_families import DEFAULTS as family_defaults
                     raw.update({key:str((query.get(key) or ['true'])[0]).lower()=='true' for key in family_defaults})
+                    if 'swing_breakout_enabled' in query:raw['swing_breakout_enabled']=query['swing_breakout_enabled'][0].lower()=='true'
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower()=='true'
-                    for flag,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('sma_entry_enabled','false'),('sma_exit_enabled','false'),('supertrend_slope_enabled','false'),('renko_brick_exit_enabled','false'),('anti_chop_enabled','false'),('zone_entry_enabled','false'),('zone_entry_rearm','true'),('calibrated_enabled','false'),('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
                     from strategies.renko_supertrend.ema_exit import settings as exit_settings
                     from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults
@@ -4079,10 +4358,18 @@ def run_server():
                 self.send_header('Cache-Control','no-cache, no-store')
                 self.send_header('X-Accel-Buffering','no')
                 self.end_headers()
+                last_live_revision=None
                 try:
                     while self.workspace_stream_valid():
                         frame = browser_frame(renko_supertrend,renko_chart_broker,config,renko_order_stream)
                         frame['bar_seconds'] = seconds
+                        from strategies.renko_supertrend.live_chart import chart_for
+                        live_chart=chart_for(renko_chart_broker)
+                        live_chart.poll(config)
+                        if (query.get('live_price_chart') or ['false'])[0]=='true' and not (query.get('confirmed_run_id') or [''])[0]:
+                            frame['live_chart']=live_chart.apply(context_key,revision=last_live_revision)
+                            if frame['live_chart']:last_live_revision=frame['live_chart']['live_chart_revision']
+                            frame['live_chart_pending_revision']=last_live_revision
                         requested_run = (query.get('confirmed_run_id') or [''])[0]
                         if requested_run and frame.get('runner',{}):
                             confirmed = frame['runner'].get('confirmed_indicators')
@@ -4133,8 +4420,9 @@ def run_server():
                     symbol = str((query.get('symbol') or [''])[0]).upper()
                     timeframe = str((query.get('timeframe') or ['5 minutes'])[0])
                     raw = {key: query[key][0] for key in renko_supertrend_settings({}) if key in query}
+                    if 'swing_breakout_enabled' in query:raw['swing_breakout_enabled']=query['swing_breakout_enabled'][0].lower()=='true'
                     raw['use_adx'] = str((query.get('use_adx') or ['false'])[0]).lower() == 'true'
-                    for flag,default in [('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
+                    for flag,default in [('sma_entry_enabled','false'),('sma_exit_enabled','false'),('supertrend_slope_enabled','false'),('renko_brick_exit_enabled','false'),('anti_chop_enabled','false'),('zone_entry_enabled','false'),('zone_entry_rearm','true'),('calibrated_enabled','false'),('manual_trend_enabled','false'),('supertrend_enabled','true'),('ema_fast_enabled','true'),('ema_slow_enabled','true'),('ema_third_enabled','true'),('ema_widening_enabled','true'),('rsi_slope_enabled','true'),('rsi_level_enabled','false'),('retest_enabled','false'),('retest_engulfing','true'),('retest_harami','true'),('retest_star','true')]:
                         raw[flag]=str((query.get(flag) or [default])[0]).lower()=='true'
                     from strategies.renko_supertrend.ema_exit import settings as exit_settings
                     from strategies.renko_supertrend.exit_indicators import DEFAULTS as exit_defaults
@@ -4165,9 +4453,10 @@ def run_server():
                     if not requested_run and config.get('chart_entry_guards') and config.get('higher_timeframe_enabled'):
                         higher_analysis,_,_,_=renko_chart_history.load(ema_readonly_client(),symbol,config['supertrend_timeframe'],str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),{**config,'chart_entry_guards':False,'chart_zone_target_enabled':False,'underlying':symbol,'timeframe':config['supertrend_timeframe']},tick)
                         config['_chart_higher_rows']=higher_analysis['rows']
-                    if not requested_run and config.get('chart_zone_target_enabled'):
+                    if not requested_run and (config.get('chart_zone_target_enabled') or config.get('zone_entry_enabled')):
                         zone_analysis,_,_,_=renko_chart_history.load(ema_readonly_client(),symbol,'5 minutes',str((query.get('history_preset') or ['45'])[0]),str((query.get('history_from') or [''])[0]),str((query.get('history_to') or [''])[0]),{**config,'chart_zone_target_enabled':False,'underlying':symbol,'timeframe':'5 minutes'},tick)
                         config['_chart_zone_rows']=zone_analysis['rows']
+                        config['chart_zone_entry_filter']=bool(config.get('zone_entry_enabled') and config.get('chart_entry_guards'))
                     confirmed_source = None
                     if requested_run:
                         from strategies.renko_supertrend.confirmed_feed import bind_confirmed
@@ -4229,13 +4518,21 @@ def run_server():
                         except (ValueError,RuntimeError) as error:
                             candidate_error = str(error)
                     from strategies.renko_supertrend import session_auto as renko_session_auto
-                    self.send_json(200, {'session_auto': renko_session_auto.for_observation(config,time.time(),tick), 'symbol': symbol, 'timeframe': timeframe, 'settings': {k:v for k,v in config.items() if not k.startswith('_')},
+                    chart_response = {'session_auto': renko_session_auto.for_observation(config,time.time(),tick), 'symbol': symbol, 'timeframe': timeframe, 'settings': {k:v for k,v in config.items() if not k.startswith('_')},
                         'tick_size': tick, 'rows': [r for r in rows if r['timestamp'] >= float((query.get('since') or ['0'])[0])] if (query.get('revision') or [''])[0] == history['analysis_revision'] else rows, 'incremental': (query.get('revision') or [''])[0] == history['analysis_revision'], 'history':history, 'latest': rows[-1] if rows and analysis_available else None, 'data_quality':data_quality,
                         'confirmed_source':confirmed_source, 'initialization_anchor': analyzed['anchor'],
                         'host_bar_count': analyzed['state']['count'], 'forming': [c for c in candles if c.get('is_forming')],
                         'source': 'Pinaki Renko ST Auto Research · supplied Pine v6',
                         'history_error': history_error, 'intrabar_entries':intrabar_enabled,'provisional_candidate':candidate,'provisional_error':candidate_error,'session_policy':policy,'option_route':option_route,'squareoff_time':('None · overnight carry; exact option expiry protection applies' if config.get('commodity_holding')=='CARRY_FORWARD' else policy['session_deadline']+' Asia/Kolkata'),
-                        'parity': 'Formula port; initialization depends on identical host history. Protected-original parity unverified.'})
+                        'parity': 'Formula port; initialization depends on identical host history. Protected-original parity unverified.'}
+                    if not requested_run and analysis_available and (query.get('live_price_chart') or ['false'])[0]=='true':
+                        from strategies.renko_supertrend.live_chart import chart_for
+                        live_chart=chart_for(renko_chart_broker)
+                        live_chart.seed(context_key,analyzed,{**config,'underlying':symbol,'timeframe':timeframe},tick)
+                        live_chart.poll({'underlying':symbol,'timeframe':timeframe})
+                        chart_response['rows']=rows  # A new live recurrence needs the complete displayed seed, even after an incremental request.
+                        chart_response=live_chart.apply(context_key,chart_response)
+                    self.send_json(200,chart_response)
                 except Exception as error:
                     self.send_json(409, {'error': str(error)})
                 return
@@ -4287,6 +4584,13 @@ def run_server():
                 return
             if path == "/api/auth/start":
                 try:
+                    current = fyers_auth_status()
+                    if current["authenticated"]:
+                        self.send_json(200, current)
+                        return
+                    if not current.get("reauthentication_required"):
+                        self.send_json(503, {"error": current["message"]})
+                        return
                     oauth_state = secrets.token_urlsafe(24)
                     if workspace_guard: oauth_state = workspace_guard.account_id + '.' + oauth_state
                     url = authorization_url(expected_port=port, state=oauth_state)
@@ -4401,32 +4705,11 @@ def run_server():
                 try:
                     query = parse_qs(urlparse(self.path).query)
                     service = self.dhan_service((query.get('account_id') or [None])[0])
-                    client = service._client()
-                    profile = client.request('GET', '/profile')
-                    if str(profile.get('dhanClientId')) != client.client_id:
-                        raise PermissionError('Dhan token belongs to a different account.')
-                    rows = client.request('GET', '/positions')
-                    if not isinstance(rows, list) or any(str(row.get('dhanClientId', client.client_id)) != client.client_id for row in rows):
-                        raise PermissionError('Dhan returned unverified account positions.')
-                    realized = sum(float(row.get('realizedProfit') or 0) for row in rows)
-                    unrealized = sum(float(row.get('unrealizedProfit') or 0) for row in rows)
-                    if path.endswith('/realized-pnl'):
-                        period = (query.get('period') or ['day'])[0]
-                        self.send_json(200, {'broker':'DHAN', 'supported':period in ('day','daily'),
-                            'summary':{'net_pnl':realized} if period in ('day','daily') else {},
-                            'records':[], 'message':'Dhan current-session realized P&L; historical period tradebook is unavailable.'})
-                    else:
-                        funds = client.request('GET', '/fundlimit')
-                        if str(funds.get('dhanClientId')) != client.client_id:
-                            raise PermissionError('Dhan funds belong to a different account.')
-                        positions = [{'symbol':row.get('tradingSymbol') or row.get('securityId'),
-                            'netQty':row.get('netQty'), 'netAvg':row.get('costPrice') or row.get('buyAvg'),
-                            'pl':float(row.get('unrealizedProfit') or 0)} for row in rows if float(row.get('netQty') or 0)!=0]
-                        self.send_json(200, {'broker':'DHAN','connected':True,'pnl':realized+unrealized,
-                            'realized':realized,'unrealized':unrealized,'positions':positions,
-                            'available_funds':funds.get('availabelBalance',funds.get('availableBalance')),
-                            'estimated_charges':{'available':False,'total':None,'disclaimer':'Account-wide fees require verified executed trades; gross P&L shown.'},
-                            'estimated_net_pnl':None})
+                    from .dhan_account_reports import DhanAccountReports
+                    with service.lock:
+                        if not hasattr(service,'account_reports'):service.account_reports=DhanAccountReports(service)
+                    result=service.account_reports.realized((query.get('period') or ['day'])[0]) if path.endswith('/realized-pnl') else service.account_reports.positions()
+                    self.send_json(200,result)
                 except PermissionError as error:
                     self.send_json(403, {'error':str(error),'connected':False})
                 except Exception as error:
@@ -4440,11 +4723,11 @@ def run_server():
                 except PermissionError as error:self.send_json(403, {'error':str(error)})
                 except Exception as error:self.send_json(409, {'error':str(error)})
                 return
-            if path == '/api/analysis-handoff/screener-selection':
-                if not workspace_guard or self.workspace_identity[1]['broker']!='FYERS' or not {'handoff','screener'}<=set(self.workspace_identity[0].get('features',[])):
-                    self.send_json(403,dict(error='Owned FYERS Handoff and Screener permissions required.'));return
+            if path in {'/api/analysis-handoff/screener-selection','/api/dhan/analysis-handoff/screener-selection'}:
+                if not workspace_guard or self.workspace_identity[1]['broker'] not in {'FYERS','DHAN'} or not {'handoff','screener'}<=set(self.workspace_identity[0].get('features',[])):
+                    self.send_json(403,dict(error='Owned selected-broker Handoff and Screener permissions required.'));return
                 from .handoff_screener import Store
-                self.send_json(200,Store(workspace_guard.store.folder(self.workspace_identity[1])).status());return
+                self.send_json(200,Store(workspace_guard.store.folder(self.workspace_identity[1]),self.workspace_identity[1]['broker']).status());return
             if path == '/api/analysis-handoff/exit-monitor/status':
                 if workspace_guard and 'handoff' not in self.workspace_identity[0].get('features',[]):
                     self.send_json(403,dict(error='Analysis Handoff permission required.'));return
@@ -4533,6 +4816,8 @@ def run_server():
         def do_POST(self):
             if local_auth:
                 if local_auth.post(self) or local_auth.portal(self, mutation=True): return
+                from .multi_account_ticket import handle as multi_ticket_handle
+                if multi_ticket_handle(local_auth,self,True):return
                 from .workspace_proxy import proxy as workspace_proxy
                 if workspace_proxy(local_auth,self,mutation=True):return
                 if not local_auth.check(self, mutation=True): return
@@ -4541,12 +4826,18 @@ def run_server():
             try:
                 payload = self.read_json()
                 if workspace_guard: workspace_guard.validate_action(self.workspace_identity[1], path, payload)
-                if path == '/api/analysis-handoff/screener-selection':
-                    if not workspace_guard or self.workspace_identity[1]['broker']!='FYERS' or not {'handoff','screener'}<=set(self.workspace_identity[0].get('features',[])):raise PermissionError('Owned FYERS Handoff and Screener permissions required.')
+                if path.startswith("/api/chart-workspace/trading/"):
+                    from .chart_trading import handle as handle_chart_trading
+                    if handle_chart_trading(self, path, payload, workspace_guard=workspace_guard,
+                                            fyers_execution=fyers_execution, delta_execution=delta_india,
+                                            dhan_execution=self.dhan_service,dhan_tick_reader=chart_dhan_execution_tick):
+                        return
+                if path in {'/api/analysis-handoff/screener-selection','/api/dhan/analysis-handoff/screener-selection'}:
+                    if not workspace_guard or self.workspace_identity[1]['broker'] not in {'FYERS','DHAN'} or not {'handoff','screener'}<=set(self.workspace_identity[0].get('features',[])):raise PermissionError('Owned selected-broker Handoff and Screener permissions required.')
                     from .handoff_screener import Store
                     incoming={k:v for k,v in payload.items() if k not in {'broker','account_id'}}
                     if payload.get('account_id') not in (None,self.workspace_identity[1]['id']):raise PermissionError('Selection belongs to another account.')
-                    self.send_json(200,Store(workspace_guard.store.folder(self.workspace_identity[1])).save(incoming));return
+                    self.send_json(200,Store(workspace_guard.store.folder(self.workspace_identity[1]),self.workspace_identity[1]['broker']).save(incoming));return
                 if path == '/api/analysis-handoff/exit-monitor/control':
                     if not handoff_exit_monitor or not workspace_guard:raise PermissionError('Owned FYERS workspace required.')
                     user,account=self.workspace_identity
@@ -4573,6 +4864,9 @@ def run_server():
                     self.dhan_strategy(path,payload);return
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')):
+                    from strategies.renko_supertrend.binding import validate_request
+                    validate_request(payload,'DELTA_INDIA' if path.startswith('/api/renko-delta/') else 'FYERS',bound_instrument,workspace_guard.account_id if workspace_guard else None)
                 if bound_instrument and path.endswith(('/preview','/start','/adopt','/override-entry')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
                 if path=='/api/renko-instances/start-selected':
                     if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
@@ -4622,7 +4916,12 @@ def run_server():
                     origin = self.headers.get('Origin')
                     if origin and urlparse(origin).netloc != self.headers.get('Host'):
                         raise PermissionError('Cross-origin runner mutations are forbidden.')
-                    actions = {'/api/renko-supertrend/adopt': renko_adoptions.apply,
+                    actions = {'/api/renko-supertrend/ai-options/prepare': lambda p:ai_options_service(renko_supertrend).prepare(p),
+                               '/api/renko-supertrend/ai-options/start': lambda p:ai_options_service(renko_supertrend).start(p),
+                               '/api/renko-supertrend/ai-options/stop': lambda p:ai_options_service(renko_supertrend).stop(p),
+                               '/api/renko-supertrend/spread-filter': renko_supertrend.set_spread_filter,
+                               '/api/renko-supertrend/trend-reentry': renko_supertrend.set_trend_reentry,
+                               '/api/renko-supertrend/adopt': renko_adoptions.apply,
                                '/api/renko-supertrend/adoption-control': renko_adoptions.control,
                                '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
                                '/api/renko-supertrend/preview': renko_supertrend.preview,
@@ -4652,6 +4951,14 @@ def run_server():
                     action=actions.get(path.rsplit('/',1)[-1])
                     if not action:raise ValueError('Unknown Telegram action.')
                     self.send_json(200,action(payload));return
+                if path=='/api/dhan/account-reports/analyze':
+                    from .dhan_account_reports import DhanAccountReports
+                    service=self.dhan_service(payload.get('account_id'))
+                    with service.lock:
+                        if not hasattr(service,'account_reports'):service.account_reports=DhanAccountReports(service)
+                    self.send_json(200,service.account_reports.realized(payload.get('period','daily')));return
+                if path.startswith('/api/broker-parser/'):
+                    self.private_parser(path,payload);return
                 if path == "/api/trade-recommendation/parse":
                     self.send_json(200, trade_recommendation_preview(payload))
                     return
@@ -4699,6 +5006,16 @@ def run_server():
                 if path == "/api/analysis-handoff/preview":
                     self.send_json(200, analysis_packet(payload))
                     return
+                if path in {'/api/dhan/chartink/refresh','/api/dhan/chartink/analyze'}:
+                    from .dhan_screener import DhanScreener
+                    account_id=payload.get('account_id')
+                    query=parse_qs(urlparse(self.path).query)
+                    query_id=(query.get('account_id') or [None])[0]
+                    if account_id and query_id and account_id!=query_id:
+                        raise PermissionError('Screener account differs from the selected account.')
+                    research=DhanScreener(self.dhan_service(account_id or query_id))
+                    result=research.refresh(payload,fetch_chartink_source,chartink_candidate_sectors) if path.endswith('/refresh') else research.analyze(payload)
+                    self.send_json(200,result);return
                 if path == "/api/chartink/refresh":
                     result = fetch_chartink_source(payload.get("url"))
                     if result.get("status") == "READY":
@@ -4727,6 +5044,23 @@ def run_server():
                         raise PermissionError("Dhan analysis requires its owned account endpoint.")
                     self.send_json(200, size_analysis_opportunity(payload))
                     return
+                if path.startswith('/api/dhan/manual-multi/'):
+                    service=self.dhan_service(payload.get('account_id'))
+                    user=self.workspace_identity[0] if workspace_guard else local_auth.authorize(self.headers,True)
+                    action=path.rsplit('/',1)[-1]
+                    if action=='describe':
+                        from .multi_account_ticket import native_description
+                        result=native_description(service,payload)
+                    else:
+                        from .account_parser import AccountParser
+                        if not hasattr(self.server,'manual_dhan_parsers'):self.server.manual_dhan_parsers={}
+                        parser=self.server.manual_dhan_parsers.setdefault(service.account['id'],AccountParser(service.account,service))
+                        parser.account=dict(service.account)
+                        if action=='parse':result=parser.parse(payload)
+                        elif action=='prepare':result=parser.prepare(payload,user['csrf'])
+                        elif action=='submit':result=parser.submit(dict(payload,live_confirmation=True),user['csrf'])
+                        else:raise ValueError('Unknown native amount ticket action.')
+                    self.send_json(200,result);return
                 if path in {'/api/dhan/prepare', '/api/dhan/submit'} or (path.startswith('/api/trade-ticket/') and (str(payload.get('broker','')).upper()=='DHAN' or (payload.get('items') and str(payload['items'][0].get('broker','')).upper()=='DHAN') or str(payload.get('preview_id','')).startswith('DHAN-'))):
                     service=self.dhan_service(payload.get('account_id') or ((payload.get('items') or [{}])[0].get('account_id')))
                     if path.endswith('/prepare-batch'):
@@ -4915,14 +5249,23 @@ def run_server():
         port=Port(**kwargs);trailing_ports[account['id']]=port;return port
     persistent_jobs = install_persistent_jobs(Handler, ROOT, local_auth, workspace_guard, analysis_runs, market_job_adapter, runner_job_handles, trailing_job_adapter)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    from .chart_trading import resume_existing as resume_chart_orders, close_services as close_chart_orders
+    resume_chart_orders(server,workspace_guard,fyers_execution,delta_india,
+        dhan_execution_factory=(lambda account:selected_dhan_execution(account,workspace_guard.store)) if workspace_guard else None,
+        dhan_tick_reader=chart_dhan_execution_tick)
     print(f"Sector heat map: http://127.0.0.1:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nSector heat map stopped cleanly. Restart with ./setup_and_run.sh when ready.")
     finally:
+        close_chart_orders(server)
         if handoff_exit_monitor: handoff_exit_monitor.close()
         persistent_jobs.close(wait=False)
+        if dhan_chart_stream:
+            dhan_chart_stream.stop()
+        if delta_workspace_stream:
+            delta_workspace_stream.stop()
         delta_india.monitoring_stop.set()
         delta_india.stop_event.set()  # Shutdown is not an intentional persisted monitoring stop.
         telegram_polling.stop()

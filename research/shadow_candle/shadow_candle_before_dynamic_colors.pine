@@ -1,0 +1,202 @@
+//@version=6
+indicator("Sector Pulse — Shadow Candle", shorttitle="Shadow Candle", overlay=true, precision=2, max_lines_count=500, max_labels_count=100, max_boxes_count=500)
+
+string gSource = "Source and session"
+string market = input.string("Auto", "Market classification", options=["Auto", "NSE/BSE", "Foreign gold", "MCX", "Crypto", "Manual"], group=gSource, display=display.none)
+string manualTf = input.timeframe("360", "Manual reference timeframe", group=gSource, display=display.none)
+string sourceSession = input.string("Chart", "Source trading session", options=["Chart", "Regular", "Extended"], group=gSource, display=display.none)
+string boundary = input.string("Exchange trading day", "Daily boundary", options=["Exchange trading day", "Custom daily reset"], group=gSource, display=display.none)
+string zone = input.string("Etc/UTC", "Custom reset timezone (IANA)", group=gSource, display=display.none)
+int resetHour = input.int(0, "Custom reset hour", minval=0, maxval=23, group=gSource, display=display.none)
+int resetMinute = input.int(0, "Custom reset minute", minval=0, maxval=59, group=gSource, display=display.none)
+string gLevels = "Range levels — measured upward from low"
+float p1 = input.float(46, "Level 1 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+float p2 = input.float(50, "Level 2 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+float p3 = input.float(56, "Level 3 (%)", minval=0, maxval=100, step=0.1, group=gLevels, display=display.none)
+int keep = input.int(3, "Completed sessions to retain", minval=1, maxval=40, group="Display", display=display.none)
+bool showFinal = input.bool(true, "Plot Shadow Candleonacci", group="Display", display=display.none)
+bool showFull = input.bool(false, "Also plot complete reference-candle range", group="Display", display=display.none)
+bool showLabels = input.bool(true, "Show Shadow Candle label", group="Display", display=display.none)
+bool showSourceMarkers = input.bool(false, "Show historical source markers", group="Display", display=display.none)
+bool showPanel = input.bool(true, "Show compact current levels", group="Display", display=display.none)
+bool showGradient = input.bool(true, "Gradient fill inside closing-candle range", group="Display", display=display.none)
+int fillOpacity = input.int(88, "Gradient transparency near middle (%)", minval=70, maxval=98, group="Display", display=display.none)
+color edge = input.color(color.silver, "High / low", group="Display", display=display.none)
+color c1 = input.color(color.orange, "Level 1", group="Display", display=display.none)
+color c2 = input.color(color.yellow, "Level 2", group="Display", display=display.none)
+color c3 = input.color(color.aqua, "Level 3", group="Display", display=display.none)
+
+string symbolText = str.upper(syminfo.ticker)
+string prefix = str.upper(syminfo.prefix)
+bool gold = str.contains(symbolText, "GOLD") or str.contains(symbolText, "XAU")
+bool crypto = syminfo.type == "crypto" or prefix == "DELTAIN"
+bool indian = prefix == "NSE" or prefix == "BSE"
+bool mcx = str.contains(prefix, "MCX")
+string autoMarket = mcx ? "MCX" : indian ? "NSE/BSE" : gold ? "Foreign gold" : crypto ? "Crypto" : "Unknown"
+string selected = market == "Auto" ? autoMarket : market
+string refTf = selected == "Foreign gold" ? "1320" : selected == "Crypto" ? "1380" : selected == "MCX" ? "840" : selected == "NSE/BSE" ? "360" : manualTf
+if barstate.isfirst
+    if selected == "Unknown"
+        runtime.error("Unclassified symbol: choose a market classification or Manual reference timeframe.")
+    if not chart.is_standard or not timeframe.isintraday or timeframe.in_seconds() > timeframe.in_seconds(refTf)
+        runtime.error("Use a standard, time-based intraday chart at or below the reference timeframe (for example, 5 minutes).")
+
+// The custom boundary groups native HTF bars; it does not re-anchor their openings.
+customKey(int t) =>
+    int y = year(t, zone)
+    int m = month(t, zone)
+    int d = dayofmonth(t, zone)
+    int today = timestamp(zone, y, m, d, resetHour, resetMinute)
+    t >= today ? today : timestamp(zone, y, m, d - 1, resetHour, resetMinute)
+
+source() =>
+    int key = boundary == "Exchange trading day" ? time_tradingday : customKey(time)
+    var float fullH = na
+    var float fullL = na
+    var int fullT = na
+    var int fullC = na
+    if na(key[1]) or key != key[1]
+        fullH := na
+        fullL := na
+        fullT := na
+        fullC := na
+    if time_close - time >= timeframe.in_seconds() * 1000
+        fullH := high
+        fullL := low
+        fullT := time
+        fullC := time_close
+    // Only previous-bar prices/state leave the reference context.
+    [high[1], low[1], time[1], time_close[1], time_close("1D")[1], key[1], key, fullH[1], fullL[1], fullT[1], fullC[1]]
+
+string requestTicker = ticker.new(syminfo.prefix, syminfo.ticker, sourceSession == "Regular" ? session.regular : sourceSession == "Extended" ? session.extended : syminfo.session)
+[h, l, sourceOpen, sourceClose, scheduledClose, priorKey, currentKey, fullHigh, fullLow, fullOpen, fullClose] = request.security(requestTicker, refTf, source(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+bool finalBar = not na(priorKey) and priorKey != currentKey
+bool atClose = boundary == "Exchange trading day" ? sourceClose == scheduledClose : sourceClose == currentKey
+bool shortened = sourceClose - sourceOpen < timeframe.in_seconds(refTf) * 1000
+bool validFinal = atClose and shortened
+var int lastSource = na
+var bool missingFinal = false
+var int lockedClose = na
+var int lockedScheduled = na
+var float lockedHigh = na
+var float lockedLow = na
+var float lockedFullHigh = na
+var float lockedFullLow = na
+var int lockedFullOpen = na
+var int lockedFullClose = na
+var array<line> finalLines = array.new<line>()
+var array<line> fullLines = array.new<line>()
+var array<line> activeFinal = array.new<line>()
+var array<line> activeFull = array.new<line>()
+var array<label> labels = array.new<label>()
+var label rangeTag = na
+var array<box> bandHistory = array.new<box>()
+var array<box> activeBands = array.new<box>()
+
+finishSet(array<line> active) =>
+    if array.size(active) > 0
+        for ln in active
+            line.set_x2(ln, time)
+    array.clear(active)
+
+drawSet(float hi, float lo, int opened, int closed, bool complete, array<line> history, array<line> active) =>
+    array<float> prices = array.from(hi, lo, lo + (hi-lo)*p1/100, lo + (hi-lo)*p2/100, lo + (hi-lo)*p3/100)
+    array<color> colors = array.from(edge, edge, c1, c2, c3)
+    for i = 0 to 4
+        color col = complete ? color.new(array.get(colors, i), 45) : array.get(colors, i)
+        line ln = line.new(time, array.get(prices, i), time_close, array.get(prices, i), xloc=xloc.bar_time, color=col, width=i < 2 ? 2 : 1, style=complete ? line.style_dashed : line.style_solid)
+        array.push(history, ln)
+        array.push(active, ln)
+    if not complete and showGradient
+        float lower = 0.0
+        float upper = 100.0
+        float middle = math.max(lower, math.min(upper, p2))
+        // Twelve transparent slices use Pine color.from_gradient; no opaque range block.
+        for slice = 0 to 11
+            float a = lower + (upper-lower)*slice/12
+            float b = lower + (upper-lower)*(slice+1)/12
+            float mid = (a+b)/2
+            color shade = mid <= middle ? color.from_gradient(mid, lower, middle, color.new(c1, 98), color.new(c2, fillOpacity)) : color.from_gradient(mid, middle, upper, color.new(c2, fillOpacity), color.new(c3, 98))
+            box band = box.new(time, lo+(hi-lo)*b/100, time_close, lo+(hi-lo)*a/100, xloc=xloc.bar_time, border_color=na, bgcolor=shade)
+            array.push(bandHistory, band)
+            array.push(activeBands, band)
+        while array.size(bandHistory) > keep*12
+            box.delete(array.shift(bandHistory))
+    if showSourceMarkers
+        string identity = complete ? "Complete " + refTf + "m reference candle" : "Shadow Candle"
+        string labelText = identity + "\n" + str.format_time(opened, "dd MMM HH:mm", syminfo.timezone) + " → " + str.format_time(closed, "dd MMM HH:mm", syminfo.timezone) + "\nH " + str.tostring(hi, "#.##") + "  L " + str.tostring(lo, "#.##") + "\n" + str.tostring(p1, "#.##") + "% " + str.tostring(lo + (hi-lo)*p1/100, "#.##") + " | " + str.tostring(p2, "#.##") + "% " + str.tostring(lo + (hi-lo)*p2/100, "#.##") + " | " + str.tostring(p3, "#.##") + "% " + str.tostring(lo + (hi-lo)*p3/100, "#.##")
+        array.push(labels, label.new(time, lo, "", xloc=xloc.bar_time, style=label.style_circle, color=complete ? color.new(color.purple, 25) : color.new(color.rgb(30, 41, 59), 15), textcolor=color.white, size=size.tiny, tooltip=labelText))
+    while array.size(history) > keep * 5
+        line.delete(array.shift(history))
+    while array.size(labels) > keep * (showFinal and showFull ? 2 : 1)
+        label.delete(array.shift(labels))
+
+if finalBar and (na(lastSource) or sourceOpen != lastSource)
+    lastSource := sourceOpen
+    missingFinal := not validFinal
+    lockedClose := sourceClose
+    lockedScheduled := scheduledClose
+    lockedHigh := validFinal ? h : na
+    lockedLow := validFinal ? l : na
+    lockedFullHigh := fullHigh
+    lockedFullLow := fullLow
+    lockedFullOpen := fullOpen
+    lockedFullClose := fullClose
+    if array.size(activeBands) > 0
+        for band in activeBands
+            box.set_right(band, time)
+    array.clear(activeBands)
+    if not na(rangeTag)
+        label.delete(rangeTag)
+        rangeTag := na
+    finishSet(activeFinal)
+    finishSet(activeFull)
+    if showFinal and validFinal
+        drawSet(h, l, sourceOpen, sourceClose, false, finalLines, activeFinal)
+        if showLabels
+            string details = "Shadow Candle\n" + str.format_time(sourceOpen, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(sourceClose, "HH:mm", syminfo.timezone) + "\nHigh " + str.tostring(h, "#.##") + " · Low " + str.tostring(l, "#.##")
+            rangeTag := label.new(time_close, l, "Shadow Candle", xloc=xloc.bar_time, style=label.style_label_upper_right, color=color.new(color.rgb(30, 41, 59), 10), textcolor=color.white, size=size.small, tooltip=details)
+    if showFull and not na(fullHigh)
+        drawSet(fullHigh, fullLow, fullOpen, fullClose, true, fullLines, activeFull)
+if not na(rangeTag)
+    label.set_x(rangeTag, time_close)
+if array.size(activeFinal) > 0
+    for ln in activeFinal
+        line.set_x2(ln, time_close)
+if array.size(activeFull) > 0
+    for ln in activeFull
+        line.set_x2(ln, time_close)
+
+if array.size(activeBands) > 0
+    for band in activeBands
+        box.set_right(band, time_close)
+
+// Compact current-level panel; detailed source evidence belongs in hover tooltips.
+var table panel = table.new(position.bottom_right, 3, 5, border_width=0, frame_width=0)
+if barstate.isfirst
+    table.merge_cells(panel, 0, 0, 2, 0)
+    table.merge_cells(panel, 0, 2, 2, 2)
+
+panelRow(int row, float hi, float lo) =>
+    array<float> ratios = array.from(p1, p2, p3)
+    array<color> colors = array.from(c1, c2, c3)
+    for i = 0 to 2
+        float ratio = array.get(ratios, i)
+        string caption = str.tostring(ratio, "#.##") + "%  " + str.tostring(lo + (hi-lo)*ratio/100, "#,###.##")
+        table.cell(panel, i, row, caption, text_color=array.get(colors, i), bgcolor=color.new(color.rgb(15, 23, 42), 7), text_size=size.small)
+
+if barstate.islast
+    table.clear(panel, 0, 0, 2, 4)
+    if showPanel
+        // Reserve room above TradingView event icons at the bottom edge.
+        table.cell(panel, 0, 4, "", height=4, bgcolor=color.new(color.white, 100))
+        if showFinal
+            string title = na(lastSource) ? "Shadow Candle · waiting" : missingFinal ? "Shadow Candle · unavailable" : "" + str.format_time(lastSource, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(lockedClose, "HH:mm", syminfo.timezone)
+            string evidence = selected + " / " + refTf + " min / " + sourceSession + " session\nH " + str.tostring(lockedHigh, "#.##") + " · L " + str.tostring(lockedLow, "#.##") + "\nConfirmed source; published next session."
+            table.cell(panel, 0, 0, title, text_color=color.white, bgcolor=color.new(color.rgb(30, 41, 59), 10), text_size=size.small, tooltip=evidence)
+            if not missingFinal and not na(lockedHigh)
+                panelRow(1, lockedHigh, lockedLow)
+        if showFull and not na(lockedFullHigh)
+            string title = "Reference " + refTf + "m · " + str.format_time(lockedFullOpen, "dd MMM HH:mm", syminfo.timezone) + "–" + str.format_time(lockedFullClose, "HH:mm", syminfo.timezone)
+            table.cell(panel, 0, 2, title, text_color=color.white, bgcolor=color.new(color.purple, 35), text_size=size.small, tooltip="Optional complete reference candle; dashed lines.")
+            panelRow(3, lockedFullHigh, lockedFullLow)

@@ -1,5 +1,5 @@
 """Shared sector + Handoff + screener digest. Read-only sources, Telegram only."""
-import argparse,fcntl,hashlib,json,math,os,sqlite3,subprocess,time
+import argparse,fcntl,hashlib,json,logging,math,os,sqlite3,subprocess,time
 from datetime import datetime,timedelta
 from pathlib import Path
 from .market_calendar import IST,market_session,REGULAR_OPEN
@@ -7,16 +7,19 @@ from .sector_cards import snapshot_from_history,history_path,parse_time,SectorOu
 from .trade_notifications import ROOT,PRIVATE
 from .handoff_cards import completed_jobs
 from .workspaces import WorkspaceStore,isolated_environment,private_write
+LOGGER=logging.getLogger(__name__)
 ACCOUNT="bf46fc364b610a0dfd338419e133cb41"
 def number(value):
  return isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value)
 def grade(row):
  c=row.get("conviction") or {}
  return round(c["score"]/c["maximum_score"]*10,2) if number(c.get("score")) and number(c.get("maximum_score")) and c["maximum_score"]>0 else None
-def slot(now):
+def slot(now, interval_ms=900000):
  if market_session(now)["status"]!="OPEN":return None
  start=now.replace(hour=REGULAR_OPEN.hour,minute=REGULAR_OPEN.minute,second=0,microsecond=0)
- return (start+timedelta(minutes=15*int((now-start).total_seconds()//900))).isoformat()
+ seconds=interval_ms/1000
+ if interval_ms not in (5000,15000,30000,60000,300000,900000,3600000,14400000):raise ValueError('Unsupported rotation interval')
+ return (start+timedelta(seconds=seconds*int((now-start).total_seconds()//seconds))).isoformat()
 def freshness(value,now,max_age=1800):
  try:
   stamp=parse_time(value);age=(now-stamp).total_seconds()
@@ -69,6 +72,8 @@ def handoff_section(report,completed,now):
  checked=report.get("generated_at") or datetime.fromtimestamp(completed,IST).isoformat()
  asof=intraday_asof([c.get("candidate") or {} for c in report.get("cards",[])])
  lines=["Analysis checked "+stamp(checked)]
+ if report.get("scheduled_status"):lines.append(report["scheduled_status"]["message"])
+ if report.get("report_refresh"):lines.append("Latest refresh unavailable; showing the last completed analysis, not current recommendations.")
  for card in sorted(report.get("cards",[]),key=lambda c:-(grade(c.get("analysis") or {}) or 0))[:5]:
   candidate=card.get("candidate") or {};a=card.get("analysis") or {};proposed=a.get("proposed_sizing") or {}
   active=a.get("active_invalidation") or {};recommended=a.get("recommended_invalidation") or {};proposal=a.get("proposal") or {}
@@ -80,7 +85,35 @@ def handoff_section(report,completed,now):
   else:lines.append(f"Underlying entry {level(entry)} | proposed stop {level(stop)} | target {level(active.get('target') or proposed.get('target') or a.get('target'))}")
  if len(lines)==1:lines+=["No new eligible recommendations." if not report.get("scheduled_status") else report["scheduled_status"]["message"]]
  return {"status":freshness(asof,now),"asof":asof,"lines":lines}
-def collect(config,now,screener=None,root=ROOT,mtf=None):
+def select_handoff_outcome(matches):
+ """A failed refresh must not erase the last completed, owned analysis outcome.
+
+ An actual completed empty scan remains authoritative. Retained findings stay
+ historical and keep their original bar timestamps; this never grants execution.
+ """
+ valid=[]
+ for row in matches:
+  report=row[3]
+  if row[0].get("id")!=ACCOUNT or row[0].get("broker")!="FYERS" or not isinstance(report,dict):continue
+  if (report.get("source") or {}).get("broker",report.get("broker","FYERS"))!="FYERS":continue
+  if not isinstance(report.get("cards"),list):continue
+  screen=(report.get("scope") or {}).get("screener") or {}
+  # A terminal manual job can still contain an incomplete source refresh.
+  # Empty partial collections are failures, not completed no-signal scans.
+  if not report["cards"] and screen.get("enabled") and screen.get("status") not in {"COMPLETED","DISABLED"}:
+   report={**report,"scheduled_status":{"code":"DATA_UNAVAILABLE","message":"Analysis unavailable: selected Screener collection is incomplete."}}
+   row=(*row[:3],report)
+  valid.append(row)
+ if not valid:raise ValueError("No readable owned Handoff outcome")
+ valid.sort(key=lambda r:r[2],reverse=True)
+ latest=valid[0];state=(latest[3].get("scheduled_status") or {}).get("code")
+ if state not in {"DATA_UNAVAILABLE","RATE_LIMITED"}:return latest
+ completed=next((r for r in valid[1:] if not r[3].get("scheduled_status") or (r[3].get("scheduled_status") or {}).get("code")=="NO_NEW_SIGNALS"),None)
+ if completed is None:return latest
+ report={**completed[3],"report_refresh":{"code":state,"checked_at":latest[3].get("generated_at"),"retained":True}}
+ return (*completed[:3],report)
+
+def collect(config,now,screener=None,root=ROOT,mtf=None,handoff_report=None):
  scope(config)
  sections=[];sector_visual={};handoff_visual={}
  try:
@@ -96,12 +129,15 @@ def collect(config,now,screener=None,root=ROOT,mtf=None):
  except Exception:sector={"status":"UNAVAILABLE","asof":None,"lines":["Fresh sector snapshot could not be verified; no stale scores presented as current."]}
  sections.append(("SECTOR ROTATION",sector))
  try:
-  matches=[r for r in completed_jobs(config,root) if r[0]["id"]==ACCOUNT]
-  latest=max(matches,key=lambda r:r[2])
+  matches=list(completed_jobs({**config,"accounts":[scope(config)]},root))
+  if handoff_report is not None:matches.append((scope(config),"report-cycle",now.timestamp(),handoff_report))
+  latest=select_handoff_outcome(matches)
   handoff=handoff_section(latest[3],latest[2],now)
   from .market_brief_visual import handoff_public
   handoff_visual=handoff_public(latest[3],now)
- except Exception:handoff={"status":"UNAVAILABLE","asof":None,"lines":["No readable owned Handoff outcome."]}
+ except Exception:
+  LOGGER.exception("Owned FYERS Handoff report collection failed")
+  handoff={"status":"UNAVAILABLE","asof":None,"lines":["Saved Handoff analysis could not be read; report refresh requires attention."]}
  sections.append(("ANALYSIS HANDOFF",handoff))
  if screener is None:
   try:
@@ -126,9 +162,9 @@ class CombinedOutbox(SectorOutbox):
    sender=selected
   return super().deliver(config,sender=sender,only_event=only_event)
  def settle(self):
-  with self.db:self.db.execute("UPDATE delivery SET state='EXPIRED',error='Combined report slot expired' WHERE state IN ('PENDING','RETRY','PAUSED') AND event IN (SELECT id FROM events WHERE created<?)",(self.clock()-900,))
+  with self.db:self.db.execute("UPDATE delivery SET state='EXPIRED',error='Combined report slot expired' WHERE state IN ('PENDING','RETRY','PAUSED') AND event IN (SELECT id FROM events WHERE created<? AND COALESCE(json_extract(payload,'$.completed_run'),0)=0)",(self.clock()-900,))
   super().settle()
-def enqueue(box,config,snapshot,key):
+def enqueue(box,config,snapshot,key,completed_run=False):
  ident="combined-"+hashlib.sha256((config["owner_username"]+":"+ACCOUNT+":"+key).encode()).hexdigest()[:24]
  if box.db.execute("SELECT 1 FROM events WHERE id=?",(ident,)).fetchone():return ident
  image=PRIVATE/"combined-reports"/(ident+".png")
@@ -143,7 +179,7 @@ def enqueue(box,config,snapshot,key):
  from .market_brief_panels import REVISION
  private_write(image.with_suffix(".json"),json.dumps(snapshot,allow_nan=False))
  event={"id":ident,"kind":"COMBINED_CARD","owner_username":config["owner_username"],"image":panels[0]["image"] if image_ok else str(image),
-  "image_sha256":panels[0]["image_sha256"] if image_ok else None,"panels":panels if image_ok else [],"snapshot":snapshot,"text_only":not image_ok,"visual_revision":REVISION,"delivery_slot":key[5:] if key.startswith("slot-") else None,"public_text":fallback_text(snapshot),
+  "image_sha256":panels[0]["image_sha256"] if image_ok else None,"panels":panels if image_ok else [],"snapshot":snapshot,"text_only":not image_ok,"visual_revision":REVISION,"completed_run":completed_run,"delivery_slot":key[5:] if key.startswith("slot-") and not completed_run else None,"public_text":fallback_text(snapshot),
   "public_caption":caption(snapshot)}
  with box.db:
   box.db.execute("INSERT INTO events VALUES(?,?,?)",(ident,json.dumps(event),box.clock()))
@@ -188,7 +224,7 @@ def send_text(config,event,audit):
  except Exception:return "REVIEW","Text outcome unknown; no automatic duplicate"
 
 def launch(config,request,output,worker_module="sector_heatmap.combined_screener_worker"):
- if worker_module not in {"sector_heatmap.combined_screener_worker","sector_heatmap.combined_sector_worker"}:raise ValueError("Unsupported report worker")
+ if worker_module not in {"sector_heatmap.combined_screener_worker","sector_heatmap.combined_sector_worker","sector_heatmap.combined_handoff_worker"}:raise ValueError("Unsupported report worker")
  scope(config);folder=ROOT/".private/dashboard-login/accounts"/ACCOUNT
  registry=ROOT/".private/dashboard-login/registry.sqlite3"
  with sqlite3.connect(registry.resolve().as_uri()+"?mode=ro",uri=True) as db:
@@ -203,13 +239,12 @@ def launch(config,request,output,worker_module="sector_heatmap.combined_screener
  path=output.with_suffix(".request.json");private_write(path,json.dumps(request))
  with open(PRIVATE/"combined-screener.log","a") as log:
   return subprocess.Popen([str(ROOT/".venv/bin/python"),"-B","-m",worker_module,"--request",str(path),"--output",str(output)],cwd=folder/"source",env=env,stdout=log,stderr=log,start_new_session=True)
-def read_sector_mtf(config,output,timeout=210):
+def read_sector_mtf(config,output,timeout=210,progress=None):
  """Isolated market-data worker; never uses an Auto/session submission path."""
  try:
   proc=launch(config,dict(account_id=ACCOUNT,broker="FYERS"),output,worker_module="sector_heatmap.combined_sector_worker")
-  try:proc.wait(timeout=timeout)
-  except subprocess.TimeoutExpired:
-   proc.terminate();proc.wait(timeout=10);raise ValueError("Sector MTF report deadline")
+  from .report_wait import wait_for_report
+  wait_for_report(proc,progress or (lambda elapsed:LOGGER.warning("Sector analysis remains in progress")))
   value=json.loads(output.read_text())
   if value.get("status")!="COMPLETED":raise ValueError("Sector MTF report unavailable")
   private_write(PRIVATE/"combined-reports/sector-mtf-latest.json",json.dumps(value,allow_nan=False))
@@ -221,7 +256,7 @@ def main():
  os.umask(0o077);PRIVATE.mkdir(parents=True,exist_ok=True)
  lock=(PRIVATE/("combined-"+args.action+".lock" if args.action in {"probe","preview"} else "combined-worker.lock")).open("a");fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
  config=json.loads((PRIVATE/"config.json").read_text())
- if not config.get("combined_reports",{}).get("enabled") and args.action!="preview":raise SystemExit("Combined reports disabled")
+ if not config.get("combined_reports",{}).get("enabled") and args.action not in {"preview","run"}:raise SystemExit("Combined reports disabled")
  if args.action=="probe":
   request,_=screener_source();request["symbols"]=request["symbols"][:2]
   output=PRIVATE/"combined-reports/service-probe.json"
@@ -236,8 +271,8 @@ def main():
   panels=render_panels(snapshot,path);private_write(path.with_name("preview-panels.json"),json.dumps(panels,indent=2))
   print(json.dumps({"panels":[p["image"] for p in panels],"sections":[[t,s["status"]] for t,s in snapshot["sections"]]}));return
  box=CombinedOutbox(PRIVATE/"combined-outbox.sqlite3",recover=True)
- def publish(snapshot,key):
-  event=enqueue(box,config,snapshot,key);box.deliver(config,sender=deliver_card,only_event=event);box.settle()
+ def publish(snapshot,key,completed_run=False):
+  event=enqueue(box,config,snapshot,key,completed_run=completed_run);box.deliver(config,sender=deliver_card,only_event=event);box.settle()
   states=box.db.execute("SELECT channel,state FROM delivery WHERE event=?",(event,)).fetchall()
   print(json.dumps({"event_id":event,"delivery":states}),flush=True);return event
  if args.action=="initial":
@@ -247,29 +282,46 @@ def main():
   return
  while True:
   config=json.loads((PRIVATE/"config.json").read_text())
-  now=datetime.now(IST);current=slot(now)
+  now=datetime.now(IST);current=slot(now,config.get('combined_reports',{}).get('refresh_interval_ms',900000))
   with box.db:box.db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",("heartbeat",time.time()))
   initial=box.db.execute("SELECT value FROM meta WHERE key=?",("initial_slot",)).fetchone()
   if current and current!=(initial[0] if initial else None) and config.get("combined_reports",{}).get("enabled"):
    key="slot-"+current
    ident="combined-"+hashlib.sha256((config["owner_username"]+":"+ACCOUNT+":"+key).encode()).hexdigest()[:24]
    if not box.db.execute("SELECT 1 FROM events WHERE id=?",(ident,)).fetchone():
-    deadline=time.monotonic()+820
+    def progress(stage,elapsed):
+     # Durable status events use the existing verified shared Telegram route.
+     at=datetime.now(IST)
+     status_key=key+"-progress-"+stage+"-"+str(int(elapsed)//300)
+     event_id="progress-"+hashlib.sha256(status_key.encode()).hexdigest()[:24]
+     text="SECTOR PULSE | Analysis in progress\nReport started "+stamp(current)+"\n"+stage+" analysis is still running. The completed output will be published when ready."
+     event=dict(id=event_id,owner_username=config["owner_username"],kind="COMBINED_CARD",text_only=True,public_text=text,completed_run=True)
+     with box.db:
+      box.db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?)",(event_id,json.dumps(event),box.clock()))
+      box.db.execute("INSERT OR IGNORE INTO delivery(event,channel,state,updated) VALUES(?,'telegram','PENDING',?)",(event_id,box.clock()))
+      box.db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",("analysis_progress",json.dumps(dict(slot=current,stage=stage,updated=at.isoformat()))))
+      box.db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",("heartbeat",time.time()))
+     box.deliver(config,sender=deliver_card,only_event=event_id)
+    from .report_wait import wait_for_report
     mtf_output=PRIVATE/"combined-reports"/("sector-mtf-"+hashlib.sha256(key.encode()).hexdigest()[:16]+".json")
-    mtf=read_sector_mtf(config,mtf_output,timeout=210)
+    mtf=read_sector_mtf(config,mtf_output,progress=lambda elapsed:progress("Sector",elapsed))
     output=PRIVATE/"combined-reports"/("screener-"+hashlib.sha256(key.encode()).hexdigest()[:16]+".json")
     try:
      request,_=screener_source();proc=launch(config,request,output)
-     try:proc.wait(timeout=max(1,deadline-time.monotonic()))
-     except subprocess.TimeoutExpired:
-      proc.terminate();proc.wait(timeout=10)
-      raise ValueError("Screener scan deadline")
+     wait_for_report(proc,lambda elapsed:progress("Screener",elapsed))
      screener=json.loads(output.read_text()) if output.exists() else {"status":"UNAVAILABLE"}
     except Exception as error:
      with box.db:box.db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",("last_worker_error",type(error).__name__))
      screener={"status":"UNAVAILABLE","generated_at":datetime.now(IST).isoformat()}
-    # Never deliver the prior slot late or after market close.
+    handoff_output=PRIVATE/"combined-reports"/("handoff-"+hashlib.sha256(key.encode()).hexdigest()[:16]+".json")
+    try:
+     proc=launch(config,dict(account_id=ACCOUNT,broker="FYERS"),handoff_output,worker_module="sector_heatmap.combined_handoff_worker")
+     wait_for_report(proc,lambda elapsed:progress("Handoff",elapsed))
+     handoff_report=json.loads(handoff_output.read_text())
+    except Exception:
+     LOGGER.exception("Read-only Handoff cycle failed")
+     handoff_report=dict(cards=[],source=dict(broker="FYERS"),generated_at=datetime.now(IST).isoformat(),scheduled_status=dict(code="DATA_UNAVAILABLE",message="Handoff analysis failed; fresh broker evidence could not be verified."))
     finished=datetime.now(IST)
-    if slot(finished)==current:publish(collect(config,finished,screener,mtf=mtf),key)
+    publish(collect(config,finished,screener,mtf=mtf,handoff_report=handoff_report),key,completed_run=True)
   box.deliver(config,sender=deliver_card);box.settle();time.sleep(15)
 if __name__=="__main__":main()

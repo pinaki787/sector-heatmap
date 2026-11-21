@@ -13,7 +13,9 @@ def schema(base):
  s=deepcopy(base);item=s['properties']['recommendations']['items'];item['properties']['fundamental_feedback']=deepcopy(FEEDBACK_SCHEMA);item['required'].append('fundamental_feedback');return s
 def compact(e):return {k:e.get(k) for k in ('symbol','company_name','status','period_end','filing_at','as_of','scope','metrics','missing','reason','sources')}
 def report(e,feedback=None):
- if e.get('status') not in ('PARTIAL','AVAILABLE') or not any(v is not None for v in (e.get('metrics') or {}).values()):
+ if e.get('status')=='NOT_APPLICABLE':
+  feedback=dict(relationship='NOT_APPLICABLE',summary=e.get('reason') or 'Company ratios do not apply to this instrument.',financial_health='Not applicable: this is not an operating-company financial review.',growth='Fund-specific review required',valuation='Use fund NAV and tracking evidence',key_risks=['Fund expenses, tracking difference and underlying exposure require separate review.'])
+ elif e.get('status') not in ('PARTIAL','AVAILABLE') or not any(v is not None for v in (e.get('metrics') or {}).values()):
   feedback=dict(relationship='INSUFFICIENT_EVIDENCE',summary=e.get('reason') or 'Verified company financial evidence unavailable.',financial_health='Unavailable',growth='Unavailable',valuation='Unavailable',key_risks=['Financial feedback is unavailable; no fundamental conclusion inferred.'])
  elif not isinstance(feedback,dict):feedback=dict(relationship='INSUFFICIENT_EVIDENCE',summary='Filing evidence captured; selected AI commentary is unavailable.',financial_health='See reported profitability; solvency not established.',growth='Comparison unavailable',valuation='Unavailable',key_risks=e.get('missing',[]))
  return dict(evidence=e,feedback=feedback,report_only=True,horizon_note='Company fundamentals provide longer-term context; disagreement with a short-term trade does not automatically invalidate or change its execution policy.')

@@ -8,7 +8,7 @@ from decimal import Decimal
 import math
 
 MODEL=dict(id='DELTA_INDIA_OPTION_NATIVE_ESTIMATE_2026_10_07',source='https://www.delta.exchange/fees',
-           premium_cap=.035,gst=.18,basis='Recorded native commission when available, otherwise product taker rate × observed index notional, capped at 3.5% premium; GST estimated at 18%. No discounts assumed. Not broker-invoiced costs; regular filled option BUY/SELL only, excludes expiry/exercise/liquidation.')
+           premium_cap=.035,gst=.18,basis='Recorded Delta commission is the charged total including GST; its fee/GST split is estimated at 18%. Without native commission, product taker rate × observed index notional, capped at 3.5% premium, plus estimated GST. No discounts assumed. Not broker-invoiced costs; regular filled option BUY/SELL only, excludes expiry/exercise/liquidation.')
 
 
 def number(value):
@@ -22,6 +22,15 @@ def order_cost(row):
     try:
         qty=number(row['filled']); price=number(row['average_price']); units=number(row['quantity_multiplier'])
         if min(qty,price,units)<=0:return None
+        commission=row.get('native_commission')
+        if commission is not None:
+            # Delta fill commission matches meta_data.total_commission_in_settling_asset
+            # (rack commission including GST). Never apply GST a second time.
+            total=number(commission);fee=total/(1+number(MODEL['gst']))
+            return dict(commission=float(fee),gst=float(total-fee),total=float(total),
+                        kind='BROKER_CHARGED_TOTAL_GST_SPLIT_ESTIMATE',currency=row['quote_currency'],
+                        model=MODEL if row.get('execution_route')!='DELTA_PERPETUAL' else
+                        dict(id='DELTA_PERPETUAL_TRADING_FEES_ONLY',basis='Broker charged commission total including GST; fee/GST split estimated. Funding/liquidation excluded.'))
         if row.get('execution_route')=='DELTA_PERPETUAL':
             commission=row.get('native_commission')
             fee=number(commission) if commission is not None else qty*units*price*number(row['taker_commission_rate'])

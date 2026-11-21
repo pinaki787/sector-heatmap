@@ -53,7 +53,7 @@ class Tests(unittest.TestCase):
         class Master:
             def load(inner,now):return self.rows
         class Service:
-            account=dict(id='account-a',live_enabled=True)
+            account=dict(id='account-a',broker='DHAN',live_enabled=True)
             folder=Path(self.temp.name)
             master=Master()
             import threading
@@ -199,7 +199,7 @@ class Tests(unittest.TestCase):
                       quantity_multiplier=1,tick_size=.05,entry_price=None,opened_at=None,entry_signal_timestamp=self.now-60)
         from unittest.mock import patch
         runner.state['renko_engine']={'anchor':{},'last':{'host_atr':1}}
-        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100)):
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100,ema30=100)):
             runner.submit(self.order,position,'CONFIRMED_ENTRY')
         pending=runner.state['pending']
         self.assertIsNotNone(pending);self.assertIsNone(runner.state['position'])
@@ -222,7 +222,7 @@ class Tests(unittest.TestCase):
                       quantity_multiplier=1,tick_size=.05,entry_price=None,opened_at=None,entry_signal_timestamp=self.now-60)
         from unittest.mock import patch
         runner.state['renko_engine']={'anchor':{},'last':{'host_atr':1}}
-        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100)):
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100,ema30=100)):
             runner.submit(self.order,position,'EMA10_RETEST_BOUNCE')
         self.assertIsNotNone(runner.state['position'])
         row=runner.state['order_history'][-1]
@@ -335,7 +335,7 @@ class McxBrokerTests(unittest.TestCase):
                       quantity_multiplier=100,tick_size=.1,entry_price=None,opened_at=None,entry_signal_timestamp=self.now-60)
         from unittest.mock import patch
         runner.state['renko_engine']={'anchor':{},'last':{'host_atr':1}}
-        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100)):
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',return_value=dict(entry_qualified=True,entry_direction='BULLISH',ema10=100,ema30=100)):
             runner.submit(self.order,position,'EMA10_RETEST_BOUNCE')
         self.assertIsNotNone(runner.state['position'])
         row=runner.state['order_history'][-1]

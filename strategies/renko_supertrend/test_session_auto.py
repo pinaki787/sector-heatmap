@@ -129,7 +129,7 @@ class PreparedEngineTests(unittest.TestCase):
    self.assertEqual(e["last"],resumed["last"])
    rebuilt=analysis(self.host()[1:],d,.05)
    self.assertEqual(e["last"]["box"],rebuilt["last"]["box"])
- def test_next_session_references_completed_day_and_price_first_tick_is_baseline(self):
+ def test_next_session_keeps_anchor_and_fills_opening_gap(self):
   from .session_auto import prepare
   from .runner import analysis
   from .price_basis import observe
@@ -138,7 +138,18 @@ class PreparedEngineTests(unittest.TestCase):
    before=e["state"]["brick_box"];at=stamp(7)+12*3600
    self.assertEqual(observe(e,c,.05,dict(ltp=1003,exch_feed_time=at),at+.1,1),[])
    adapter.now=stamp(8)+1;prepare(adapter,c,self.host(8))
-   self.assertEqual(observe(e,c,.05,dict(ltp=1100,exch_feed_time=adapter.now),adapter.now+.1,1),[])
+   previous_close=e['state']['price_renko']['level']*e['state']['brick_box']
+   down_export=deepcopy(e)
+   gap=observe(e,c,.05,dict(ltp=1100,exch_feed_time=adapter.now),adapter.now+.1,1)
+   self.assertGreater(len(gap),1)
+   self.assertTrue(all(r['market_event_at']==adapter.now for r in gap))
+   self.assertAlmostEqual(gap[0]['open'],previous_close)
+   self.assertLessEqual(1100-gap[-1]['close'],e['state']['brick_box']+1e-8)
+   down=observe(down_export,c,.05,dict(ltp=900,exch_feed_time=adapter.now),adapter.now+.1,2)
+   self.assertGreater(len(down),1)
+   self.assertAlmostEqual(down[0]['open'],previous_close)
+   self.assertTrue(all(r['brick_direction']=='BEARISH' and r['market_event_at']==adapter.now for r in down))
+   self.assertLessEqual(down[-1]['close']-900,down_export['state']['brick_box']+1e-8)
    self.assertGreater(e["state"]["brick_box"],before)
    self.assertEqual(e["state"]["session_auto"]["session_start"],stamp(8))
    self.assertEqual(observe(e,c,.05,dict(ltp=1000,exch_feed_time=at),adapter.now+.1,1),[])
@@ -153,3 +164,33 @@ class PreparedEngineTests(unittest.TestCase):
   from sector_heatmap.dhan_strategy_broker import Broker as DhanBroker
   from sector_heatmap.motilal_strategy_broker import Broker as MotilalBroker
   for broker in [FyersBroker,DeltaBroker,DhanBroker,MotilalBroker]:self.assertTrue(hasattr(broker.candles,"__wrapped__"))
+
+
+class ReferenceFetchAnchorTests(PreparedEngineTests):
+ def test_cold_restarts_reuse_canonical_reference_anchor_and_preserve_frozen_values(self):
+  from .session_auto import prepare
+  from unittest.mock import patch
+  with tempfile.TemporaryDirectory() as tmp:
+   a=self.adapter(tmp);config=self.config()
+   ancient=[{**self.host()[0],"timestamp":stamp(7)-500*86400}]+self.host()
+   requested=[];original=a.session_auto_inputs
+   a.session_auto_inputs=lambda c,begin,now:(requested.append(begin) or original(c,begin,now))
+   prepare(a,config,ancient)
+   self.assertEqual(requested[0],ancient[0]["timestamp"])
+   before={p.name:p.read_bytes() for p in Path(tmp).glob("*.json")}
+   canonical=json.loads(next(Path(tmp).glob("*-source.json")).read_text())["anchor"]
+   for _ in range(2):
+    b=self.adapter(tmp);b.session_auto_inputs=lambda c,begin,now:(requested.append(begin) or original(c,begin,now))
+    next_config=self.config();prepare(b,next_config,ancient)
+    self.assertEqual(requested[-1],canonical)
+    self.assertEqual(next_config["_session_auto_references"],config["_session_auto_references"])
+    self.assertEqual({p.name:p.read_bytes() for p in Path(tmp).glob("*.json")},before)
+ def test_existing_canonical_anchor_also_governs_explicit_chart_windows(self):
+  from .session_auto import prepare
+  with tempfile.TemporaryDirectory() as tmp:
+   a=self.adapter(tmp);prepare(a,self.config(),self.host())
+   canonical=json.loads(next(Path(tmp).glob("*-source.json")).read_text())["anchor"]
+   b=self.adapter(tmp);original=b.session_auto_inputs;requested=[]
+   b.session_auto_inputs=lambda c,begin,now:(requested.append(begin) or original(c,begin,now))
+   prepare(b,{**self.config(),"history_start":stamp(7)-300*86400},self.host())
+   self.assertEqual(requested,[canonical])

@@ -15,17 +15,27 @@ class Scheduling(unittest.TestCase):
   with tempfile.TemporaryDirectory() as t:self.assertEqual(self.make(Path(t)/"s.db").step(datetime(2026,10,21,10,tzinfo=IST))["state"],"DISABLED")
  def test_manual_collects_never_executes(self):
   with tempfile.TemporaryDirectory() as t:
-   calls=[];s=self.make(Path(t)/"s.db",lambda *a:calls.append(a),lambda:True);s.configure({"enabled":True})
+   calls=[];s=self.make(Path(t)/"s.db",lambda *a:calls.append(a),lambda:True);s.configure({"enabled":True,"mode":"MANUAL"})
    self.assertEqual(s.step(datetime(2026,10,21,10,tzinfo=IST))["state"],"COMPLETED");self.assertFalse(calls)
  def test_slot_not_replayed_after_restart(self):
   with tempfile.TemporaryDirectory() as t:
-   path=Path(t)/"s.db";s=self.make(path);s.configure({"enabled":True});now=datetime(2026,10,21,10,tzinfo=IST);s.step(now)
+   path=Path(t)/"s.db";s=self.make(path);s.configure({"enabled":True,"mode":"MANUAL"});now=datetime(2026,10,21,10,tzinfo=IST);s.step(now)
    self.assertEqual(self.make(path).step(now)["state"],"ALREADY_PROCESSED")
- def test_duplicate_levels_next_slot_suppressed(self):
+ def test_existing_exposure_blocks_entry_but_preserves_report(self):
   with tempfile.TemporaryDirectory() as t:
-   s=self.make(Path(t)/"s.db");s.configure({"enabled":True});now=datetime(2026,10,21,10,tzinfo=IST);s.step(now)
+   calls=[];s=self.make(Path(t)/"s.db",lambda *a:calls.append(a),lambda:True)
+   card={"candidate_key":"stock:TEST","analysis":{"status":"READY"}}
+   s.collect=lambda p:([idea()],{"cards":[card]})
+   base=s.exposure
+   s.exposure=lambda p:{**base(p),"exposed_underlyings":[idea()["underlying"]],"daily_loss":0}
+   s.configure({"enabled":True,"mode":"AUTO","live_authorized":True})
+   value=s.step(datetime(2026,10,21,10,tzinfo=IST))
+   self.assertEqual(value["report"]["cards"],[card]);self.assertFalse(calls);self.assertFalse(value["plans"])
+ def test_repeated_recommendation_is_reported_next_slot(self):
+  with tempfile.TemporaryDirectory() as t:
+   s=self.make(Path(t)/"s.db");s.configure({"enabled":True,"mode":"MANUAL"});now=datetime(2026,10,21,10,tzinfo=IST);s.step(now)
    second=s.step(now+timedelta(minutes=15))
-   self.assertEqual(second["report"]["automation_selection"]["new_recommendations"],0)
+   self.assertEqual(second["report"]["automation_selection"]["new_recommendations"],1)
    self.assertTrue(second["plans"]) # current Manual review stays available without another alert
  def test_pre_submit_rejection_releases_capital_without_replaying_the_idea(self):
   from sector_heatmap.handoff_errors import PreflightRejected
@@ -53,23 +63,23 @@ class Scheduling(unittest.TestCase):
     return dict(protection_confirmed=True,entry_fill_price="100",protected_quantity=plan["quantity"])
    s=self.make(Path(t)/"s.db",execute,lambda:True)
    base=s.exposure;s.exposure=lambda p:{**base(p),"daily_loss":0}
-   s.configure({"enabled":True});now=datetime(2026,10,21,10,tzinfo=IST)
+   s.configure({"enabled":True,"mode":"MANUAL"});now=datetime(2026,10,21,10,tzinfo=IST)
    first=s.step(now);self.assertEqual(first["report"]["automation_selection"]["new_recommendations"],1)
-   s.configure({"mode":"AUTO","live_authorized":True})
+   s.configure({"mode":"AUTO","enabled":True,"live_authorized":True})
    second=s.step(now+timedelta(minutes=15))
    self.assertEqual(second["state"],"COMPLETED")
-   self.assertEqual(second["report"]["automation_selection"]["new_recommendations"],0)
+   self.assertEqual(second["report"]["automation_selection"]["new_recommendations"],1)
    self.assertEqual(len(calls),1)
    s.step(now+timedelta(minutes=30));self.assertEqual(len(calls),1)
  def test_auto_requires_authorization(self):
   with tempfile.TemporaryDirectory() as t:
-   with self.assertRaises(ValueError):self.make(Path(t)/"s.db").configure({"mode":"AUTO"})
+   with self.assertRaises(ValueError):self.make(Path(t)/"s.db").configure({"mode":"AUTO","enabled":True})
  def test_auto_requires_verified_adapter(self):
   with tempfile.TemporaryDirectory() as t:
-   with self.assertRaises(ValueError):self.make(Path(t)/"s.db").configure({"mode":"AUTO","live_authorized":True})
+   with self.assertRaises(ValueError):self.make(Path(t)/"s.db").configure({"mode":"AUTO","enabled":True,"live_authorized":True})
  def test_unverified_exposure_blocks(self):
   with tempfile.TemporaryDirectory() as t:
-   s=self.make(Path(t)/"s.db");s.configure({"enabled":True});s.exposure=lambda p:{}
+   s=self.make(Path(t)/"s.db");s.configure({"enabled":True,"mode":"MANUAL"});s.exposure=lambda p:{}
    self.assertEqual(s.step(datetime(2026,10,21,10,tzinfo=IST))["state"],"REVIEW")
  def test_amo_not_silently_sent(self):
   with tempfile.TemporaryDirectory() as t:
@@ -139,7 +149,7 @@ class NextOpen(unittest.TestCase):
   with tempfile.TemporaryDirectory() as t:
    calls=[];s=Schedule(Path(t)/"s.db","owned","FYERS",lambda p:(calls.append("analysis") or ([idea()],{"cards":[]})),
       lambda p:dict(positions_verified=True,orders_verified=True,used_capital=0,available_funds=100000,exposed_underlyings=[]))
-   s.configure({"enabled":True})
+   s.configure({"enabled":True,"mode":"MANUAL"})
    result=s.step(datetime(2026,10,20,18,tzinfo=IST))
    self.assertEqual(result["state"],"WAITING_NEXT_OPEN_REVALIDATION");self.assertFalse(calls)
    self.assertFalse(result["broker_amo_submitted"])
@@ -187,3 +197,19 @@ class DuplicateReportPolicy(unittest.TestCase):
     with self.assertRaises(ValueError):s.configure({"allow_duplicate_reports":value})
    s.configure({"allow_duplicate_reports":True});self.assertTrue(s.policy()["allow_duplicate_reports"])
    s.configure({"allow_duplicate_reports":False});self.assertFalse(s.policy()["allow_duplicate_reports"])
+
+class AutoSubmissionDefaults(unittest.TestCase):
+ def test_new_schedule_defaults_auto_but_is_disabled_and_unauthorized(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   s=Schedule(Path(tmp)/"new.db","owned","FYERS",lambda p:([],{}),lambda p:{})
+   self.assertEqual(s.policy()["mode"],"AUTO")
+   self.assertFalse(s.policy()["enabled"])
+   self.assertIsNot(s.policy().get("live_authorized"),True)
+   with self.assertRaises(ValueError):s.configure({"enabled":True})
+ def test_saved_manual_mode_is_preserved(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   path=Path(tmp)/"saved.db"
+   s=Schedule(path,"owned","FYERS",lambda p:([],{}),lambda p:{})
+   s.configure({"mode":"MANUAL","enabled":False})
+   loaded=Schedule(path,"owned","FYERS",lambda p:([],{}),lambda p:{})
+   self.assertEqual(loaded.policy()["mode"],"MANUAL")

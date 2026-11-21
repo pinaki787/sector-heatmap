@@ -215,17 +215,24 @@ class Broker:
         if stock_symbol(config['underlying']):require_options_allowed([r['expiry'] for r in rows],datetime.fromtimestamp(self.clock(),IST))
         expiry=min(r['expiry'] for r in rows);rows=[r for r in rows if r['expiry']==expiry]
         chosen=min(rows,key=lambda r:(abs(r['strike']-price),r['strike']))
+        if config.get('target_option_premium') not in (None,''):
+            from strategies.renko_supertrend.option_premium import choose_native,MAX_CANDIDATES
+            candidates=sorted(rows,key=lambda r:(abs(r['strike']-price),r['strike']))[:MAX_CANDIDATES]
+            for row in candidates:self.subscribe(row['symbol'])
+            return choose_native(self,config,[self.contract(r['symbol']) for r in candidates],price)
         self.subscribe(chosen['symbol']);return self.contract(chosen['symbol'])
     def quote(self,symbol):
         meta=self.contract(symbol);self.subscribe(symbol);self.start()
         quote=self.service.feed.quote(meta['exchange'],meta['token'])
-        if (quote['ask']-quote['bid'])/quote['ask']>.03:raise ValueError('Native spread exceeds 3%.')
+        if getattr(self,'entry_spread_filter_enabled',True) and (quote['ask']-quote['bid'])/quote['ask']>.03:raise ValueError('Entry spread exceeds the enabled 3% limit.')
         return dict(quote,bid=round(quote['bid'],4),ask=round(quote['ask'],4))
     def warm_options(self,config):
         for direction in ('BULLISH','BEARISH'):
             try:self.resolve(config,direction)
             except ValueError:pass
     def validate_config(self,config):
+        from strategies.ema_crossover.spread_policy import enabled
+        self.entry_spread_filter_enabled=enabled(config)
         self.ready();self.session_policy(config)
         if not self.route_availability(config)['available']:raise ValueError(self.route_availability(config)['message'])
         if config.get('zone_volume_exit_enabled') or config.get('volume_filter_enabled'):raise ValueError('Native captured candles have no verified traded volume; disable volume-dependent rules.')

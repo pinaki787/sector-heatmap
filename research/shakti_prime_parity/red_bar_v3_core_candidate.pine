@@ -1,0 +1,157 @@
+//@version=6
+indicator("Red Bar v3 — core parity research", overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+max_bars_back(time,5000)
+// Independent observed-behavior reconstruction; historical timing is being calibrated.
+// Reference source state is merged on its closing chart bar, without future lookahead.
+string sess = input.session("0915-1530", "Session")
+string tz = input.string("Asia/Kolkata", "Timezone")
+bool skip = input.bool(true, "Ignore first reference candle")
+bool matchCarry = input.bool(true, "Match observed prior-session carry until source reset")
+bool show5 = input.bool(true, "Show 5m bands")
+bool show30 = input.bool(true, "Show 30m bands")
+bool showHL = input.bool(true, "Show reference high/low")
+if not chart.is_standard or not timeframe.isintraday
+    runtime.error("Use standard intraday candles.")
+bool india = syminfo.prefix=="NSE" or syminfo.prefix=="BSE" or syminfo.prefix=="MCX"
+bool crypto = syminfo.type=="crypto" or syminfo.prefix=="DELTAIN"
+bool autoTF=input.bool(true,"Automatic market reference timeframe")
+int resetHour=input.int(2,"Crypto reset hour IST",minval=0,maxval=23)
+int resetMinute=input.int(30,"Crypto reset minute IST",minval=0,maxval=59)
+f_ref() =>
+    bool active = not india or not na(time(timeframe.period,sess,tz))
+    int resetMinutes=crypto ? resetHour*60+resetMinute : 210
+    int dayKey=india ? time("D") : int(math.floor((time+19800000-resetMinutes*60000)/86400000))
+    bool dayChange=ta.change(dayKey)!=0
+    bool first = active and (not active[1] or dayChange)
+    var float hi = na
+    var float lo = na
+    var int key = na
+    if first
+        hi := na
+        lo := na
+        key := time
+    if active and na(hi) and close < open and (not skip or not first)
+        hi := high
+        lo := low
+    [hi,lo,key]
+string symbol = ticker.standard(syminfo.tickerid)
+[a,b,k5] = request.security(symbol,autoTF and not india ? "30" : "5",f_ref(),lookahead=barmerge.lookahead_off)
+[c,d,k30] = request.security(symbol,"30",f_ref(),lookahead=barmerge.lookahead_off)
+bool active = not india or not na(time(timeframe.period,sess,tz))
+int resetMinutes=crypto ? resetHour*60+resetMinute : 210
+int dayKey=india ? time("D") : int(math.floor((time+19800000-resetMinutes*60000)/86400000))
+bool dayChange=ta.change(dayKey)!=0
+bool first = active and (not active[1] or dayChange)
+var int start = na
+if first
+    start := time
+bool valid5 = matchCarry or (not na(start) and k5 >= start)
+bool valid30 = matchCarry or (not na(start) and k30 >= start)
+float h5 = valid5 ? a : na
+float l5 = valid5 ? b : na
+float h30 = valid30 ? c : na
+float l30 = valid30 ? d : na
+f_level(float h,float l,float p) => l+(h-l)*p
+plot(h5,"LOCKED RED BAR HIGH",color.rgb(184,90,0),4,plot.style_linebr)
+plot(l5,"LOCKED RED BAR LOW",color.rgb(213,0,0),4,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.44) : na,"44%",color.rgb(227,125,50),2,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.50) : na,"50%",color.rgb(245,151,34),2,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.56) : na,"56%",color.rgb(227,125,50),2,plot.style_linebr)
+
+// Moving-average channels restored from the calibrated reconstruction.
+bool showEMA = input.bool(false,"Show 2m EMA200 channel",group="Moving averages")
+bool showSMA = input.bool(true,"Show 2m SMA200 channel",group="Moving averages")
+bool delayEMA = input.bool(true,"Delay EMA by one chart bar",group="Moving averages")
+bool showSlow = input.bool(true,"Show SMA5 on 30m and above",group="Moving averages")
+f_ma() => [ta.ema(high,200),ta.ema(low,200),ta.sma(high,200),ta.sma(low,200)]
+[eh,el,sh,sl] = request.security(symbol,"2",f_ma(),lookahead=barmerge.lookahead_off)
+float emaH = delayEMA ? eh[1] : eh
+float emaL = delayEMA ? el[1] : el
+color ec = close > emaH ? color.lime : close < emaL ? color.red : color.gray
+color sc = close > sh ? color.green : close < sl ? color.red : color.gray
+peh = plot(showEMA ? emaH : na,"2m EMA200 High",ec,2)
+pel = plot(showEMA ? emaL : na,"2m EMA200 Low",ec,2)
+fill(peh,pel,color.new(ec,88))
+psh = plot(showSMA and timeframe.in_seconds() <= 1800 ? sh : na,"200 SMA High — 2m",sc,2)
+psl = plot(showSMA and timeframe.in_seconds() <= 1800 ? sl : na,"200 SMA Low — 2m",sc,2)
+fill(psh,psl,color.new(sc,88))
+float sma5=ta.sma(close,5)
+plot(showSlow and timeframe.in_seconds() >= 1800 ? sma5 : na,"5 SMA Close — 30m+",close >= sma5 ? color.green : color.red,2)
+
+// Outer H+n*range / L-n*range anchors verified against original T20 export.
+// Intermediate spacing and SMART/colour rules are reconstruction hypotheses.
+string targetSource=input.string("5m","Target reference",options=["5m","30m","Both"],group="Targets")
+string targetMode=input.string("SMART","Target display",options=["ALL","SMART","OFF"],group="Targets")
+int targetCount=input.int(10,"Targets each direction",minval=1,maxval=20,group="Targets")
+int forward=input.int(2,"SMART forward targets",minval=1,maxval=5,group="Targets")
+bool targetBands=input.bool(true,"Show target 44/50/56 bands",group="Targets")
+bool targetLabels=input.bool(true,"Show target prices",group="Targets")
+int historyInput=input.int(8,"Target sessions to retain (object-budget capped)",minval=1,maxval=8,group="Targets")
+int sourceCount=targetSource == "Both" ? 2 : 1
+int keep=math.max(1,math.min(historyInput,int(math.floor(450.0/(targetCount*6*sourceCount)))))
+type TargetRecord
+    float hi
+    float lo
+    int key
+    int left
+    int right
+    float topClose
+    float botClose
+    float topWick
+    float botWick
+var array<line> targetLines=array.new<line>()
+var array<label> targetText=array.new<label>()
+var array<linefill> targetFill=array.new<linefill>()
+f_targetLine(float price,int left,int right,color col,string tag,float span) =>
+    line mid=line.new(left,price,right,price,xloc=xloc.bar_index,color=col,width=2)
+    array.push(targetLines,mid)
+    if targetBands
+        line upper=line.new(left,price+span*0.06,right,price+span*0.06,xloc=xloc.bar_index,color=color.new(col,35))
+        line lower=line.new(left,price-span*0.06,right,price-span*0.06,xloc=xloc.bar_index,color=color.new(col,35))
+        array.push(targetLines,upper)
+        array.push(targetLines,lower)
+        array.push(targetFill,linefill.new(upper,lower,color.new(col,92)))
+    if targetLabels
+        array.push(targetText,label.new(math.min(right,last_bar_index),price,tag+" "+str.tostring(price,"#.00"),xloc=xloc.bar_index,style=label.style_label_right,color=color.new(col,15),textcolor=color.white,size=size.tiny))
+f_targets(float hi,float lo,int key,string name,bool enabled) =>
+    var array<TargetRecord> records=array.new<TargetRecord>()
+    if enabled and active and not na(start) and key >= start and not na(hi) and hi > lo
+        bool fresh=array.size(records) == 0
+        if not fresh
+            fresh := array.last(records).key != key
+        if fresh
+            array.push(records,TargetRecord.new(hi,lo,key,bar_index,bar_index,close,close,high,low))
+            if array.size(records) > keep
+                array.shift(records)
+        TargetRecord record=array.last(records)
+        record.right := bar_index
+        if barstate.isconfirmed
+            record.topClose := math.max(record.topClose,close)
+            record.botClose := math.min(record.botClose,close)
+            record.topWick := math.max(record.topWick,high)
+            record.botWick := math.min(record.botWick,low)
+    if barstate.islast and enabled and targetMode != "OFF" and array.size(records) > 0
+        for j=0 to array.size(records)-1
+            TargetRecord record=array.get(records,j)
+            float span=record.hi-record.lo
+            int upperCount=targetMode == "ALL" ? targetCount : math.min(targetCount,math.max(forward,int(math.floor((record.topClose-record.hi)/span))+forward))
+            int lowerCount=targetMode == "ALL" ? targetCount : math.min(targetCount,math.max(forward,int(math.floor((record.lo-record.botClose)/span))+forward))
+            int right=j == array.size(records)-1 and key >= start ? bar_index+8 : record.right
+            for n=1 to targetCount
+                float up=record.hi+n*span
+                float down=record.lo-n*span
+                if n <= upperCount
+                    f_targetLine(up,record.left,right,record.topWick >= up ? color.rgb(42,200,102) : color.rgb(245,151,34),"T"+str.tostring(n),span)
+                if n <= lowerCount
+                    f_targetLine(down,record.left,right,record.botWick <= down ? color.rgb(255,0,0) : color.rgb(245,151,34),"T"+str.tostring(n),span)
+if barstate.islast
+    for item in targetFill
+        linefill.delete(item)
+    array.clear(targetFill)
+    for item in targetLines
+        line.delete(item)
+    array.clear(targetLines)
+    for item in targetText
+        label.delete(item)
+    array.clear(targetText)
+f_targets(a,b,k5,autoTF and not india ? "30m" : "5m",true)

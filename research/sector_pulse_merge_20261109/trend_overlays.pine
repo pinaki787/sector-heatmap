@@ -1,0 +1,56 @@
+// Trend overlays
+string spRtGroup = "TREND OVERLAYS"
+bool spRtShow = input.bool(true, "Show AI Renko Supertrend", group=spRtGroup, display=display.none)
+int spRtAutoLength = input.int(5, "ATR length", minval=1, group=spRtGroup, display=display.none)
+int spRtStLength = spRtAutoLength
+float spRtFactor = input.float(3.0, "Base factor", minval=0.1, step=0.1, group=spRtGroup, display=display.none)
+string spRtBrickMode = input.string("Auto", "Brick size mode", options=["Auto", "Manual"], group=spRtGroup, display=display.none)
+float spRtManualBrick = input.float(12.8, "Manual brick size", minval=0.00000001, active=spRtBrickMode == "Manual", group=spRtGroup, display=display.none)
+bool spRtShowMidline = input.bool(true, "Show Shakti Midline", group=spRtGroup, tooltip="Gaussian midline using the Sector Pulse dashboard period.", display=display.none)
+
+var float spRtHostAtr = na
+spRtHostAtr := ta.atr(spRtAutoLength)
+float spRtRegimeAtr = ta.atr(15)
+float spRtLowAtr = ta.atr(9)
+float spRtVolatilityRatio = spRtRegimeAtr > 0 ? spRtHostAtr / spRtRegimeAtr : 1.0
+float spRtEffectiveFactor = spRtFactor + (spRtVolatilityRatio > 1.2 ? 1.0 : spRtVolatilityRatio < 0.8 ? -0.5 : 0.0)
+float spRtAutoBox = math.max(syminfo.mintick, spRtVolatilityRatio > 1.2 ? spRtHostAtr * 1.5 : spRtVolatilityRatio < 0.8 ? spRtLowAtr * 0.7 : spRtHostAtr)
+float spRtBox = spRtBrickMode == "Manual" ? spRtManualBrick : spRtAutoBox
+var float spRtRc = na
+var float spRtRo = na
+var float spRtSyntheticAtr = na
+var float spRtUpper = na
+var float spRtLower = na
+var float spRtSt = na
+var int spRtDirection = 1
+if na(spRtRc)
+    spRtRc := close
+    spRtRo := close
+float spRtPreviousRc = spRtRc
+float spRtDelta = close - spRtRc
+int spRtSteps = spRtBox > 0 ? int(math.floor(math.abs(spRtDelta) / spRtBox)) : 0
+if spRtSteps >= 1
+    spRtRo := spRtRc
+    spRtRc += math.sign(spRtDelta) * spRtSteps * spRtBox
+float spRtRh = math.max(spRtRo, spRtRc)
+float spRtRl = math.min(spRtRo, spRtRc)
+float spRtSyntheticTr = math.max(spRtRh - spRtRl, math.max(math.abs(spRtRh - spRtPreviousRc), math.abs(spRtRl - spRtPreviousRc)))
+spRtSyntheticAtr := na(spRtSyntheticAtr) ? spRtSyntheticTr : spRtSyntheticAtr + (spRtSyntheticTr - spRtSyntheticAtr) / spRtStLength
+float spRtMidpoint = (spRtRh + spRtRl) / 2
+float spRtBasicUpper = spRtMidpoint + spRtEffectiveFactor * spRtSyntheticAtr
+float spRtBasicLower = spRtMidpoint - spRtEffectiveFactor * spRtSyntheticAtr
+float spRtPreviousUpper = spRtUpper
+float spRtPreviousLower = spRtLower
+float spRtPreviousSt = spRtSt
+spRtUpper := na(spRtPreviousUpper) or spRtBasicUpper < spRtPreviousUpper or spRtPreviousRc > spRtPreviousUpper ? spRtBasicUpper : spRtPreviousUpper
+spRtLower := na(spRtPreviousLower) or spRtBasicLower > spRtPreviousLower or spRtPreviousRc < spRtPreviousLower ? spRtBasicLower : spRtPreviousLower
+if na(spRtPreviousSt)
+    spRtDirection := 1
+else if spRtPreviousSt == spRtPreviousUpper
+    spRtDirection := spRtRc > spRtUpper ? -1 : 1
+else
+    spRtDirection := spRtRc < spRtLower ? 1 : -1
+spRtSt := spRtDirection < 0 ? spRtLower : spRtUpper
+bool spRtSupported = chart.is_standard or chart.is_renko
+plot(spRtShow and spRtSupported ? spRtSt : na, "AI Renko Supertrend", color=spRtDirection < 0 ? color.rgb(46, 160, 67) : color.rgb(229, 57, 53), linewidth=2, display=display.pane + display.data_window)
+plot(spRtShowMidline ? inferredG3 : na, "Shakti Midline", color=color.rgb(255, 184, 77), linewidth=2, display=display.pane + display.data_window)

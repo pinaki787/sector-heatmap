@@ -40,3 +40,45 @@ class CentralCallbackTests(unittest.TestCase):
   self.assertEqual(account_from_state('a'*32+'.'+'x'*32),'a'*32)
   for state in [None,'','../callback','a'*32+'.short','z'*32+'.'+'x'*32,'a'*32+'.'+'x'*32+'&account=other']:
    self.assertIsNone(account_from_state(state))
+
+
+class FyersSessionReuseTests(unittest.TestCase):
+    def test_sign_in_start_reuses_valid_session_and_waits_for_verified_expiry(self):
+        import ast
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        source = Path(__file__).resolve().parents[1] / "sector_heatmap" / "web.py"
+        tree = ast.parse(source.read_text())
+        route, = (
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.If) and ast.unparse(node.test) == "path == '/api/auth/start'"
+        )
+        module = ast.parse("def start(self): pass")
+        module.body[0].body = [route]
+        handler = compile(module, str(source), "exec")
+        for current, expected_status, oauth in (
+            ({"authenticated": True, "message": "Session already valid"}, 200, False),
+            ({"authenticated": False, "message": "Verification unavailable"}, 503, False),
+            ({"authenticated": False, "reauthentication_required": True}, 200, True),
+        ):
+            with self.subTest(current=current):
+                start_oauth = Mock(return_value="https://example.invalid/sign-in")
+                state = {}
+                environment = {
+                    "path": "/api/auth/start", "fyers_auth_status": lambda: current,
+                    "authorization_url": start_oauth, "secrets": SimpleNamespace(token_urlsafe=lambda n: "nonce"),
+                    "workspace_guard": SimpleNamespace(account_id="selected-account"), "port": 8100,
+                    "state": state,
+                }
+                exec(handler, environment)
+                response = Mock()
+                environment["start"](response)
+                status, payload = response.send_json.call_args.args
+                self.assertEqual(status, expected_status)
+                self.assertEqual("url" in payload, oauth)
+                self.assertEqual(start_oauth.called, oauth)
+                self.assertEqual("oauth_state" in state, oauth)
+                if oauth:
+                    self.assertEqual(state["oauth_state"], "selected-account.nonce")

@@ -1,5 +1,7 @@
+from strategies.ema_crossover.spread_policy import enabled as spread_filter_enabled
 """FYERS adapter: current masters, streaming prices and fresh order preflight."""
 import csv
+from collections import OrderedDict
 from datetime import datetime
 from sector_heatmap.market_calendar import IST
 import hashlib
@@ -16,6 +18,38 @@ from sector_heatmap.fyers_execution import _current_client, available_funds
 from sector_heatmap.market_data import configure_websocket_ca_bundle
 from sector_heatmap.fyers_history import account_read
 from .valuation import amount, multiplier
+
+
+_shared_master_rows_lock = threading.RLock()
+_shared_master_rows = OrderedDict()
+_SHARED_MASTER_PATH_LIMIT = 16
+
+
+def _master_signature(stat):
+    return (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
+def _shared_fyers_master_rows(path, signature):
+    # Public instrument metadata only. Keep each path's current version, not a
+    # growing history of revisions; quotes/accounts/orders never enter this cache.
+    key = str(path.absolute())
+    with _shared_master_rows_lock:
+        saved = _shared_master_rows.get(key)
+        if saved is not None and saved[0] == signature:
+            _shared_master_rows.move_to_end(key)
+            return saved[1]
+        with path.open() as stream:
+            if _master_signature(os.fstat(stream.fileno())) != signature:
+                raise ValueError('FYERS instrument master changed during read; retry current master.')
+            rows = tuple(tuple(row) for row in csv.reader(stream))
+            if (_master_signature(os.fstat(stream.fileno())) != signature
+                    or _master_signature(path.stat()) != signature):
+                raise ValueError('FYERS instrument master changed during read; retry current master.')
+        _shared_master_rows[key] = (signature, rows)
+        _shared_master_rows.move_to_end(key)
+        while len(_shared_master_rows) > _SHARED_MASTER_PATH_LIMIT:
+            _shared_master_rows.popitem(last=False)
+        return rows
 
 
 class IndependentDataSocket(data_ws.FyersDataSocket):
@@ -77,8 +111,8 @@ class FyersBroker:
         path = self.master_dir / (segment + '.csv')
         if not path.exists() or time.time()-path.stat().st_mtime > 86400:
             raise ValueError('Current FYERS master cache required (less than 24 hours old). Refresh EMA Band master cache.')
-        with path.open() as f:
-            return list(csv.reader(f))
+        signature = _master_signature(path.stat())
+        return _shared_fyers_master_rows(path, signature)
 
     def underlying(self, symbol):
         exchange = symbol.split(':')[0]
@@ -346,9 +380,12 @@ class FyersBroker:
             raise ValueError('Broker position differs from this runner’s confirmed quantity. Manual reconciliation required; no SELL sent.')
 
     def preflight(self,order,c):
+        if c.get('_entry_deadline') is not None:
+            from strategies.renko_supertrend.entry_pipeline import broker_preflight
+            return broker_preflight(self,order,c)
         self.validate_order(order)
         quote=self.quote(order['symbol'])
-        if (quote['ask']-quote['bid'])/quote['ask']>0.03:
+        if spread_filter_enabled(c) and (quote['ask']-quote['bid'])/quote['ask']>0.03:
             raise ValueError('Entry spread exceeds 3%.')
         if any(r.get('symbol')==order['symbol'] and float(r.get('netQty',0))!=0 for r in self.positions()):
             raise ValueError('Existing position in the same option contract blocks entry; external positions are never adopted.')

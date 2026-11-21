@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const {choices}=require('../broker-account-options.js');
 const accounts=[
  {id:'f',broker:'FYERS',label:'Personal FYERS',configured:true},
- {id:'d',broker:'DHAN',label:'Personal Dhan',configured:true,strategy_routes:['renko','rsi','band','kama']},
- {id:'x',broker:'DELTA_INDIA',label:'Crypto',configured:true},
+ {id:'d',broker:'DHAN',label:'Personal Dhan',configured:true,parser_supported:true,strategy_routes:['renko','rsi','band','kama']},
+ {id:'x',broker:'DELTA_INDIA',label:'Crypto',configured:true,parser_supported:true},
  {id:'u',broker:'DHAN',label:'Incomplete',configured:false}
 ];
 test('manual lists every owned account but supports owned FYERS workspaces and the Dhan manual adapter',()=>{
@@ -42,7 +42,7 @@ test('Dhan Renko and RSI options route to an owned strategy account',()=>{
 });
 
 test('strategy accounts remain disabled until loaded backend advertises the route',()=>{
- assert.equal(choices([{id:'d',broker:'DHAN',label:'Dhan',configured:true}],{kind:'renko'})[0].disabled,true);
+ assert.equal(choices([{id:'d',broker:'DHAN',label:'Dhan',configured:true,parser_supported:true}],{kind:'renko'})[0].disabled,true);
 });
 
 test('Renko lists configured FYERS and Delta workspaces as selectable accounts',()=>{
@@ -60,7 +60,24 @@ test('Live feed enables configured Dhan accounts without enabling Delta',()=>{
  assert.equal(rows[0].disabled,false);assert.equal(rows[1].disabled,true);
 });
 
-test('parser enables configured FYERS from main portal without enabling other brokers',()=>{
- const rows=choices([{id:'f',broker:'FYERS',label:'Algo',configured:true},{id:'d',broker:'DHAN',label:'Dhan',configured:true},{id:'x',broker:'DELTA_INDIA',label:'Crypto',configured:true},{id:'bad',broker:'FYERS',configured:false}],{kind:'parser'});
- assert.deepEqual(rows.map(r=>r.disabled),[false,true,true,true]);
+test('Trade Parser lists configured owned brokers and rejects incomplete connections',()=>{
+ const rows=choices([{id:'f',broker:'FYERS',label:'Algo',configured:true},{id:'d',broker:'DHAN',label:'Dhan',configured:true,parser_supported:true},{id:'x',broker:'DELTA_INDIA',label:'Crypto',configured:true,parser_supported:true},{id:'bad',broker:'FYERS',configured:false}],{kind:'parser'});
+ assert.deepEqual(rows.map(r=>r.disabled),[false,false,false,true]);
+});
+test('configured Dhan Screener is selectable only after read-only backend capability is advertised',()=>{
+ const a={id:'mine',broker:'DHAN',label:'Algo',configured:true,screener_read_only:true};
+ assert.equal(choices([a],{kind:'screener',currentBroker:'FYERS'})[0].disabled,false);
+ assert.equal(choices([{...a,screener_read_only:false}],{kind:'screener'})[0].disabled,true);
+ assert.equal(choices([{...a,configured:false}],{kind:'screener'})[0].disabled,true);
+});
+test('Parser and Live Feed use valid owned context, sole Dhan, or explicit selection for multiple accounts',()=>{
+ const {accountSelection}=require('../broker-account-options.js');
+ const rows=choices(accounts,{kind:'parser'});
+ assert.equal(accountSelection(rows),null);
+ assert.equal(accountSelection(rows,{requestedId:'d'}).id,'d');
+ assert.equal(accountSelection(rows,{requestedId:'someone-else'}),null);
+ assert.equal(accountSelection(rows,{previousValue:'account:d'}).id,'d');
+ assert.equal(accountSelection(rows,{previousValue:'account:deleted'}),null);
+ assert.equal(accountSelection(rows.filter(r=>r.id==='d')).id,'d');
+ assert.equal(accountSelection(rows,{workspaceId:'f'}).id,'f');
 });

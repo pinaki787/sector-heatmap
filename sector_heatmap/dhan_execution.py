@@ -35,10 +35,11 @@ def number(value, label, positive=False):
 
 
 class DhanAPIError(RuntimeError):
-    def __init__(self, message, definitive_rejection=False, reauthentication_required=False):
+    def __init__(self, message, definitive_rejection=False, reauthentication_required=False, rate_limited=False):
         super().__init__(message)
         self.definitive_rejection = definitive_rejection
         self.reauthentication_required = reauthentication_required
+        self.rate_limited = rate_limited
 
 
 def contract_underlying(row):
@@ -110,6 +111,9 @@ class DhanClient:
         if path.startswith('/optionchain'):
             with self._quote_slot('optionchain', 3.1):
                 return self._request(method, path, payload)
+        if method=='GET' and path.startswith('/trades/'):
+            with self._quote_slot('statement-history',1.1):
+                return self._request(method,path,payload)
         if path.startswith('/charts/'):
             with self._quote_slot('history', .25):
                 return self._request(method, path, payload)
@@ -129,7 +133,7 @@ class DhanClient:
             if response.status_code == 403:
                 raise DhanAPIError('Dhan rejected account authorization or API permission. Test the selected account connection before retrying.', True)
             if response.status_code == 429:
-                raise DhanAPIError('Dhan API rate limit reached. Wait briefly before a new read or preview. Order submissions are never retried automatically.', True)
+                raise DhanAPIError('Dhan API rate limit reached. Wait briefly before a new read or preview. Order submissions are never retried automatically.', True, rate_limited=True)
             if response.status_code >= 500:
                 raise RuntimeError('Dhan service is temporarily unavailable. Read/preview failed; an attempted submission requires reconciliation, not retry.')
             if response.status_code >= 400:
@@ -195,11 +199,15 @@ class DhanMaster:
         if expiry and expiry < now.date().isoformat():raise ValueError('Dhan contract has expired.')
         result={'security_id':row['SEM_SMST_SECURITY_ID'],'exchange_segment':segment(row), 'symbol':row['SEM_TRADING_SYMBOL'],
                 'lot_size':int(number(row['SEM_LOT_UNITS'],'Lot size',True)), 'tick_size':float(number(row['SEM_TICK_SIZE'],'Tick size',True)/100),
-                'option_type':row['SEM_OPTION_TYPE'],'strike':float(number(row.get('SEM_STRIKE_PRICE') or 0,'Master strike')),'expiry':expiry,'kind':kind,'quantity_multiplier':1}
+                'option_type':row['SEM_OPTION_TYPE'],'strike':float(number(row.get('SEM_STRIKE_PRICE') or 0,'Master strike')),'expiry':expiry,'kind':kind,'quantity_multiplier':1,
+                'instrument_name':str(row.get('SEM_INSTRUMENT_NAME') or '').upper()}
         if segment(row)=='MCX_COMM':
             from . import dhan_mcx
             result.update(dhan_mcx.valuation(row),entry_cutoff=dhan_mcx.entry_cutoff(row))
         return result
+
+
+from .chart_trade_admission import serialized_dhan_entry, mark_dhan_entry_attempt
 
 
 class DhanExecutionService:
@@ -237,7 +245,7 @@ class DhanExecutionService:
     def capabilities(self):
         configured=(self.folder/'credentials.json').exists()
         return {'selected_broker':'dhan','account_id':self.account['id'],'account_label':self.account['label'],
-                'strategy_routes':['renko','rsi','band','kama'], 'dhan_configured':configured,'live_submission_enabled':bool(self.account['live_enabled']) and self.execution_allowed(),
+                'strategy_routes':['renko','rsi','band','kama'], 'screener_read_only':True, 'dhan_configured':configured,'live_submission_enabled':bool(self.account['live_enabled']) and self.execution_allowed(),
                 'message':'Dhan account credentials are saved; broker validation occurs on preview.' if configured else 'Save your Dhan client ID and access token in Broker accounts.'}
 
     def status(self):
@@ -345,6 +353,7 @@ class DhanExecutionService:
         margin_cash=number(margin.get('availableBalance',cash),'Margin available balance')
         cash=min(cash,margin_cash)
         required=max(required,price*quantity*multiplier) if option else required
+        if payload.get('manual_amount_budget') is not None and required>number(payload['manual_amount_budget'],'Account amount',True):raise ValueError('Fresh Dhan margin exceeds the reviewed account amount.')
         if cash<required:raise ValueError(f'Insufficient Dhan funds/margin: available ₹{cash:.2f}; required ₹{required:.2f}.')
         open_positions=[row for row in positions if float(row.get('netQty',0))!=0]
         realized_loss=sum(max(0,-float(row.get('realizedProfit',0))) for row in positions)
@@ -418,6 +427,7 @@ class DhanExecutionService:
             if acquired:unlock_file(fd)
             os.close(fd)
 
+    @serialized_dhan_entry
     def submit(self,preview_id,confirmation):
         with self.lock, self._submission_lock():
             stored=self.previews.get(preview_id)
@@ -446,6 +456,7 @@ class DhanExecutionService:
         journal=self.folder/'dhan-orders'/ (preview_id+'.json')
         journal.parent.mkdir(exist_ok=True,mode=0o700)
         if journal.exists():raise ValueError('Dhan ticket was already submitted; reconcile its correlation ID.')
+        mark_dhan_entry_attempt(self)
         _atomic_private_write(journal,json.dumps({'status':'SUBMITTING','ticket':ticket,'endpoint':endpoint,'protection':fresh.get('protection')}))
         try:
             result=self._client().request('POST',endpoint,ticket)

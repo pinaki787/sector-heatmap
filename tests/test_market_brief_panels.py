@@ -125,7 +125,7 @@ class PanelDeliveryTests(unittest.TestCase):
   with self.box.db:
    self.box.db.execute("INSERT INTO events VALUES(?,?,100)",(self.event["id"],json.dumps(self.event)))
    self.box.db.execute("INSERT INTO delivery(event,channel,state,updated) VALUES(?,'telegram','PENDING',100)",(self.event["id"],))
-  with patch.object(d,"media_bytes",return_value=b"ok"),patch.object(d,"send_card",side_effect=self.send),patch.object(d,"private_write"),patch("sector_heatmap.notification_controls.gate",return_value=(None,None)):
+  with patch.object(d,"media_bytes",return_value=b"ok"),patch.object(d,"send_card",side_effect=self.send),patch.object(d,"private_write"),patch("sector_heatmap.notification_controls.gate",return_value=(None,None)),patch("sector_heatmap.notification_sessions.gate",return_value=(None,None)):
    self.box.deliver(self.config);self.box.deliver(self.config)
   self.assertEqual(self.calls,[0,1,2]);self.assertEqual(self.box.db.execute("SELECT state FROM delivery").fetchone()[0],"SENT")
 if __name__=="__main__":unittest.main()

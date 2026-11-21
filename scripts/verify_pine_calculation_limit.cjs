@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm');
+const worker=process.argv[2]||'.private/chart-pine-worker.js',start=Date.UTC(2026,10,18),bars=Array.from({length:250},(_,i)=>({openTime:start+i*300000,closeTime:start+(i+1)*300000,open:100+i,high:102+i,low:99+i,close:101+i,volume:10}));
+(async()=>{const results=[];for(const [name,expression,limit,inputs] of [['literal','100',100],['arithmetic','20*5',100],['constant','LIMIT',100],['unlimited','0',250],['exceeds_history','1000',250],['override','100',25,{__sp_calculated_bars:25}],['override_all','100',250,{__sp_calculated_bars:0}]]){
+ const ctx=vm.createContext({console,setTimeout,clearTimeout,structuredClone});ctx.self=ctx;vm.runInContext(fs.readFileSync(worker,'utf8'),ctx);
+ const source='//@version=6\nconst int LIMIT=100\nindicator("Calculation limit",calc_bars_count='+expression+')\nplot(close,"close")\nplot(bar_index,"index")\nplot(close[1],"previous")';
+ const output=await new Promise((resolve,reject)=>{ctx.postMessage=d=>{if(d.ok===false)reject(Error(d.error));else if(d.plots)resolve(d)};ctx.onmessage({data:{source,inputs,symbolInfo:{tickerid:'DELTAIN:TEST',ticker:'TEST',prefix:'DELTAIN',type:'crypto',timezone:'UTC',session:'24x7',mintick:.01},frames:{'5':bars},timeframe:'5',count:250}}).catch(reject)});
+ const close=output.plots.close.data,index=output.plots.index.data,previous=output.plots.previous.data,first=bars.length-limit;
+ const checks={count:close.length===limit,first_time:close[0].time===bars[first].openTime,first_index:index[0].value===0,last_index:index.at(-1).value===limit-1,first_previous_missing:previous[0].value==null};
+ results.push({name,expression,expected_bars:limit,actual_bars:close.length,checks,status:Object.values(checks).every(Boolean)?'PASS':'FAIL'});
+}const status=results.every(r=>r.status==='PASS')?'PASS':'FAIL';console.log(JSON.stringify({status,scope:'Declaration calc_bars_count, source constants/arithmetic, zero and oversized values; relative bar indexing and inaccessible prior history',results},null,2));if(status==='FAIL')process.exitCode=1})().catch(e=>{console.error(e.stack);process.exitCode=1});

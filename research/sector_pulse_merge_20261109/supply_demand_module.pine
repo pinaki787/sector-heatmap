@@ -1,0 +1,90 @@
+
+// Automatic chart-timeframe supply/demand. Detection is delayed by right-hand confirmation.
+// Boxes START at confirmation, never at the pivot: there is no historical availability claim.
+string sdGroup = "SD — Automatic supply and demand"
+bool sdEnabled = input.bool(true, "Automatic supply / demand zones", group=sdGroup, display=display.none)
+int sdLeft = input.int(3, "Pivot left bars", minval=1, maxval=20, group=sdGroup, display=display.none)
+int sdRight = input.int(3, "Pivot confirmation bars", minval=1, maxval=20, group=sdGroup, display=display.none)
+float sdDeparture = input.float(0.8, "Minimum departure (pivot ATR)", minval=0, step=0.1, group=sdGroup, display=display.none)
+float sdMaxWidth = input.float(1.5, "Maximum zone width (pivot ATR)", minval=0.1, step=0.1, group=sdGroup, display=display.none)
+int sdKeep = input.int(16, "Zones retained", minval=2, maxval=24, group=sdGroup, display=display.none)
+int sdExpiry = input.int(500, "Expire after chart bars", minval=10, maxval=5000, group=sdGroup, display=display.none)
+bool sdShowEnded = input.bool(true, "Retain invalidated / expired zones", group=sdGroup, display=display.none)
+color sdSupply = input.color(color.rgb(220,38,38), "Supply", group=sdGroup, display=display.none)
+color sdDemand = input.color(color.rgb(22,163,74), "Demand", group=sdGroup, display=display.none)
+type SDZone
+    float hi
+    float lo
+    bool supply
+    int pivotTime
+    int detectedTime
+    int born
+    int state
+    int tests
+    bool touching
+    bool departed
+    box drawing
+var array<SDZone> sdZones = array.new<SDZone>()
+float sdAtr = ta.atr(14)
+float sdPh = ta.pivothigh(high, sdLeft, sdRight)
+float sdPl = ta.pivotlow(low, sdLeft, sdRight)
+float sdLowSince = ta.lowest(low, sdRight)
+float sdHighSince = ta.highest(high, sdRight)
+sdCaption(SDZone z) =>
+    (z.supply ? "SUPPLY" : "DEMAND") + " · " + (z.state == 2 ? "INVALIDATED" : z.state == 3 ? "EXPIRED" : z.touching ? "RETESTING" : z.tests > 0 ? "RETESTED" : "FRESH") + "\n" + str.tostring(z.lo, "#.##") + "–" + str.tostring(z.hi, "#.##") + " | " + timeframe.period + " | tests " + str.tostring(z.tests)
+sdCreate(bool supply, float hi, float lo) =>
+    bool overlap = false
+    for z in sdZones
+        if z.state < 2 and z.supply == supply and hi >= z.lo and lo <= z.hi
+            overlap := true
+    if not overlap and hi > lo
+        color tint = supply ? sdSupply : sdDemand
+        box drawing = box.new(time_close, hi, time_close, lo, xloc=xloc.bar_time, border_color=tint, bgcolor=color.new(tint, 88), text_color=tint, text_size=size.tiny, text_halign=text.align_right, text_valign=text.align_center)
+        SDZone z = SDZone.new(hi, lo, supply, time[sdRight], time_close, bar_index, 0, 0, false, supply ? close < lo : close > hi, drawing)
+        box.set_text(drawing, sdCaption(z))
+        array.push(sdZones, z)
+        while array.size(sdZones) > sdKeep
+            box.delete(array.shift(sdZones).drawing)
+bool sdRetestEvent = false
+bool sdInvalidEvent = false
+if sdEnabled and chart.is_standard and barstate.isconfirmed
+    // Existing zones update before creation. The detection candle is never counted as a retest.
+    for z in sdZones
+        if z.state < 2
+            bool invalid = z.supply ? close > z.hi : close < z.lo
+            bool expired = bar_index-z.born >= sdExpiry
+            bool touches = high >= z.lo and low <= z.hi
+            if invalid or expired
+                z.state := invalid ? 2 : 3
+                z.touching := false
+                sdInvalidEvent := sdInvalidEvent or invalid
+                box.set_border_style(z.drawing, line.style_dashed)
+                box.set_bgcolor(z.drawing, color.new(color.gray, sdShowEnded ? 95 : 100))
+                box.set_border_color(z.drawing, color.new(color.gray, sdShowEnded ? 50 : 100))
+                box.set_text_color(z.drawing, color.new(color.gray, sdShowEnded ? 0 : 100))
+            else
+                if touches and not z.touching and z.departed
+                    z.tests += 1
+                    z.state := 1
+                    sdRetestEvent := true
+                z.touching := touches and z.departed
+                if z.supply ? close < z.lo : close > z.hi
+                    z.departed := true
+            box.set_right(z.drawing, time_close)
+            box.set_text(z.drawing, sdCaption(z))
+    float pivotAtr = sdAtr[sdRight]
+    if not na(pivotAtr) and pivotAtr > 0
+        if not na(sdPh)
+            float hi = high[sdRight]
+            float lo = math.max(open[sdRight], close[sdRight])
+            lo := math.min(lo, hi-syminfo.mintick)
+            if hi-lo <= pivotAtr*sdMaxWidth and hi-sdLowSince >= pivotAtr*sdDeparture and close < lo
+                sdCreate(true, hi, lo)
+        if not na(sdPl)
+            float lo = low[sdRight]
+            float hi = math.min(open[sdRight], close[sdRight])
+            hi := math.max(hi, lo+syminfo.mintick)
+            if hi-lo <= pivotAtr*sdMaxWidth and sdHighSince-lo >= pivotAtr*sdDeparture and close > hi
+                sdCreate(false, hi, lo)
+alertcondition(sdRetestEvent, "Supply/demand retest", "A confirmed chart candle retested an automatic zone. Retest is not confirmation of support/resistance.")
+alertcondition(sdInvalidEvent, "Supply/demand invalidation", "A confirmed chart close invalidated an automatic supply/demand zone.")

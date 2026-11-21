@@ -28,7 +28,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_new_navigation_registry_drives_global_and_user_controls(self):
         from sector_heatmap.section_permissions import FEATURES
-        for key in ('runner-jobs','user-guide'):
+        for key in ('investment','runner-jobs','user-guide'):
             self.assertIn(key,FEATURES)
             self.assertTrue(self.store.sidebar_visibility()[key])
         choices=self.store.sidebar_visibility()
@@ -37,6 +37,24 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(self.store.sidebar_visibility()['runner-jobs'])
         with self.assertRaises(PermissionError):
             self.store.set_sidebar_visibility(self.alice,choices)
+
+    def test_investment_assignment_and_visibility_preserve_saved_choices(self):
+        from sector_heatmap.section_permissions import allowed
+        choices=self.store.sidebar_visibility()
+        choices['straddles']=False
+        choices['investment']=False
+        self.store.set_sidebar_visibility(self.admin,choices)
+        self.store.set_features(self.admin,'alice',['sectors','investment'])
+        token,user=self.store.login('alice','alice-private-password')
+        self.assertTrue(allowed(user,'/api/investment/analyze'))
+        self.assertFalse(allowed(self.store.login('bob','bob-private-password')[1],'/api/investment/analyze'))
+        self.assertFalse(self.store.sidebar_visibility()['investment'])
+        choices['investment']=True
+        self.store.set_sidebar_visibility(self.admin,choices)
+        self.assertFalse(self.store.sidebar_visibility()['straddles'])
+        self.assertEqual(set(self.store.session(token)['features']),{'sectors','investment'})
+        self.store.set_features(self.admin,'alice',['sectors'])
+        self.assertFalse(allowed(self.store.session(token),'/api/investment/analyze'))
 
     def test_password_hash_and_session_are_not_plaintext(self):
         token,user=self.store.login('alice','alice-private-password')
@@ -85,11 +103,69 @@ class WorkspaceTests(unittest.TestCase):
         for user in (self.admin,self.bob):
             with self.assertRaises(PermissionError):self.store.account(user,self.a['id'])
 
+    def test_legacy_registry_migration_preserves_rows_and_scopes_duplicates(self):
+        import sqlite3
+        legacy=self.store.path.parent/'legacy-scope.sqlite3'
+        with sqlite3.connect(legacy) as db:
+            db.execute("""CREATE TABLE accounts(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,
+                broker TEXT NOT NULL,label TEXT NOT NULL,account_ref TEXT NOT NULL,
+                port INTEGER UNIQUE NOT NULL,live_enabled INTEGER NOT NULL DEFAULT 0,
+                credential_identity TEXT UNIQUE,UNIQUE(broker,account_ref))""")
+            db.execute("INSERT INTO accounts VALUES(?,?,?,?,?,?,?,?)",
+                       ('a'*32,'owner','DHAN','Original','123456',8801,1,'digest'))
+        migrated=WorkspaceStore(legacy)
+        with migrated.db() as db:
+            self.assertEqual(tuple(db.execute('SELECT * FROM accounts').fetchone()),
+                             ('a'*32,'owner','DHAN','Original','123456',8801,1,'digest'))
+            db.execute("INSERT INTO accounts VALUES(?,?,?,?,?,?,?,?)",
+                       ('b'*32,'other','DHAN','Independent','123456',8802,0,'digest'))
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute("INSERT INTO accounts VALUES(?,?,?,?,?,?,?,?)",
+                           ('c'*32,'owner','DHAN','Duplicate','123456',8803,0,None))
+        WorkspaceStore(legacy)  # migration is idempotent
+
+    def test_same_broker_action_cannot_target_another_account(self):
+        second=self.store.create_account(self.alice,'FYERS','Independent','ALICE-NEXT')
+        guard=WorkspaceGuard(self.store,self.a['id'],self.a['port'],8079)
+        for path in ('/api/renko-supertrend/start','/api/trade-ticket/prepare',
+                     '/api/ema-crossover/start','/api/kama/start','/api/analysis-handoff/preview'):
+            with self.assertRaisesRegex(PermissionError,'Action account differs'):
+                guard.validate_action(self.a,path,{'account_id':second['id'],'broker':'FYERS'})
+        guard.validate_action(self.a,'/api/renko-supertrend/start',{'account_id':self.a['id']})
+
+    def test_same_dhan_account_across_users_has_independent_credentials_and_home(self):
+        first=self.store.create_account(self.alice,'DHAN','First','12345678')
+        second=self.store.create_account(self.bob,'DHAN','Second','12345678')
+        fields={'DHAN_CLIENT_ID':'12345678','DHAN_API_KEY':'key','DHAN_API_SECRET':'secret'}
+        self.store.configure(self.alice,first['id'],fields)
+        self.store.configure(self.bob,second['id'],fields)
+        self.assertNotEqual(self.store.folder(first),self.store.folder(second))
+        with self.assertRaises(PermissionError):self.store.account(self.alice,second['id'])
+        with self.assertRaises(PermissionError):self.store.configure(self.alice,second['id'],fields)
+
+    def test_common_binding_rejects_foreign_query_and_runner_path(self):
+        guard=WorkspaceGuard(self.store,self.a['id'],self.a['port'],8079)
+        foreign='f'*32
+        for path in ('/api/renko-supertrend/runner?account_id='+foreign,
+                     '/api/renko-dhan/'+foreign+'/status',
+                     '/api/jobs?account_id='+self.a['id']+'&account_id='+foreign):
+            with self.assertRaises(PermissionError):guard.validate_account_binding(self.a,path)
+        guard.validate_account_binding(self.a,'/api/jobs?account_id='+self.a['id'])
+
+    def test_distinct_accounts_from_same_broker_are_allowed(self):
+        second=self.store.create_account(self.alice,'FYERS','Second FYERS','ALICE-SECOND')
+        accounts=self.store.accounts(self.alice)
+        self.assertEqual(len([a for a in accounts if a['broker']=='FYERS']),2)
+        self.assertNotEqual(second['id'],self.a['id'])
+        self.assertNotEqual(second['port'],self.a['port'])
+
     def test_multiple_users_and_multiple_accounts(self):
         a2=self.store.create_account(self.alice,'DELTA_INDIA','Alice crypto','ALICE-DELTA')
         self.assertEqual(len(self.store.accounts(self.alice)),2)
         self.assertNotEqual(self.a['port'],a2['port']);self.assertNotEqual(self.a['port'],self.b['port'])
-        with self.assertRaises(ValueError):self.store.create_account(self.bob,'FYERS','Duplicate','alice-id')
+        shared=self.store.create_account(self.bob,'FYERS','Independent registration','alice-id')
+        self.assertNotEqual(shared['id'],self.a['id'])
+        with self.assertRaises(ValueError):self.store.create_account(self.alice,'FYERS','Duplicate','alice-id')
         with self.assertRaises(ValueError):self.store.create_account(self.alice,'UNKNOWN','No','ID')
 
     def test_credential_ownership_and_duplicate_identity(self):
@@ -98,7 +174,10 @@ class WorkspaceTests(unittest.TestCase):
         saved=self.store.configure(self.alice,self.a['id'],fields)
         self.assertFalse(saved['live_enabled'])
         a2=self.store.create_account(self.bob,'FYERS','Other','OTHER-ID')
-        with self.assertRaisesRegex(ValueError,'already belongs'):self.store.configure(self.bob,a2['id'],fields)
+        other=self.store.configure(self.bob,a2['id'],fields)
+        self.assertNotEqual(self.store.folder(other),self.store.folder(self.a))
+        same_user=self.store.create_account(self.bob,'FYERS','Duplicate key','BOB-SECOND')
+        with self.assertRaisesRegex(ValueError,'already belongs'):self.store.configure(self.bob,same_user['id'],fields)
         with self.assertRaisesRegex(ValueError,'new workspace'):self.store.configure(self.alice,self.a['id'],{**fields,'FYERS_APP_ID':'OTHER-APP'})
         path=self.store.folder(self.a)/'credentials.json'
         self.assertEqual(path.stat().st_mode & 0o777,0o600)
@@ -169,12 +248,35 @@ class WorkspaceTests(unittest.TestCase):
         (repo/'heatmap_server.py').write_text('# entry')
         subprocess.run(['git','add','.'],cwd=repo,check=True)
         subprocess.run(['git','-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','fixture'],cwd=repo,check=True)
+        (repo/'strategies/renko_supertrend').mkdir(parents=True)
+        for name in ('brick_basis.py','anti_chop.py'):(repo/'strategies/renko_supertrend'/name).write_text('# reviewed Renko module')
+        required=['strategies/ema_crossover/spread_policy.py','strategies/renko_supertrend/live_chart.py','strategies/renko_supertrend/price_basis.py','strategies/renko_supertrend/brick_entry.py','strategies/renko_supertrend/loss_range.py','strategies/renko_supertrend/trend_reentry.py','strategies/renko_supertrend/binding.py','sector_heatmap/dhan_screener.py']
+        for name in required:
+            path=repo/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# reviewed runtime dependency')
+        chart_assets = {
+            'index.html': '<script src="/chart-workspace.js?v=1"></script>',
+            'chart-workspace.js': '// chart controls',
+            'chart-workspace-studies.js': '// chart studies',
+            'chart-workspace.css': '/* chart styles */',
+            'vendor/lightweight-charts-4.2.3.js': '// chart library',
+        }
+        for name, content in chart_assets.items():
+            asset = repo / name
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_text(content)
         (repo/'.fyers.env').write_text('PRIVATE=secret')
         self.store.configure(self.alice,self.a["id"],{"FYERS_APP_ID":"OWN-100","FYERS_SECRET_KEY":"own-secret"})
         runtime=WorkspaceRuntime(self.store,repo)
         folder=runtime.provision(self.a);other=runtime.provision(self.b)
+        for workspace in (folder, other):
+            for name, content in chart_assets.items():
+                self.assertEqual((workspace / 'source' / name).read_text(), content)
+            overlay = json.loads((workspace / 'public-source-overlay.json').read_text())
+            self.assertTrue(chart_assets.keys() <= {item['path'] for item in overlay})
         self.assertFalse((folder/'source/.fyers.env').exists())
         self.assertTrue((folder/'source/heatmap_server.py').exists())
+        for name in ('brick_basis.py','anti_chop.py'):self.assertTrue((folder/'source/strategies/renko_supertrend'/name).exists())
+        for name in required:self.assertEqual((folder/'source'/name).read_text(),'# reviewed runtime dependency')
         (folder/'source/.private').mkdir(exist_ok=True);(folder/'source/.private/state.json').write_text('alice-only')
         self.assertFalse((other/'source/.private/state.json').exists())
         self.assertTrue((folder/'source-commit.txt').exists())
@@ -237,6 +339,19 @@ class PortalTests(unittest.TestCase):
         with patch.object(self.runtime,'provision') as provision:
             self.assertEqual(self.request('/api/workspaces/open',{'account_id':a['id']},cookie,csrf)[0],403)
             provision.assert_not_called()
+    def test_delete_requires_csrf_owner_confirmation_and_revokes_access(self):
+        own=self.store.create_account(self.user,'FYERS','Private','ACCOUNT-1')
+        foreign=self.store.create_account(self.admin,'FYERS','Admin','ADMIN-1')
+        cookie,csrf=self.login()
+        payload={'account_id':own['id'],'confirmation':'ACCOUNT-1'}
+        self.assertEqual(self.request('/api/workspaces/delete',payload,cookie,'bad')[0],403)
+        self.assertEqual(self.request('/api/workspaces/delete',payload,cookie,csrf,origin=False)[0],403)
+        self.assertEqual(self.request('/api/workspaces/delete',{'account_id':foreign['id'],'confirmation':'ADMIN-1'},cookie,csrf)[0],403)
+        self.assertEqual(self.request('/api/workspaces/delete',{**payload,'confirmation':'wrong'},cookie,csrf)[0],400)
+        status,_,result=self.request('/api/workspaces/delete',payload,cookie,csrf)
+        self.assertEqual(status,200);self.assertTrue(result['records_retained'])
+        self.assertEqual(self.request('/api/workspaces/open',{'account_id':own['id']},cookie,csrf)[0],403)
+
     def test_credentials_are_not_returned_or_stored_in_listing(self):
         a=self.store.create_account(self.user,'FYERS','Private','ACCOUNT-1');cookie,csrf=self.login()
         status,_,result=self.request('/api/workspaces/configure',{'account_id':a['id'],'credentials':{'FYERS_APP_ID':'FAKE-ID','FYERS_SECRET_KEY':'FAKE-SECRET'}},cookie,csrf)

@@ -17,8 +17,9 @@
       parent.appendChild(el)
       return el
     }
-    add(output, 'h3', 'OpenAI feedback · advisory only')
+    add(output, 'h3', data.broker&&data.broker!=='FYERS'?'Selected broker evidence · advisory only':'OpenAI feedback · advisory only')
     add(output, 'p', data.message || 'Analysis runs independently of order submission.')
+    if(data.quote){const fmt=v=>v==null?'Unavailable':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});add(output,'p','Quote '+fmt(data.quote.ltp)+' · Entry '+fmt(data.entry)+' · Stop '+fmt(data.stop)+' · Targets '+(data.targets||[]).map(fmt).join(' / ')+' · Reward/risk '+fmt(data.reward_to_risk))}
     if (data.contract) add(output, 'p', `${data.contract} · Evidence captured ${data.captured_at} · ${data.model}`)
     for (const [key, title] of [['intraday', 'Intraday'], ['swing', 'Swing · 1–5 trading days']]) {
       const report = data[key]
@@ -57,7 +58,7 @@
       controller = active
       const timer = setTimeout(() => active.abort(), timeoutMs)
       try {
-        render(output, {message: 'Checking AI connection and evidence in the background. Order submission proceeds independently.'})
+        render(output, {broker:payload.broker,message:payload.broker&&payload.broker!=='FYERS'?'Checking selected-account quotes and parsed levels. No order is created.':'Checking AI connection and evidence in the background. Order submission proceeds independently.'})
         const response = await fetcher('/api/trade-recommendation/ai-analysis', {
           method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload), signal: active.signal
         })

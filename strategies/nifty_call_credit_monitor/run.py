@@ -13,6 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+from sector_heatmap.chart_trade_admission import place_fyers_entry
 
 from sector_heatmap.fyers_execution import _current_client, _number, _orders, _positions, available_funds
 from sector_heatmap.handoff import FyersFoMaster, fetch_fyers_chain
@@ -147,7 +148,7 @@ def main():
             require_market_open()
             if available_funds(client.funds()) < preview["required_margin_rupees"]:
                 raise RuntimeError("FYERS available funds do not cover the required basket margin.")
-            report["order_response"] = client.place_basket_orders(basket_payload(preview))
+            report["order_response"] = place_fyers_entry(client.place_basket_orders,basket_payload(preview))
             report.update(status="BASKET_SUBMITTED_RECONCILE_IN_FYERS",
                           note="FYERS received the basket request. Reconcile both legs in FYERS; no automatic retry occurs.")
     OUTFILE.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

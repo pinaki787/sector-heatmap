@@ -3,6 +3,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from copy import deepcopy
+import threading
+
+_read_lock=threading.Lock()
+_read_cache={}
 
 def record(state_path, state):
     if not state.get("started_at"):
@@ -31,8 +36,17 @@ def record(state_path, state):
 
 def read(state_path):
     folder = Path(state_path).with_suffix(".jobs")
+    try:revision=folder.stat().st_mtime_ns
+    except FileNotFoundError:return []
+    # Atomic replacements in record() change the directory revision.
+    with _read_lock:
+        cached=_read_cache.get(str(folder))
+        if cached and cached[0]==revision:return deepcopy(cached[1])
     rows = [json.loads(p.read_text()) for p in folder.glob("*.json")]
-    return sorted(rows, key=lambda r:r.get("started_at") or 0, reverse=True)
+    rows=sorted(rows, key=lambda r:r.get("started_at") or 0, reverse=True)
+    if folder.stat().st_mtime_ns==revision:
+        with _read_lock:_read_cache[str(folder)]=(revision,rows)
+    return deepcopy(rows)
 
 def record_legacy(state_path, state):
     """Normalize legacy timestamps without changing its execution state."""

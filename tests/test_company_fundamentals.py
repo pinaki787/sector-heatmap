@@ -17,7 +17,7 @@ class FundamentalsTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{},clear=True):
    calls=[]
    def get(u):calls.append(u);return HTML if u==URL else json.dumps(META)
-   p=Provider(t,clock=lambda:NOW,get=get);e=p.evidence('NSE:TEST-EQ');self.assertEqual(e['status'],'PARTIAL');self.assertEqual(len(calls),2);self.assertIn('Valuation/TTM P/E',e['missing']);p.evidence('NSE:TEST-EQ');self.assertEqual(len(calls),2);self.assertEqual(e['period_end'],'2026-06-30');self.assertEqual(e['sources'][0]['url'],URL)
+   p=Provider(t,clock=lambda:NOW,get=get);e=p.evidence('NSE:TEST-EQ');self.assertEqual(e['status'],'PARTIAL');self.assertEqual(len(calls),3);self.assertIn('Valuation/TTM P/E',e['missing']);p.evidence('NSE:TEST-EQ');self.assertEqual(len(calls),3);self.assertEqual(e['period_end'],'2026-06-30');self.assertEqual(e['sources'][0]['url'],URL)
  def test_noncompany_and_unmapped_market_never_fetch_or_guess(self):
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{},clear=True):
    p=Provider(t,get=lambda _:self.fail('No request for unmapped identity'));self.assertEqual(p.evidence('NSE:NIFTY50-INDEX')['status'],'NOT_APPLICABLE');self.assertEqual(p.evidence('BSE:TEST-EQ')['status'],'UNAVAILABLE');self.assertEqual(p.evidence('NSE:TEST26OCT100CE')['status'],'UNAVAILABLE')
@@ -37,3 +37,19 @@ class FundamentalsTests(unittest.TestCase):
   with patch('sector_heatmap.company_fundamentals.Provider') as p,patch('sector_heatmap.handoff_ai.HandoffAI.from_payload',return_value=AI()):
    p.return_value.evidence.return_value=e;v=holdings({'rows':[row]},dict(ai_provider='CODEX_CHATGPT'),'.')
   self.assertEqual(v['rows'][0]['action'],'EXIT');self.assertEqual(row['fundamentals']['feedback']['relationship'],'CONFLICTS');encoded=json.dumps(captured);self.assertNotIn('quantity',encoded);self.assertNotIn('average_price',encoded);self.assertNotIn('999999',encoded);self.assertNotIn('secret',encoded)
+
+from tempfile import TemporaryDirectory
+
+class ETFApplicabilityTests(unittest.TestCase):
+ def test_verified_etf_skips_operating_company_filing_and_ai_insufficiency(self):
+  from sector_heatmap.fundamental_feedback import report
+  with TemporaryDirectory() as folder:
+   calls=[]
+   def get(url):
+    calls.append(url)
+    return json.dumps({'data':[{'symbol':'GOLDBEES','assets':'Gold'}]})
+   evidence=Provider(folder,get=get).evidence('NSE:GOLDBEES-EQ')
+   self.assertEqual(evidence['status'],'NOT_APPLICABLE')
+   self.assertEqual(evidence['instrument_type'],'ETF')
+   self.assertEqual(len(calls),1)
+   self.assertEqual(report(evidence)['feedback']['relationship'],'NOT_APPLICABLE')

@@ -262,7 +262,9 @@ def calculate_sector(sector, timeframe_states, mode="intraday", constituent_metr
         mtf_alignment=mtf_alignment(timeframe_states), adx=_round(adx_value), last_updated=latest,
         data_quality=quality, missing_components=missing, component_weights={key: _round(value * 100) for key, value in effective_weights.items()}, explanations=explanations,
     )
-    return asdict(result)
+    output = asdict(result)
+    output["participation"] = {"coverage": (constituent_metrics or {}).get("coverage", {}), "breadth": breadth_details, "volume": volume_details}
+    return output
 
 
 def rank_sectors(sectors, previous_ranks=None):

@@ -28,6 +28,7 @@ class AllBrokerAtrTests(unittest.TestCase):
         for broker,symbol,runner_type in [('FYERS','NSE:NIFTY50-INDEX',Runner),('DHAN','NSE:SUNTV-EQ',Runner),('MOTILAL_OSWAL','MCX:CRUDEOILM26NOVFUT',Runner),('DELTA_INDIA','BTCUSD',DeltaRunner)]:
             with self.subTest(broker=broker),tempfile.TemporaryDirectory() as d:
                 adapter=FakeBroker();runner=runner_type(adapter,Path(d)/'state.json',lambda:adapter.now)
+                runner.bound_broker=broker;runner.bound_instrument=symbol
                 try:
                     payload=dict(strategy='RENKO_SUPERTREND_V1',exit_policy='OPPOSITE_CONFIRMED_SIGNAL',underlying=symbol,timeframe='5 minutes',mode='PAPER',lots=1,broker=broker)
                     if broker=='DELTA_INDIA':payload.update(price_source='PERPETUAL_LAST_TRADE',order_terms='MARKETABLE_LIMIT_IOC',carry_policy='CONTINUOUS')

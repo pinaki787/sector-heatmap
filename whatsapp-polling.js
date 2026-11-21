@@ -4,11 +4,14 @@
   const panel = document.createElement('section')
   panel.className = 'panel'
   panel.style.marginTop = '16px'
-  panel.innerHTML = `<h2>WhatsApp polling</h2><p class="muted">Only the latest verified unread message is eligible. WhatsApp read state and this app’s processed IDs are checked separately; already processed messages are not retried.</p><p class="muted">Read-only recommendations → review → your fresh go-ahead. Existing FYERS parser route; no automatic orders.</p><div class="field-grid"><label class="field">Exact group name<input id="wa-group" value="Trading With Mo 2.O"></label><label class="field">Interval (seconds)<input id="wa-interval" type="number" min="30" max="3600" value="60"></label></div><div class="packet-actions" style="margin-top:12px"><button class="button secondary" id="wa-save">Save configuration</button><button class="button" id="wa-start" disabled>Start polling</button><button class="button secondary" id="wa-stop" disabled>Stop polling</button><button class="button secondary" id="wa-refresh">Refresh status</button></div><p id="wa-status" role="status">Checking polling service…</p><p id="wa-source" class="ticket-warning"></p><details><summary>Source setup and screenshot fallback</summary><p>A signed-in native WhatsApp window is not a server API connection. An installed local adapter must verify the selected group, message ID, full date/time, message body and reply/forward metadata. Screenshots showing only clock times or image-only calls are blocked until these can be verified. The native reader uses Accessibility. Unattended polling does not capture screenshots. Image-only or undated calls remain blocked; OCR alone does not certify source, time or reply context. Build the helper with scripts/whatsapp/build.sh and grant permissions to your dashboard launcher in macOS Privacy & Security. Keep using manually verified messages in the parser meanwhile.</p><p>Messages expire after five minutes. Polling always starts stopped after a restart. No WhatsApp message is sent.</p></details><h3>Recommendation review queue</h3><div id="wa-queue"></div>`
+  panel.innerHTML = `<h2>WhatsApp polling</h2><p class="muted">Only the latest verified unread message is eligible. WhatsApp read state and this app’s processed IDs are checked separately; already processed messages are not retried.</p><p class="muted">Read-only recommendations → review → your fresh go-ahead. Uses the selected private broker account; no automatic orders.</p><div class="field-grid"><label class="field">Exact group name<input id="wa-group" value="Trading With Mo 2.O"></label><label class="field">Interval (seconds)<input id="wa-interval" type="number" min="30" max="3600" value="60"></label></div><div class="packet-actions" style="margin-top:12px"><button class="button secondary" id="wa-save">Save configuration</button><button class="button" id="wa-start" disabled>Start polling</button><button class="button secondary" id="wa-stop" disabled>Stop polling</button><button class="button secondary" id="wa-refresh">Refresh status</button></div><p id="wa-status" role="status">Checking polling service…</p><p id="wa-source" class="ticket-warning"></p><details><summary>Source setup and screenshot fallback</summary><p>A signed-in native WhatsApp window is not a server API connection. An installed local adapter must verify the selected group, message ID, full date/time, message body and reply/forward metadata. Screenshots showing only clock times or image-only calls are blocked until these can be verified. The native reader uses Accessibility. Unattended polling does not capture screenshots. Image-only or undated calls remain blocked; OCR alone does not certify source, time or reply context. Build the helper with scripts/whatsapp/build.sh and grant permissions to your dashboard launcher in macOS Privacy & Security. Keep using manually verified messages in the parser meanwhile.</p><p>Messages expire after five minutes. Polling always starts stopped after a restart. No WhatsApp message is sent.</p></details><h3>Recommendation review queue</h3><div id="wa-queue"></div>`
   host.appendChild(panel)
   const el = id => document.getElementById(id)
   async function api(action, body) {
-    const response = await fetch('/api/whatsapp/' + action, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    await window.BrokerForms?.ready
+    const account=window.BrokerForms?.account('parser')
+    if(!account)throw Error('Select a configured private broker account in Trade Parser.')
+    const response = await fetch('/api/broker-parser/'+encodeURIComponent(account.id)+'/whatsapp/' + action, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     if (!response.ok) {
       let error
       try { error = (await response.json()).error } catch (_) {}
@@ -22,7 +25,7 @@
     el('wa-source').textContent = data.blocker || (data.error ? 'Reader installed; source verification failed. No recommendations ingested from this failed read.' : 'Reader installed. Source verification is checked on each poll.')
     el('wa-start').disabled = data.running || !data.source_ready
     el('wa-stop').disabled = !data.running
-    el('wa-save').disabled = data.running
+    el('wa-save').disabled = data.running || !data.source_ready
     el('wa-queue').replaceChildren()
     if (!data.queue.length) el('wa-queue').textContent = 'No recommendations received.'
     for (const item of data.queue) {
@@ -51,6 +54,8 @@
   el('wa-start').onclick=()=>act(async()=>render(await api('start',{})))
   el('wa-stop').onclick=()=>act(async()=>render(await api('stop',{})))
   el('wa-refresh').onclick=()=>act(async()=>render(await api('status')))
+  window.addEventListener('broker-account-change',event=>{if(event.detail?.kind==='parser'){el('wa-queue').replaceChildren();void refreshStatus(true)}})
+  window.addEventListener('broker-accounts-ready',()=>void refreshStatus(true))
   let refreshing = false
   async function refreshStatus(initial = false) {
     if (refreshing || document.hidden) return

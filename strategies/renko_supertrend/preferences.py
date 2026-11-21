@@ -1,4 +1,4 @@
-from . import anti_chop
+from . import loss_range, anti_chop
 from . import destinations, indicator_families, manual_trend, calibrated, zone_entry
 """Versioned UI preferences, kept separate from armed runner configuration."""
 import json
@@ -9,13 +9,15 @@ from .signals import settings
 from . import exit_indicators
 from . import ema_proximity, trailing_stop, zone_target, market_structure, mtf_supertrend, mtf_rsi
 
-KEYS=('rsi-level-mode','rsi-bullish-min','rsi-bullish-max','rsi-bearish-min','rsi-bearish-max','manual-brick-reference','rsi-level-enabled','rsi-bullish-above','rsi-bearish-below','symbol','timeframe','atr-length','factor','brick-mode','manual-brick','use-adx','adx-threshold','adx-length','adx-smoothing','widening-window','rsi-slope-enabled','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','mode','lots','max-trades','max-premium','daily-budget','spot-target','spot-stop','ema-exit-enabled','ema-exit-length','sideways-enabled','sideways-max-candles','additional-slippage-points','ema-momentum-enabled','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','trailing-enabled','trailing-basis','trailing-distance','chart-view','history-preset','history-from','history-to')
-KEYS=KEYS+('supertrend-slope-enabled','supertrend-slope-bars','supertrend-slope-min-atr')
+KEYS=('strategy-mode','swing-breakout-enabled','swing-levels-visible','swing-breakout-bricks','line-entry-enabled','line-entry-definition',)+('rsi-level-mode','rsi-bullish-min','rsi-bullish-max','rsi-bearish-min','rsi-bearish-max','manual-brick-reference','rsi-level-enabled','rsi-bullish-above','rsi-bearish-below','symbol','timeframe','atr-length','factor','brick-mode','manual-brick','use-adx','adx-threshold','adx-length','adx-smoothing','widening-window','rsi-slope-enabled','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','mode','lots','max-trades','max-premium','daily-budget','spot-target','spot-stop','ema-exit-enabled','ema-exit-length','sideways-enabled','sideways-max-candles','additional-slippage-points','ema-momentum-enabled','ema-proximity-enabled','ema-proximity-mode','ema-proximity-distance','trailing-enabled','trailing-basis','trailing-distance','chart-view','history-preset','history-from','history-to')
+KEYS=KEYS+('renko-loss-range-enabled','renko-loss-range-buffer','spread-filter-enabled','trend-reentry-enabled','supertrend-slope-enabled','supertrend-slope-bars','supertrend-slope-min-atr')
+KEYS=KEYS+('target-premium',)
 KEYS=KEYS+('ema-policy-profile','strategy-basis','renko-brick-exit-enabled')
 KEYS=KEYS+tuple(k.replace('_','-') for k in {**calibrated.DEFAULTS,**zone_entry.DEFAULTS})
-MAP={'rsi-level-mode':'rsi_level_mode','rsi-bullish-min':'rsi_bullish_min','rsi-bullish-max':'rsi_bullish_max','rsi-bearish-min':'rsi_bearish_min','rsi-bearish-max':'rsi_bearish_max','rsi-level-enabled':'rsi_level_enabled','rsi-bullish-above':'rsi_bullish_above','rsi-bearish-below':'rsi_bearish_below','rsi-length':'rsi_slope_length','supertrend-enabled':'supertrend_enabled','ema-fast-enabled':'ema_fast_enabled','ema-slow-enabled':'ema_slow_enabled','ema-third-enabled':'ema_third_enabled','ema-third-length':'ema_third_length','ema-widening-enabled':'ema_widening_enabled','ema-fast-length':'ema_fast_length','ema-slow-length':'ema_slow_length','atr-length':'atr_length','brick-mode':'brick_mode','manual-brick':'manual_brick','use-adx':'use_adx','adx-threshold':'adx_threshold','adx-length':'adx_length','adx-smoothing':'adx_smoothing','widening-window':'widening_window','rsi-slope-enabled':'rsi_slope_enabled','retest-enabled':'retest_enabled','retest-engulfing':'retest_engulfing','retest-harami':'retest_harami','retest-star':'retest_star'}
+MAP={'strategy-mode':'strategy_mode','swing-breakout-enabled':'swing_breakout_enabled','swing-breakout-bricks':'swing_breakout_bricks','line-entry-enabled':'line_entry_enabled','line-entry-definition':'line_entry_definition','rsi-level-mode':'rsi_level_mode','rsi-bullish-min':'rsi_bullish_min','rsi-bullish-max':'rsi_bullish_max','rsi-bearish-min':'rsi_bearish_min','rsi-bearish-max':'rsi_bearish_max','rsi-level-enabled':'rsi_level_enabled','rsi-bullish-above':'rsi_bullish_above','rsi-bearish-below':'rsi_bearish_below','rsi-length':'rsi_slope_length','supertrend-enabled':'supertrend_enabled','ema-fast-enabled':'ema_fast_enabled','ema-slow-enabled':'ema_slow_enabled','ema-third-enabled':'ema_third_enabled','ema-third-length':'ema_third_length','ema-widening-enabled':'ema_widening_enabled','ema-fast-length':'ema_fast_length','ema-slow-length':'ema_slow_length','atr-length':'atr_length','brick-mode':'brick_mode','manual-brick':'manual_brick','use-adx':'use_adx','adx-threshold':'adx_threshold','adx-length':'adx_length','adx-smoothing':'adx_smoothing','widening-window':'widening_window','rsi-slope-enabled':'rsi_slope_enabled','retest-enabled':'retest_enabled','retest-engulfing':'retest_engulfing','retest-harami':'retest_harami','retest-star':'retest_star'}
 MAP.update({key.replace('_','-'):key for key in ('supertrend_slope_enabled','supertrend_slope_bars','supertrend_slope_min_atr')})
-MAP.update({'strategy-basis':'strategy_basis','renko-brick-exit-enabled':'renko_brick_exit_enabled'})
+MAP.update({'target-premium':'target_option_premium'})
+MAP.update({'spread-filter-enabled':'spread_filter_enabled','trend-reentry-enabled':'trend_reentry_enabled','strategy-basis':'strategy_basis','renko-brick-exit-enabled':'renko_brick_exit_enabled'})
 MAP.update({k.replace('_','-'):k for k in {**calibrated.DEFAULTS,**zone_entry.DEFAULTS}})
 KEYS=KEYS+tuple(k.replace('_','-') for k in exit_indicators.DEFAULTS)+( 'rsi-length','volume-enabled','rsi-sma-enabled','supertrend-enabled','ema-fast-enabled','ema-slow-enabled','ema-third-enabled','ema-widening-enabled','ema-fast-length','ema-slow-length','ema-third-length','higher-timeframe-enabled','supertrend-timeframe','market-structure-enabled','zone-target-enabled','paper-capital','commodity-holding','cash-product','market','session-deadline','price-source','order-terms','carry-policy','delta-execution-route')
 
@@ -31,6 +33,10 @@ MAP.update({k.replace('_','-'):k for k in manual_trend.DEFAULTS})
 KEYS=KEYS+tuple(k.replace('_','-') for k in anti_chop.DEFAULTS)
 MAP.update({k.replace('_','-'):k for k in anti_chop.DEFAULTS})
 
+SMA_KEYS = ('sma-entry-enabled', 'sma-exit-enabled', 'sma-length')
+KEYS += SMA_KEYS
+MAP.update({key: key.replace('-', '_') for key in SMA_KEYS})
+
 def read(path):
     p=Path(path)
     if not p.exists():return dict(schema_version=1,settings={},saved_at=None)
@@ -38,9 +44,11 @@ def read(path):
     if d.get('schema_version')!=1 or not isinstance(d.get('settings'),dict):raise ValueError('Saved preferences format is unsupported; preferences were preserved.')
     return d
 
-def write(path,payload,now):
+def write(path,payload,now,scope=None):
     values=payload.get('settings')
     if not isinstance(values,dict):raise ValueError('A settings object is required.')
+    from .binding import normalize_settings
+    values=normalize_settings(values,**(scope or {}))
     c={k:values[k] for k in KEYS if k in values}
     for k in ('volume-enabled','rsi-sma-enabled','supertrend-enabled','ema-fast-enabled','ema-slow-enabled','ema-third-enabled','ema-widening-enabled','rsi-slope-enabled','use-adx','intrabar-entries','retest-enabled','retest-engulfing','retest-harami','retest-star','ema-exit-enabled','sideways-enabled','ema-proximity-enabled','ema-momentum-enabled','trailing-enabled','zone-target-enabled','market-structure-enabled','higher-timeframe-enabled'):
         if k in c and not isinstance(c[k],bool):raise ValueError('Saved checkbox settings must be booleans.')
@@ -55,6 +63,9 @@ def write(path,payload,now):
     indicator_families.apply({k.replace('-','_'):v for k,v in c.items()})
     settings({MAP.get(k,k):v for k,v in c.items()})
     extras={k.replace('-','_'):v for k,v in c.items()}
+    from .option_premium import settings as premium_settings
+    premium_settings({**extras,'underlying':c.get('symbol',''),'target_option_premium':c.get('target-premium')})
+    loss_range.settings(extras)
     exit_indicators.settings(extras)
     destinations.settings(extras)
     calibrated.settings(extras)
@@ -78,6 +89,7 @@ def write(path,payload,now):
         if k in c and (int(c[k])<1 or float(c[k])!=int(c[k])):raise ValueError('Lots and trade limit must be positive integers.')
     if c.get('history-preset','45') not in ('7','45','90','custom'):raise ValueError('Unknown historical range preset.')
     result=dict(schema_version=1,settings=c,saved_at=now)
+    if scope:result['binding']=dict(scope)
     p=Path(path);p.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.NamedTemporaryFile(mode='w',dir=p.parent,prefix=p.name+'.',suffix='.tmp',delete=False) as f:
         tmp=Path(f.name);os.chmod(tmp,0o600);json.dump(result,f,allow_nan=False);f.flush();os.fsync(f.fileno())

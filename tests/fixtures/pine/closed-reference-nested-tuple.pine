@@ -1,0 +1,22 @@
+//@version=6
+indicator("Exact closed ref timing")
+sc_rsiOscValues() =>
+    float sc_oscillator = ta.rsi(close, 14)
+    float sc_average = ta.sma(sc_oscillator, 14)
+    [sc_oscillator, sc_average, sc_average[1], time_close]
+sc_rsiOscPrevious() =>
+    [sc_oscillator, sc_average, sc_priorAverage, sc_ended] = sc_rsiOscValues()
+    [sc_oscillator[1], sc_average[1], sc_priorAverage[1], sc_ended[1]]
+[pr,pa,pp,pt]=request.security(syminfo.tickerid,"15",sc_rsiOscPrevious(),gaps=barmerge.gaps_off,lookahead=timeframe.in_seconds()>900 ? barmerge.lookahead_off : barmerge.lookahead_on)
+[cr,ca,cp,ct]=request.security(syminfo.tickerid,"15",sc_rsiOscValues(),gaps=barmerge.gaps_off,lookahead=barmerge.lookahead_off)
+sc_closedOsc(float pr,float pa,float pp,int pt,float cr,float ca,float cp,int ct) =>
+    bool completed=not na(ct) and ct<=timenow and ct<=time_close
+    [completed ? cr : pr,completed ? ca : pa,completed ? cp : pp,completed ? ct : pt]
+[r,a,p,t]=sc_closedOsc(pr,pa,pp,pt,cr,ca,cp,ct)
+plot(pt,"previous_end")
+plot(ct,"current_end")
+plot(timenow,"now")
+plot(t,"selected_end")
+var table panel=table.new(position.top_right,1,1)
+if barstate.islast
+    table.cell(panel,0,0,str.format_time(t,"dd MMM HH:mm","Asia/Kolkata"))

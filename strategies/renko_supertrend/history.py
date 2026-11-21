@@ -35,6 +35,10 @@ def trade_history(orders,position=None,unrealized=None,valuation=None):
         result[-1].update(exposure_range=next((r.get('exposure_range') for r in reversed(rows) if r.get('exposure_range')),None),exposure_host_candles=next((r.get('exposure_host_candles') for r in reversed(rows) if r.get('exposure_host_candles') is not None),None),sideways_lock_trigger=next((r.get('sideways_lock_trigger') for r in reversed(rows) if r.get('sideways_lock_trigger')),None))
         snapshot=result[-1].get('entry_indicator_snapshot') or {}
         settings=snapshot.get('settings') or {}
+        frozen=(entries[0].get('calibrated_levels') or {}) if entries else {}
+        if frozen:
+            settings={**settings,**{k:frozen[k] for k in ('spot_stop','spot_target') if k in frozen}}
+            result[-1]['calibrated_levels']=frozen
         result[-1].update(entry_side=entries[0].get('side') if entries else None,configured_lots=settings.get('lots'),spot_target=settings.get('spot_target'),spot_stop=settings.get('spot_stop'),trailing_enabled=settings.get('trailing_enabled'),trailing_mode=settings.get('trailing_mode'),trailing_step=settings.get('trailing_step'),ema_exit_enabled=settings.get('ema_exit_enabled',True),ema_exit_length=settings.get('ema_exit_length',10),valuation=(valuation if owns and remaining else None))
         result[-1]['costs']=trade_costs(result[-1],ledger)
     return result

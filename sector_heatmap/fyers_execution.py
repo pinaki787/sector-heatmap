@@ -19,6 +19,7 @@ from fyers_apiv3 import fyersModel
 from sector_heatmap.fyers_transport import client as ipv4_fyers_client
 
 from .exposure_guard import matches_exposure, open_exposures
+from .chart_trade_admission import serialized_fyers_entry,mark_entry_attempt
 from .config import _atomic_private_write, load_config
 from .equity_exit_plan import build_equity_exit_plan
 from .premium_exit_mapping import premium_exits, cash_exits
@@ -369,7 +370,7 @@ class FyersExecutionService:
         requested_legs = proposal.get("legs") or []
         if len(requested_legs) != 2:
             raise ValueError("A defined-risk spread requires exactly two option legs.")
-        chain, expiry = fetch_fyers_chain(client, underlying_symbol)
+        chain, expiry = fetch_fyers_chain(client, underlying_symbol,now=self.now())
         try:
             chain_expiry_iso = datetime.strptime(expiry.get("date"), "%d-%m-%Y").date().isoformat()
         except (TypeError, ValueError) as error:
@@ -472,14 +473,14 @@ class FyersExecutionService:
         expected = 'CE' if direction == 'BULLISH' else 'PE' if direction == 'BEARISH' else None
         if len(requested) != 1 or requested[0].get('action') != 'BUY' or requested[0].get('option_type') != expected or not expected:
             raise ValueError('A stock-option entry must be one BUY Call for bullish or one BUY Put for bearish; SELL legs are forbidden.')
-        chain, expiry = fetch_fyers_chain(client, str(payload.get('underlying') or ''))
+        chain, expiry = fetch_fyers_chain(client, str(payload.get('underlying') or ''),now=self.now())
         symbols = [r.get('symbol') for r in chain.get('data', {}).get('optionsChain', []) if r.get('symbol')]
         options = build_long_option_proposals(chain, expiry, self.master.lookup(symbols), direction,
                     dict(invalidation=payload.get('invalidation'), stop_basis='price', minimum_reward_to_risk=minimum_rr))
         if options['status'] != 'READY' or options.get('expiry_iso') != payload.get('expiry'):
             raise FyersExecutionUnavailable(options.get('reason') or 'Fresh exact option expiry changed.')
         selected = options['proposals'][0]['legs'][0]
-        if requested[0].get('symbol') != selected['symbol'] or float(requested[0].get('strike')) != selected['strike']:
+        if (requested[0].get('symbol') != selected['symbol'] and payload.get('portable_manual_ticket') is not True) or float(requested[0].get('strike')) != selected['strike']:
             raise FyersExecutionUnavailable('The exact ATM option changed; collect fresh analysis before preparing an order.')
         lots = _number(payload.get('lots'))
         if lots is None or lots < 1 or lots != int(lots):
@@ -731,6 +732,8 @@ class FyersExecutionService:
         return preview
 
     def _archive_entry_evidence(self, preview_id, stored, refreshed):
+        from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+        assert_workspace_chart_entry_allowed('FYERS')
         payload = stored["payload"]
         evidence = {"version": 1, "preview_id": preview_id,
                     "captured_at": self.now().astimezone().isoformat(),
@@ -1017,7 +1020,10 @@ class FyersExecutionService:
         return result
 
 
+    @serialized_fyers_entry
     def submit_batch(self, preview_id, confirmation):
+        from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+        assert_workspace_chart_entry_allowed('FYERS')
         if not self._live_submission_enabled():
             raise PermissionError(f"Live FYERS submission is disabled. Enable {self.live_gate_name}=1 intentionally before submitting a reviewed batch.")
         with self.lock:
@@ -1049,6 +1055,7 @@ class FyersExecutionService:
                            "validity": "DAY", "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(item, leg)})
         with self.lock:
             if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
+        mark_entry_attempt("FYERS")
         response = client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         status = "PENDING" if len(order_ids) == len(orders) else "EXECUTION_STATUS_UNCERTAIN"
@@ -1080,6 +1087,7 @@ class FyersExecutionService:
                              "side": 1 if leg["action"] == "BUY" else -1,
                              "productType": item["order_policy"]["product_type"], "limitPrice": leg["limit_price"],
                              "stopPrice": 0, "validity": "DAY", "disclosedQty": 0, "offlineOrder": False, **self._linked_exit_fields(item, leg)}
+                    mark_entry_attempt("FYERS")
                     response = client.place_order(order)
                     ids = _order_ids(response)
                     order_ids.extend(ids)
@@ -1100,7 +1108,10 @@ class FyersExecutionService:
                            "order_ids": order_ids, "events": events}, self.now().date())
         return {"preview_id": preview_id, "status": status, "order_ids": order_ids, "events": events, "message": message}
 
+    @serialized_fyers_entry
     def submit(self, preview_id, confirmation):
+        from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+        assert_workspace_chart_entry_allowed('FYERS')
         if not self._live_submission_enabled():
             raise PermissionError(f"Live FYERS submission is disabled. The account holder must intentionally set {self.live_gate_name}=1 before starting the dashboard.")
         with self.lock:
@@ -1131,6 +1142,7 @@ class FyersExecutionService:
         } for leg in refreshed["instrument"]["contracts"]]
         with self.lock:
             if self.previews.pop(preview_id,None) is None:raise ValueError('Preview already consumed; reconcile FYERS before another submission.')
+        mark_entry_attempt("FYERS")
         response = client.place_order(orders[0]) if refreshed["instrument"]["kind"] in {"EQUITY", "LONG_OPTION"} else client.place_basket_orders(orders)
         order_ids = _order_ids(response)
         if not order_ids:

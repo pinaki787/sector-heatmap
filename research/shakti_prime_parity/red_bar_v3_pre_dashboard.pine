@@ -1,0 +1,301 @@
+//@version=6
+indicator("Red Bar v3 — Shakti parity research", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500, max_bars_back=5000)
+max_bars_back(time,5000)
+// Independent reconstruction. See research/shakti_prime_parity/evidence.md.
+// Reference historical timing uses lookahead_off after recalculation.
+// This is a visual parity candidate, not a validated causal trading signal.
+string gRef="01 — REFERENCE & SESSION"
+string refMode=input.string("Auto","Reference timeframe selection",options=["Auto","Manual"],group=gRef,display=display.none)
+string manualRef=input.timeframe("5","Manual reference timeframe",group=gRef,display=display.none)
+string optionMode=input.string("Auto","Indian option reference candle",options=["Auto","Force PE Green","Force Red"],group=gRef,display=display.none)
+string sessionMode=input.string("Auto","Session preset",options=["Auto","Manual"],group=gRef,display=display.none)
+string sess=input.session("0915-1530","Manual session",group=gRef,display=display.none)
+string tz=input.string("Asia/Kolkata","Manual timezone (IANA)",group=gRef,display=display.none)
+string openingMode=input.string("Auto gap + IST fallback","Global opening detection",options=["Auto gap + IST fallback","Fixed IST opening"],group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+int fxHour=input.int(3,"Gold/FX fallback opening hour (IST)",minval=0,maxval=23,group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+int fxMinute=input.int(30,"Gold/FX fallback opening minute (IST)",options=[0,15,30,45],group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+int cryptoHour=input.int(2,"Crypto daily reset hour (IST)",minval=0,maxval=23,group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+int cryptoMinute=input.int(30,"Crypto daily reset minute (IST)",options=[0,15,30,45],group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+int openingGap=input.int(45,"Minimum trading break for opening detection (minutes)",minval=1,group="01A — GLOBAL BROKER SESSION (30M)",display=display.none)
+bool show30=input.bool(false,"Show EXTRA 30m Red Bar zone (India only)",group="01B — EXTRA INDIA 30M SELLING ZONE",display=display.none)
+color extraColor=input.color(color.rgb(220,38,38),"30m zone colour (Red)",group="01B — EXTRA INDIA 30M SELLING ZONE",display=display.none)
+int extraTransparency=input.int(91,"30m zone transparency",minval=0,maxval=100,group="01B — EXTRA INDIA 30M SELLING ZONE",display=display.none)
+bool extraLevels=input.bool(true,"Show 30m 44 / 50 / 56% levels",group="01B — EXTRA INDIA 30M SELLING ZONE",display=display.none)
+bool highlight=input.bool(true,"Highlight actual locked Red Bar candle",group="02 — CHART VISIBILITY",display=display.none)
+bool show5=input.bool(true,"Show 44%, 50%, 56% INSIDE Red Bar",group="02 — CHART VISIBILITY",display=display.none)
+bool targetBands=input.bool(true,"Show 44%-56% BANDS centered on EACH target",group="02 — CHART VISIBILITY",display=display.none)
+string targetMode=input.string("SMART","Target Display Mode",options=["SMART","ALL","OFF"],group="02 — CHART VISIBILITY",display=display.none)
+int forward=input.int(2,"SMART Forward Targets",options=[1,2,3],group="02 — CHART VISIBILITY",display=display.none)
+int targetTransparency=input.int(90,"Target band fill transparency",minval=0,maxval=100,group="02 — CHART VISIBILITY",display=display.none)
+int mainWidth=input.int(4,"Main High / Low line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY",display=display.none)
+int targetWidth=input.int(3,"Target line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY",display=display.none)
+int bandWidth=input.int(2,"Target 44/50/56 line thickness",minval=1,maxval=4,group="02 — CHART VISIBILITY",display=display.none)
+bool showTargets=input.bool(true,"Show bullish / bearish targets",group="02 — CHART VISIBILITY",display=display.none)
+color pendingColor=input.color(color.rgb(245,151,34),"Pending target (Orange)",group="02 — CHART VISIBILITY",display=display.none)
+color upperColor=input.color(color.rgb(42,200,102),"Upper target reached (Green)",group="02 — CHART VISIBILITY",display=display.none)
+color lowerColor=input.color(color.rgb(255,0,0),"Lower target reached (Bright Red)",group="02 — CHART VISIBILITY",display=display.none)
+int targetCount=input.int(10,"Maximum targets",options=[5,10,15,20],group="02 — CHART VISIBILITY",display=display.none)
+bool autoScale=input.bool(false,"Auto-scale chart to T15/T20 (compresses candles)",group="02 — CHART VISIBILITY",display=display.none)
+bool targetLabels=input.bool(true,"Show T11-T20 price labels",group="02 — CHART VISIBILITY",display=display.none)
+bool bothDirections=input.bool(true,"Show both target directions",group="02 — CHART VISIBILITY",display=display.none)
+int historyInput=input.int(8,"Historical sessions to retain (object limit)",minval=1,maxval=8,group="02 — CHART VISIBILITY",display=display.none)
+bool crypto=syminfo.type=="crypto" or syminfo.prefix=="DELTAIN" or syminfo.prefix=="BINANCE" or syminfo.prefix=="BYBIT"
+bool india=syminfo.prefix=="NSE" or syminfo.prefix=="BSE" or syminfo.prefix=="MCX"
+bool indianOption=india and (not na(str.match(syminfo.ticker,".*[0-9]PE$")) or (syminfo.type=="option" and not na(str.match(syminfo.ticker,".*P[0-9]+$"))))
+bool greenReference=optionMode=="Force PE Green" or (optionMode=="Auto" and indianOption)
+string refTF=refMode=="Manual" ? manualRef : india ? "5" : "30"
+string symbol=ticker.standard(syminfo.tickerid)
+f_ref() =>
+    bool manual=sessionMode=="Manual"
+    bool inSess=manual or india ? not na(time(timeframe.period,sess,tz)) : true
+    int resetMinutes=crypto ? cryptoHour*60+cryptoMinute : fxHour*60+fxMinute
+    int key=manual or india ? time("D") : int(math.floor((time+19800000-resetMinutes*60000)/86400000))
+    bool gap=openingMode=="Auto gap + IST fallback" and not crypto and not india and time-time_close[1]>=openingGap*60000
+    bool first=inSess and (not inSess[1] or key!=key[1] or gap)
+    var float hi=na
+    var float lo=na
+    var int sessionStart=na
+    var int lockedTime=na
+    if first
+        hi:=na
+        lo:=na
+        lockedTime:=na
+        sessionStart:=time
+    bool wanted=greenReference ? close>open : close<open
+    if inSess and not first and na(hi) and wanted
+        hi:=high
+        lo:=low
+        lockedTime:=time
+    [hi,lo,sessionStart,lockedTime]
+[a,b,k5,lock5]=request.security(symbol,refTF,f_ref(),lookahead=barmerge.lookahead_off)
+[c,d,k30,lock30]=request.security(symbol,"30",f_ref(),lookahead=barmerge.lookahead_off)
+bool active=not na(a) and not na(b)
+int start=k5
+float h5=a
+float l5=b
+float h30=c
+float l30=d
+f_level(float h,float l,float p) => l+(h-l)*p
+pHigh=plot(h5,"LOCKED RED BAR HIGH",color.rgb(184,90,0),mainWidth,plot.style_linebr)
+pLow=plot(l5,"LOCKED RED BAR LOW",color.rgb(213,0,0),mainWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.44) : na,"44%",color.rgb(227,125,50),bandWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.50) : na,"50%",color.orange,bandWidth,plot.style_linebr)
+plot(show5 ? f_level(h5,l5,0.56) : na,"56%",color.rgb(227,125,50),bandWidth,plot.style_linebr)
+plot(autoScale and barstate.islast ? h5+(h5-l5)*targetCount : na,"Extended upper scale anchor",color.new(color.white,100))
+plot(autoScale and barstate.islast ? l5-(h5-l5)*targetCount : na,"Extended lower scale anchor",color.new(color.white,100))
+fill(pHigh,pLow,color.new(color.red,94))
+
+// Extra Indian 30m zones are drawing objects, not additional legend plots.
+type ExtraZone
+    float hi
+    float lo
+    int left
+    int right
+var array<ExtraZone> extraZones=array.new<ExtraZone>()
+var array<box> extraBoxes=array.new<box>()
+var array<line> extraLines=array.new<line>()
+if india and not na(lock30) and (na(lock30[1]) or lock30!=lock30[1])
+    array.push(extraZones,ExtraZone.new(h30,l30,lock30,time))
+    if array.size(extraZones)>historyInput
+        array.shift(extraZones)
+if india and array.size(extraZones)>0
+    ExtraZone latestExtra=array.last(extraZones)
+    latestExtra.right:=time
+if barstate.islast
+    for item in extraBoxes
+        box.delete(item)
+    array.clear(extraBoxes)
+    for item in extraLines
+        line.delete(item)
+    array.clear(extraLines)
+    if show30 and india
+        for rec in extraZones
+            array.push(extraBoxes,box.new(rec.left,rec.hi,rec.right,rec.lo,xloc=xloc.bar_time,border_color=color.new(extraColor,100),bgcolor=color.new(extraColor,extraTransparency)))
+            if extraLevels
+                for p in array.from(.44,.50,.56)
+                    float price=rec.lo+(rec.hi-rec.lo)*p
+                    array.push(extraLines,line.new(rec.left,price,rec.right,price,xloc=xloc.bar_time,color=extraColor,width=bandWidth))
+var array<box> referenceBoxes=array.new<box>()
+bool freshLock=not na(lock5) and (na(lock5[1]) or lock5!=lock5[1])
+if highlight and freshLock
+    array.push(referenceBoxes,box.new(lock5,h5,lock5+int(timeframe.in_seconds(refTF))*1000,l5,xloc=xloc.bar_time,border_color=color.new(color.red,35),bgcolor=color.new(color.red,90)))
+    if array.size(referenceBoxes)>historyInput
+        box.delete(array.shift(referenceBoxes))
+bool showSMA=input.bool(true,"Show 200 SMA High/Low Band",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+int maLength=input.int(200,"200 SMA Length (2m Bars)",minval=1,group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+color maBull=input.color(color.rgb(0,180,90),"Above Band — Green",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+color maBear=input.color(color.rgb(220,50,55),"Below Band — Red",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+color maNeutral=input.color(color.rgb(150,150,150),"Inside Band — Neutral",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+bool maFill=input.bool(true,"Fill 200 SMA Band",group="OB · 01 — 200 SMA HIGH / LOW (2M SOURCE; UP TO 30M)",display=display.none)
+bool showSlow=input.bool(true,"Show 5 SMA Close",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)",display=display.none)
+int slowLength=input.int(5,"SMA Close Length",minval=1,group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)",display=display.none)
+color slowBull=input.color(color.rgb(0,230,118),"Close Above SMA — Green",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)",display=display.none)
+color slowBear=input.color(color.rgb(242,54,69),"Close Below SMA — Red",group="OB · 02 — 5 SMA CLOSE TREND (30M AND ABOVE)",display=display.none)
+int maWidth=input.int(2,"SMA Line Width",minval=1,maxval=4,group="03 — VISUAL SETTINGS",display=display.none)
+int maTransparency=input.int(88,"200 SMA Band Fill Transparency",minval=0,maxval=100,group="03 — VISUAL SETTINGS",display=display.none)
+[sh,sl]=request.security(symbol,"2",[ta.sma(high,maLength),ta.sma(low,maLength)],lookahead=barmerge.lookahead_off)
+color sc=close>sh ? maBull : close<sl ? maBear : maNeutral
+psh=plot(showSMA and timeframe.in_seconds()<=1800 ? sh : na,"200 SMA High — 2m",sc,maWidth)
+psl=plot(showSMA and timeframe.in_seconds()<=1800 ? sl : na,"200 SMA Low — 2m",sc,maWidth)
+fill(psh,psl,maFill ? color.new(sc,maTransparency) : na)
+float sma5=ta.sma(close,slowLength)
+plot(showSlow and timeframe.in_seconds()>=1800 ? sma5 : na,"5 SMA Close — 30m+",close>sma5 ? slowBull : slowBear,maWidth)
+
+// Target reveal and first-touch times are retained. Cross-market parity remains under review.
+type TargetSession
+    float hi
+    float lo
+    int key
+    int finish
+    array<int> revealUp
+    array<int> revealDown
+    array<int> hitUp
+    array<int> hitDown
+var array<TargetSession> targetSessions=array.new<TargetSession>()
+var array<line> targetLines=array.new<line>()
+var array<box> targetBoxes=array.new<box>()
+var array<label> targetText=array.new<label>()
+bool newSession=active and (array.size(targetSessions)==0 or array.last(targetSessions).key!=k5)
+if newSession
+    array.push(targetSessions,TargetSession.new(a,b,k5,time,array.new<int>(20,na),array.new<int>(20,na),array.new<int>(20,na),array.new<int>(20,na)))
+    if array.size(targetSessions)>historyInput
+        array.shift(targetSessions)
+if active and array.size(targetSessions)>0
+    TargetSession rec=array.last(targetSessions)
+    rec.finish:=time
+    float span=rec.hi-rec.lo
+    if span>0
+        for n=1 to 20
+            float up=rec.hi+n*span
+            float down=rec.lo-n*span
+            if na(array.get(rec.hitUp,n-1)) and high>=up
+                array.set(rec.hitUp,n-1,time)
+            if na(array.get(rec.hitDown,n-1)) and low<=down
+                array.set(rec.hitDown,n-1,time)
+            int upAhead=math.max(forward,int(math.floor((close-rec.hi)/span))+forward)
+            int dnAhead=math.max(forward,int(math.floor((rec.lo-close)/span))+forward)
+            if (newSession or barstate.isconfirmed) and n<=upAhead and na(array.get(rec.revealUp,n-1))
+                array.set(rec.revealUp,n-1,time)
+            if (newSession or barstate.isconfirmed) and n<=dnAhead and na(array.get(rec.revealDown,n-1))
+                array.set(rec.revealDown,n-1,time)
+f_targetSegment(int left,int right,float price,float span,color col) =>
+    if right>=left
+        array.push(targetLines,line.new(left,price,right,price,xloc=xloc.bar_time,color=col,width=targetWidth))
+        if targetBands
+            array.push(targetBoxes,box.new(left,price+span*.06,right,price-span*.06,xloc=xloc.bar_time,border_color=color.new(col,90),border_width=bandWidth,bgcolor=color.new(col,targetTransparency)))
+f_renderTarget(TargetSession rec,int n,bool upper) =>
+    float span=rec.hi-rec.lo
+    float price=upper ? rec.hi+n*span : rec.lo-n*span
+    int reveal=targetMode=="ALL" ? rec.key : upper ? array.get(rec.revealUp,n-1) : array.get(rec.revealDown,n-1)
+    int hit=upper ? array.get(rec.hitUp,n-1) : array.get(rec.hitDown,n-1)
+    color reached=upper ? upperColor : lowerColor
+    if not na(reveal)
+        if na(hit) or hit>rec.finish
+            f_targetSegment(reveal,rec.finish,price,span,pendingColor)
+        else
+            if hit>reveal
+                f_targetSegment(reveal,hit,price,span,pendingColor)
+            f_targetSegment(math.max(reveal,hit),rec.finish,price,span,reached)
+        if targetLabels and n>10
+            array.push(targetText,label.new(rec.finish,price,"T"+str.tostring(n)+" "+str.tostring(price,format.mintick),xloc=xloc.bar_time,style=label.style_label_left,color=color.new(color.black,100),textcolor=na(hit) ? pendingColor : reached,size=size.tiny))
+if barstate.islast
+    for item in targetLines
+        line.delete(item)
+    array.clear(targetLines)
+    for item in targetBoxes
+        box.delete(item)
+    array.clear(targetBoxes)
+    for item in targetText
+        label.delete(item)
+    array.clear(targetText)
+    if showTargets and targetMode!="OFF" and array.size(targetSessions)>0
+        for rec in targetSessions
+            for n=1 to targetCount
+                f_renderTarget(rec,n,true)
+                if bothDirections
+                    f_renderTarget(rec,n,false)
+
+// Independent 30-minute candle windows use standard market candles.
+string gWindow="05 — INDEPENDENT IST CANDLE WINDOWS"
+bool mark1230=input.bool(true,"Mark 12:30-13:00 IST",group=gWindow,display=display.none)
+bool mark1730=input.bool(true,"Mark 17:30-18:00 IST",group=gWindow,display=display.none)
+color color1230=input.color(color.rgb(0,175,230),"12:30 color",group=gWindow,display=display.none)
+color color1730=input.color(color.rgb(165,65,240),"17:30 color",group=gWindow,display=display.none)
+int windowTransparency=input.int(78,"Candle box transparency",minval=0,maxval=100,group=gWindow,display=display.none)
+bool windowInternal=input.bool(true,"Show 44/50/56% inside candle",group=gWindow,display=display.none)
+bool windowExtend=input.bool(true,"Extend 44/50/56% candleSpan levels",group=gWindow,display=display.none)
+bool windowHL=input.bool(false,"Also extend High/Low",group=gWindow,display=display.none)
+int windowKeep=input.int(8,"Keep last N windows",minval=1,maxval=20,group=gWindow,display=display.none)
+string gCut="05A — MARKER NEXT RED BAR CUTOFF"
+string markerTF=input.timeframe("30","Red Bar timeframe",group=gCut,display=display.none)
+int markerHour=input.int(2,"Session start IST hour (BTC 02:30)",minval=0,maxval=23,group=gCut,display=display.none)
+int markerMinute=input.int(30,"Session start IST minute",options=[0,15,30,45],group=gCut,display=display.none)
+bool markerSkip=input.bool(true,"Ignore first session candle",group=gCut,display=display.none)
+f_window(int hh,int mm) =>
+    bool selected=hour(time,"Asia/Kolkata")==hh and minute(time,"Asia/Kolkata")==mm
+    var float wh=na
+    var float wl=na
+    var int wt=na
+    var int we=na
+    if selected
+        wh:=high
+        wl:=low
+        wt:=time
+        we:=time_close
+    [wh,wl,wt,we]
+f_markerCutoff() =>
+    int key=int(math.floor((time+19800000-(markerHour*60+markerMinute)*60000)/86400000))
+    bool first=key!=key[1]
+    var int locked=na
+    var int lastKey=na
+    if first
+        lastKey:=na
+    if close<open and (not markerSkip or not first) and na(lastKey)
+        locked:=time_close
+        lastKey:=key
+    locked
+[w1h,w1l,w1t,w1e]=request.security(symbol,"30",f_window(12,30),lookahead=barmerge.lookahead_off)
+[w2h,w2l,w2t,w2e]=request.security(symbol,"30",f_window(17,30),lookahead=barmerge.lookahead_off)
+int markerCut=request.security(symbol,markerTF,f_markerCutoff(),lookahead=barmerge.lookahead_off)
+type WindowRecord
+    float hi
+    float lo
+    int start
+    int finish
+    int cutoff
+    int kind
+var array<WindowRecord> windows=array.new<WindowRecord>()
+var array<box> windowBoxes=array.new<box>()
+var array<line> windowLines=array.new<line>()
+if not na(w1t) and (na(w1t[1]) or w1t!=w1t[1])
+    array.push(windows,WindowRecord.new(w1h,w1l,w1t,w1e,na,1))
+if not na(w2t) and (na(w2t[1]) or w2t!=w2t[1])
+    array.push(windows,WindowRecord.new(w2h,w2l,w2t,w2e,na,2))
+if array.size(windows)>windowKeep
+    array.shift(windows)
+for rec in windows
+    if na(rec.cutoff) and not na(markerCut) and markerCut>rec.finish
+        rec.cutoff:=markerCut
+if barstate.islast
+    for item in windowBoxes
+        box.delete(item)
+    array.clear(windowBoxes)
+    for item in windowLines
+        line.delete(item)
+    array.clear(windowLines)
+    for rec in windows
+        bool enabled=rec.kind==1 ? mark1230 : mark1730
+        if enabled
+            color col=rec.kind==1 ? color1230 : color1730
+            array.push(windowBoxes,box.new(rec.start,rec.hi,rec.finish,rec.lo,xloc=xloc.bar_time,border_color=col,border_width=2,bgcolor=color.new(col,windowTransparency)))
+            for p in array.from(.44,.50,.56)
+                float price=rec.lo+(rec.hi-rec.lo)*p
+                if windowInternal
+                    array.push(windowLines,line.new(rec.start,price,rec.finish,price,xloc=xloc.bar_time,color=col,width=p==.50 ? 2 : 1))
+                if windowExtend
+                    int right=na(rec.cutoff) ? time : rec.cutoff
+                    array.push(windowLines,line.new(rec.finish,price,right,price,xloc=xloc.bar_time,color=col,width=p==.50 ? 2 : 1,style=line.style_dotted))
+            if windowHL
+                int right=na(rec.cutoff) ? time : rec.cutoff
+                array.push(windowLines,line.new(rec.finish,rec.hi,right,rec.hi,xloc=xloc.bar_time,color=col,style=line.style_dotted))
+                array.push(windowLines,line.new(rec.finish,rec.lo,right,rec.lo,xloc=xloc.bar_time,color=col,style=line.style_dotted))

@@ -103,7 +103,17 @@ class Manager:
             with self.intent_lock:
                 with self.cache_lock:self.position_cache=None;self.order_cache=None
                 if runner.is_entry_order(order,position) and (runner.state.get('config') or {}).get('mode')=='LIVE':
-                    claimed=set(self.owners())
+                    config=runner.state.get('config') or {}
+                    if config.get('renko_confirmation')=='PRICE':
+                        from .entry_pipeline import bounded_read
+                        event=(runner.state.get('last_signal') or {}).get('market_event_at',0)
+                        began=runner.clock()
+                        try:claimed=set(bounded_read(self.owners,event+15))
+                        finally:
+                            runner.state['last_ownership_preflight']={
+                                'started_at':began,'finished_at':runner.clock(),
+                                'elapsed_seconds':runner.clock()-began}
+                    else:claimed=set(self.owners())
                     for other in list(self.runners.values()):
                         if other is runner:continue
                         p=other.state.get('position') or (other.state.get('pending') or {}).get('position')
@@ -113,7 +123,7 @@ class Manager:
         runner.submit=submit
 
     def owned_symbols(self):
-        return {p['symbol'] for r in self.runners.values() for p in [r.state.get('position') or (r.state.get('pending') or {}).get('position')] if p}
+        return {p['symbol'] for r in list(self.runners.values()) for p in [r.state.get('position') or (r.state.get('pending') or {}).get('position')] if p}
 
     def inventory(self):
         account=self.account_reader();positions=self.reader.positions();orders=self.reader.orders()

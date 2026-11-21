@@ -25,19 +25,31 @@ def reload_states(source,broker):
     """Broker-scoped reload permits only proven Paper Stop handoff; main restart stays strict."""
     from .service_restart import runtime_states
     from strategies.renko_supertrend.stop_recovery import paper_stop_identity
-    source=Path(source).resolve();paths=runtime_states(source);drains={}
+    source=Path(source).resolve()
+    from strategies.nifty_ai_options.process_state import assert_stopped as assert_ai_stopped
+    assert_ai_stopped(source)
+    paths=runtime_states(source);drains={}
     for path in paths:
-        if path.stat().st_size>4000000:raise ValueError('Oversized current state blocks broker reload.')
-        try:state=json.loads(path.read_text())
-        except (OSError,ValueError):raise ValueError('Unreadable current state blocks broker reload.') from None
-        if not isinstance(state,dict):raise ValueError('Invalid current state blocks broker reload.')
+        from .restart_state_read import read_runtime_state
+        state=read_runtime_state(path,source)
+        if path.name=='delta-india-live.json' and (state.get('runner_position') or state.get('runner_pending')
+                or any(row.get('status') not in ('closed','cancelled','REJECTED')
+                       for row in (state.get('orders') or {}).values())):
+            raise ValueError('Native Delta monitoring or unresolved owned order blocks reload.')
         active=any(state.get(k) for k in ('running','accepting_entries','position','positions','pending','active','loop_running'))
         if not active:continue
+        from .restart_state_read import SMALL_LIMIT
+
         relative=path.resolve().relative_to(source).parts
         canonical=relative==('.private','renko-delta-state.json') or (len(relative)==4 and relative[:2]==('.private','renko-delta-instances') and relative[3]=='renko-delta-state.json')
         if broker!='DELTA_INDIA' or not canonical or state.get('active') or state.get('loop_running'):
             raise ValueError('Broker reload blocked by active runtime outside the identified Paper Stop.')
-        drains[path]=paper_stop_identity(state)
+        if (state.get('config') or {}).get('mode')=='LIVE':
+            from strategies.renko_supertrend.delta_external_close import stopped_external_identity
+            drains[path]=stopped_external_identity(source,state)
+        else:
+            if path.stat().st_size>SMALL_LIMIT:raise ValueError('Large retained Paper state reload requires stopped, flat and no pending orders.')
+            drains[path]=paper_stop_identity(state)
     return paths,drains
 
 
@@ -92,8 +104,8 @@ def begin(store, runtime, user, aid):
         if (Path('/proc')/str(pid)/'cwd').resolve() != (folder/'source').resolve():
             raise ValueError('Dashboard owner identity could not be verified.')
         state = dict(status='CHECKING',label=account['label'],broker=account['broker'],requested_by=user.get('username'),
-                     tag='Paper Stop recovery reload' if drains else 'Broker rolling bounce',started_at=time.time(),updated_at=time.time(),
-                     message='Checking retained Paper Stop identity; entries remain disabled.' if drains else 'Checking stopped runner state; no trading will be activated.',paper_stop_recovery=bool(drains))
+                     tag='Existing Stop recovery reload' if drains else 'Broker rolling bounce',started_at=time.time(),updated_at=time.time(),
+                     message='Checking retained Stop identity; entries remain disabled.' if drains else 'Checking stopped runner state; no trading will be activated.',paper_stop_recovery=bool(drains))
         private_write(folder/'bounce-status.json',json.dumps(state))
         thread = threading.Thread(target=_bounce,args=(store,runtime,account,pid,state),daemon=True,name='broker-dashboard-bounce')
         _active_account = aid
@@ -129,7 +141,7 @@ def _bounce(store, runtime, account, pid, initial):
             handle=open(path.with_suffix('.lock'),'a')
             lock_file(handle.fileno(),blocking=False);handles.append(handle)
         _,current_drains=reload_states(source,account['broker'])
-        if current_drains!=drains:raise ValueError('Paper Stop identity changed before broker reload; no handoff.')
+        if current_drains!=drains:raise ValueError('Stop identity changed before broker reload; no handoff.')
         if (Path('/proc')/str(pid)/'cwd').resolve()!=source.resolve():
             raise ValueError('Owner changed before handoff.')
         env=isolated_environment(account,folder,store.path,runtime.portal_port)
@@ -150,7 +162,7 @@ if __import__('os').environ.get('SECTOR_PULSE_WORKSPACE_BROKER')=='MOTILAL_OSWAL
  runpy.run_module('sector_heatmap.motilal_server',run_name='__main__')
 else:runpy.run_path('heatmap_server.py',run_name='__main__')
 '''
-        report('RESTARTING','Reloading this broker to finish its existing Paper Stop; entries remain disabled.' if drains else 'Replacing this broker dashboard; runners remain stopped.')
+        report('RESTARTING','Reloading this broker to finish its existing Stop; entries remain disabled.' if drains else 'Replacing this broker dashboard; runners remain stopped.')
         with open(folder/'dashboard.log','a') as output:
             replacement=subprocess.Popen([sys.executable,'-c',wrapper],cwd=source,env=env,stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
         time.sleep(.2)
@@ -175,7 +187,7 @@ else:runpy.run_path('heatmap_server.py',run_name='__main__')
                         serving=response.code in (401,403)
                     if serving:
                         stopped_states(source)
-                        report('READY','Existing Paper Stop completed: flat, no pending order, all runners stopped.' if drains else 'Broker dashboard is ready. All strategy runners remain stopped.')
+                        report('READY','Existing Stop completed: owned exposure reconciled, no pending order, all runners stopped.' if drains else 'Broker dashboard is ready. All strategy runners remain stopped.')
                         return
             except (OSError,ValueError,KeyError):
                 pass

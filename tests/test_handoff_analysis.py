@@ -38,19 +38,19 @@ class AnalysisTests(unittest.TestCase):
             risk_policy=self.payload()["risk_policy"],selection={"method":"structure"}),runs)
         self.assertGreater(review["active_invalidation"]["price"],100)
         self.assertLess(review["active_invalidation"]["target"],100)
-    def test_existing_position_is_excluded_before_card_generation(self):
+    def test_existing_position_does_not_suppress_analysis(self):
         report=opportunities(self.payload(),Provider(True),{})
-        self.assertEqual(report["cards"],[])
-        self.assertEqual(report["exclusions"][0]["kind"],"OPEN_POSITION")
-    def test_exposure_appearing_during_analysis_is_rechecked(self):
+        self.assertEqual(len(report["cards"]),1)
+        self.assertFalse(any(x.get("kind")=="OPEN_POSITION" for x in report["exclusions"]))
+    def test_exposure_appearing_during_analysis_retains_findings(self):
         provider=Provider();base=provider.positions
         def positions():
             if provider.positions_calls:provider.exposed=True
             return base()
         provider.positions=positions
         report=opportunities(self.payload(),provider,{})
-        self.assertEqual(report["cards"],[])
-        self.assertTrue(report["exclusions"])
+        self.assertEqual(len(report["cards"]),1)
+        self.assertFalse(any(x.get("kind")=="OPEN_POSITION" for x in report["exclusions"]))
 
 class AdapterIntegration(unittest.TestCase):
     def test_real_engine_sizing_shape_is_accepted_by_owned_adapter(self):

@@ -1,0 +1,6 @@
+//@version=6
+indicator("Chart guard request reproduction")
+if barstate.isfirst and not timeframe.isintraday
+    runtime.error("Host chart must be intraday")
+float previousHigh=request.security(syminfo.tickerid,"1D",high[1])
+plot(previousHigh)

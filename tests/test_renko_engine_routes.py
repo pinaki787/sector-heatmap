@@ -14,7 +14,7 @@ class RouteTests(unittest.TestCase):
    if aid!=self.account['id']:raise PermissionError('Account belongs to another user.')
    return self.account
   self.store=SimpleNamespace(account=account,folder=lambda a:Path(self.tmp.name))
-  self.env=dict(__name__="sector_heatmap.engine_test",__package__="sector_heatmap",workspace_guard=SimpleNamespace(store=self.store),local_auth=None,engine_services={},engine_services_lock=threading.RLock(),RenkoSupertrendBroker=lambda *a:FakeBroker(),ema_master_dir=None,ema_band_candles=None,select_ema_atm_option=None,automation_policy=SimpleNamespace(current=lambda:{}),json=__import__('json'))
+  self.env=dict(__name__="sector_heatmap.engine_test",__package__="sector_heatmap",workspace_guard=SimpleNamespace(store=self.store),local_auth=None,engine_services={},engine_services_lock=threading.RLock(),RenkoSupertrendBroker=lambda *a:FakeBroker(),RenkoChartBroker=lambda *a:FakeBroker(),ema_master_dir=None,ema_band_candles=None,select_ema_atm_option=None,automation_policy=SimpleNamespace(current=lambda:{}),json=__import__('json'))
   source=(Path(__file__).resolve().parents[1]/'sector_heatmap/web.py').read_text()
   method=source[source.index('        def renko_engine('):source.index('        def dhan_strategy(')]
   exec('class Handler:\n'+method,self.env)

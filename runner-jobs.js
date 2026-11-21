@@ -60,30 +60,91 @@ async function readSources(tasks,request,onResult){
 }
 async function stopJob(job,request){
  const current=unwrap(job.source,await request(job.read));
+ if(current.broker&&current.broker!==job.account.broker||current.account_id&&current.account_id!==job.account.id)throw Error('Runner account or broker mismatch. Refresh the job list.');
  if((current.run_id||current.run_started_at||current.started_at||null)!==(job.state.run_id||job.state.run_started_at||job.state.started_at||null))throw Error('Run changed. Refresh the job list before stopping.');
  if(!(current.running||current.position||current.pending))return 'Already stopped';
  const result=unwrap(job.source,await request(job.stop,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:current.run_id,started_at:current.run_started_at||current.started_at})}));
  return result.running||result.position||result.pending?'Stopping / reconciliation pending':'Stopped';
 }
-if(typeof module!=='undefined'&&module.exports){module.exports={sources,normalize,link,stopJob,netPnl,readSources,inventoryGroup};return;}
-root.RunnerJobInventory={sources,normalize,link};
+
+function runIdentity(state){return state.run_id||state.run_started_at||state.started_at||null;}
+function configurationKey(config){const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).filter(k=>!k.startsWith('_')).sort().map(k=>[k,stable(value[k])])):value;return JSON.stringify(stable(config));}
+function startSpec(job,state=job.state){
+ const c=state.config;
+ if(['renko','engine','rsi'].includes(job.source.kind)&&(!c?.strategy||job.source.kind==='renko'&&!state.runtime_revision))return null;
+ if(state.running||state.position||state.pending||state.shutdown_pending||job.sourceError||!c||!['PAPER','LIVE'].includes(c.mode)||!(c.underlying||c.symbol))return null;
+ const suffix='?instance='+encodeURIComponent(job.instance),account=job.account,kind=job.source.kind;
+ if(kind==='renko'){
+  const base=job.stop.split('?')[0].replace(/stop$/,'');
+  return {url:base+'start'+suffix,payload:{...c,broker:account.broker,account_id:account.id,configuration_revision:state.runtime_revision},protocol:'activate'};
+ }
+ if(kind==='engine'){
+  const base=job.source.url.replace(/runner$/,'');
+  return {url:base+'start',preview:base+'preview',payload:{...c,broker:account.broker,account_id:account.id},protocol:state.runtime_revision==='renko-engine-broker-v1'?'preview':'activate'};
+ }
+ if(['band','rsi','kama'].includes(kind)){
+  if(account.broker==='DHAN'){
+   const base=job.source.readPrefix.replace(/form-runner$/,'');
+   return {url:base+'form-runner-start'+suffix,payload:{...c,broker:'DHAN',account_id:account.id,quantity:c.quantity??c.size??c.lots},protocol:'activate'};
+  }
+  if(account.broker!=='FYERS')return null;
+  if(kind==='rsi'){
+   const base=job.source.url.replace(/runner$/,'');
+   return {url:base+'start',preview:base+'preview',payload:{...c},protocol:'preview'};
+  }
+  return {url:job.source.stop.replace(/stop$/,'start'),payload:{...c,quantity:c.quantity??c.size},protocol:'activate'};
+ }
+ return null;
+}
+async function startJob(job,request){
+ const current=unwrap(job.source,await request(job.read));
+ if(current.broker&&current.broker!==job.account.broker||current.account_id&&current.account_id!==job.account.id)throw Error('Runner account or broker mismatch. Refresh the job list.');
+ if(runIdentity(current)!==runIdentity(job.state))throw Error('Run changed. Refresh the job list before starting.');
+ if(configurationKey(current.config)!==configurationKey(job.state.config))throw Error('Saved settings changed. Review the refreshed job before starting.');
+ const spec=startSpec(job,current);if(!spec)throw Error('This runner is active, has retained exposure, or needs configuration. Open its settings.');
+ const post=body=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ let result;
+ if(spec.protocol==='preview'){
+  const prepared=await request(spec.preview,post(spec.payload));
+  result=await request(spec.url,post({preview_id:prepared.id,confirmation:prepared.confirmation}));
+ }else result=await request(spec.url,post(spec.payload));
+ const state=unwrap(job.source,result);
+ return state.running?'Started':state.pending?'Order reconciliation pending':state.message||state.status||'Start requested; refresh status';
+}
+function sessionChartLink(job,origin){
+ const u=new URL(link(job,origin));
+ if(job.source.kind==='renko'){
+  if(job.state.run_id)u.searchParams.set('renkoSession',job.state.run_id);
+  if(job.state.config?.timeframe)u.searchParams.set('renkoSessionTimeframe',job.state.config.timeframe);
+ }
+ return u.href;
+}
+function visibleJobs(jobs,includeStopped=false,query=''){
+ const term=query.trim().toLowerCase();
+ return jobs.filter(j=>(inventoryGroup(j)==='running'||includeStopped)&&(!term||[j.title,j.account.label,j.source.label,j.status].join(' ').toLowerCase().includes(term))).sort((a,b)=>['running','attention','history'].indexOf(inventoryGroup(a))-['running','attention','history'].indexOf(inventoryGroup(b)));
+}
+
+if(typeof module!=='undefined'&&module.exports){module.exports={sources,normalize,link,stopJob,netPnl,readSources,inventoryGroup,startSpec,startJob,sessionChartLink,visibleJobs,runIdentity};return;}
+root.RunnerJobInventory={sources,normalize,link,startSpec,startJob,stopJob,sessionChartLink};
 async function mount(){
  if(new URLSearchParams(location.search).get('renkoBatchChart')==='1')return;
  await root.BrokerForms.ready;
  if(document.querySelector('dialog[aria-label="Runner jobs"]'))return;
  const nav=document.querySelector('nav');if(!nav)return;
- const open=nav.querySelector('[data-view="runner-jobs"]')||document.createElement('button');open.type='button';open.dataset.feature='runner-jobs';open.dataset.view='runner-jobs';open.hidden=true;open.textContent='Saved jobs & reports';nav.append(open);
+ const open=nav.querySelector('[data-view="runner-jobs"]')||document.createElement('button');open.type='button';open.dataset.feature='runner-jobs';open.dataset.view='runner-jobs';open.hidden=true;open.textContent='Runner jobs & reports';nav.append(open);
  const help=document.createElement('a');help.href='/user-guide.html';help.dataset.feature='user-guide';help.hidden=true;help.textContent='?';help.className='portal-help-icon';help.setAttribute('aria-label','Help / User guide');help.title='Help / User guide';document.body.append(help);
  const dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Runner jobs');
- dialog.innerHTML=`<header><div><p class="job-window-eyebrow">RUNNERS &amp; EXECUTION</p><h2>Runner jobs</h2><p class="job-window-caption">Follow each runner, its trades and its journal.</p></div><button type="button" data-close>Close</button></header><div class="job-summary" data-count></div><div class="job-toolbar"><label>Find a job<input type="search" data-job-search placeholder="Instrument, strategy or account"></label><label class="job-history-toggle"><input type="checkbox" data-history> Include stopped / saved</label><label>Refresh mode<select data-refresh-interval aria-label="Runner jobs refresh interval"><option value="0">Manual</option><option value="15000">Every 15 seconds</option><option value="30000">Every 30 seconds</option><option value="60000">Every minute</option><option value="300000">Every 5 minutes</option></select></label><button type="button" data-refresh>Refresh now</button></div><div class="job-selection"><button type="button" data-select-all>Select running jobs</button><button type="button" data-clear>Clear selection</button><button type="button" data-stop disabled>Stop selected jobs</button><small>Stop follows the runner’s exit policy. Check pending orders in job details.</small></div><p data-message role="status" class="job-source-status"></p><div class="job-card-list" aria-label="Runner inventory"></div>`;
+ dialog.innerHTML=`<header><div><p class="job-window-eyebrow">RUNNERS &amp; EXECUTION</p><h2>Runner sessions</h2><p class="job-window-caption">Every saved symbol, its current session chart, trades and lifecycle controls.</p></div><button type="button" data-close>Close</button></header><div class="job-summary" data-count></div><div class="job-toolbar"><label>Find a job<input type="search" data-job-search placeholder="Instrument, strategy or account"></label><label class="job-history-toggle"><input type="checkbox" data-history> Include stopped / saved</label><label>Refresh mode<select data-refresh-interval aria-label="Runner jobs refresh interval"><option value="0">Manual</option><option value="15000">Every 15 seconds</option><option value="30000">Every 30 seconds</option><option value="60000">Every minute</option><option value="300000">Every 5 minutes</option></select></label><button type="button" data-refresh>Refresh now</button></div><div class="job-selection"><button type="button" data-select-all>Select all</button><button type="button" data-select-running>Select running</button><button type="button" data-clear>Clear selection</button><button type="button" data-start disabled>Start selected</button><button type="button" data-stop disabled>Stop selected</button><small>Stop follows the runner’s exit policy. Check pending orders in job details.</small></div><p data-message role="status" class="job-source-status"></p><div class="job-card-list" aria-label="Runner inventory"></div>`;
  document.body.append(dialog);
  const style=document.createElement('style');style.textContent=`
 .portal-help-icon{position:fixed;top:16px;right:20px;z-index:100;width:36px;height:36px;display:grid;place-items:center;border:1px solid #53647e;border-radius:50%;background:#142033;color:#e4ecf7;font-size:20px;text-decoration:none}.portal-help-icon[hidden]{display:none}
 dialog[aria-label="Runner jobs"]{--job-line:#344960;--job-muted:#a9bbcd;width:min(1120px,94vw);max-height:88vh;box-sizing:border-box;overflow:auto;background:#142033;color:#e4ecf7;border:1px solid #53647e;border-radius:16px;padding:28px;font:14px/1.5 system-ui,sans-serif}dialog[aria-label="Runner jobs"]::backdrop{background:#07101bd9}dialog[aria-label="Runner jobs"]>header{display:flex;justify-content:space-between;align-items:start;gap:16px}dialog[aria-label="Runner jobs"] h2{margin:0;font-size:28px;line-height:1.2;letter-spacing:-.025em}.job-window-eyebrow{font:11px/1.5 ui-monospace,monospace;letter-spacing:.12em;color:#9ab6d2;margin:0 0 8px}.job-window-caption{color:var(--job-muted);margin:8px 0 0}.job-summary{margin:24px 0 20px;padding:14px 0;border-block:1px solid var(--job-line);font:15px/1.6 ui-monospace,monospace;color:#b9d9f1}.job-toolbar{display:flex;align-items:end;gap:18px;flex-wrap:wrap}.job-toolbar>label:first-child{flex:1;min-width:220px}.job-toolbar label{font-size:12px;color:var(--job-muted)}.job-toolbar select{display:block;margin-top:6px;min-height:42px;background:#0f1b2a;border:1px solid #52647e;border-radius:8px;color:#e4ecf7;padding:9px;font:14px system-ui,sans-serif}.job-toolbar input[type=search]{display:block;box-sizing:border-box;width:100%;margin-top:6px;background:#0f1b2a;border:1px solid #52647e;color:#e4ecf7;border-radius:8px;padding:11px;font:14px system-ui,sans-serif}.job-history-toggle{display:flex;align-items:center;gap:8px;min-height:42px}.job-selection{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:16px}.job-selection small{flex-basis:100%;color:var(--job-muted);margin-top:4px}.job-source-status{font-size:12px;color:var(--job-muted);overflow-wrap:anywhere;max-height:90px;overflow:auto;margin:18px 0 12px}.job-card-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));gap:14px}.runner-job-card{min-width:0;border:1px solid var(--job-line);border-left:3px solid #61758b;border-radius:10px;background:#19283b;padding:18px;overflow-wrap:anywhere}.runner-job-card.is-active{border-left-color:#71cfb1}.job-card-heading{display:flex;gap:12px;align-items:start}.job-card-heading>div{flex:1;min-width:0}.job-card-heading h3{margin:0 0 4px;font-size:18px;line-height:1.35;letter-spacing:-.015em}.job-card-account{margin:0;color:var(--job-muted);font-size:12px}.job-card-heading input{margin-top:6px;flex:none}.job-card-state{display:inline-block;margin:14px 0 8px;padding:3px 9px;background:#263b50;border-radius:5px;color:#b9d9f1;font-size:12px}.job-card-metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0 14px}.job-card-metrics dt{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--job-muted)}.job-card-metrics dd{margin:4px 0 0;font:14px/1.5 ui-monospace,monospace}.job-card-note{font-size:12px;color:var(--job-muted);margin:8px 0;max-height:64px;overflow:auto}.job-card-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--job-line);padding-top:14px;margin-top:16px}.job-card-actions a{color:#a9d4fb;font-size:13px}.job-empty{grid-column:1/-1;text-align:center;border:1px dashed var(--job-line);border-radius:10px;padding:36px 20px}.job-empty h3{font-size:20px;margin:0 0 8px}.job-empty p{color:var(--job-muted);margin:0 0 18px}dialog[aria-label="Runner jobs"] button{padding:9px 13px;background:#263953;color:#e4ecf7;border:1px solid #52647e;border-radius:7px;font:13px/1.4 system-ui,sans-serif;cursor:pointer}dialog[aria-label="Runner jobs"] button:disabled{opacity:.45;cursor:default}dialog[aria-label="Runner jobs"] [data-stop]:not(:disabled){background:#583741;border-color:#a96a76}dialog[aria-label="Runner jobs"] :is(button,input,a):focus-visible{outline:2px solid #91c4ff;outline-offset:3px}.job-detail-pane{margin-top:22px}.job-detail-pane:empty{display:none}@media(max-width:600px){dialog[aria-label="Runner jobs"]{padding:18px;width:96vw}.job-toolbar>label:first-child{flex-basis:100%}.job-selection small{font-size:11px}.job-card-list{grid-template-columns:1fr}.job-card-metrics{gap:10px}}
 `;document.head.append(style);
- const body=dialog.querySelector('.job-card-list'),message=dialog.querySelector('[data-message]'),stop=dialog.querySelector('[data-stop]'),count=dialog.querySelector('[data-count]');
+ const extraStyle=document.createElement('style');extraStyle.textContent='.job-start-review{max-width:760px;width:92vw;box-sizing:border-box;max-height:85vh;overflow:auto;background:#17263a;color:#e4ecf7;border:1px solid #52647e;border-radius:12px;padding:24px;font:14px/1.6 system-ui}.job-start-review::backdrop{background:#07101bd9}.job-start-review button{padding:10px 14px;background:#263953;color:#e4ecf7;border:1px solid #52647e;border-radius:6px}.job-session-chart{margin-top:24px;min-width:0}.job-session-chart:empty{display:none}.job-session-chart h3{font:600 18px system-ui;color:#dbeaf7}.job-card-actions{gap:8px}.job-card-actions button{white-space:nowrap}';document.head.append(extraStyle);
+ const body=dialog.querySelector('.job-card-list'),message=dialog.querySelector('[data-message]'),stop=dialog.querySelector('[data-stop]'),start=dialog.querySelector('[data-start]'),count=dialog.querySelector('[data-count]');
  let jobs=[],selected=new Set(),busy=false,loading=false,revision=0,detailJob=null,detailBusy=false,detailRevision=0;
  const detail=document.createElement('section');detail.className='job-detail-pane';dialog.append(detail);
+ const chartPane=document.createElement('section');chartPane.className='job-session-chart';dialog.append(chartPane);let chartKey=null;
  function savedAudit(job){
   const run=root.RunnerJobDetails?.identity(job.state);
   if(!run)return null;
@@ -95,10 +156,59 @@ dialog[aria-label="Runner jobs"]{--job-line:#344960;--job-muted:#a9bbcd;width:mi
   }
   return null;
  }
+ function showSession(job){
+  if(job.source.kind==='renko'){location.href=sessionChartLink(job,location.origin);return;}
+  detailRevision++;detailJob={...job,receivedAt:Date.now()/1000};renderDetails();
+  chartPane.replaceChildren();chartKey=null;
+  const heading=document.createElement('h3');heading.textContent=job.title+' · '+(job.state.config?.mode||'Saved')+' · '+(job.state.config?.timeframe||'Session chart');
+  chartPane.append(heading);
+  if(job.source.kind==='renko'){
+   const url=new URL(sessionChartLink(job,location.origin));url.searchParams.set('renkoBatchChart','1');url.searchParams.set('runnerSessionReadOnly','1');url.searchParams.set('renkoChartSymbol',job.title);
+   const frame=document.createElement('iframe');frame.src=url;frame.title=job.title+' current trading session chart';frame.loading='lazy';frame.style.cssText='width:100%;height:760px;border:1px solid #344960;border-radius:8px;background:#101b2b';chartPane.append(frame);chartKey=job.key+':'+runIdentity(job.state);
+  }else{
+   const a=document.createElement('a');a.href=sessionChartLink(job,location.origin);a.textContent='Open this strategy’s session chart';chartPane.append(a);
+  }
+  chartPane.scrollIntoView?.({block:'start',behavior:'auto'});void refreshDetail();
+ }
+ async function approveStarts(rows){
+  if(!rows.length)return false;
+  return new Promise(resolve=>{
+   const review=document.createElement('dialog');review.className='job-start-review';review.setAttribute('aria-label','Review selected runner starts');
+   const heading=document.createElement('h2');heading.textContent='Start '+rows.length+' selected runner'+(rows.length===1?'':'s');
+   const note=document.createElement('p');note.textContent='Each start opens a new session using that runner’s own last recorded settings, mode, quantity and timeframe. LIVE runners can submit real broker orders on new signals. Existing positions and pending orders block a new start.';
+   review.append(heading,note);
+   const list=document.createElement('div');
+   for(const job of rows){const c=job.state.config,line=document.createElement('p');line.textContent=job.title+' · '+job.account.label+' · '+job.source.label+' · '+c.mode+' · '+(c.timeframe||'saved timeframe')+' · '+(c.quantity??c.size??c.lots??'saved')+' '+(c.quantity||c.size?'units':'lots');list.append(line);}
+   const actions=document.createElement('div');actions.className='job-selection';
+   const finish=value=>{review.close();review.remove();resolve(value);};
+   for(const [label,value] of [['Cancel',false],['Start selected runners',true]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>finish(value);actions.append(b);}
+   review.addEventListener('cancel',e=>{e.preventDefault();finish(false);});review.append(list,actions);document.body.append(review);review.showModal();
+  });
+ }
+ async function startRows(rows){
+  const eligible=rows.filter(j=>startSpec(j));if(busy||!eligible.length)return;
+  busy=true;render();
+  if(!await approveStarts(eligible)){busy=false;render();return;}
+  const results=[];
+  for(const job of eligible){try{results.push(job.title+': '+await startJob(job,request));}catch(error){results.push(job.title+': '+error.message+' — refresh status before retrying');}}
+  busy=false;selected.clear();if(dialog.open)await refresh();else render();message.textContent=results.join(' | ');return results;
+ }
+ async function stopRows(rows){
+  const eligible=rows.filter(j=>j.active&&!j.sourceError);if(busy||!eligible.length)return;
+  busy=true;render();const results=[];
+  await Promise.all(eligible.map(async job=>{try{results.push(job.title+': '+await stopJob(job,request));}catch(error){results.push(job.title+': '+error.message+' — check status before retrying');}}));
+  busy=false;selected.clear();if(dialog.open)await refresh();else render();message.textContent=results.join(' | ');return results;
+ }
+ function updateActions(){
+  const chosen=jobs.filter(j=>selected.has(j.key));
+  const starts=chosen.filter(j=>startSpec(j)).length,stops=chosen.filter(j=>j.active&&!j.sourceError).length;
+  start.disabled=busy||!starts;stop.disabled=busy||!stops;
+  start.textContent='Start selected'+(starts?' ('+starts+')':'');stop.textContent='Stop selected'+(stops?' ('+stops+')':'');
+ }
  function renderDetails(error){
   if(!detailJob||!root.RunnerJobDetails)return;
   root.RunnerJobDetails.render(detail,{state:detailJob.state,account:detailJob.account,title:detailJob.title,strategy:detailJob.source.label,
-   audit:savedAudit(detailJob),chartUrl:link(detailJob,location.origin),observedAt:detailJob.receivedAt,connectionError:error,
+   audit:savedAudit(detailJob),chartUrl:sessionChartLink(detailJob,location.origin),observedAt:detailJob.receivedAt,connectionError:error,
    onRefresh:()=>void refreshDetail(),onStop:detailJob.active?async()=>{try{await stopJob(detailJob,request);await refreshDetail();}catch(error){renderDetails(error.message);}}:null});
  }
  async function refreshDetail(){
@@ -120,18 +230,18 @@ dialog[aria-label="Runner jobs"]{--job-line:#344960;--job-muted:#a9bbcd;width:mi
   const expanded=new Set([...body.querySelectorAll('article[data-job-key]')].filter(card=>card.querySelector('details[open]')).map(card=>card.dataset.jobKey));
   const focus=document.activeElement,focusCard=focus?.closest('article[data-job-key]'),focusKey=focusCard?.dataset.jobKey;
   const focusIndex=focusCard?[...focusCard.querySelectorAll('button,input,a,summary')].indexOf(focus):-1;
-  body.replaceChildren();count.textContent=jobs.filter(j=>j.state.running).length+' running · '+jobs.filter(j=>inventoryGroup(j)==='attention').length+' stopped requiring review';
+  body.replaceChildren();count.textContent=jobs.filter(j=>j.state.running).length+' running · '+jobs.filter(j=>inventoryGroup(j)==='attention').length+' stopped requiring review · '+jobs.filter(j=>inventoryGroup(j)==='history').length+' stopped / saved';
   if(detailJob&&inventoryGroup(detailJob)!=='running'&&!dialog.querySelector('[data-history]').checked){detailRevision++;detailJob=null;detail.replaceChildren();}
   const query=dialog.querySelector('[data-job-search]').value.trim().toLowerCase();
-  const visible=jobs.filter(j=>(inventoryGroup(j)==='running'||dialog.querySelector('[data-history]').checked)&&(!query||[j.title,j.account.label,j.source.label,j.status].join(' ').toLowerCase().includes(query))).sort((a,b)=>['running','attention','history'].indexOf(inventoryGroup(a))-['running','attention','history'].indexOf(inventoryGroup(b)));
+  const visible=visibleJobs(jobs,dialog.querySelector('[data-history]').checked,query);
   if(!visible.length){const empty=document.createElement('div');empty.className='job-empty';const heading=document.createElement('h3');heading.textContent=loading?'Reading your runners…':query?'No matching runners':dialog.querySelector('[data-history]').checked?'No saved runners':'No runners are running';const caption=document.createElement('p');caption.textContent=query?'Try another instrument, strategy or account.':'Completed and stopped runs remain available with their recorded journals.';empty.append(heading,caption);if(!loading&&!dialog.querySelector('[data-history]').checked){const history=document.createElement('button');history.type='button';history.textContent='View stopped / saved runners';history.onclick=()=>{dialog.querySelector('[data-history]').checked=true;render();};empty.append(history);}body.append(empty);}
   let lastGroup=null;
   for(const job of visible){
    const group=inventoryGroup(job);
-   if(group!==lastGroup){const section=document.createElement('div');section.className='job-inventory-section';section.dataset.inventoryGroup=group;section.style.gridColumn='1/-1';const title=document.createElement('h3');title.textContent=group==='running'?'Running / stopping':group==='attention'?'Stopped — recorded exposure needs review':'Stopped / saved history';section.append(title);if(group==='attention'){const note=document.createElement('p');note.textContent='These runners are stopped. A saved position or pending order remains recorded; verify current broker state before recovery. They are excluded from Select running jobs.';section.append(note);}body.append(section);lastGroup=group;}
+   if(group!==lastGroup){const section=document.createElement('div');section.className='job-inventory-section';section.dataset.inventoryGroup=group;section.style.gridColumn='1/-1';const title=document.createElement('h3');title.textContent=group==='running'?'Running / stopping':group==='attention'?'Stopped — recorded exposure needs review':'Stopped / saved history';section.append(title);if(group==='attention'){const note=document.createElement('p');note.textContent='These runners are stopped. A saved position or pending order remains recorded; verify current broker state before recovery. They are excluded from Select running.';section.append(note);}body.append(section);lastGroup=group;}
    const card=document.createElement('article');card.dataset.jobKey=job.key;card.className='runner-job-card'+(inventoryGroup(job)==='running'?' is-active':'');card.dataset.inventoryGroup=group;
    const heading=document.createElement('div');heading.className='job-card-heading';
-   const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+job.title+' '+job.account.label);check.disabled=busy||loading||!job.active;check.checked=selected.has(job.key);check.onchange=()=>{check.checked?selected.add(job.key):selected.delete(job.key);stop.disabled=busy||loading||selected.size===0;};
+   const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+job.title+' '+job.account.label);check.disabled=busy||!!job.sourceError||!(job.active||startSpec(job));check.checked=selected.has(job.key);check.onchange=()=>{check.checked?selected.add(job.key):selected.delete(job.key);updateActions();};
    const identity=document.createElement('div'),title=document.createElement('h3'),account=document.createElement('p');title.textContent=job.title;account.className='job-card-account';account.textContent=(names[job.account.broker]||job.account.broker)+' · '+job.account.label+' · '+job.source.label;identity.append(title,account);heading.append(check,identity);card.append(heading);
    const status=document.createElement('span');status.className='job-card-state';status.textContent=job.status;card.append(status);
    const metrics=document.createElement('dl');metrics.className='job-card-metrics';
@@ -140,12 +250,15 @@ dialog[aria-label="Runner jobs"]{--job-line:#344960;--job-muted:#a9bbcd;width:mi
    metric('Mode · timeframe',(job.state.config?.mode||job.state.mode||'—')+' · '+(job.state.config?.timeframe||'—'));
    metric('Started',job.state.started_at?new Date(typeof job.state.started_at==='number'?job.state.started_at*1000:job.state.started_at).toLocaleString():'Not recorded');
    metric('Run ID',String(job.state.run_id||'Not started'));card.append(metrics);
-   const note=document.createElement('p');note.className='job-card-note';note.textContent=(job.state.status_read_delayed?'Runner busy · showing saved status. ':'')+(job.state.message||job.state.last_event?.message||'');card.append(note);
+   const note=document.createElement('p');note.className='job-card-note';note.textContent=(job.sourceError?'Source unavailable: '+job.sourceError+' · Showing last received session. ':'')+(job.state.status_read_delayed?'Runner busy · showing saved status. ':'')+(job.state.message||job.state.last_event?.message||'');card.append(note);
    if(job.state.job_history?.length){const history=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Submission history ('+job.state.job_history.length+')';history.append(summary);for(const run of job.state.job_history){const row=document.createElement('p');row.className='job-card-note';row.textContent=new Date(run.started_at*1000).toLocaleString()+' · '+(run.config?.mode||'—')+' · '+(run.status||'Unknown')+' · '+(run.message||'');history.append(row);}card.append(history);}
    const actions=document.createElement('div');actions.className='job-card-actions';const view=document.createElement('button');view.type='button';view.textContent='View job details';view.onclick=()=>{detailRevision++;detailJob={...job,receivedAt:Date.now()/1000};renderDetails();detail.scrollIntoView?.({block:'start',behavior:'auto'});void refreshDetail();};actions.append(view);
-   const a=document.createElement('a');a.textContent='Settings & chart';a.href=link(job,location.origin);actions.append(a);card.append(actions);body.append(card);
+   const chart=document.createElement('button');chart.type='button';chart.textContent='Session chart';chart.onclick=()=>showSession(job);actions.append(chart);
+   if(startSpec(job)){const b=document.createElement('button');b.type='button';b.textContent='Start · '+job.state.config.mode;b.disabled=busy||!!job.sourceError;b.onclick=()=>void startRows([job]);actions.append(b);}
+   if(job.active){const b=document.createElement('button');b.type='button';b.textContent='Stop & close';b.disabled=busy||!!job.sourceError;b.onclick=()=>void stopRows([job]);actions.append(b);}
+   const a=document.createElement('a');a.textContent=startSpec(job)||job.active?'Settings':'Configure & start';a.href=link(job,location.origin);actions.append(a);card.append(actions);body.append(card);
   }
-  stop.disabled=busy||loading||selected.size===0;
+  updateActions();
   for(const card of body.querySelectorAll('article[data-job-key]')){
    if(expanded.has(card.dataset.jobKey)){const history=card.querySelector('details');if(history)history.open=true;}
    if(card.dataset.jobKey===focusKey&&focusIndex>=0)card.querySelectorAll('button,input,a,summary')[focusIndex]?.focus({preventScroll:true});
@@ -154,32 +267,35 @@ dialog[aria-label="Runner jobs"]{--job-line:#344960;--job-muted:#a9bbcd;width:mi
  }
  async function refresh(){
   if(loading||busy)return;loading=true;const ticket=++revision;message.textContent='Reading server jobs…';
-  const next=[],errors=[];
+  const next=[],errors=[],previous=jobs,responded=new Set(),failed=new Map();
+  const sourceKey=(account,source)=>account.id+'|'+source.url;
   const tasks=root.BrokerForms.accounts().filter(a=>a.configured).flatMap(account=>sources(account).filter(source=>!root.SectorPulseWorkspace||root.SectorPulseWorkspace.allowed_features?.includes(featureKeys[source.kind])).map(source=>({account,source})));
   let completed=0;
   if(!jobs.length)render();
   await readSources(tasks,request,({account,source},data,error)=>{
    if(ticket!==revision)return;
    completed++;
-   if(error)errors.push(account.label+' / '+source.label+': '+error.message);
+   responded.add(sourceKey(account,source));
+   if(error){errors.push(account.label+' / '+source.label+': '+error.message);failed.set(sourceKey(account,source),error.message);}
    else for(const state of source.many?data.instances||[]:[data]){const job=normalize(account,source,state);if(job)next.push(job);}
-   // Keep the current inventory visible until all sources have responded.
+   jobs=[...next,...previous.filter(j=>tasks.some(t=>sourceKey(t.account,t.source)===sourceKey(j.account,j.source))&&(!responded.has(sourceKey(j.account,j.source))||failed.has(sourceKey(j.account,j.source)))).map(j=>({...j,sourceError:failed.get(sourceKey(j.account,j.source))}))];
+   render();
+   // Retain a source’s last received sessions when that source cannot respond.
    message.textContent='Received '+completed+'/'+tasks.length+' job sources'+(completed<tasks.length?' · remaining sources are still responding…':'')+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):'');
   });
   if(ticket!==revision)return;
-  loading=false;jobs=next;selected=new Set([...selected].filter(k=>jobs.some(j=>j.key===k&&j.active)));render();message.textContent='Updated '+new Date().toLocaleTimeString()+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):' · All listed sources responded.');
+  loading=false;selected=new Set([...selected].filter(k=>jobs.some(j=>j.key===k&&(j.active||startSpec(j)))));render();message.textContent='Updated '+new Date().toLocaleTimeString()+(errors.length?' · Some jobs unavailable: '+errors.join(' | '):' · All listed sources responded.');
  }
- dialog.querySelector('[data-select-all]').onclick=()=>{if(busy||loading)return;selected=new Set(jobs.filter(j=>j.state.running).map(j=>j.key));render();};
+ dialog.querySelector('[data-select-all]').onclick=()=>{if(busy)return;const visible=visibleJobs(jobs,dialog.querySelector('[data-history]').checked,dialog.querySelector('[data-job-search]').value);selected=new Set(visible.filter(j=>!j.sourceError&&(j.active||startSpec(j))).map(j=>j.key));render();};
+ dialog.querySelector('[data-select-running]').onclick=()=>{if(busy)return;selected=new Set(visibleJobs(jobs,true,dialog.querySelector('[data-job-search]').value).filter(j=>j.state.running&&!j.sourceError).map(j=>j.key));render();};
  dialog.querySelector('[data-clear]').onclick=()=>{if(busy)return;selected.clear();render();};
  dialog.querySelector('[data-history]').onchange=render;
  dialog.querySelector('[data-job-search]').oninput=render;
+ root.RunnerJobInventory.startSessions=startRows;
  root.RunnerJobInventory.open=host=>{host.append(dialog);dialog.classList.add('fullpage-runner-pane');if(!dialog.open)dialog.show();void refresh();};
- open.onclick=()=>root.SectorPulseJobs?root.SectorPulseJobs.open('ANALYSIS'):(dialog.showModal(),void refresh());dialog.querySelector('[data-close]').onclick=()=>{dialog.close();root.SectorPulseJobs?.open('ANALYSIS');};dialog.querySelector('[data-refresh]').onclick=()=>void refreshAll();
- stop.onclick=async()=>{
-  if(busy||loading)return;busy=true;render();const results=[];
-  await Promise.all(jobs.filter(j=>selected.has(j.key)).map(async job=>{try{results.push(job.title+': '+await stopJob(job,request));}catch(e){results.push(job.title+': '+e.message+' — check status before retrying');}}));
-  busy=false;selected.clear();await refresh();message.textContent=results.join(' | ');
- };
+ open.onclick=()=>root.SectorPulseJobs?root.SectorPulseJobs.open('LIVE'):(dialog.showModal(),void refresh());dialog.querySelector('[data-close]').onclick=()=>{dialog.close();root.SectorPulseJobs?.open('ANALYSIS');};dialog.querySelector('[data-refresh]').onclick=()=>void refreshAll();
+ start.onclick=()=>void startRows(jobs.filter(j=>selected.has(j.key)));
+ stop.onclick=()=>void stopRows(jobs.filter(j=>selected.has(j.key)));
  const refreshMode=dialog.querySelector('[data-refresh-interval]'),refreshKey='sector-pulse:runner-jobs:refresh-interval';
  let refreshTimer=null;
  async function refreshAll(){

@@ -2,7 +2,7 @@
 from pathlib import Path
 import hashlib
 from .market_brief_visual import public_snapshot,metric,numeric,date,status_label,TF_ORDER,caption,fallback_text
-REVISION="phone-panels-v3"
+REVISION="phone-panels-v4-retained-handoff"
 WIDTH=720
 SECTORS_PER_PANEL=3
 MIN_BODY_FONT=28
@@ -38,7 +38,7 @@ def render_panels(snapshot,target):
   d.rectangle((0,0,WIDTH,180),fill=navy)
   text(32,20,"SECTOR PULSE",25,"#BFDCD9",True);right(688,20,f"{index+1} / {len(specs)}",25,"#FFFFFF",True)
   text(32,62,"Sector alignment" if kind=="sectors" else "Analysis Handoff",39,"#FFFFFF",True)
-  fit(32,115,(s.get("status") or "UNAVAILABLE") if kind=="sectors" else "Review-only market analysis",size=26,minimum=24,color="#F0D39B")
+  fit(32,115,(s.get("status") or "UNAVAILABLE") if kind=="sectors" else ("Saved analysis · refresh unavailable" if h.get("retained") else "Review-only market analysis"),size=26,minimum=24,color="#F0D39B")
   text(32,150,"Bars "+date(s.get("asof") if kind=="sectors" else h.get("asof")),24,"#CEE0EA")
   if kind=="sectors":
    for j,row in enumerate(items):
@@ -69,7 +69,7 @@ def render_panels(snapshot,target):
    if flag!="Completed 15m / 1H / Daily / Weekly states":
     d.rectangle((28,fy+60,700,fy+90),fill="#E9EFF5");fit(32,fy+61,flag,size=24,minimum=24,color=muted)
   elif not items:
-   wrapped(32,220,"No verified Handoff recommendation available.",size=32,color=ink)
+   wrapped(32,220,h.get("empty_reason") or "Fresh Handoff analysis unavailable.",size=32,color=ink)
    wrapped(32,320,h.get("status") or "UNAVAILABLE",size=28)
    text(32,430,"Analysis only. No orders or fills confirmed.",24,muted)
   else:
