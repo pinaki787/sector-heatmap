@@ -1,0 +1,52 @@
+
+/* Broker-bound chart order ticket. */
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) {
+  box-sizing:border-box; width:300px; max-width:calc(100vw - 24px); padding:16px;
+  background:var(--chart-bg,#fff); color:var(--chart-ink,#131722);
+  border:1px solid #d1d4dc; border-radius:8px; box-shadow:0 8px 28px #1317221a;
+  font:12px/1.45 Inter,system-ui,sans-serif;
+}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket)[hidden] {display:none;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) header {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) header small {display:block;color:#787b86;margin-top:3px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) button {min-height:30px;border:1px solid #d1d4dc;border-radius:4px;padding:5px 10px;background:var(--chart-bg,#fff);color:#131722;cursor:pointer;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) button:disabled {opacity:.55;cursor:default;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) form>label,.sp-chart-trade-levels>label {display:grid;gap:4px;margin:10px 0;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) input:not([type=checkbox]),:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) select {box-sizing:border-box;min-width:0;width:100%;height:32px;border:1px solid #d1d4dc;border-radius:4px;padding:5px 8px;background:var(--chart-bg,#fff);color:#131722;font:inherit;font-variant-numeric:tabular-nums;}
+.sp-chart-trade-levels>label>span {display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:5px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-pick] {padding:4px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-preview],:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-arm] {width:100%;background:#2962ff;color:#fff;border-color:#2962ff;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-status] {color:#5d606b;min-height:18px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-review] {border-top:1px solid #e0e3eb;margin-top:14px;padding-top:8px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) h3 {font-size:13px;margin:6px 0;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) dl {display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) dt {color:#787b86;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) dd {margin:0;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-review]>label {display:flex;align-items:flex-start;gap:7px;margin:12px 0;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) :focus-visible {outline:2px solid #2962ff;outline-offset:2px;}
+
+
+:is(#sp-chart-workspace .sp-chart-trade-actions, .sp-chart-trade-actions) {display:flex;gap:6px;margin:4px 0;}
+:is(#sp-chart-workspace .sp-chart-trade-actions, .sp-chart-trade-actions) button {font:600 11px/1.3 Inter,system-ui,sans-serif;border-radius:4px;padding:5px 14px;background:transparent;cursor:pointer;}
+:is(#sp-chart-workspace .sp-chart-trade-actions, .sp-chart-trade-actions) [data-trade-side=SELL] {border:1px solid #f23645;color:#f23645;}
+:is(#sp-chart-workspace .sp-chart-trade-actions, .sp-chart-trade-actions) [data-trade-side=BUY] {border:1px solid #2962ff;color:#2962ff;}
+:is(#sp-chart-workspace .sp-chart-trade-actions, .sp-chart-trade-actions) button:disabled {opacity:.45;cursor:default;}
+.sp-chart-content>:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) {flex:0 0 300px;align-self:stretch;border-radius:0;overflow:auto;box-shadow:none;border-width:0 0 0 1px;max-height:100%;}
+@media(max-width:760px) {
+  .sp-chart-content>:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) {position:absolute;right:8px;top:100px;bottom:45px;z-index:35;border:1px solid #d1d4dc;border-radius:8px;box-shadow:0 8px 28px #13172226;}
+}
+
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [hidden] {display:none !important;}
+
+@media(max-width:760px){:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket).sp-trade-picking{visibility:hidden;pointer-events:none;}}
+
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-tick-unit] {display:block;color:#787b86;line-height:1.5;margin:8px 0;overflow-wrap:anywhere;}
+
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket)>header {position:sticky;top:-16px;z-index:2;background:var(--chart-bg,#fff);padding:0 0 10px;border-bottom:1px solid #e0e3eb;}
+
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-cancel-condition]{margin-top:8px;background:transparent;color:#b32636;border:1px solid #d1d4dc;}
+:is(#sp-chart-workspace .sp-chart-trade-ticket, .sp-chart-trade-ticket) [data-trade-notice]{padding:8px 10px;border-radius:4px;background:#fff7e6;color:#875600;font-size:12px;line-height:1.5;}
+
+/* Keep native confirmation controls aligned with the active chart theme. */
+.sp-chart-trade-ticket {color-scheme:light;}
+#sp-chart-workspace.sp-chart-dark .sp-chart-trade-ticket {color-scheme:dark;}

@@ -1,0 +1,375 @@
+from datetime import datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+from sector_heatmap.analysis import (
+    calculate_sector, calculate_timeframe_state, classify_rotation, detect_events,
+    market_overview, mtf_alignment, rank_sectors, rsi_state, weighted_available,
+)
+from sector_heatmap.analysis_config import MTF_MODES, SECTOR_SCORE_WEIGHTS
+from sector_heatmap.indicators import (
+    adx_dmi, breadth_score, ema, normalized_slope, rsi,
+    volume_participation_score,
+)
+from sector_heatmap.market_calendar import IST, market_session
+from sector_heatmap.sector_service import (
+    CandleHistoryProvider, FyersAuthenticationError, SectorAnalysisService, rank_directional_drivers,
+)
+from sector_heatmap.sectors import SECTOR_DEFINITIONS
+
+
+def candles(count=260, start=100.0, step=0.5, timestamp=None):
+    first = timestamp or int((datetime.now() - timedelta(days=count)).timestamp())
+    rows = []
+    for index in range(count):
+        close = start + index * step
+        rows.append({"timestamp": first + index * 86400, "open": close - step / 2, "high": close + 1, "low": close - 1, "close": close, "volume": 1000 + index})
+    return rows
+
+
+def timeframe(score=70, state=1, rs=65, momentum=60, adx=25, quality="DELAYED"):
+    return {"score": score, "state": state, "relative_strength_score": rs, "momentum_score": momentum, "adx": adx, "data_quality": quality, "last_updated": "2026-08-29T15:30:00+05:30", "series": []}
+
+
+class IndicatorTests(unittest.TestCase):
+    def test_ema_alignment_is_strong_bullish_for_ordered_uptrend(self):
+        result = calculate_timeframe_state("daily", candles(), candles(step=0.2))
+        self.assertEqual(result["state"], 2)
+        self.assertIn("Close > EMA20 > EMA50 > EMA200", result["reasons"])
+
+    def test_normalized_ema_slope_uses_atr_and_lookback(self):
+        series = ema([100 + index for index in range(30)], 5)
+        self.assertAlmostEqual(normalized_slope(series, 2.0, 5), (series[-1] - series[-6]) / 10)
+
+    def test_rsi_state_thresholds(self):
+        self.assertEqual(rsi_state(60)[0], 2)
+        self.assertEqual(rsi_state(57)[0], 1)
+        self.assertEqual(rsi_state(50)[0], 0)
+        self.assertEqual(rsi_state(42)[0], -1)
+        self.assertEqual(rsi_state(39)[0], -2)
+
+    def test_rsi_uptrend_is_bounded(self):
+        value = rsi([100 + index for index in range(30)])
+        self.assertGreaterEqual(value, 0)
+        self.assertLessEqual(value, 100)
+
+    def test_adx_direction_comes_from_dmi(self):
+        adx, plus_di, minus_di = adx_dmi(candles(80), 14)
+        self.assertGreater(adx, 25)
+        self.assertGreater(plus_di, minus_di)
+
+    def test_momentum_normalization_is_bounded(self):
+        result = calculate_timeframe_state("daily", candles(), candles(step=0.2))
+        self.assertGreaterEqual(result["momentum_score"], 0)
+        self.assertLessEqual(result["momentum_score"], 100)
+
+    def test_relative_strength_calculation_detects_outperformance(self):
+        result = calculate_timeframe_state("daily", candles(step=1.0), candles(step=0.1))
+        self.assertGreater(result["relative_strength_score"], 50)
+
+    def test_relative_strength_state_is_explainable(self):
+        result = calculate_timeframe_state("daily", candles(step=1.0), candles(step=0.1))
+        self.assertIn(result["relative_strength_state"], {"Outperformer", "Strong Outperformer"})
+        self.assertTrue(any("RS slope" in reason for reason in result["reasons"]))
+
+    def test_breadth_calculation(self):
+        score, details = breadth_score([
+            {"close": 110, "ema20": 100, "ema50": 95, "ema200": 90, "change": 1, "relative_strength_score": 60},
+            {"close": 90, "ema20": 100, "ema50": 95, "ema200": 85, "change": -1, "relative_strength_score": 40},
+        ])
+        self.assertEqual(details["above_ema20_pct"], 50)
+        self.assertGreater(score, 0)
+
+    def test_volume_participation_calculation(self):
+        score, details = volume_participation_score([{"volume": 200, "average_volume20": 100}, {"volume": 80, "average_volume20": 100}])
+        self.assertEqual(details["above_average_pct"], 50)
+        self.assertGreater(score, 0)
+
+
+class HistoryThrottleTests(unittest.TestCase):
+    def test_rate_limited_history_request_is_retried_before_failure(self):
+        class Client:
+            calls = 0
+
+            def history(self, _payload):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"s": "error", "message": "request limit reached"}
+                return {"s": "ok", "candles": [[1_788_000_000, 100, 101, 99, 100, 1000]]}
+
+        client = Client()
+        provider = CandleHistoryProvider(client, now=lambda: datetime(2026, 9, 4, 16, tzinfo=IST))
+        with patch("sector_heatmap.sector_service.time.sleep"):
+            provider._download("NSE:NIFTYIT-INDEX", "60", 1)
+        self.assertEqual(client.calls, 2)
+
+
+class ScoringTests(unittest.TestCase):
+    def setUp(self):
+        self.sector = SECTOR_DEFINITIONS[0]
+        self.states = {key: timeframe() for key in MTF_MODES["intraday"]}
+
+    def test_sector_score_uses_configured_components(self):
+        result = calculate_sector(self.sector, self.states, "intraday", {"breadth": [{"close": 110, "ema20": 100, "ema50": 95, "ema200": 90, "change": 1, "relative_strength_score": 60}], "volume": [{"volume": 150, "average_volume20": 100}]})
+        self.assertEqual(set(result["component_weights"]), set(SECTOR_SCORE_WEIGHTS))
+        self.assertGreater(result["overall_score"], 0)
+
+    def test_missing_metric_weights_are_redistributed(self):
+        result = calculate_sector(self.sector, self.states, "intraday")
+        self.assertAlmostEqual(sum(result["component_weights"].values()), 100, places=1)
+        self.assertNotIn("breadth", result["component_weights"])
+        self.assertIn("breadth", result["missing_components"])
+
+    def test_intraday_mtf_weighting(self):
+        values = {"15m": 20, "1h": 40, "daily": 80, "weekly": 100}
+        score, _ = weighted_available(values, MTF_MODES["intraday"])
+        self.assertAlmostEqual(score, 47)
+
+    def test_swing_mtf_weighting_excludes_15m(self):
+        values = {"15m": 0, "1h": 50, "daily": 80, "weekly": 100}
+        score, _ = weighted_available(values, MTF_MODES["swing"])
+        self.assertAlmostEqual(score, 85)
+
+    def test_rank_generation(self):
+        ranked = rank_sectors([{"sector_id": "a", "name": "A", "overall_score": 60}, {"sector_id": "b", "name": "B", "overall_score": 80}])
+        self.assertEqual((ranked[0]["sector_id"], ranked[0]["rank"]), ("b", 1))
+
+    def test_rank_change_positive_means_improving(self):
+        ranked = rank_sectors([{"sector_id": "a", "name": "A", "overall_score": 80}], {"a": 3})
+        self.assertEqual(ranked[0]["rank_change"], 2)
+
+    def test_rotation_classification_uses_score_and_rank_direction(self):
+        current = {"overall_score": 72, "rank": 1, "last_updated": "bar-3"}
+        history = [{"overall_score": 60, "rank": 4, "last_updated": "bar-1"}, {"overall_score": 68, "rank": 2, "last_updated": "bar-2"}]
+        self.assertEqual(classify_rotation(current, history)[0], "LEADING")
+
+    def test_rotation_acceleration_compares_velocities(self):
+        current = {"overall_score": 75, "rank": 1, "last_updated": "bar-3"}
+        history = [{"overall_score": 60, "rank": 4, "last_updated": "bar-1"}, {"overall_score": 64, "rank": 3, "last_updated": "bar-2"}]
+        self.assertEqual(classify_rotation(current, history)[1], "ACCELERATING")
+
+    def test_rotation_ignores_duplicate_and_current_completed_bar_timestamps(self):
+        current = {"overall_score": 75, "rank": 1, "last_updated": "bar-2"}
+        history = [
+            {"overall_score": 60, "rank": 4, "last_updated": "bar-1"},
+            {"overall_score": 61, "rank": 3, "last_updated": "bar-1"},
+            {"overall_score": 65, "rank": 2, "last_updated": "bar-2"},
+        ]
+        quadrant, pace, velocity, readiness = classify_rotation(current, history)
+        self.assertEqual((quadrant, pace, velocity, readiness), ("UNAVAILABLE", "UNAVAILABLE", None, "INSUFFICIENT_HISTORY"))
+
+    def test_market_overview_exposes_rotation_readiness_without_fabricating_neutral(self):
+        sectors = [{
+            "name": "Auto", "overall_score": 60, "rotation_state": "UNAVAILABLE",
+            "rotation_readiness": "INSUFFICIENT_HISTORY", "mtf_alignment": "MIXED",
+            "relative_strength_state": "Neutral", "timeframe_states": {"daily": {"state": 0}},
+        }]
+        overview = market_overview(sectors, {})
+        self.assertEqual(overview["rotation_readiness"], "INSUFFICIENT_HISTORY")
+        self.assertEqual(overview["neutral"], [])
+
+    def test_full_mtf_alignment(self):
+        states = {key: timeframe(state=1) for key in ("15m", "1h", "daily", "weekly")}
+        self.assertEqual(mtf_alignment(states), "FULL BULLISH ALIGNMENT")
+
+    def test_missing_timeframe_redistributes_mode_weight(self):
+        score, weights = weighted_available({"15m": None, "1h": 50, "daily": 100, "weekly": 0}, MTF_MODES["intraday"])
+        self.assertIsNotNone(score)
+        self.assertAlmostEqual(sum(weights.values()), 1)
+
+    def test_missing_weekly_cannot_claim_full_alignment(self):
+        states = {"15m": timeframe(state=1), "1h": timeframe(state=1), "daily": timeframe(state=1), "weekly": {"state": None}}
+        self.assertEqual(mtf_alignment(states), "MIXED")
+
+    def test_stale_data_handling(self):
+        current = datetime(2026, 8, 28, 11, 0, tzinfo=IST)
+        old = [{"timestamp": int((current - timedelta(days=20)).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("daily", old), "STALE")
+
+    def test_insufficient_candles_are_explicit(self):
+        result = calculate_timeframe_state("daily", candles(20), candles(20))
+        self.assertEqual(result["data_quality"], "INSUFFICIENT DATA")
+        self.assertIsNone(result["score"])
+
+    def test_benchmark_failure_retains_absolute_trend(self):
+        result = calculate_timeframe_state("daily", candles(), [])
+        self.assertIsNotNone(result["score"])
+        self.assertIsNone(result["relative_strength_score"])
+        self.assertIn("relative strength benchmark alignment", result["missing_components"])
+
+    def test_constituent_failure_does_not_fabricate_breadth(self):
+        result = calculate_sector(self.sector, self.states, "intraday", {"breadth": [], "volume": []})
+        self.assertIsNone(result["breadth_score"])
+        self.assertIsNone(result["volume_score"])
+
+    def test_alert_ready_transition_event(self):
+        previous = {"rank": 5, "rotation_state": "IMPROVING", "mtf_alignment": "MIXED", "relative_strength_state": "Neutral"}
+        current = {"sector_id": "auto", "rank": 2, "rotation_state": "LEADING", "rotation_readiness": "READY", "mtf_alignment": "BULLISH ALIGNMENT", "relative_strength_state": "Strong Outperformer"}
+        types = {event["type"] for event in detect_events(previous, current)}
+        self.assertIn("TOP_3_ENTERED", types)
+        self.assertIn("ROTATION_CHANGED", types)
+
+
+class ServiceContractTests(unittest.TestCase):
+    def test_directional_scan_does_not_let_index_weight_suppress_momentum(self):
+        drivers = [
+            {"ticker": "HEAVY", "change": 2.0, "contribution": 0.40},
+            {"ticker": "MOMENTUM", "change": 3.5, "contribution": 0.10},
+            {"ticker": "OPPOSITE", "change": -4.0, "contribution": -0.50},
+        ]
+        bullish = rank_directional_drivers(drivers, "BULLISH")
+        bearish = rank_directional_drivers(drivers, "BEARISH")
+        self.assertEqual([item["ticker"] for item in bullish], ["MOMENTUM", "HEAVY"])
+        self.assertEqual([item["ticker"] for item in bearish], ["OPPOSITE"])
+
+    def test_handoff_candidate_scan_excludes_stale_full_alignment(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=object())
+            service.snapshots["intraday"] = {
+                **service._empty_snapshot("intraday"),
+                "status": "STALE", "refreshing": False, "updated_at": "2026-08-28T15:15:00+05:30",
+                "sectors": [{
+                    "sector_id": "it", "name": "IT", "symbol": "NSE:NIFTYIT-INDEX",
+                    "mtf_alignment": "FULL BULLISH ALIGNMENT", "data_quality": "STALE",
+                }],
+            }
+            service._timeframe_candles = lambda symbol: {}
+            result = service.alignment_candidates([], "intraday")
+            self.assertEqual(result["candidates"], [])
+
+    def test_initial_snapshot_is_loading_not_unavailable_when_provider_exists(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=object())
+            snapshot = service.snapshot("intraday")
+            self.assertEqual(snapshot["status"], "LOADING")
+            self.assertTrue(snapshot["refreshing"])
+            self.assertEqual(snapshot["refresh_state"]["phase"], "CONNECTING")
+            self.assertIsNone(snapshot["error"])
+
+    def test_refresh_ranks_sectors_persists_history_and_keeps_detail_series(self):
+        class Provider:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, symbol, timeframe):
+                self.calls.append((symbol, timeframe))
+                offset = sum(ord(character) for character in symbol) % 7
+                return candles(260, start=100 + offset, step=0.2 + offset / 100)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "analysis.json"
+            provider = Provider()
+            service = SectorAnalysisService("", state_file=path, provider=provider, now=lambda: datetime(2026, 8, 28, 11, 0, tzinfo=IST))
+            service.refresh()
+            snapshot = service.snapshot("intraday")
+            detail = service.snapshot("intraday", SECTOR_DEFINITIONS[0].sector_id)
+            self.assertEqual(snapshot["status"], "DELAYED")
+            self.assertEqual(len(snapshot["sectors"]), len(SECTOR_DEFINITIONS))
+            self.assertEqual(snapshot["sectors"][0]["rank"], 1)
+            self.assertNotIn("series", snapshot["sectors"][0]["timeframe_states"]["daily"])
+            self.assertTrue(detail["sector"]["timeframe_states"]["daily"]["series"])
+            self.assertTrue(path.exists())
+            self.assertEqual(len(provider.calls), (len(SECTOR_DEFINITIONS) + 1) * 3)
+            self.assertEqual(snapshot["refresh_state"]["phase"], "READY")
+
+    def test_failed_refresh_retains_last_valid_snapshot(self):
+        class Provider:
+            def get(self, symbol, timeframe):
+                return candles(260)
+
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=Provider(), now=lambda: datetime(2026, 8, 28, 11, 0, tzinfo=IST))
+            service.refresh()
+            before = service.snapshot("intraday")
+            service._set_refresh_state("LOADING_BARS", "Loading completed bars", completed=3)
+            service._record_refresh_failure(RuntimeError("provider timed out"))
+            after = service.snapshot("intraday")
+            self.assertEqual(after["status"], before["status"])
+            self.assertEqual(after["updated_at"], before["updated_at"])
+            self.assertEqual(after["sectors"], before["sectors"])
+            self.assertIsNone(after["error"])
+            self.assertEqual(after["refresh_error"], "provider timed out")
+            self.assertEqual(after["refresh_state"]["phase"], "FAILED")
+            self.assertEqual(after["refresh_state"]["last_phase"], "LOADING_BARS")
+
+    def test_unknown_detail_is_explicitly_unavailable(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json")
+            result = service.snapshot("intraday", "unknown")
+            self.assertEqual(result["status"], "UNAVAILABLE")
+            self.assertIn("Unknown", result["error"])
+
+    def test_one_timeframe_failure_preserves_other_timeframes(self):
+        class PartialProvider:
+            def get(self, symbol, timeframe):
+                if timeframe == "1h":
+                    raise RuntimeError("provider interval unavailable")
+                return candles(260)
+
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=PartialProvider())
+            service.refresh()
+            sector = service.snapshot("intraday", SECTOR_DEFINITIONS[0].sector_id)["sector"]
+            self.assertEqual(sector["timeframe_states"]["1h"]["data_quality"], "UNAVAILABLE")
+            self.assertIsNotNone(sector["overall_score"])
+
+    def test_authentication_failure_stops_refresh_after_first_request(self):
+        class ExpiredProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, symbol, timeframe):
+                self.calls += 1
+                raise FyersAuthenticationError("FYERS authentication expired")
+
+        with TemporaryDirectory() as directory:
+            provider = ExpiredProvider()
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json", provider=provider)
+
+            with self.assertRaises(FyersAuthenticationError):
+                service.refresh()
+
+            self.assertEqual(provider.calls, 1)
+
+    def test_missing_authentication_has_actionable_analysis_error(self):
+        with TemporaryDirectory() as directory:
+            service = SectorAnalysisService("", state_file=Path(directory) / "analysis.json")
+            result = service.snapshot("intraday")
+            self.assertIn("authentication", result["error"].lower())
+
+
+class MarketCalendarTests(unittest.TestCase):
+    def test_weekend_uses_last_completed_session_instead_of_stale(self):
+        current = datetime(2026, 8, 30, 12, 0, tzinfo=IST)  # Sunday
+        friday_bar = [{"timestamp": int(datetime(2026, 8, 28, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        session = market_session(current)
+        self.assertEqual(session["status"], "CLOSED")
+        self.assertEqual(session["last_completed_session"], "2026-08-28")
+        self.assertEqual(service._quality("15m", friday_bar), "MARKET CLOSED")
+
+    def test_closed_market_does_not_hide_genuinely_stale_data(self):
+        current = datetime(2026, 8, 30, 12, 0, tzinfo=IST)
+        thursday_bar = [{"timestamp": int(datetime(2026, 8, 27, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(service._quality("15m", thursday_bar), "STALE")
+
+    def test_open_market_keeps_previous_session_intraday_data_stale(self):
+        current = datetime(2026, 8, 31, 11, 30, tzinfo=IST)
+        friday_bar = [{"timestamp": int(datetime(2026, 8, 28, 15, 15, tzinfo=IST).timestamp())}]
+        service = SectorAnalysisService("", now=lambda: current)
+        self.assertEqual(market_session(current)["status"], "OPEN")
+        self.assertEqual(service._quality("15m", friday_bar), "STALE")
+
+    def test_exchange_holiday_and_special_sunday_are_calendar_aware(self):
+        holiday = market_session(datetime(2026, 9, 14, 10, 0, tzinfo=IST))
+        budget_session = market_session(datetime(2026, 2, 1, 10, 0, tzinfo=IST))
+        self.assertEqual((holiday["status"], holiday["reason"]), ("CLOSED", "Ganesh Chaturthi"))
+        self.assertEqual(budget_session["status"], "OPEN")
+
+
+if __name__ == "__main__":
+    unittest.main()

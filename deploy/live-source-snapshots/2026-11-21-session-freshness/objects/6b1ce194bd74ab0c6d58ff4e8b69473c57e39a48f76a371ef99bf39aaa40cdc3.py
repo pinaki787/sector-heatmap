@@ -1,0 +1,138 @@
+"""Authenticate every request made to an isolated account dashboard."""
+import json
+import os
+import re
+from urllib.parse import urlsplit,parse_qs
+from pathlib import Path
+from .file_lock import lock_file
+from .workspaces import WorkspaceStore, cookie_token
+
+
+class WorkspaceGuard:
+    def __init__(self, store, account_id, port, portal_port):
+        self.store,self.account_id,self.port,self.portal_port=store,account_id,int(port),int(portal_port)
+        self.owner_fd=None
+
+    @classmethod
+    def from_environment(cls):
+        registry=os.getenv('SECTOR_PULSE_WORKSPACE_REGISTRY')
+        aid=os.getenv('SECTOR_PULSE_WORKSPACE_ID')
+        if not registry and not aid:return None
+        if not registry or not aid:raise ValueError('Incomplete account workspace context.')
+        guard=cls(WorkspaceStore(registry),aid,os.environ['HEATMAP_PORT'],os.environ['SECTOR_PULSE_PORTAL_PORT'])
+        with guard.store.db() as db:
+            row=db.execute('SELECT * FROM accounts WHERE id=?',(aid,)).fetchone()
+        if not row or row['port']!=guard.port:raise ValueError('Workspace port/account mismatch.')
+        expected_user=os.getenv('SECTOR_PULSE_WORKSPACE_USER_ID')
+        expected_broker=os.getenv('SECTOR_PULSE_WORKSPACE_BROKER')
+        if expected_user and row['user_id']!=expected_user:
+            raise ValueError('Workspace user/account mismatch.')
+        if expected_broker and row['broker']!=expected_broker:
+            raise ValueError('Workspace broker/account mismatch.')
+        folder=guard.store.folder(dict(row))
+        if Path(__file__).resolve().parents[1] != folder/'source':
+            raise ValueError('Account dashboard must run from its isolated source directory.')
+        folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+        guard.owner_fd=os.open(folder/'dashboard-owner.lock',os.O_RDWR|os.O_CREAT,0o600)
+        try:lock_file(guard.owner_fd,blocking=False)
+        except Exception:
+            os.close(guard.owner_fd);raise RuntimeError('Account dashboard already running.') from None
+        owner=json.dumps({'pid':os.getpid()}).encode()
+        os.lseek(guard.owner_fd,0,os.SEEK_SET);os.write(guard.owner_fd,owner);os.ftruncate(guard.owner_fd,len(owner))
+        return guard
+
+    def authorize(self,headers,mutation=False):
+        host=f'127.0.0.1:{self.port}'
+        if headers.get('Host')!=host:
+            raise PermissionError('Use this account’s registered 127.0.0.1 address.')
+        if mutation and headers.get('Origin')!='http://'+host:
+            raise PermissionError('Account actions require a same-origin request.')
+        user=self.store.session(cookie_token(headers))
+        account=self.store.account(user,self.account_id)
+        return user,account
+
+    def validate_account_binding(self,account,path,payload=None):
+        selected=[]
+        if payload and payload.get('account_id') is not None:selected.append(payload['account_id'])
+        selected.extend(parse_qs(urlsplit(path).query,keep_blank_values=True).get('account_id',[]))
+        route=re.match(r'^/api/(?:broker-parser|renko-motilal|renko-dhan|ema-dhan|band-dhan|kama-dhan|renko-engine)/([a-f0-9]{32})(?:/|$)',urlsplit(path).path)
+        if route:selected.append(route.group(1))
+        if any(value!=account['id'] for value in selected):
+            raise PermissionError('Action account differs from this private workspace.')
+
+    def validate_action(self,account,path,payload):
+        self.validate_account_binding(account,path,payload)
+        bounce=self.store.folder(account)/'bounce-status.json'
+        if bounce.exists():
+            try:phase=json.loads(bounce.read_text()).get('status')
+            except (OSError,ValueError):raise PermissionError('Dashboard maintenance state is unreadable; refresh after operator review.') from None
+            if phase in {'CHECKING','RESTARTING','WAITING'}:
+                raise PermissionError('Broker dashboard bounce in progress; wait until it is ready.')
+        if path.startswith('/api/chart-workspace/trading/'):
+            if (account['broker'] not in {'FYERS','DELTA_INDIA'} or path.rsplit('/',1)[-1] not in {'prepare','arm','status'}
+                    or payload.get('account_id')!=account['id'] or payload.get('broker')!=account['broker']):
+                raise PermissionError('Chart trading must use its exact private account and active broker adapter.')
+            return
+        if path in ('/api/investment/analyze','/api/investment/seasonality/analyze'):return  # Public research; no broker execution.
+        if account['broker']=='MOTILAL_OSWAL':
+            if not path.startswith('/api/motilal/') or payload.get('broker','MOTILAL_OSWAL')!='MOTILAL_OSWAL':
+                raise PermissionError('This action has no Motilal adapter; it cannot use another broker route.')
+            return
+        if path.startswith('/api/motilal/'):
+            raise PermissionError('Open a Motilal Oswal workspace for this action.')
+        if path.startswith('/api/telegram/'):
+            action=path.rsplit('/',1)[-1]
+            options=action in {'paper-start','paper-stop','paper-settings','option-preview','option-submit','execution-start','execution-stop','execution-settings','execution-preview','execution-submit','parse','submit'}
+            if options and account['broker']!='DELTA_INDIA':
+                raise PermissionError('Open your Delta India account workspace for Telegram option Paper and option tickets. This workspace cannot own Delta entries.')
+            if account['broker'] not in {'FYERS','DELTA_INDIA'}:
+                raise PermissionError('Telegram reception requires a FYERS or Delta India account workspace.')
+            if payload.get('broker') and payload['broker']!=account['broker']:
+                raise PermissionError('Telegram order broker must match this account workspace.')
+            return
+        if path.startswith('/api/renko-engine/'):
+            parts=path[len('/api/renko-engine/'):].split('/')
+            if len(parts)!=2 or parts[0]!=account['id'] or payload.get('account_id')!=account['id'] or payload.get('broker')!=account['broker']:
+                raise PermissionError('Renko Engine must use this exact private account.')
+            return
+        delta=path.startswith(('/api/delta-india/','/api/renko-delta/'))
+        if path.startswith('/api/renko-instances/'):
+            if payload.get('broker')!=account['broker']:
+                raise PermissionError('Action broker differs from this account workspace.')
+        elif account['broker']=='DHAN':
+            if not path.startswith(('/api/dhan/', '/api/trade-ticket/', '/api/renko-dhan/', '/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/')):
+                raise PermissionError('This action has no Dhan adapter; it cannot be routed to FYERS or Delta.')
+            if payload.get('broker') and str(payload['broker']).upper() != 'DHAN':
+                raise PermissionError('Action broker differs from this Dhan account workspace.')
+        elif account['broker']=='FYERS' and (delta or path.startswith(('/api/dhan/','/api/renko-dhan/','/api/ema-dhan/','/api/band-dhan/','/api/kama-dhan/'))):
+            raise PermissionError('Open the matching broker account workspace for this action.')
+        elif account['broker']=='DELTA_INDIA' and not delta:
+            raise PermissionError('Open the matching broker account workspace for this action.')
+        # Credential identity cannot be changed through a running dashboard.
+        if path=='/api/delta-india/connect':
+            raise PermissionError('Save broker credentials in user and broker setup while the dashboard is stopped.')
+
+    def context(self,user,account):
+        return dict(username=user['username'],admin=bool(user['admin']),allowed_features=user.get('features',[]),sidebar_visibility=self.store.sidebar_visibility(),renko_visibility=self.store.renko_visibility(),workspace={k:account[k] for k in ('id','label','broker','account_ref','live_enabled')},
+                    portal_url=f'http://127.0.0.1:{self.portal_port}/')
+
+    def check(self,handler,mutation=False):
+        try:
+            user,account=self.authorize(handler.headers,mutation)
+            self.validate_account_binding(account,handler.path)
+            if handler.path.split('?',1)[0].startswith('/api/whatsapp/'):
+                raise PermissionError('Native WhatsApp uses the shared desktop session and is unavailable in isolated user workspaces.')
+            from .section_permissions import allowed
+            if not allowed(user,handler.path.split('?',1)[0]):
+                raise PermissionError('This section is not assigned to your user.')
+            handler.workspace_identity=(user,account)
+            return True
+        except PermissionError as e:
+            path=handler.path.split('?',1)[0]
+            if not mutation and path in ('/','/index.html','/workspace-entry'):
+                body=('<!doctype html><title>Sector Pulse sign in</title><h1>Sign in to your workspace</h1>'
+                      f'<p><a href="http://127.0.0.1:{self.portal_port}/">Open user and broker setup</a></p>').encode()
+                handler.send_response(401);handler.send_header('Content-Type','text/html');handler.send_header('Cache-Control','no-store');handler.send_header('Content-Length',str(len(body)));handler.end_headers()
+                if handler.command!='HEAD':handler.wfile.write(body)
+            else:handler.send_json(403,dict(error=str(e)))
+            return False

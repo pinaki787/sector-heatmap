@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preload" href="/dashboard-login.js" as="script" fetchpriority="high">
+    <title>NSE Sector Pulse</title>
+    <link rel="stylesheet" href="/sector-pulse-background.css?v=20261101-sector-controls-1">
+    <script src="/resource-restarts.js?v=20261019-preflight-blocked-2"></script>
+    <script charset="utf-8" src="/resource-monitor.js?v=20261017-restarts-1"></script>
+    <script defer src="/handoff-schedule.js?v=20261121-session-freshness-2"></script>
+    <script defer src="/handoff-exit-monitor.js?v=20261025-monitor-1"></script>
+    <script defer src="/handoff-screener.js?v=20261030-auto-1"></script>
+</head>
+  <body>
+    <noscript>This dashboard requires JavaScript to show live sector data.</noscript>
+    <script src="/workspace-bootstrap.js?v=20261008-1"></script>
+    <script src="/sector-dashboard-model.js?v=20260909-optional-controls-v1"></script>
+    <script src="/trade-parser-quote.js?v=20260929-1"></script>
+    <script src="/trade-parser-advisory.js?v=20260929-1"></script>
+    <script src="/vendor/lightweight-charts-4.2.3.js?v=4"></script>
+    <link rel="stylesheet" href="/chart-workspace.css?v=322&header-spacing=20261119-1&header-menus=20261119-1&drawing-list=20261119-3&indicator-remove=20261119-1&drawing-name-js=20261119-2&drawing-names=20261119-2&solo-pane=20261120-1&pine-expanded-heading=20261120-1&drawing-order-layout=20261120-1&desktop-reference-rows=20261120-1&shortcut-help-fit=20261120-1&shortcut-help-anchor=20261120-1">
+    <script defer src="/chart-workspace-studies.js?v=v1-all-segments-20261119&volume-indices=20261119-1&adr-study=20261119-2&twap-study=20261119-2&special-k=20261119-1&woodies-cci=20261119-1&renko-study-tf=20261120-1&renko-percent=20261120-1&renko-volume=20261120-1&vwap-first-weight=20261120-1&correlation-log=20261120-1&chop-zone=20261120-1&advance-decline=20261120-1&profile-doji=20261120-1"></script>
+    <script defer src="/chart-workspace.js?v=v1-all-segments-20261119&pine-auto-recovery=20261119-3&renko-pine-time=20261119-1&reference-refresh=20261119-1&settings-close=20261119-1&twap-study=20261119-2&study-actions=20261119-8&study-keyboard=20261119-2&special-k=20261119-1&study-tabs=20261119-1&woodies-cci=20261119-1&study-checks=20261119-1&ha-study-tf=20261119-1&drawing-merge=20261119-1&drawing-list=20261119-3&pine-library=20261119-3&indicator-remove=20261119-1&drawing-name-js=20261119-2&renko-study-tf=20261120-1&renko-percent=20261120-1&reference-close=20261120-1&renko-context=20261120-1&renko-partial=20261120-1&renko-tail=20261120-1&ai-fixed-brick=20261120-1&motilal-label=20261120-2&renko-volume=20261120-1&pine-table-resize=20261120-2&fib-labels=20261120-1&pane-reset=20261120-1&editor-pane-fit=20261120-1&fyers-ticker=20261120-1&renko-profile-volume=20261120-2&pine-calendar-context=20261120-1&numeric-input-bounds=20261120-1&drawing-fill-defaults=20261120-1&pitchfork-defaults=20261120-1&shape-style-defaults=20261120-1&shortcut-reference-focus=20261120-1&correlation-log=20261120-1&profile-doji=20261120-1&drawing-manager-toggle=20261120-1&drawing-manager-toggle-pointer=20261120-1&shared-v1=20261120-3&rsi-fill-pane=20261120-1"></script>
+    <script src="/redbar-overlays.js?v=20261001-1"></script>
+    <script src="/ema-cloud-chart.js?v=20261010-inline-7"></script>
+    <script src="/ema-crossover.js?v=20261010-inline-7"></script>
+    <script src="/position-history.js?v=20261003-paper-timeframe-11"></script>
+    <script src="/ema-crossover-live.js?v=20261010-inline-7"></script>
+    <script src="/renko-assessment.js?price-bricks=2&v=20261007-1"></script>
+    <script src="/dashboard-help.js?v=20261121-session-freshness-2"></script>
+    <script src="/renko-supertrend.js?sma=5&v=20261103-qualified-replay-2&broker-selection=20261111-1&chart-view=4&execution-anchor=20261119-1&simulation-labels=20261119-1&renko-context=20261120-1&ai-draft-isolation=20261120-1"></script>
+    <script src="/renko-backtest.js?v=20261025-exchange-lots-v7"></script>
+    <script src="/renko-engine.js?v=20261012-direct-start-1"></script>
+    <script src="/paper-capital.js?v=20261011-diagnostics-1"></script>
+    <script src="/delta-inr.js?v=20261007-1"></script>
+    <script src="/delta-journal.js?v=20261002-1"></script>
+    <script src="/delta-backtest.js?v=20261007-inr-1"></script>
+    <script src="/delta-india.js?v=20261011-renko-engine-nav-1"></script>
+    <script src="/broker-form-routing.js?v=20261020-sector-default-1&broker-selection=20261111-1&renko-context=20261120-1"></script>
+    <script defer src="/renko-ai-options.js?v=20261120-3"></script>
+    <script src="/holdings-trailing.js" defer></script>
+    <script src="/holdings-review-tools.js?v=20261108-readable-charts-3" defer></script>
+    <script src="/holdings-portfolio.js?v=20261108-allocation-3"></script>
+    <script src="/holdings-review.js?v=20261116-shared-data-account-1"></script>
+    <script src="/sector-detail-client.js?v=20261021-sector-detail-1"></script>
+    <script src="/closed-pnl.js?v=20261024-1"></script>
+    <script src="/fundamental-report.js?v=20261025-ai-fundamentals-2"></script>
+    <script src="/handoff-level-report.js?v=20261025-outcomes-5"></script>
+    <script src="/dashboard-enhancements.js?rotation=20261101&v=20261030-screener-auto-1&broker-selection=20261116-session-reuse-1"></script>
+    <link rel="stylesheet" href="/multi-account-orders.css">
+    <script defer src="/multi-account-orders.js"></script>
+    <script src="/telegram-parser.js?v=20261020-parsers-3"></script>
+    <script src="/whatsapp-polling.js?v=20261005-2"></script>
+    <script src="/workspace-context.js?v=20261008-1"></script>
+    <script src="/broker-account-options.js?v=20261116-broker-top-1"></script>
+  <script defer src="/runner-job-details.js?v=20261018-no-trades-1"></script>
+  <script defer src="/runner-jobs.js?v=20261102-runner-sessions-1"></script>
+    <script src="/analysis-jobs.js?v=20261108-allocation-1"></script>
+    <script defer src="/analysis-trailing.js?v=20261025-1"></script>
+    <script src="/market-handoff.js?v=20261025-completed-history-2"></script>
+<script src="/broker-connection-status.js?v=20261121-session-freshness-2"></script>
+<link rel="stylesheet" href="/investment.css?v=20261116-entry-monitor-1">
+<script defer src="/seasonality.js?v=20261108-readable-charts-2"></script>
+<script defer src="/investment-exports.js?v=20261116-developing-fib-1"></script>
+<script defer src="/investment.js?v=20261116-broker-top-1&chart-link=20261119-2"></script>
+<script defer src="/navigation-polish.js?v=20261020-1"></script>
+</body>
+</html>
