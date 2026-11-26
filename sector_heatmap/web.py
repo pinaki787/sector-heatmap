@@ -1,4 +1,5 @@
 from copy import deepcopy
+from .chart_trade_admission import serialized_fyers_entry,place_fyers_entry
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -64,6 +65,7 @@ FYERS_MASTER_SOURCES = {
     "BSE_FO": "https://public.fyers.in/sym_details/BSE_FO.csv",
     "MCX_COM": "https://public.fyers.in/sym_details/MCX_COM.csv",
 }
+FYERS_CHART_EXTRA_MASTERS = ("NSE_CD", "NSE_COM")
 EMA_DIRECTION_TO_OPTION_TYPE = {"BULLISH": "CE", "BEARISH": "PE"}
 EMA_MAX_TRADE_LOSS = 3000.0
 EMA_IST = ZoneInfo("Asia/Kolkata")
@@ -882,7 +884,10 @@ def run_server():
     from .local_dashboard_auth import LocalDashboardAuth
     local_auth = None if workspace_guard else LocalDashboardAuth.configured(ROOT, port)
     token = load_config().get("FYERS_ACCESS_TOKEN", "")
-    feed = FyersLiveFeed(token) if token else None
+    from .chart_workspace import FyersChartBars
+    workspace_chart_bars = (FyersChartBars() if workspace_guard
+                            else None)
+    feed = FyersLiveFeed(token, chart_bars=workspace_chart_bars) if token else None
     if feed: feed.start()
     sector_analysis = SectorAnalysisService(token)
     sector_analysis.start()
@@ -1263,6 +1268,7 @@ def run_server():
             return submit_trade_recommendation_order({"preview_id": ticket["preview_id"], "confirmation": ticket["confirmation_phrase"]})
         return parser_submissions.submit(str(payload.get("submission_id") or ""), payload, submit_once)
 
+    @serialized_fyers_entry
     def submit_trade_recommendation_order(payload):
         preview_id = str(payload.get("preview_id") or "")
         stored = parser_order_previews.get(preview_id)
@@ -1292,7 +1298,7 @@ def run_server():
             return {"status": result["status"], "broker": "FYERS", "lifecycle_id": result["id"], "message": result["message"]}
         token = load_config().get("FYERS_ACCESS_TOKEN", "")
         app_id, access_token = token.split(":", 1)
-        response = ipv4_fyers_client(client_id=app_id, token=access_token).place_order(old_order)
+        response = place_fyers_entry(ipv4_fyers_client(client_id=app_id, token=access_token).place_order,old_order)
         if not isinstance(response, dict) or response.get("s") != "ok" or not response.get("id"):
             parser_order_previews.pop(preview_id, None)
             raise ValueError("FYERS did not confirm entry acceptance. Check the broker orderbook before retrying; no protection was created.")
@@ -1399,6 +1405,110 @@ def run_server():
     ema_daily_reference_cache = {}
     rsi_table = RsiTable()
     delta_india = DeltaIndia(ROOT / ".private" / "delta-india-paper.json",credentials=load_config)
+    dhan_chart_stream = None
+    dhan_chart_key = None
+    dhan_chart_symbols = set()
+    dhan_profile_key = None
+    dhan_profile_until = 0
+    dhan_chart_lock = threading.Lock()
+
+    def chart_dhan_client(service):
+        nonlocal dhan_profile_key, dhan_profile_until
+        from .chart_workspace import require_dhan_data
+        client = service._client()
+        key = (service.account["id"], hashlib.sha256(client.headers["access-token"].encode()).digest())
+        with dhan_chart_lock:
+            if dhan_profile_key != key or time.monotonic() >= dhan_profile_until:
+                require_dhan_data(client)
+                dhan_profile_key = key
+                dhan_profile_until = time.monotonic() + 60
+        return client, key
+
+    def chart_dhan_history(service, interval, after, *, symbol=None, before=None):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from .chart_workspace import fetch_dhan_history, resolve_dhan_chart_symbol
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        client, _ = chart_dhan_client(service)
+        options = resolve_dhan_chart_symbol(service.master, symbol, now) if symbol else {}
+        return fetch_dhan_history(client, interval, after, now, before=before, **options)
+
+    def chart_dhan_snapshot(service, minutes, *, symbol=None, price_only=False):
+        nonlocal dhan_chart_stream, dhan_chart_key
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from .chart_workspace import DhanChartStream, resolve_dhan_chart_symbol
+        client, account_key = chart_dhan_client(service)
+        key = account_key
+        with dhan_chart_lock:
+            if dhan_chart_stream is None or dhan_chart_key != key or (
+                    not dhan_chart_stream.thread.is_alive() and time.monotonic() - dhan_chart_stream.started >= 15):
+                if symbol:
+                    resolve_dhan_chart_symbol(service.master, symbol, datetime.now(ZoneInfo("Asia/Kolkata")))
+                if dhan_chart_stream:
+                    dhan_chart_stream.stop()
+                dhan_chart_stream = DhanChartStream(client, symbol=symbol, account_id=service.account["id"])
+                dhan_chart_key = key
+                dhan_chart_symbols.clear()
+                dhan_chart_symbols.add(symbol)
+            if symbol not in dhan_chart_symbols and symbol:
+                resolve_dhan_chart_symbol(service.master, symbol, datetime.now(ZoneInfo("Asia/Kolkata")))
+            result = dhan_chart_stream.quote_snapshot(symbol=symbol) if price_only else dhan_chart_stream.snapshot(minutes, symbol=symbol)
+            dhan_chart_symbols.add(symbol)
+            return result
+
+    def chart_dhan_execution_tick(service,symbol):
+        # Reuses this selected account's existing chart socket and subscriptions.
+        # This performs market-data reads only; it cannot arm or send an order.
+        chart_dhan_snapshot(service,1,symbol=symbol)
+        with dhan_chart_lock:
+            if dhan_chart_stream is None or not dhan_chart_key or dhan_chart_key[0]!=service.account["id"]:
+                return None
+            return dhan_chart_stream.execution_tick(symbol)
+
+    delta_workspace_stream = None
+    delta_workspace_trades = {}
+    delta_chart_activity = {}
+    delta_workspace_stream_lock = threading.Lock()
+
+    def chart_delta_snapshot(minutes, *, symbol="BTCUSD", trade_delta=False, price_only=False):
+        nonlocal delta_workspace_stream
+        from .chart_workspace import DELTA_CHART_SYMBOLS, DELTA_INTERVALS, delta_live_snapshot, subscribe_delta_chart, trade_interval
+        from .chart_trade_stream import DeltaChartTrades
+        if symbol not in DELTA_CHART_SYMBOLS:
+            delta_india.product(symbol, chart=True)
+        if trade_delta or (isinstance(minutes, str) and trade_interval(minutes)):
+            with delta_workspace_stream_lock:
+                now = time.monotonic()
+                entry = delta_workspace_trades.get(symbol)
+                if entry is None:
+                    if len(delta_workspace_trades) >= 8:
+                        oldest = min(delta_workspace_trades, key=lambda name: delta_workspace_trades[name][1])
+                        old_stream, last_used = delta_workspace_trades[oldest]
+                        if now - last_used < 90:
+                            raise RuntimeError("All Delta chart trade streams are currently in use.")
+                        old_stream.stop()
+                        del delta_workspace_trades[oldest]
+                    stream = DeltaChartTrades(symbol)
+                    stream.thread.start()
+                else:
+                    stream = entry[0]
+                delta_workspace_trades[symbol] = (stream, now)
+            if trade_delta:
+                width = minutes * 60 if isinstance(minutes, int) else 86400 if minutes == "1D" else int(minutes[:-1])
+                return stream.snapshot(minutes, delta_width=width)
+            return stream.snapshot(minutes)
+        from strategies.renko_supertrend.delta_broker import Broker
+        with delta_workspace_stream_lock:
+            if delta_workspace_stream is None:
+                stream = Broker(delta_india, ROOT / ".private" / "chart-workspace-delta")
+                stream.subscribe_quotes = False
+                stream.candle_resolutions = {interval * 60: resolution for interval, resolution in DELTA_INTERVALS.items()}
+                delta_workspace_stream = stream
+            subscribe_delta_chart(delta_workspace_stream, delta_chart_activity, symbol, time.monotonic())
+            delta_workspace_stream.start()
+            return delta_live_snapshot(delta_workspace_stream, minutes, symbol=symbol, price_only=price_only)
+
     from .delta_backtest_server import ensure_research_worker
     ensure_research_worker()  # Public-data research has its own process; broker runners are untouched.
     from .telegram_subscriber import TelegramConnections
@@ -3508,6 +3618,20 @@ def run_server():
     renko_instances_lock=threading.RLock()
     renko_instances={}
     renko_manifest=ROOT/'.private'/'renko-instances.json'
+    # Isolated standalone AI runtime. Constructing/status/prepare never activates it.
+    ai_options_services={}
+    ai_options_services_lock=threading.RLock()
+    def ai_options_service(legacy):
+        from strategies.nifty_ai_options.ui_bridge import Service
+        owner=workspace_guard.account_id if workspace_guard else None
+        if not owner:raise PermissionError('AI Renko options require the selected private broker account workspace.')
+        with ai_options_services_lock:
+            key=(owner,id(legacy))
+            if key not in ai_options_services:
+                from strategies.nifty_ai_options.ui_bridge import NativeLegacyView,owner_broker
+                ai_options_services[key]=Service(owner,NativeLegacyView(owner) if owner_broker(owner) in ('DHAN','MOTILAL_OSWAL') else legacy)
+            return ai_options_services[key]
+
     def renko_instance_owners(broker,exclude=None):
         result=set()
         if broker=='FYERS':
@@ -3566,6 +3690,8 @@ def run_server():
                 manager=RenkoAdoptionManager(folder/'adoptions',lambda:RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),RenkoSupertrendBroker(ema_master_dir,ema_band_candles,select_ema_atm_option),renko_adoption_account,lambda:renko_instance_owners(broker,key))
                 manager.intent_lock=renko_default_bundle[3].intent_lock;manager.guard(runner)
                 component=(runner,adapter,chart_adapter,manager,RenkoChartHistory(folder/'chart-history',tail_provider=shared_renko_tail),order_stream,context,context_lock,wake)
+            runner.bound_broker=broker;runner.bound_instrument=instrument;runner.bound_instance=key
+            runner.bound_account=workspace_guard.account_id if workspace_guard else None
             renko_instances[key]={'broker':broker,'instrument':instrument,'component':component}
             if persist:
                 runner.save_preferences({'settings':{'symbol':instrument,'timeframe':'5 minutes','mode':'PAPER'}})
@@ -3905,6 +4031,10 @@ def run_server():
             if self.path.split('?', 1)[0] == '/workspace-bootstrap.js':
                 context = workspace_guard.context(*self.workspace_identity) if workspace_guard else (local_auth.context(self.headers) if local_auth else {'workspace':None})
                 context['holdings_review_available'] = True
+                context['chart_workspace_available'] = bool(
+                    workspace_guard and self.workspace_identity[1]['broker'] in {'FYERS', 'DHAN', 'DELTA_INDIA'}
+                )
+                context['delta_chart_symbol_selection'] = bool(workspace_guard and self.workspace_identity[1]['broker'] == 'DELTA_INDIA')
                 body = ('window.SectorPulseWorkspace=' + json.dumps(context).replace('<', '\u003c') + ';' + ('document.addEventListener("DOMContentLoaded",()=>{const s=document.createElement("script");s.src="/dashboard-login.js";document.head.append(s);});' if local_auth else '')).encode()
                 self.send_response(200); self.send_header('Content-Type','text/javascript'); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path.split('?', 1)[0] == '/api/workspace-context':
@@ -3916,6 +4046,82 @@ def run_server():
                 try:self.motilal_shared(path)
                 except PermissionError as error:self.send_json(403,dict(error=str(error)))
                 except Exception as error:self.send_json(409,dict(error=str(error)))
+                return
+            if path == "/api/chart-workspace/pine-worker.js" and local_auth and not workspace_guard:
+                from .chart_workspace import serve_pine_worker
+                serve_pine_worker(self, local_auth, ROOT / ".private" / "chart-pine-worker.js")
+                return
+            if path == "/api/chart-workspace/live":
+                from .chart_workspace import serve_live
+                serve_live(self, local_auth, workspace_guard, workspace_chart_bars, state.get("feed"), chart_delta_snapshot,
+                           lambda minutes, **options: chart_dhan_snapshot(self.dhan_service(), minutes, **options))
+                return
+            if path == "/api/chart-workspace/yahoo-history" and local_auth and not workspace_guard:
+                from .yahoo_chart import serve
+                serve(self, local_auth)
+                return
+            if path == "/api/chart-workspace/symbols" and workspace_guard:
+                from .chart_workspace import require_chart, search_dhan_chart_symbols, search_cached_fyers_chart_symbols
+                user, account = self.workspace_identity
+                try:
+                    require_chart(user, workspace_guard.store, path)
+                    if account['broker'] == 'FYERS':
+                        params = parse_qs(urlparse(self.path).query)
+                        query = params.get('q', [''])[0][:120]
+                        offset = params.get('offset', ['0'])[0]
+                        if not offset.isascii() or not offset.isdecimal() or len(offset) > 7:
+                            self.send_json(400, {'error': 'Invalid catalog offset.'})
+                            return
+                        segments = (*FYERS_MASTER_SOURCES, *FYERS_CHART_EXTRA_MASTERS)
+                        selected = params.get('segment', [''])[0]
+                        instrument_kind=''
+                        if selected in ('MCX_COM_FUT','MCX_COM_OPT'):selected,instrument_kind=selected.rsplit('_',1)
+                        if selected and selected not in segments:
+                            self.send_json(400, {'error': 'Invalid FYERS chart segment.'})
+                            return
+                        paths = (ema_master_dir / f"{segment}.csv"
+                                    for segment in ((selected,) if selected else segments))
+                        self.send_json(200, search_cached_fyers_chart_symbols(paths, query, offset=int(offset), instrument_kind=instrument_kind))
+                        return
+                    if account['broker'] == 'DHAN':
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        params = parse_qs(urlparse(self.path).query)
+                        query = params.get('q', [''])[0][:120]
+                        segment = params.get('segment', [''])[0]
+                        if segment not in ('', 'IDX_I', 'NSE_EQ', 'BSE_EQ', 'NSE_FNO', 'BSE_FNO', 'NSE_CURRENCY', 'BSE_CURRENCY', 'MCX_COMM', 'MCX_COMM_FUT', 'MCX_COMM_OPT'):
+                            self.send_json(400, {'error': 'Invalid Dhan chart segment.'})
+                            return
+                        offset = params.get('offset', ['0'])[0]
+                        if not offset.isascii() or not offset.isdecimal() or len(offset) > 7:
+                            self.send_json(400, {'error': 'Invalid catalog offset.'})
+                            return
+                        self.send_json(200, search_dhan_chart_symbols(
+                            chart_dhan_master, query, datetime.now(ZoneInfo("Asia/Kolkata")), offset=int(offset), segment_filter=segment))
+                        return
+                    if account['broker'] != 'DELTA_INDIA':
+                        self.send_json(404, {'error': 'Chart catalog unavailable for this broker.'})
+                        return
+                    instruments = delta_india.catalog(chart=True)['instruments']
+                    self.send_json(200, {'symbols': [
+                        {key: row[key] for key in ('symbol', 'description', 'tick_size', 'contract_type')}
+                        for row in instruments
+                    ]})
+                except PermissionError as error:
+                    self.send_json(403, {'error': str(error)})
+                except (OSError, RuntimeError, ValueError):
+                    self.send_json(503, {'error': 'Selected broker instrument catalog is unavailable.'})
+                return
+            if path == "/api/chart-workspace/catalog":
+                from .chart_catalog import serve_delta_chart_catalog
+                serve_delta_chart_catalog(self, workspace_guard, delta_india)
+                return
+            if path == "/api/chart-workspace/history":
+                from .chart_workspace import fetch_delta_history, fetch_fyers_history, serve_history
+                serve_history(self, local_auth, workspace_guard,
+                              lambda interval, after, **options: fetch_fyers_history(ema_readonly_client(), interval, after=after, include_forming=True, **options),
+                              lambda interval, after, **options: fetch_delta_history(delta_india, interval, after, **options),
+                              lambda interval, after, **options: chart_dhan_history(self.dhan_service(), interval, after, **options))
                 return
             if path == "/api/resources":
                 try:
@@ -4024,6 +4230,22 @@ def run_server():
                 return
             if path == '/api/renko-supertrend/broker-positions':
                 try:self.send_json(200,renko_adoptions.inventory())
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/ai-options/chart-source':
+                try:
+                    query={k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()}
+                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).chart_source(query))
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/ai-options/search':
+                try:
+                    query=parse_qs(urlparse(self.path).query)
+                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).search((query.get('q') or [''])[0],(query.get('market') or ['ALL'])[0],(query.get('route') or ['OPTIONS'])[0]))
+                except Exception as error:self.send_json(409,{'error':str(error)})
+                return
+            if path == '/api/renko-supertrend/ai-options/status':
+                try:self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).snapshot())
                 except Exception as error:self.send_json(409,{'error':str(error)})
                 return
             if path == "/api/renko-supertrend/runner":
@@ -4573,6 +4795,9 @@ def run_server():
                     self.dhan_strategy(path,payload);return
                 bundle,delta_renko,bound_instrument=renko_select(path,self.path) if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')) else (renko_default_bundle,delta_default_service,None)
                 renko_supertrend,renko_broker,renko_chart_broker,renko_adoptions,renko_chart_history,renko_order_stream,renko_display_context,renko_display_lock,renko_stream_wake=bundle
+                if path.startswith(('/api/renko-supertrend/','/api/renko-delta/')):
+                    from strategies.renko_supertrend.binding import validate_request
+                    validate_request(payload,self.workspace_identity[1]['broker'] if workspace_guard and path.startswith('/api/renko-supertrend/ai-options/') else 'DELTA_INDIA' if path.startswith('/api/renko-delta/') else 'FYERS',bound_instrument,workspace_guard.account_id if workspace_guard else None)
                 if bound_instrument and path.endswith(('/preview','/start','/adopt','/override-entry')) and payload.get('underlying')!=bound_instrument:raise ValueError('Action instrument differs from selected instance.')
                 if path=='/api/renko-instances/start-selected':
                     if (self.headers.get('Host') or '').split(':')[0] not in ('localhost','127.0.0.1'):raise PermissionError('Local dashboard required.')
@@ -4622,7 +4847,15 @@ def run_server():
                     origin = self.headers.get('Origin')
                     if origin and urlparse(origin).netloc != self.headers.get('Host'):
                         raise PermissionError('Cross-origin runner mutations are forbidden.')
-                    actions = {'/api/renko-supertrend/adopt': renko_adoptions.apply,
+                    actions = {'/api/renko-supertrend/ai-options/prepare': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).prepare(p),
+                               '/api/renko-supertrend/ai-options/start': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).start(p),
+                               '/api/renko-supertrend/ai-options/reconfigure': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).reconfigure(p),
+                               '/api/renko-supertrend/ai-options/manual-entry': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).manual_entry(p),
+                               '/api/renko-supertrend/ai-options/position-control': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).position_action(p),
+                               '/api/renko-supertrend/ai-options/stop': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).stop(p),
+                               '/api/renko-supertrend/spread-filter': renko_supertrend.set_spread_filter,
+                               '/api/renko-supertrend/trend-reentry': renko_supertrend.set_trend_reentry,
+                               '/api/renko-supertrend/adopt': renko_adoptions.apply,
                                '/api/renko-supertrend/adoption-control': renko_adoptions.control,
                                '/api/renko-supertrend/settings': renko_supertrend.save_preferences,
                                '/api/renko-supertrend/preview': renko_supertrend.preview,

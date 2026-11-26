@@ -59,6 +59,8 @@ class Service:
         self.history=History(self.folder/'motilal-candles.sqlite3',clock=clock)
         self.session_path=self.folder/'motilal-session.json'
         self.loaded_session_mtime=None;self.install_revision=0
+        self._eod_lock = threading.Lock()
+        self._eod_snapshots = {}
 
     def credentials(self):
         values=json.loads((self.folder/'credentials.json').read_text())
@@ -121,6 +123,18 @@ class Service:
                     live_enabled=self.client.live_enabled,feed_connected=self.feed.connected,feed_error=self.feed.error,
                     session_expires_at=self.client.credentials.get('MO_SESSION_EXPIRES_AT'))
 
+    def eod_snapshot(self, exchange):
+        """Share the latest native exchange-wide reply across chart intervals."""
+        client = self.client
+        with self._eod_lock:
+            previous = self._eod_snapshots.get(exchange)
+            now = self.clock()
+            if previous and previous[0] is client and 0 <= now - previous[1] < 60:
+                return previous[2]
+            reply = client.request("eod", {"exchangename": exchange})
+            self._eod_snapshots[exchange] = (client, self.clock(), reply)
+            return reply
+
     def quote(self,symbol):
         self.ready();contract=self.master.exact(symbol)
         self.feed.subscribe(contract['exchange'],contract['token']);self.feed.start()
@@ -133,9 +147,14 @@ class Service:
         if operation not in {'positions','holdings','orders','trades','margin','margin_detail'}:raise ValueError('Unsupported account report.')
         self.ready();reply=self.client.request(operation)
         identity_field={'positions':'clientcode','holdings':'clientcode','orders':'clientid','trades':'clientid'}.get(operation)
+        rows=reply.get('data')
+        if (operation in {'positions', 'orders'} and 'data' in reply and rows is None
+                and reply.get('status') == 'SUCCESS' and reply.get('errorcode') == ''
+                and ' '.join(str(reply.get('message', '')).lower().split()) == 'no records found'):
+            # Native Motilal reports explicitly encode an empty book as null.
+            rows=[]
         if identity_field:
-            rows=reply.get('data')
             if not isinstance(rows,list) or any(not isinstance(row,dict) or str(row.get(identity_field,'')).upper()!=self.account['account_ref'] for row in rows):
                 raise PermissionError('Native Motilal report has missing or mixed account ownership.')
         # Return native report data and provenance, never token-bearing transport metadata.
-        return dict(broker='MOTILAL_OSWAL',account_id=self.account['id'],data=reply.get('data'),timing=reply['_timing'],units='Native Motilal report fields; order input is lots. Acceptance is not a fill.')
+        return dict(broker='MOTILAL_OSWAL',account_id=self.account['id'],data=rows,timing=reply['_timing'],units='Native Motilal report fields; order input is lots. Acceptance is not a fill.')

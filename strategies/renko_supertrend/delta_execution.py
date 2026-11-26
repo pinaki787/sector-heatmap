@@ -59,7 +59,7 @@ class Execution:
             raise ValueError('Order is not owned by the Renko strategy.')
         return owned_order(owned, self.account_identity)
 
-    def submit(self, symbol, size, side, quote, token, signal_symbol, reason, reduce_only=None):
+    def submit(self, symbol, size, side, quote, token, signal_symbol, reason, reduce_only=None, price_limit=None, order_type='limit_order'):
         """Only a server-owned runner may invoke this; no client runner flag exists."""
         self.authenticate()
         with self.delta.lock:
@@ -67,6 +67,17 @@ class Execution:
                 raise ValueError('Existing Delta strategy ownership blocks a separate Renko order.')
             product = self.delta.product(symbol)
             payload = order_intent(symbol, size, side, quote, product, self.delta.clock(), reduce_only=reduce_only)
+            if order_type not in ('limit_order','market_order'):raise ValueError('Unsupported Delta strategy order type')
+            if order_type=='market_order':
+                if payload['reduce_only'] or price_limit is not None:raise ValueError('Market entry cannot change exit terms or carry a limit')
+                payload['order_type']='market_order';payload.pop('limit_price',None)
+            if price_limit is not None:
+                boundary=Decimal(str(price_limit));candidate=Decimal(payload['limit_price']);tick=Decimal(str(product['tick_size']))
+                if not boundary.is_finite() or boundary<=0 or boundary%tick!=0:raise ValueError('Original retry limit is invalid')
+                bounded=min(candidate,boundary) if side==1 else max(candidate,boundary)
+                executable=Decimal(str(quote['ask'] if side==1 else quote['bid']))
+                if (side==1 and executable>bounded) or (side==-1 and executable<bounded):raise ValueError('Fresh price exceeds original entry limit')
+                payload['limit_price']=str(bounded)
             # Stable identity is the shared runner's persisted tag. Delta.submit
             # separately persists native intent before touching the exchange.
             payload.pop('product_id')

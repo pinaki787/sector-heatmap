@@ -25,6 +25,7 @@ def rsi_config(payload):
 
 
 class DhanRenkoRunner(Runner):
+    bound_broker='DHAN'
     from .dhan_recovery import reconcile_external_close
 
     def event(self, code, message):
@@ -131,6 +132,9 @@ class Service(ChartService):
         self.runner.valuation_adapter=self.chart_broker
         instrument=folder/'instrument.json'
         if instrument.exists():self.instrument=json.loads(instrument.read_text())['underlying']
+        if strategy=='renko':
+            self.runner.bound_broker='DHAN';self.runner.bound_instrument=self.instrument;self.runner.bound_instance=instance
+            self.runner.bound_account=execution.account['id']
         class EmptyAdoptions:
             lock=threading.RLock()
             runners={}
@@ -180,6 +184,9 @@ class Service(ChartService):
         if payload.get('broker') not in (None,'DHAN'):raise PermissionError('Dhan strategy cannot route another broker.')
         if action=='preview' and self.strategy in ('band','kama') and payload.get('strategy')!=self.runner.strategy_id:
             raise ValueError('Strategy differs from the selected Dhan form.')
+        if self.strategy=='renko':
+            from strategies.renko_supertrend.binding import validate_request
+            validate_request(payload,'DHAN',self.instrument,self.execution.account['id'])
         if self.instrument and (action in ('preview','override-entry') or (action=='start' and self.strategy=='renko')) and payload.get('underlying')!=self.instrument:
             raise ValueError('Action instrument differs from selected Dhan instance.')
         origin=handler.headers.get('Origin')
@@ -190,7 +197,7 @@ class Service(ChartService):
         actions=dict(preview=self.runner.preview,start=self.runner.activate if self.strategy=='renko' else self.runner.start,
                      stop=lambda p:self.runner.request_stop(p),**{'reconcile-external-close':lambda p:self.runner.reconcile_external_close(p)})
         if self.strategy=='renko':
-            actions.update(settings=self.runner.save_preferences,**{'chart-timeframe':self.runner.chart_timeframe,
+            actions.update(settings=self.runner.save_preferences,**{'spread-filter':self.runner.set_spread_filter,'trend-reentry':self.runner.set_trend_reentry,'chart-timeframe':self.runner.chart_timeframe,
                 'chart-mode':self.runner.chart_mode,'chart-stop':self.runner.chart_stop,
                 'override-entry':self.runner.override_entry,'resume-position':self.runner.resume_position})
         if action not in actions:raise ValueError('Unsupported Dhan strategy action.')

@@ -73,16 +73,12 @@ def runtime_states(source):
 
 
 def stopped_state_paths(source):
+    from strategies.nifty_ai_options.process_state import assert_stopped as assert_ai_stopped
+    assert_ai_stopped(source)
     found = runtime_states(source)
     for path in found:
-        if path.stat().st_size > 4000000:
-            raise ValueError(f'Oversized current runner state blocks restart: {path.name}.')
-        try:
-            state = json.loads(path.read_text())
-        except (OSError, ValueError):
-            raise ValueError(f'Unreadable current runner state blocks restart: {path.name}.') from None
-        if not isinstance(state, dict):
-            raise ValueError(f'Invalid current runner state blocks restart: {path.name}.')
+        from .restart_state_read import read_runtime_state
+        state=read_runtime_state(path,source)
         reasons = [label for key, label in (
             ('running','runner running'),('accepting_entries','entries enabled'),
             ('position','open position'),('positions','retained positions'),

@@ -1,0 +1,15 @@
+{
+  "symbol": "BSE:SENSEX26NOV84300CE",
+  "resolution": "1",
+  "session": "2026-11-26 regular BSE",
+  "timestamp": 1795685940,
+  "bulk": [
+    [1795685940,62.5,73.4,59.7,69.3,2322680],
+    [1795685940,59.7,73.4,59.7,69.3,2322680]
+  ],
+  "independent_narrow_responses": [
+    [[1795685940,59.7,73.4,59.7,69.3,2322680]],
+    [[1795685940,59.7,73.4,59.7,69.3,2322680]]
+  ],
+  "account_identifiers_removed": true
+}

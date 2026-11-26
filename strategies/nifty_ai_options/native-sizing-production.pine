@@ -1,0 +1,34 @@
+//@version=6
+indicator("Sector Pulse Completed Native Renko Sizing", overlay=false)
+parent = input.timeframe("1380", "Parent timeframe")
+length = input.int(7, "ATR length", minval=1)
+wholeSession = input.bool(false, "Previous completed regular session")
+base = ticker.new(syminfo.prefix, syminfo.ticker, session.regular)
+native = ticker.renko(base, "ATR", length, false, "Close")
+[no,nc,nt] = request.security(native,parent,[open,close,time],lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+[ps,pe] = request.security(base,parent,[time,time_close],lookahead=barmerge.lookahead_on,calc_bars_count=20000)
+box = math.abs(nc-no)
+changed = ta.change(ps) != 0
+var float completedBox = na
+var int completedStart = na
+var int completedEnd = na
+var int completedNativeTime = na
+if changed and not wholeSession
+    completedBox := box[1]
+    completedStart := ps[1]
+    completedEnd := pe[1]
+    completedNativeTime := nt[1]
+if wholeSession ? (session.islastbar_regular and time_close <= timenow) : (pe <= timenow and time_close <= timenow)
+    completedBox := box
+    completedStart := ps
+    completedEnd := pe
+    completedNativeTime := nt
+plot(completedBox,"Completed native box")
+plot(completedStart,"Completed parent start")
+plot(completedEnd,"Completed parent end")
+plot(completedNativeTime,"Completed native time")
+plot(ps,"Current parent start")
+plot(pe,"Current parent end")
+plot(time_close,"Host end")
+plot(timenow,"Calculated at")
+plot(syminfo.mintick,"Native tick")

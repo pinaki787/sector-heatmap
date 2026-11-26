@@ -1,0 +1,64 @@
+//@version=6
+indicator("Sector Pulse ETH Origin OHLC Control", overlay=false)
+base=ticker.new(syminfo.prefix,syminfo.ticker,session.regular)
+f_bar(n) =>
+    var float bt=na
+    var float bo=na
+    var float bh=na
+    var float bl=na
+    var float bc=na
+    if bar_index == n
+        bt:=time
+        bo:=open
+        bh:=high
+        bl:=low
+        bc:=close
+    [bt,bo,bh,bl,bc]
+[t0,o0,h0,l0,c0]=request.security(base,"1380",f_bar(0),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t0,"Origin 0 t")
+plot(o0,"Origin 0 o")
+plot(h0,"Origin 0 h")
+plot(l0,"Origin 0 l")
+plot(c0,"Origin 0 c")
+[t1,o1,h1,l1,c1]=request.security(base,"1380",f_bar(1),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t1,"Origin 1 t")
+plot(o1,"Origin 1 o")
+plot(h1,"Origin 1 h")
+plot(l1,"Origin 1 l")
+plot(c1,"Origin 1 c")
+[t2,o2,h2,l2,c2]=request.security(base,"1380",f_bar(2),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t2,"Origin 2 t")
+plot(o2,"Origin 2 o")
+plot(h2,"Origin 2 h")
+plot(l2,"Origin 2 l")
+plot(c2,"Origin 2 c")
+[t3,o3,h3,l3,c3]=request.security(base,"1380",f_bar(3),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t3,"Origin 3 t")
+plot(o3,"Origin 3 o")
+plot(h3,"Origin 3 h")
+plot(l3,"Origin 3 l")
+plot(c3,"Origin 3 c")
+[t4,o4,h4,l4,c4]=request.security(base,"1380",f_bar(4),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t4,"Origin 4 t")
+plot(o4,"Origin 4 o")
+plot(h4,"Origin 4 h")
+plot(l4,"Origin 4 l")
+plot(c4,"Origin 4 c")
+[t5,o5,h5,l5,c5]=request.security(base,"1380",f_bar(5),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t5,"Origin 5 t")
+plot(o5,"Origin 5 o")
+plot(h5,"Origin 5 h")
+plot(l5,"Origin 5 l")
+plot(c5,"Origin 5 c")
+[t6,o6,h6,l6,c6]=request.security(base,"1380",f_bar(6),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t6,"Origin 6 t")
+plot(o6,"Origin 6 o")
+plot(h6,"Origin 6 h")
+plot(l6,"Origin 6 l")
+plot(c6,"Origin 6 c")
+[t7,o7,h7,l7,c7]=request.security(base,"1380",f_bar(7),lookahead=barmerge.lookahead_off,calc_bars_count=20000)
+plot(t7,"Origin 7 t")
+plot(o7,"Origin 7 o")
+plot(h7,"Origin 7 h")
+plot(l7,"Origin 7 l")
+plot(c7,"Origin 7 c")

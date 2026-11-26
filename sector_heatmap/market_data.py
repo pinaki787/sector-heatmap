@@ -3,18 +3,22 @@ import os
 from pathlib import Path
 import ssl
 from threading import Lock, Thread
+from time import monotonic
 from fyers_apiv3.FyersWebsocket import data_ws
 from .official_weights import OFFICIAL_WEIGHT_SET
 from .sectors import SECTOR_DEFINITIONS, equity_symbol
 from .market_calendar import market_session
 
-TOKEN_ERROR_HINTS = ("token", "auth", "unauthor", "401", "expired", "invalid access")
+TOKEN_ERROR_HINTS = ("invalid access token", "access token expired", "token has expired",
+                     "invalid token", "token is invalid", "token is expired", "token expired",
+                     "authentication failed", "authentication expired", "unauthorized", "invalid access")
 TICK_TIMESTAMP_FIELDS = ("last_traded_time", "exch_feed_time", "timestamp")
 
 def is_token_error(message):
     if isinstance(message, dict) and message.get("code") in {-8, -15, -16, -17, 401}:
         return True
-    return any(hint in str(message).lower() for hint in TOKEN_ERROR_HINTS)
+    detail = message.get("message", "") if isinstance(message, dict) else message
+    return any(hint in str(detail).lower() for hint in TOKEN_ERROR_HINTS)
 
 
 def provider_tick_timestamp(tick):
@@ -72,25 +76,90 @@ def configure_websocket_ca_bundle():
     return str(certifi_path)
 
 class FyersLiveFeed:
-    def __init__(self, access_token):
+    def __init__(self, access_token, chart_bars=None):
         self.access_token, self.lock, self.ticks = access_token, Lock(), {}
         self.error, self.connected, self.token_expired = None, False, False
         self.socket = None
+        self.chart_bars = chart_bars
+        self.chart_series = {}
+        self.chart_subscriptions = set()
+        self.chart_last_used = {}
+        self.chart_subscription_lock = Lock()
+        self.base_symbols = {sector.symbol for sector in SECTOR_DEFINITIONS}
+        self.base_symbols.update(equity_symbol(item.ticker) for sector in SECTOR_DEFINITIONS for item in sector.constituents)
+        if chart_bars is not None:
+            self.base_symbols.add(chart_bars.SYMBOL)
+
+    def chart_bars_for(self, symbol):
+        from .chart_workspace import FyersChartBars
+
+        with self.chart_subscription_lock:
+            now = monotonic()
+            with self.lock:
+                expired = [key for key, last in self.chart_last_used.items()
+                           if key != symbol and now - last >= 30]
+                socket = self.socket if self.connected else None
+                subscribed = [key for key in expired if key in self.chart_subscriptions and key not in self.base_symbols]
+            if socket and subscribed:
+                socket.unsubscribe(subscribed, data_type="SymbolUpdate")
+            with self.lock:
+                for key in expired:
+                    self.chart_series.pop(key, None)
+                    del self.chart_last_used[key]
+                self.chart_subscriptions.difference_update(subscribed)
+                bars = self.chart_series.get(symbol)
+                if bars is None:
+                    if len(self.chart_series) >= 32:
+                        raise ValueError("All FYERS chart subscriptions are in use. Close an idle chart and retry.")
+                    bars = self.chart_series[symbol] = FyersChartBars(symbol)
+                self.chart_last_used[symbol] = now
+                needs_subscription = socket is not None and symbol not in self.chart_subscriptions
+            if needs_subscription:
+                socket.subscribe([symbol], data_type="SymbolUpdate")
+                with self.lock:
+                    self.chart_subscriptions.add(symbol)
+            return bars
+
     def start(self):
         def on_message(message):
             symbol = message.get("symbol") if isinstance(message, dict) else None
             if symbol:
-                with self.lock: self.ticks[symbol] = message
+                with self.lock:
+                    if self.socket is not socket or self.token_expired:
+                        return
+                    self.ticks[symbol] = message
+                    stamp = tick_timestamp_iso(provider_tick_timestamp(message))
+                    if not self.connected and stamp and message.get("ltp") is not None:
+                        quote_time = datetime.fromisoformat(stamp).timestamp()
+                        if abs(datetime.now().timestamp() - quote_time) <= 60:
+                            self.connected, self.error = True, None
+                    selected = self.chart_series.get(symbol)
+                if selected is not None:
+                    selected.ingest(message)
+                if self.chart_bars is not None:
+                    self.chart_bars.ingest(message)
         def on_error(message):
             error = str(message)
             with self.lock:
-                self.error, self.connected = error, False
-                self.token_expired = is_token_error(message)
+                if self.socket is not socket:
+                    return
+                self.token_expired = self.token_expired or is_token_error(message)
+                self.error = error
+                subscription_error = isinstance(message, dict) and message.get("type") in {"sub", "unsub"}
+                if self.token_expired or not subscription_error:
+                    self.connected = False
         def on_connect():
-            with self.lock: self.connected, self.error = True, None
-            index_symbols = [sector.symbol for sector in SECTOR_DEFINITIONS]
-            stock_symbols = [equity_symbol(item.ticker) for sector in SECTOR_DEFINITIONS for item in sector.constituents]
-            socket.subscribe(list(dict.fromkeys(index_symbols + stock_symbols)), data_type="SymbolUpdate")
+            with self.chart_subscription_lock:
+                if self.chart_bars is not None:
+                    self.chart_bars.reset_coverage()
+                with self.lock:
+                    for bars in self.chart_series.values():
+                        bars.reset_coverage()
+                    symbols = sorted(self.base_symbols | self.chart_series.keys())
+                socket.subscribe(symbols, data_type="SymbolUpdate")
+                with self.lock:
+                    self.chart_subscriptions = set(symbols)
+                    self.connected, self.error = True, None
         try:
             configure_websocket_ca_bundle()
         except RuntimeError as error:

@@ -14,6 +14,7 @@ def configure(payload):
     return dict(configuration(payload),broker=BROKER,**source_settings(payload))
 
 class MotilalRunner(Runner):
+    bound_broker='MOTILAL_OSWAL'
     configure=staticmethod(configure)
     runtime_revision=Runner.runtime_revision
     def event(self,code,message):return super().event(code,message.replace('FYERS','Motilal Oswal').replace('MARKET (Motilal Oswal MPP)','LIMIT IOC'))
@@ -44,6 +45,8 @@ class Service(SharedChart):
         folder=execution.folder/'motilal-strategies'/'renko'/instance;folder.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.runner=MotilalRunner(self.broker,folder/'state.json');self.runner.valuation_adapter=self.chart_broker
         if (folder/'instrument.json').exists():self.instrument=json.loads((folder/'instrument.json').read_text())['underlying']
+        self.runner.bound_broker='MOTILAL_OSWAL';self.runner.bound_instrument=self.instrument;self.runner.bound_instance=instance
+        self.runner.bound_account=execution.account['id']
         class EmptyAdoptions:
             lock=threading.RLock();runners={}
         self.adoptions=EmptyAdoptions()
@@ -91,9 +94,11 @@ class Service(SharedChart):
     def post_action(self,handler,action,payload):
         payload=self.history_source(payload)
         if payload.get('account_id') not in (None,self.execution.account['id']) or payload.get('broker') not in (None,BROKER):raise PermissionError('Motilal account/broker mismatch.')
+        from strategies.renko_supertrend.binding import validate_request
+        validate_request(payload,'MOTILAL_OSWAL',self.instrument,self.execution.account['id'])
         if self.instrument and action in ('start','preview','override-entry') and payload.get('underlying')!=self.instrument:raise ValueError('Action differs from selected instrument.')
         actions={'preview':self.runner.preview,'start':self.runner.activate,'stop':self.runner.request_stop,'settings':self.runner.save_preferences,
-                 'chart-timeframe':self.runner.chart_timeframe,'chart-mode':self.runner.chart_mode,'chart-stop':self.runner.chart_stop,
+                 'spread-filter':self.runner.set_spread_filter,'trend-reentry':self.runner.set_trend_reentry,'chart-timeframe':self.runner.chart_timeframe,'chart-mode':self.runner.chart_mode,'chart-stop':self.runner.chart_stop,
                  'override-entry':self.runner.override_entry,'resume-position':self.runner.resume_position}
         if action not in actions:raise ValueError('Unsupported Motilal strategy action.')
         handler.send_json(200,actions[action](payload))

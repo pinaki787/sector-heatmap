@@ -65,8 +65,8 @@ class Master:
             self.cache[key]=dict(observed_at=self.clock(),rows=rows)
             return rows
 
-    def rows(self,exchange,refresh=False):
-        if exchange not in EXCHANGES:raise ValueError('Unsupported Motilal exchange.')
+    def rows(self,exchange,refresh=False,*,market_data=False):
+        if exchange not in EXCHANGES and not (market_data and exchange == 'NCDEX'):raise ValueError('Unsupported Motilal exchange.')
         with self.lock:
             cached=self.cache.get(exchange)
             if not refresh and cached and cached.get('schema_version')==2 and 0<=self.clock()-cached['observed_at']<86400:return cached['rows']
@@ -89,14 +89,14 @@ class Master:
             _atomic_private_write(path,json.dumps(saved,allow_nan=False));self.cache[exchange]=saved
             return rows
 
-    def exact(self,symbol):
+    def exact(self,symbol,*,market_data=False):
         parts=str(symbol).split(':')
         if len(parts)!=3 or parts[0]!='MO' or not parts[2].isdigit():raise ValueError('Select a Motilal-native instrument; another broker’s symbol/token is not accepted.')
         exchange=parts[1];token=int(parts[2])
-        matches=[row for row in self.rows(exchange) if row['token']==token]
+        matches=[row for row in self.rows(exchange,market_data=market_data) if row['token']==token]
         if len(matches)!=1:raise ValueError('The exact native Motilal instrument is unavailable.')
         row=matches[0]
-        if row['suspended'] or row['banned']:raise ValueError('Motilal marks this contract suspended or banned.')
+        if row['suspended'] or (row['banned'] and not market_data):raise ValueError('Motilal marks this contract suspended or banned.')
         if row['expiry'] and row['expiry']<datetime.fromtimestamp(self.clock(),ZoneInfo('Asia/Kolkata')).date().isoformat():raise ValueError('The native contract has expired.')
         return dict(row)
 

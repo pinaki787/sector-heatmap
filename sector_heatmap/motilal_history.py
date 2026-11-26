@@ -19,6 +19,11 @@ class History:
             columns={r[1] for r in db.execute('PRAGMA table_info(candles)')}
             if 'volume' not in columns:db.execute('ALTER TABLE candles ADD COLUMN volume REAL')
             if 'volume_verified' not in columns:db.execute('ALTER TABLE candles ADD COLUMN volume_verified INTEGER DEFAULT 0')
+            db.execute("""CREATE TABLE IF NOT EXISTS daily_snapshots (
+                symbol TEXT NOT NULL, timestamp INTEGER NOT NULL,
+                open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+                volume REAL, PRIMARY KEY(symbol, timestamp)
+            )""")
         self.path.chmod(0o600)
     @contextmanager
     def db(self):
@@ -30,6 +35,30 @@ class History:
     def invalidate(self):
         with self.lock:
             for bar in self.forming.values():bar['open_verified']=False
+    def _persist(self, symbol, bar):
+        if bar.get('persisted'):
+            return
+        with self.db() as db:
+            db.execute(
+                '''INSERT INTO candles VALUES (?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(symbol,timestamp) DO UPDATE SET
+                       open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,
+                       observations=excluded.observations,open_verified=excluded.open_verified,
+                       volume=excluded.volume,volume_verified=excluded.volume_verified
+                   WHERE candles.open_verified=0 AND excluded.open_verified=1''',
+                (symbol, bar['timestamp'], bar['open'], bar['high'], bar['low'], bar['close'],
+                 bar['observations'], int(bar['open_verified']), bar.get('volume'),
+                 int(bar.get('volume_verified', False))),
+            )
+        bar['persisted'] = True
+
+    def _flush_elapsed(self, symbol):
+        with self.lock:
+            bar = self.forming.get(symbol)
+            # Leave time for the same late ticks accepted by ingest().
+            if bar and bar['open_verified'] and self.clock() >= bar['timestamp'] + 75:
+                self._persist(symbol, bar)
+
     def ingest(self,tick,coverage_since):
         symbol=tick['symbol'];stamp=float(tick['exch_feed_time']);price=float(tick['ltp'])
         if not math.isfinite(price) or price<=0 or not 0<=self.clock()-stamp<=15:return
@@ -39,8 +68,7 @@ class History:
             if previous and opening<previous['timestamp']:return
             baseline=previous.get('cumulative_volume') if previous else None
             if previous and opening>previous['timestamp']:
-                with self.db() as db:
-                    db.execute('INSERT INTO candles VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,timestamp) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,observations=excluded.observations,open_verified=excluded.open_verified,volume=excluded.volume,volume_verified=excluded.volume_verified WHERE candles.open_verified=0 AND excluded.open_verified=1',(symbol,previous['timestamp'],previous['open'],previous['high'],previous['low'],previous['close'],previous['observations'],int(previous['open_verified']),previous.get('volume'),int(previous.get('volume_verified',False))))
+                self._persist(symbol, previous)
                 if opening!=previous['timestamp']+60:baseline=None
                 previous=None
             if not previous:
@@ -55,26 +83,72 @@ class History:
                 elif baseline is not None:previous['volume_verified']=False
             previous.update(high=max(previous['high'],price),low=min(previous['low'],price),close=price,observations=previous['observations']+1)
             if coverage_since>opening:previous['open_verified']=False
-    def candles(self,symbol,minutes=1,limit=500,session_open=None):
+    def candles(self,symbol,minutes=1,limit=500,session_open=None,*,session_minutes=None, session_bounds=None, before=None):
         if isinstance(minutes,bool) or not isinstance(minutes,int) or not 1<=minutes<=1440:raise ValueError('Invalid candle interval.')
+        self._flush_elapsed(symbol)
         with self.db() as db:
-            rows=db.execute('SELECT timestamp,open,high,low,close,observations,open_verified,volume,volume_verified FROM candles WHERE symbol=? AND timestamp+60<=? ORDER BY timestamp DESC LIMIT ?',(symbol,self.clock(),min(limit*minutes,100000))).fetchall()[::-1]
+            # MCX calendar candles need complete sessions across the requested
+            # history window, even when it contains more than 100,000 minutes.
+            row_limit = limit * minutes if limit >= 750 else min(limit * minutes, 100000)
+            cutoff = self.clock() - 60
+            if before is not None:
+                cutoff = min(cutoff, before - 1)
+            rows = db.execute(
+                'SELECT timestamp,open,high,low,close,observations,open_verified,volume,volume_verified '
+                'FROM candles WHERE symbol=? AND timestamp<=? ORDER BY timestamp DESC LIMIT ?',
+                (symbol, cutoff, row_limit),
+            ).fetchall()[::-1]
+        if session_minutes is not None and (not isinstance(session_minutes, int) or not 1 <= session_minutes <= 1440):
+            raise ValueError('Invalid session length.')
         groups={}
+        ends={}
+        now=self.clock()
         for row in rows:
             if not row[6]:continue
             stamp=datetime.fromtimestamp(row[0],ZoneInfo('Asia/Kolkata'))
-            hour,minute=map(int,(session_open or '00:00').split(':'))
+            bounds = session_bounds(row[0]) if session_bounds else None
+            if bounds and bounds[0] == bounds[1]:
+                continue
+            hour,minute=divmod(bounds[0],60) if bounds else map(int,(session_open or '00:00').split(':'))
             anchor=int(stamp.replace(hour=hour,minute=minute,second=0,microsecond=0).timestamp())
-            if row[0]<anchor:continue
+            length = bounds[1] - bounds[0] if bounds else session_minutes
+            session_end = anchor + length * 60 if length is not None else None
+            if row[0] < anchor or (session_end is not None and row[0] >= session_end):
+                continue
             opening=anchor+(row[0]-anchor)//(minutes*60)*(minutes*60)
+            end = opening + minutes * 60
+            ends[opening] = min(end, session_end) if session_end is not None else end
             groups.setdefault(opening,[]).append(row)
         result=[]
         for opening,parts in sorted(groups.items()):
-            if len(parts)!=minutes or [r[0] for r in parts]!=list(range(opening,opening+minutes*60,60)):continue
-            if opening+minutes*60>self.clock():continue
+            end = ends[opening]
+            if end > now or [r[0] for r in parts] != list(range(opening, end, 60)):
+                continue
             volume_ok=all(r[8] and r[7] is not None for r in parts)
             result.append(dict(timestamp=opening,open=parts[0][1],high=max(r[2] for r in parts),low=min(r[3] for r in parts),close=parts[-1][4],volume=sum(r[7] for r in parts) if volume_ok else None,volume_available=volume_ok,source='MOTILAL_CAPTURED_TICKS',open_verified=True))
         return result[-limit:]
+
+    def save_daily_snapshot(self, symbol, row):
+        """Store a confirmed broker session in the daily archive."""
+        with self.db() as db:
+            db.execute("""
+                INSERT INTO daily_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, timestamp) DO UPDATE SET
+                    open=excluded.open, high=excluded.high, low=excluded.low,
+                    close=excluded.close, volume=excluded.volume
+                WHERE daily_snapshots.open IS NOT excluded.open
+                   OR daily_snapshots.high IS NOT excluded.high
+                   OR daily_snapshots.low IS NOT excluded.low
+                   OR daily_snapshots.close IS NOT excluded.close
+                   OR daily_snapshots.volume IS NOT excluded.volume
+            """, (symbol, *row))
+
+    def daily_snapshots(self, symbol):
+        with self.db() as db:
+            return db.execute("""
+                SELECT timestamp, open, high, low, close, volume FROM daily_snapshots
+                WHERE symbol=? ORDER BY timestamp
+            """, (symbol,)).fetchall()
 
     def session_candles(self,symbol,session_open='09:15',minutes=375,limit=3000):
         """Aggregate complete native sessions without truncating older minutes.
@@ -91,6 +165,7 @@ class History:
             if not 0<=hour<24 or not 0<=minute<60:raise ValueError()
         except (ValueError,AttributeError):raise ValueError('Invalid session opening.') from None
         shift=19800-(hour*60+minute)*60
+        self._flush_elapsed(symbol)
         with self.db() as db:
             rows=db.execute("""
                 WITH aligned AS (

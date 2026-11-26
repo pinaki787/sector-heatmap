@@ -1,4 +1,5 @@
 """Shared Renko rules with explicit Delta policy and native accounting labels."""
+from copy import deepcopy
 from .runner import Runner
 from .adoption import AdoptedRunner
 from .delta_contracts import configuration, FUTURES_ROUTE, FUTURES_REVISION
@@ -13,6 +14,103 @@ class DeltaRunner(Runner):
         if self.state.get('telegram_source') and self.state.get('management_only') and self.state.get('running') and not self.state.get('position') and not self.state.get('pending'):
             return self.stop()  # Finished Telegram position: no independent signal re-entry.
         return super().step()
+
+
+    def reconcile_external_stop(self):
+        if (self.state.get('config') or {}).get('broker')!='DELTA_INDIA':
+            return super().reconcile_external_stop()
+        if ((self.state.get('config') or {}).get('mode')!='LIVE'
+                or not self.state.get('squareoff_requested')
+                or (self.state.get('pending') and not self.state['pending'].get('reconciliation_only'))
+                or not self.state.get('position')):
+            return False
+        from .delta_external_close import confirmed_close
+        p=deepcopy(self.state['position'])
+        from .delta_external_close import read_evidence
+        def evidence():
+            return read_evidence(self.adapter.delta,self.adapter.execution,p,self.state.get('account_identity'),self.clock)
+        found=evidence()
+        if found!=evidence():raise ValueError('Delta external-close evidence changed.')
+        order=dict(symbol=p['symbol'],qty=found['quantity'],side=found['side'],
+                   productType=found['product'],type=1)
+        self.state['pending']=dict(order=order,tag='EXTERNAL-CLOSE-'+found['order_id'],
+            id=found['order_id'],position=p,reason='EXTERNAL_BROKER_CLOSE',
+            submitted_at=found['filled_at'],cancel_requested=False,reconciliation_only=True,
+            external_close_evidence=found)
+        self.save()
+        self.complete_pending(found['quantity'],found['price'])
+        self.state.setdefault('external_close_reconciliations',[]).append(found)
+        self.state['accepting_entries']=False
+        self.event('EXTERNAL_CLOSE_RECONCILED','Existing Delta exit fills verified; no closing order submitted.')
+        self.stop()
+        return True
+
+
+    def recover_requested_external_stop(self, background=True):
+        """Finish a saved Stop from existing external fills only; never run trading."""
+        c=self.state.get('config') or {}
+        pending=self.state.get('pending') or {}
+        if (c.get('mode')!='LIVE' or c.get('broker')!='DELTA_INDIA'
+                or self.state.get('running') or self.state.get('accepting_entries')
+                or not self.state.get('squareoff_requested') or not self.state.get('position')
+                or (pending and not pending.get('reconciliation_only'))):
+            return False
+        import fcntl,json,threading
+        from copy import deepcopy
+        expected={k:deepcopy(self.state.get(k)) for k in ('run_id','account_identity','position','pending','squareoff_requested','accepting_entries')}
+        def reconcile_once():
+            with self.lock:
+                if self.file_lock or (self.thread and self.thread.is_alive()) or self.state.get('running'):return False
+                handle=open(self.path.with_suffix('.lock'),'a')
+                validated=False
+                try:
+                    fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    saved=json.loads(self.path.read_text())
+                    if {k:saved.get(k) for k in expected}!=expected:
+                        raise ValueError('Saved Delta Stop ownership changed.')
+                    self.file_lock=handle
+                    validated=True
+                    return self.reconcile_external_stop()
+                except Exception as error:
+                    if validated:
+                        self.state.update(running=False,accepting_entries=False)
+                        self.event('STOP_RECOVERY_BLOCKED',str(error))
+                    return False
+                finally:
+                    if self.file_lock is handle:self.release()
+                    else:handle.close()
+        if not background:return reconcile_once()
+        worker=threading.Thread(target=reconcile_once,name='delta-external-stop-reconciliation',daemon=True)
+        worker.start()
+        return worker
+
+    def recover_unsubmitted_intent(self):
+        """Startup cleanup for a durable no-send receipt; never resumes trading."""
+        from .delta_no_send import receipt_path,recover
+        pending=self.state.get('pending') or {}
+        if (self.state.get('running') or self.state.get('position') or not pending
+                or (self.state.get('config') or {}).get('mode')!='LIVE'
+                or pending.get('id') or not hasattr(self.adapter.delta,'live_path')
+                or not receipt_path(self.adapter.delta,pending['tag']).exists()):return None
+        import threading
+        tag=pending['tag'];run=self.state.get('run_id')
+        def reconcile_once():
+            with self.lock:
+                if self.state.get('running') or self.state.get('run_id')!=run or (self.state.get('pending') or {}).get('tag')!=tag:return
+                try:recover(self)
+                except Exception:
+                    self.state['no_send_recovery']={'status':'BLOCKED','reason':'Fresh broker identity/order/position evidence unavailable or contradictory; retained intent unchanged.'}
+                    self.save()
+        worker=threading.Thread(target=reconcile_once,name='delta-no-send-reconciliation',daemon=True)
+        worker.start()
+        return worker
+
+    def reconcile(self):
+        if (self.state.get('pending') or {}).get('reconciliation_only'):
+            return self.reconcile_external_stop()
+        from .delta_no_send import recover
+        if recover(self):return
+        return super().reconcile()
 
     def entry_preflight(self, order, contract, quote):
         if self.state['config'].get('execution_route') == FUTURES_ROUTE:
@@ -58,11 +156,17 @@ class DeltaRunner(Runner):
                     self.stop()
             return self.snapshot()
 
-    def read_preferences(self):
-        return preferences.read(self.path.with_name('renko-delta-settings.json'))
+    def preferences_path(self):
+        return self.path.with_name('renko-delta-settings.json')
 
-    def save_preferences(self, payload):
-        return preferences.write(self.path.with_name('renko-delta-settings.json'),payload,self.clock())
+    def binding_scope(self):
+        return dict(broker='DELTA_INDIA',instrument=getattr(self,'bound_instrument',None) or (self.state.get('config') or {}).get('underlying'))
+
+    def read_preferences(self):
+        return super().read_preferences()
+
+    def save_preferences(self,payload):
+        return super().save_preferences(payload)
 
     def deadline(self):
         c=self.state.get('config') or {}
@@ -97,9 +201,15 @@ class DeltaRunner(Runner):
         meta=self.adapter.contract(row['symbol'])
         row.update(native_contract_type='perpetual_futures' if meta.get('execution_route')==FUTURES_ROUTE else 'options',taker_commission_rate=meta.get('taker_commission_rate'),broker='DELTA_INDIA',quote_currency=meta['quote_currency'],settlement_currency=meta['settlement_currency'],product_id=meta['product_id'])
         owned=self.adapter.delta.live['orders'].get(pending['tag']) or {}
-        row['native_commission']=owned.get('commission') if self.state['config']['mode']=='LIVE' else None
-        row['requested_type']='LIMIT_IOC' if self.state['config']['mode']=='LIVE' else 'PAPER_EXECUTABLE_QUOTE'
-        row['native_order_terms']='MARKETABLE_LIMIT_IOC' if self.state['config']['mode']=='LIVE' else 'SIMULATED_EXECUTABLE_QUOTE'
+        row['native_commission']=(pending.get('external_close_evidence') or {}).get('commission',owned.get('commission')) if self.state['config']['mode']=='LIVE' else None
+        if pending.get('external_close_evidence'):
+            row['external_close_evidence']=deepcopy(pending['external_close_evidence'])
+            row['broker_filled_at']=pending['external_close_evidence']['filled_at']
+            row['reconciliation_only']=True
+            row['requested_type']='EXTERNAL_BROKER_ORDER'
+            row['native_order_terms']='BROKER_CONFIRMED_EXTERNAL_FILL'
+        if not pending.get('reconciliation_only'):row['requested_type']='LIMIT_IOC' if self.state['config']['mode']=='LIVE' else 'PAPER_EXECUTABLE_QUOTE'
+        if not pending.get('reconciliation_only'):row['native_order_terms']='MARKETABLE_LIMIT_IOC' if self.state['config']['mode']=='LIVE' else 'SIMULATED_EXECUTABLE_QUOTE'
         if filled and row.get('native_commission') is None and not row.get('native_fee_policy'):
             try:
                 quote=self.adapter.delta.ticker(self.state['config']['underlying'])

@@ -23,6 +23,7 @@ def whole(value,label):
     if isinstance(value,bool) or result!=int(result):raise ValueError(label+' must be a whole number.')
     return int(result)
 
+from .chart_trade_admission import serialized_dhan_strategy_entry, mark_dhan_entry_attempt
 from .dhan_execution import fresh_quote_snapshot
 from . import dhan_mcx
 
@@ -124,6 +125,8 @@ class Broker:
         return dict(available={'CE','PE'}<=kinds,message='Dhan nearest-expiry ATM bought Call / Put; no broker fallback.')
 
     def validate_config(self,config):
+        from strategies.ema_crossover.spread_policy import enabled
+        self.entry_spread_filter_enabled=enabled(config)
         self.session_policy(config)
         if not self.route_availability(config)['available']: raise ValueError('No current Dhan Call/Put pair for this underlying.')
         self.authenticated_client()
@@ -160,10 +163,31 @@ class Broker:
         if not depth: return float(number(row['last_price'],'Last price',True)),stamp
         bid=float(number(row['depth']['buy'][0]['price'],'Bid',True))
         ask=float(number(row['depth']['sell'][0]['price'],'Ask',True))
-        if bid>ask or (ask-bid)/ask>.03: raise ValueError('Dhan quote crossed or spread exceeds 3%.')
-        return dict(bid=bid,ask=ask,received_at=stamp,exchange_at=stamp, timestamp_basis='DHAN_REST_SNAPSHOT', last_trade_time=row.get('last_trade_time'))
+        if bid>ask:raise ValueError('Dhan quote is crossed.')
+        if getattr(self,'entry_spread_filter_enabled',True) and (ask-bid)/ask>.03:raise ValueError('Entry spread exceeds the enabled 3% limit.')
+        return dict(bid=bid,ask=ask,last_price=float(number(row['last_price'],'Last price',True)),received_at=stamp,exchange_at=stamp, timestamp_basis='DHAN_REST_SNAPSHOT', last_trade_time=row.get('last_trade_time'))
 
     def quote(self,symbol): return self._market(self.contract(symbol))
+
+    def premium_quotes(self,contracts):
+        # One account-throttled REST snapshot for the bounded candidate set.
+        payload={}
+        for meta in contracts:payload.setdefault(meta['exchange_segment'],[]).append(int(meta['security_id']))
+        started=self.clock();data=self.service._client().request('POST','/marketfeed/quote',payload);received=self.clock()
+        timing=data.get('_sector_snapshot_timing') or {}
+        elapsed=timing.get('elapsed',received-started);received=timing.get('received_at',received)
+        if data.get('status') not in (None,'success') or not 0<=elapsed<=15 or not 0<=self.clock()-received<=15:
+            raise ValueError('Target premium quote snapshot is delayed or unavailable; no entry sent.')
+        result={}
+        for meta in contracts:
+            try:
+                row=data['data'][meta['exchange_segment']][str(meta['security_id'])]
+                bid=float(number(row['depth']['buy'][0]['price'],'Bid',True));ask=float(number(row['depth']['sell'][0]['price'],'Ask',True))
+                if bid>ask:continue
+                if getattr(self,'entry_spread_filter_enabled',True) and (ask-bid)/ask>.03:continue
+                result[meta['symbol']]=dict(bid=bid,ask=ask,received_at=received,exchange_at=received,timestamp_basis='DHAN_REST_SNAPSHOT')
+            except (ValueError,KeyError,TypeError,IndexError):continue
+        return result
 
     def live_price(self,config,now):
         row=self.underlying(config['underlying'])
@@ -191,10 +215,15 @@ class Broker:
         matches=[r for r in candidates if abs(float(r['SEM_STRIKE_PRICE'])-spot)==strike]
         # Deterministic lower strike for an exact half-step tie.
         row=min(matches,key=lambda r:float(r['SEM_STRIKE_PRICE']))
-        meta=self._meta(row)
-        if host['SEM_SEGMENT']=='M':meta['expiry_protection_at']=dhan_mcx.entry_cutoff(row)
-        self.contracts[meta['symbol']]=meta
-        return meta
+        def metadata(candidate):
+            meta=dict(self._meta(candidate),strike=float(candidate['SEM_STRIKE_PRICE']))
+            if host['SEM_SEGMENT']=='M':meta['expiry_protection_at']=dhan_mcx.entry_cutoff(candidate)
+            self.contracts[meta['symbol']]=meta
+            return meta
+        if config.get('target_option_premium') not in (None,''):
+            from strategies.renko_supertrend.option_premium import choose_native
+            return choose_native(self,config,[metadata(r) for r in candidates],spot)
+        return metadata(row)
 
     def warm_options(self,config): pass
 
@@ -375,8 +404,12 @@ class Broker:
         import json
         for folder in ('dhan-strategy-intents','dhan-orders'):
             for path in (self.service.folder/folder).glob('*.json'):
-                if json.loads(path.read_text()).get('status') in ('SUBMITTING','UNKNOWN'):
-                    raise ValueError('Uncertain Dhan submission requires reconciliation before another entry.')
+                retained=json.loads(path.read_text())
+                if retained.get('status') in ('SUBMITTING','UNKNOWN'):
+                    from .native_exit_scope import managed_closing_exit
+                    ticket=retained.get('ticket') or {}
+                    if folder!='dhan-strategy-intents' or not managed_closing_exit(self,ticket.get('correlationId'),ticket,dhan_ticket=True):
+                        raise ValueError('Uncertain Dhan submission requires reconciliation before another entry.')
         quote=self.quote(order['symbol'])
         funds=client.request('GET','/fundlimit')
         if str(funds.get('dhanClientId'))!=str(client.client_id):raise PermissionError('Dhan funds ownership mismatch.')
@@ -397,6 +430,7 @@ class Broker:
                     orderType='LIMIT',validity=order['validity'],price=order['limitPrice'],triggerPrice=0,
                     disclosedQuantity=0,afterMarketOrder=False)
 
+    @serialized_dhan_strategy_entry
     def place(self,order):
         attempt={'post_started':False}
         try:
@@ -441,6 +475,7 @@ class Broker:
             if order['side']==1 and quote['ask']>order['limitPrice'] or order['side']==-1 and quote['bid']<order['limitPrice']:
                 raise QuoteMovedBeforeSubmission('Dhan executable quote moved beyond the order limit; no order sent. Waiting for a new eligible signal.')
             native=self._native(order,client)
+            if order['side']==1:mark_dhan_entry_attempt(self.service)
             with path.open('x') as f:
                 os.chmod(path,0o600);json.dump(dict(status='SUBMITTING',ticket=native),f);f.flush();os.fsync(f.fileno())
             attempt['post_started']=True

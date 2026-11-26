@@ -73,7 +73,7 @@ class ProjectionEntryIsolationTests(unittest.TestCase):
     def test_zero_trade_flat_runner_accepts_host_once_without_order_submission(self):
         _,row=six_brick_observation()
         runner,broker=self.make_runner()
-        sig={**row,'cross_direction':row['entry_direction']}
+        sig={**row,'cross_direction':row['entry_direction'],'swing_breakout':{'sides':{row['entry_direction']:{'allowed':True,'required':2,'count':2}}}}
         self.assertTrue(runner.fresh_cross(sig))
         assessment=deepcopy(runner.state['latest_entry_assessment'])
         self.assertEqual(assessment['code'],'ELIGIBLE')

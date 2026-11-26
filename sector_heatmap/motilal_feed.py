@@ -5,12 +5,12 @@ import struct
 import threading
 import time
 from zoneinfo import ZoneInfo
-from .motilal_api import EXCHANGES
 
 QUOTE_SOCKET='wss://ws1feed.motilaloswal.com/jwebsocket/jwebsocket'
 ORDER_SOCKET='wss://openapi.motilaloswal.com/ws'
 EPOCH_1980=datetime(1980,1,1,tzinfo=ZoneInfo('Asia/Kolkata')).timestamp()
-EXCHANGE_CODES={'NSE':b'N','NSEFO':b'N','BSE':b'B','BSEFO':b'G','NSECD':b'C','MCX':b'M'}
+# Broadcast codes are independent of the trading API's exchange whitelist.
+EXCHANGE_CODES={'NSE':b'N','NSEFO':b'N','BSE':b'B','BSEFO':b'G','NSECD':b'C','MCX':b'M','NCDEX':b'D'}
 
 
 def login_packet(client_id):
@@ -20,7 +20,7 @@ def login_packet(client_id):
 
 
 def subscription_packet(exchange,token,subscribe=True):
-    if exchange not in EXCHANGES:raise ValueError('Unsupported market-data exchange.')
+    if exchange not in EXCHANGE_CODES:raise ValueError('Unsupported market-data exchange.')
     token=int(token)
     if not 0<token<2**31:raise ValueError('Invalid native scrip code.')
     return struct.pack('<cHcciB',b'D',7,EXCHANGE_CODES[exchange],b'C' if exchange in {'NSE','BSE'} else b'D',token,int(subscribe))

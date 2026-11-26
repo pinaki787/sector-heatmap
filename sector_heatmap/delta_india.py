@@ -10,12 +10,14 @@ import requests
 from sector_heatmap.delta_signals import delta_rsi_series,momentum_settings,momentum_allows
 from .delta_history import CandleArchive
 from . import delta_trailing,delta_adx
+from .chart_trade_admission import serialized_delta_request
 from .delta_lifecycle import lifecycles
 from .delta_monitoring import saved_paper_config,health as monitoring_health
 
 BASE='https://api.india.delta.exchange'
 RESOLUTIONS={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'1d':86400,'1w':604800}
 SUPPORTED={'perpetual_futures','futures','call_options','put_options'}
+CHART_SUPPORTED=SUPPORTED | {'spot','move_options'}
 
 class DeltaIPv4Adapter(requests.adapters.HTTPAdapter):
     # Keep outbound API traffic on the server's explicitly whitelisted IPv4.
@@ -118,7 +120,7 @@ class DeltaIndia:
         threading.Thread(target=supervise,daemon=True,name='delta-monitor-watchdog').start()
     def _get(self,path,params=None,private=False):
         if private:return self._private('GET',path,params=params)
-        if path not in ('/v2/products','/v2/history/candles','/v2/wallet/balances') and not re.fullmatch(r'/v2/(products|tickers)/[A-Z0-9][A-Z0-9_-]{0,79}',path):raise ValueError('Unsupported Delta India read-only endpoint.')
+        if path not in ('/v2/products','/v2/history/candles','/v2/wallet/balances') and not re.fullmatch(r'/v2/(products|tickers|l2orderbook)/[A-Z0-9][A-Z0-9_-]{0,79}',path):raise ValueError('Unsupported Delta India read-only endpoint.')
         query='?'+urlencode(params) if params else '';headers={'Accept':'application/json','User-Agent':'SectorPulse-DeltaIndia/1.0'}
         try:
             response=self.requester.get(BASE+path+query,headers=headers,timeout=15,allow_redirects=False)
@@ -184,8 +186,9 @@ class DeltaIndia:
             with tmp.open('w') as f:
                 os.chmod(tmp,0o600);f.write('DELTA_MCP_ENV=india_prod\nDELTA_API_KEY='+json.dumps(key)+'\nDELTA_API_SECRET='+json.dumps(secret)+'\n');f.flush();os.fsync(f.fileno())
             os.replace(tmp,mcp_path);return self.status()
+    @serialized_delta_request
     def _private(self,method,path,params=None,body=None,credentials=None):
-        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path))) or (method in ('POST','PUT','DELETE') and path=='/v2/orders')
+        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders','/v2/orders/history') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path))) or (method in ('POST','PUT','DELETE') and path=='/v2/orders')
         if not allowed:raise ValueError('Unsupported Delta India authenticated endpoint.')
         c=credentials or self._credentials();key,secret=c.get('DELTA_INDIA_API_KEY'),c.get('DELTA_INDIA_API_SECRET')
         if not key or not secret:raise PermissionError('Delta India is not connected. Enter India API key and secret in Connection settings.')
@@ -277,13 +280,16 @@ class DeltaIndia:
         with tmp.open('w') as f:os.chmod(tmp,0o600);json.dump(data,f,allow_nan=False);f.flush();os.fsync(f.fileno())
         os.replace(tmp,path)
     def _save_live(self):self._write(self.live_path,self.live)
-    def catalog(self):
+    def catalog(self, *, chart=False):
+        cache_key = ('catalog', 'chart') if chart else 'catalog'
+        supported = CHART_SUPPORTED if chart else SUPPORTED
         with self.lock:
-            cached=self.cache.get('catalog')
+            cached=self.cache.get(cache_key)
             if cached and self.clock()-cached[0]<300:return deepcopy(cached[1])
             rows=[];cursor=None;seen=set();total=None
             for _ in range(20):
                 params={'page_size':500}
+                if chart:params['states']='live'
                 if cursor:params['after']=cursor
                 data=self._get('/v2/products',params);batch=data.get('result')
                 if not isinstance(batch,list):raise ValueError('Invalid Delta India instrument catalog.')
@@ -294,19 +300,21 @@ class DeltaIndia:
             else:raise ValueError('Delta India catalog exceeded safe pagination limit.')
             unique={r['id']:r for r in rows if isinstance(r,dict) and r.get('id') is not None}
             if isinstance(total,int) and len(unique)!=total:raise ValueError('Incomplete Delta India catalog; refresh before selecting a contract.')
-            instruments=[self._metadata(r) for r in unique.values() if r.get('state')=='live' and r.get('trading_status')=='operational' and r.get('contract_type') in SUPPORTED]
+            instruments=[self._metadata(r) for r in unique.values() if r.get('state')=='live' and (chart or r.get('trading_status')=='operational') and r.get('contract_type') in supported]
             instruments.sort(key=lambda r:(r['contract_type']!='perpetual_futures',r['symbol']))
             result=dict(broker='DELTA_INDIA',complete=True,available_types=sorted({r['contract_type'] for r in instruments}),instruments=instruments,listed_count=len(unique),supported_live_count=len(instruments),fetched_at=self.clock(),forex_supported=False,forex_message='Only listed supported India crypto derivatives are selectable. This integration provides no forex pair routing.')
-            self.cache['catalog']=(self.clock(),result);return deepcopy(result)
+            self.cache[cache_key]=(self.clock(),result);return deepcopy(result)
     def _metadata(self,r):
-        return {k:r.get(k) for k in ('id','symbol','description','contract_type','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate','initial_margin','maintenance_margin','product_specs')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
-    def product(self,symbol):
+        return {k:r.get(k) for k in ('id','symbol','description','contract_type','launch_time','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate','initial_margin','maintenance_margin','product_specs')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
+    def product(self,symbol, *, chart=False):
+        supported = CHART_SUPPORTED if chart else SUPPORTED
         if not isinstance(symbol,str) or not re.fullmatch(r'[A-Z0-9][A-Z0-9_-]{0,79}',symbol):raise ValueError('Select an exact listed Delta India symbol.')
-        cached=self.cache.get(('product',symbol))
+        cache_key = ('product', symbol, 'chart') if chart else ('product', symbol)
+        cached=self.cache.get(cache_key)
         if cached and self.clock()-cached[0]<60:return deepcopy(cached[1])
         r=self._get('/v2/products/'+quote(symbol,safe=''))['result']
-        if r.get('symbol')!=symbol or r.get('contract_type') not in SUPPORTED or r.get('state')!='live' or r.get('trading_status')!='operational':raise ValueError('Delta India contract is not currently supported and operational.')
-        result=self._metadata(r);self.cache[('product',symbol)]=(self.clock(),result);return deepcopy(result)
+        if r.get('symbol')!=symbol or r.get('contract_type') not in supported or r.get('state')!='live' or (not chart and r.get('trading_status')!='operational'):raise ValueError('Delta India contract is not currently supported and operational.')
+        result=self._metadata(r);self.cache[cache_key]=(self.clock(),result);return deepcopy(result)
     def ticker(self,symbol):
         self.product(symbol);r=self._get('/v2/tickers/'+symbol)['result'];q=r.get('quotes') or {}
         try:bid,ask=float(q['best_bid']),float(q['best_ask']);stamp=float(r['timestamp'])/1e6
@@ -635,6 +643,9 @@ class DeltaIndia:
             if existing:
                 if existing['payload_digest']!=digest:raise ValueError('Submission request ID reused with different terms.')
                 return self.reconcile({'request_id':token}) if existing['status'] not in ('REJECTED','closed','cancelled') else deepcopy(existing)
+            if payload.get('reduce_only') is not True:
+                from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+                assert_workspace_chart_entry_allowed('DELTA_INDIA')
             if self.runner['running'] and not runner and not payload.get('reduce_only'):raise ValueError('Stop the Delta runner before manual live submission.')
             if any(o['status'] in ('SUBMITTING','UNKNOWN','open','pending','CANCEL_UNKNOWN') for o in self.live['orders'].values()):raise ValueError('Reconcile/cancel the outstanding owned Delta order first.')
             self._live_ready();p,body,q=self._validate_order(payload,runner=runner)
@@ -812,6 +823,8 @@ class DeltaIndia:
             mode=payload.get('mode');direction=payload.get('direction','BOTH');size=payload.get('contracts')
             if mode not in ('LIVE','PAPER') or direction not in ('BOTH','LONG_ONLY') or isinstance(size,bool) or not isinstance(size,int) or not 1<=size<=100000:raise ValueError('Choose LIVE/PAPER, runner direction and whole contract quantity.')
             if mode=='LIVE':
+                from .chart_trade_ownership import assert_workspace_chart_entry_allowed
+                assert_workspace_chart_entry_allowed('DELTA_INDIA')
                 self._live_ready()
                 if any(o['status'] in ('SUBMITTING','UNKNOWN','open','pending','CANCEL_UNKNOWN') for o in self.live['orders'].values()):raise ValueError('Reconcile outstanding Delta orders before starting.')
             p,_=self._paper_contract(payload.get('symbol'))

@@ -6,9 +6,9 @@ from .test_brick_basis import BASE,candles
 
 class PriceBasisTests(unittest.TestCase):
  def setUp(self):
-  self.config={**BASE,'manual_brick':10,'_run_id':'test','timeframe':'5 minutes',
+  self.config={**BASE,'swing_breakout_bricks':2,'manual_brick':10,'_run_id':'test','timeframe':'5 minutes',
                'supertrend_slope_enabled':True,'ema_fast_enabled':False,'ema_exit_enabled':False}
-  self.export=analysis(candles([100,135,165,195,225,255,285,315]),self.config,.05)
+  self.export=analysis(candles([100,135,165,195,165,135,165,195,225,255,285,315]),self.config,.05)
   self.at=self.export['last']['timestamp']+1
  def price(self,value,delta=1,generation=1):
   self.at+=delta
@@ -35,17 +35,37 @@ class PriceBasisTests(unittest.TestCase):
   self.assertEqual(reason(self.config,rows[0],'BULLISH'),'OPPOSITE_RENKO_BRICK_CLOSE')
   self.assertEqual(self.price(335),[])
   self.assertEqual([(r['open'],r['close']) for r in self.price(340)],[(330,340)])
+ def test_sma_uses_full_price_bricks_before_host_close(self):
+  from .exit_indicators import reason
+  self.config.update(strategy_mode='SIMPLE_BRICK', swing_breakout_enabled=False,
+                     sma_entry_enabled=True, sma_exit_enabled=True, sma_length=6)
+  self.export=analysis(candles([100]),self.config,.05)
+  self.at=self.export['last']['timestamp']+1
+  self.assertEqual(self.price(100),[])
+  rows=self.price(160)
+  self.assertEqual([r['sma'] for r in rows],[None,None,None,None,None,135])
+  self.assertEqual([r['entry_direction'] for r in rows],[None,None,None,None,None,'BULLISH'])
+  self.assertEqual(self.price(159),[])
+  red=self.price(140)[0]
+  self.assertEqual(red['sma'],140)
+  self.assertIsNone(reason(self.config,red,'BULLISH'))
+  red=self.price(130)[0]
+  self.assertEqual(reason(self.config,red,'BULLISH'),'SMA6_CONFIRMED_BREACH')
+
  def test_duplicate_out_of_order_and_stale_prices_are_inert(self):
   self.price(310);before=deepcopy(self.export)
   for stamp,received in [(self.at,self.at+.1),(self.at-1,self.at+.1),(self.at+1,self.at+20)]:
    self.assertEqual(observe(self.export,self.config,.05,dict(ltp=400,exch_feed_time=stamp),received,1),[])
    self.assertEqual(before,self.export)
- def test_reconnect_and_long_gap_rebase_without_gap_bricks(self):
-  self.price(310);self.price(345);before=deepcopy(self.export['rows'])
-  self.assertEqual(self.price(500,generation=2),[])
-  self.assertEqual(before,self.export['rows'])
+ def test_reconnect_and_long_gap_fill_complete_bricks_at_fresh_observation(self):
+  self.price(310);self.price(345)
+  rows=self.price(500,generation=2)
+  self.assertEqual([r['close'] for r in rows],list(range(350,501,10)))
+  self.assertTrue(all(r['market_event_at']==self.at for r in rows))
   self.assertEqual([r['close'] for r in self.price(510,generation=2)],[510])
-  self.assertEqual(self.price(1000,delta=20,generation=2),[])
+  rows=self.price(450,delta=20,generation=2)
+  self.assertEqual([r['close'] for r in rows],[490,480,470,460,450])
+  self.assertTrue(all(r['market_event_at']==self.at for r in rows))
  def test_new_run_baselines_without_replaying_price_gap(self):
   self.price(310);self.price(345)
   self.config['_run_id']='new-run'
@@ -62,12 +82,12 @@ class PriceBasisTests(unittest.TestCase):
   self.price(310);self.price(345)
   saved=deepcopy(self.export)
   saved['state']['brick_indicator_state']['projected_position']=None
-  tick=dict(ltp=245,exch_feed_time=self.at+1)
+  tick=dict(ltp=95,exch_feed_time=self.at+1)
   a=observe(self.export,self.config,.05,tick,self.at+1.01,1)
   b=observe(saved,self.config,.05,tick,self.at+1.01,1)
   keys=('entry_qualified','entry_direction','entry_diagnostic','supertrend_slope_filter')
   self.assertEqual([{k:r[k] for k in keys} for r in a],[{k:r[k] for k in keys} for r in b])
-  self.assertTrue(any(r['entry_qualified'] for r in a))
+  self.assertTrue(any(r['entry_qualified'] or r.get('trend_reentry_direction') for r in a))
  def test_same_timestamp_ordered_feed_observations_are_not_lost(self):
   self.price(310)
   stamp=self.at+1
@@ -122,10 +142,15 @@ class PriceExecutionTests(unittest.TestCase):
    b.now+=1
    produce(r,dict(ltp=155,exch_feed_time=b.now-.01),b.now,1)
    r.step()
+   self.assertEqual(r.state['trades_used'],0)  # No confirmed swing breakout yet.
+   for value in (120,175):
+    b.now+=1
+    produce(r,dict(ltp=value,exch_feed_time=b.now-.01),b.now,1)
+    r.step()
    self.assertEqual(r.state['trades_used'],1)
    self.assertIsNotNone(r.state['position'])
    self.assertEqual(r.state['position']['direction'],'BULLISH')
-   self.assertLess(r.state['position']['entry_event_at']-start,2)
+   self.assertLess(r.state['position']['entry_event_at']-start,4)
    self.assertEqual(r.state['last_signal']['confirmation_basis'],'ORDERED_LIVE_PRICE')
    b.now+=1
    produce(r,dict(ltp=120,exch_feed_time=b.now-.01),b.now,1)

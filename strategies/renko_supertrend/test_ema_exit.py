@@ -49,3 +49,37 @@ class RunnerEmaControlsTests(unittest.TestCase):
         self.assertEqual(t['exit_reasons'],['EMA30_INTRABAR_BREACH'])
         self.assertEqual(t['ema_exit_length'],30)
         self.assertIn('ema_exit',t['exit_indicator_snapshots'][0]['indicators'])
+
+    def test_disabled_custom_exit_never_reads_exit_ema_history(self):
+        from unittest.mock import patch
+        self.c.update(ema_exit_enabled=False,ema_exit_length=30)
+        with patch.object(self.r,'exit_ema',side_effect=AssertionError('Disabled exit history was read')) as history:
+            self.start();self.r.step()
+        self.assertIsNotNone(self.r.state['position'])
+        history.assert_not_called()
+        self.assertEqual(self.b.sent,[])
+
+    def test_disabled_exit_skips_ema_preflight_but_keeps_selected_supertrend_exit(self):
+        from unittest.mock import patch
+        self.c.update(ema_exit_enabled=False,ema_exit_length=30,ema_proximity_enabled=False)
+        self.b.forming=lambda *args:None
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',side_effect=AssertionError('Disabled exit observation was requested')) as observation:
+            self.start();self.r.step()
+        observation.assert_not_called()
+        self.assertIsNotNone(self.r.state['position'])
+        sig=self.r.signal()
+        self.assertTrue(self.r.exit_signal(dict(sig,supertrend_cross_direction='BEARISH'),'BULLISH'))
+        self.assertFalse(self.r.exit_signal(dict(sig,close=1,supertrend_cross_direction=None),'BULLISH'))
+        self.assertEqual(self.b.sent,[])
+
+    def test_disabled_exit_skips_intrabar_ema_monitor(self):
+        from unittest.mock import patch
+        self.c.update(ema_exit_enabled=False,ema_exit_length=30)
+        self.start();self.r.step()
+        self.r.state['config']['intrabar_entries']=True
+        self.b.forming=lambda *args:None
+        with patch('strategies.renko_supertrend.runner.ema_exit_observation',side_effect=AssertionError('Disabled intrabar EMA monitor ran')) as observation:
+            self.r.step()
+        observation.assert_not_called()
+        self.assertIsNotNone(self.r.state['position'])
+        self.assertEqual(self.b.sent,[])

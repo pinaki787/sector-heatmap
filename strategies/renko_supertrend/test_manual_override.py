@@ -85,6 +85,7 @@ class OverrideTests(unittest.TestCase):
         self.r.state['config']['paper_capital_inr']=1
         with self.assertRaises(ValueError):self.r.override_entry(p)
         self.r.state['config']['paper_capital_inr']=100000
+        self.r.state['config']['spread_filter_enabled']=True
         self.b.quote=lambda symbol:dict(bid=1,ask=10)
         with self.assertRaisesRegex(ValueError,'spread'):self.r.override_entry(p)
         self.b.quote=lambda symbol:dict(bid=10,ask=10)
