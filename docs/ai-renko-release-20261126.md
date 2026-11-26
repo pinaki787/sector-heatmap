@@ -37,3 +37,38 @@ The actual Strategy mode defaults to AI Renko Supertrend on every section entry/
 
 ## Start admission correction
 Start validates the actual captured broker/execution route against the release allowlist, rather than an empty configuration. A permitted route can proceed to the explicit user-Start gates; unreleased routes and a global hold remain blocked. No Start is replayed during deployment. Historical manual-request errors are contextualized when the stopped strategy ledger retains no exposure or intent, without deleting or altering their records.
+
+## Delta source-health correction — 27 November
+
+The first user-started PAXG test stopped after 30 seconds without a candle-price
+callback. That timer did not distinguish a quiet trade stream from transport
+failure; the old run did not archive transport heartbeats, so its precise
+upstream cause cannot be reconstructed from that timer alone.
+
+The public adapter now records real server heartbeats separately. During a
+candle-price pause the worker waits, without manual or automatic entry decisions,
+only while the selected symbol has a fresh executable quote and a fresh transport
+heartbeat. Heartbeat freshness follows Delta's documented 30-second interval plus
+5-second grace; executable quotes retain the existing 15-second bound. Stale
+health permits at most three subscription repairs, spaced ten seconds apart.
+Exhaustion or disconnection preserves exposure and blocks execution. Reconnection
+still requires history reconciliation; it does not silently resume an old
+indicator state. No heartbeat or book quote is converted into a trade or candle.
+Pre-pause entry confirmations are cleared so resumed fresh data cannot replay a
+retained entry signal. Stop/position-control polling remains available while
+waiting.
+
+All 624 AI strategy tests pass. This source is distributed for the next
+user-started worker; the stopped PAXG worker was not restarted, and no orders were
+placed. Browser chart health is independent of worker health.
+
+## Embedded chart interaction correction — 27 November
+
+Fullscreen now uses the browser fullscreen API on the chart section, with
+explicit iframe permission. The chart's dialog is not itself a valid native
+fullscreen target. Escape/button exit synchronizes layout and accessibility
+state. Hosted desktop and 390-pixel checks confirm expansion and restoration;
+horizontal/vertical dragging and wheel zoom were exercised without trading.
+OHLC and order-preview controls share a compact header row, preserving the
+indicator information. Fifteen focused UI checks pass. This static change adds
+no broker requests or tick processing.

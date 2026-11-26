@@ -163,6 +163,8 @@ def stream(args):
         broker.subscribe(underlying,config['timeframe']*60);broker.subscribe(symbol,config['timeframe']*60)
         bars={underlying:SourceBars(config['timeframe'],continuous=True,confirmed_closes=True)}
         if symbol!=underlying:bars[symbol]=SourceBars(config['timeframe'],continuous=True,confirmed_closes=True)
+        from strategies.nifty_ai_options.delta_feed_health import FeedHealth
+        feed_health=FeedHealth()
         sma=SourceBars(1,continuous=True,confirmed_closes=True);markers=[];last_tick=time.monotonic();last_write=0;generation=None;observation_sequence=0;last_reconcile=0
         broker.start()
         if not direct:
@@ -270,10 +272,21 @@ def stream(args):
                 if generation is not None and (not status['connected'] or status['generation']!=generation):raise ValueError('Public stream disconnected/reconnected; halt for history reconciliation')
                 try:tick=q.get(timeout=1)
                 except queue.Empty:
+                    if time.monotonic()-last_tick>30:
+                        if feed_health.attempts == 0:
+                            engine.entry_confirmation.clear()
+                            engine.pending_direction = None
+                            if hasattr(engine,'pending_underlying_flip'):engine.pending_underlying_flip=None
+                            engine.band.consume_entry()
+                        health=feed_health.check(broker,underlying,time.monotonic())
+                        atomic(out/'source-health.json',dict(health,at=delta.clock(),symbol=underlying))
+                        atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),source_health=health,native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),position_control=manager.status(),manual_entry_capable=False,reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
+                        # Waiting/recovery never executes a manual or automatic entry.
+                        # Only a fresh validated selected-symbol tick resumes decisions.
+                        continue
                     if not manager.entry_blocked:manual.poll()
                     if not manager.entry_blocked:control.poll(busy=bool(manual.pending or executor.state['pending']),position=bool(executor.state['position']))
                     engine.entry_paused=control.entry_blocked or manager.entry_blocked
-                    if time.monotonic()-last_tick>30:raise ValueError('Delta source heartbeat stalled; exposure preserved')
                     continue
                 if tick.get('symbol') not in bars:continue
                 stamp,price=tick.get('exch_feed_time'),tick.get('ltp')
@@ -281,6 +294,7 @@ def stream(args):
                 current_status=broker.stream_status()
                 if not current_status['connected']:raise ValueError('Public stream unavailable before processing tick')
                 if generation is None:generation=current_status['generation']
+                feed_health.reset()
                 last_tick=time.monotonic();sym=tick['symbol']
                 if direct and executor.state.get('pending') and time.monotonic()-last_reconcile>=1:
                     last_reconcile=time.monotonic()

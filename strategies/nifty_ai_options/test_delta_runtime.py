@@ -13,16 +13,23 @@ class RuntimeTests(unittest.TestCase):
         self.run_runtime(live=True)
     def test_manual_direct_entry_uses_normal_runtime_exit(self):
         self.run_runtime(manual=True)
-    def run_runtime(self,reconfigure=False,live=False,manual=False,hybrid=False):
+    def test_quiet_price_pause_keeps_worker_alive_without_order_replay(self):
+        self.run_runtime(quiet=True)
+    def run_runtime(self,reconfigure=False,live=False,manual=False,hybrid=False,quiet=False):
         delta=Mock();delta.product.return_value=PRODUCT;delta.current=120;delta.price=100;delta.clock.side_effect=lambda:delta.current
         prices={120+i*60:price for i,price in enumerate([100,102,104,106,108,110,108,106,104,102,100,98,96,94,92,90])}
         delta._get.side_effect=lambda path,params:dict(result=[dict(time=params['start'],open=prices[params['start']],high=prices[params['start']]+.1,low=prices[params['start']]-.1,close=prices[params['start']])])
-        instances={}
+        instances={};monotonic=[0];quiet_injected=[False]
         class FakeQueue:
             def __init__(self,*a,**kw):self.rows=[]
             def put_nowait(self,tick):self.rows.append(tick)
             def get(self,**kw):
                 if not self.rows:raise ValueError('offline fixture completed')
+                if quiet and len(self.rows)==10 and not quiet_injected[0]:
+                    import queue
+                    quiet_injected[0]=True;monotonic[0]=40
+                    raise queue.Empty
+
                 if reconfigure and len(self.rows)==11:
                     from runtime_control import enqueue
                     enqueue(folder/'run',config,dict(account_id=config['account'],broker=config['broker'],run_id='run',runtime_session=config['runtime_session'],underlying='BTCUSD',timeframe=5))
@@ -38,6 +45,8 @@ class RuntimeTests(unittest.TestCase):
             def start(self):
                 for i,price in enumerate([100,102,104,106,108,110,108,106,104,102,100,98,96,94,92,90]):self.callback(dict(symbol='BTCUSD',exch_feed_time=135+i*60,ltp=price))
             def stream_status(self):return dict(connected=True,generation=1)
+            def source_health(self,*a):return dict(connected=True,heartbeat_fresh=True,quote_fresh=True)
+            def subscribe_all(self):raise AssertionError('Healthy quiet stream must not resubscribe')
             def tick(self,*a):return dict(exch_feed_time=delta.current)
             def quote(self,*a):return dict(bid=delta.price,ask=delta.price+.5,exchange_at=delta.current,received_at=delta.current)
             def stop(self):self.stopped=True
@@ -54,9 +63,11 @@ class RuntimeTests(unittest.TestCase):
             (folder/'config.json').write_text(json.dumps(config));args=SimpleNamespace(config=str(folder/'config.json'),output=str(folder/'run'),live=live)
             import manual_entry,os
             original_dispatch=manual_entry.ManualDispatcher
-            with patch('delta_live.live_readiness'),patch('delta_live.ManualDispatcher',side_effect=lambda *args,**kwargs:original_dispatch(*args,**kwargs,clock=lambda:delta.current)),patch.dict(os.environ,{'AI_RENKO_LIVE_ORDERS':'I_ACCEPT_REAL_ORDERS'}):
+            with patch('delta_live.time.monotonic',side_effect=lambda:monotonic[0]),patch('delta_live.live_readiness'),patch('delta_live.ManualDispatcher',side_effect=lambda *args,**kwargs:original_dispatch(*args,**kwargs,clock=lambda:delta.current)),patch.dict(os.environ,{'AI_RENKO_LIVE_ORDERS':'I_ACCEPT_REAL_ORDERS'}):
                 with patch('delta_live.runtime_configuration',side_effect=lambda config,output:config),patch('delta_live.automatic_strategy',side_effect=lambda engine,*a,**kw:engine),patch('delta_live.bound_delta',return_value=delta),patch('delta_live.history',return_value=[[0,100,100.1,99.9,100,None],[60,100,100.1,99.9,100,None]] if hybrid else [[0,None,None,None,100,None],[60,None,None,None,100,None]]),patch('delta_live.SourceBroker',FakeBroker),patch('delta_live.DeltaExecution',FakeExecutor),patch('delta_live.queue.Queue',FakeQueue),self.assertRaisesRegex(ValueError,'offline fixture completed'):
                     delta_live.stream(args)
+            if quiet:
+                health=json.loads((folder/'run/source-health.json').read_text());self.assertEqual(health['state'],'WAITING_FOR_TRADED_PRICE');self.assertTrue(health['entries_blocked'])
             actions=[a['action'] for a in instances['executor'].actions]
             self.assertIn('OPEN_LONG',actions);self.assertIn('CLOSE_LONG',actions);self.assertIn('OPEN_SHORT',actions)
             exit_index=actions.index('CLOSE_LONG');reverse_index=actions.index('OPEN_SHORT')

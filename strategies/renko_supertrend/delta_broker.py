@@ -41,7 +41,7 @@ class Broker:
         self.path = Path(history_path)
         self.lock = threading.RLock(); self.connected = False
         self.socket = None; self.thread = None; self.stopping = threading.Event()
-        self.generation = 0; self.stream_error = None; self.account_identity = None
+        self.generation = 0; self.stream_error = None; self.account_identity = None; self.last_heartbeat = None
         self.ticks = {}; self.quotes = {}; self.forming_bars = {}; self.frame_seconds = {}
         self.symbols = set(); self.on_tick = on_tick
         self.history_lock = HISTORY_LOCK; self.history_cache = {}; self.resolved_contracts={};self.paper_stop_contracts={}
@@ -152,6 +152,9 @@ class Broker:
     def ingest(self, message, received=None):
         received = self.delta.clock() if received is None else received
         if not isinstance(message,dict): return
+        if message.get('type') == 'heartbeat':
+            with self.lock: self.last_heartbeat = received
+            return
         symbol = message.get('sy') or message.get('symbol'); kind = message.get('type')
         if symbol not in self.symbols: return
         try:
@@ -200,7 +203,7 @@ class Broker:
                 while not self.stopping.is_set():
                     def opened(socket):
                         with self.lock:
-                            self.connected=True; self.generation+=1; self.quotes={}; self.ticks={}; self.forming_bars={}; self.stream_error=None
+                            self.connected=True; self.last_heartbeat=None; self.generation+=1; self.quotes={}; self.ticks={}; self.forming_bars={}; self.stream_error=None
                         socket.send(json.dumps(dict(type='enable_heartbeat'))); self.subscribe_all()
                     def closed(*args):
                         with self.lock: self.connected=False
@@ -224,6 +227,17 @@ class Broker:
 
     def stream_status(self):
         return dict(connected=self.connected,generation=self.generation,error=self.stream_error)
+
+    def source_health(self, symbol):
+        # Transport heartbeat and executable quotes are independent of last trades.
+        now = self.delta.clock()
+        with self.lock:
+            quote = self.quotes.get(symbol) or {}
+            heartbeat = self.last_heartbeat
+            return dict(connected=self.connected, generation=self.generation,
+                heartbeat_fresh=isinstance(heartbeat,(int,float)) and 0<=now-heartbeat<=35,
+                quote_fresh=all(isinstance(quote.get(key),(int,float)) and 0<=now-quote[key]<=15
+                    for key in ('exchange_at','received_at')))
 
     def tick(self, symbol):
         self.subscribe(symbol)
