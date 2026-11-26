@@ -597,7 +597,7 @@ function mount(){
    };
    card.querySelector('h3').textContent=item.title;card.querySelector('.contract-details').textContent=item.details;
    const framePolicy=chartFramePolicy(item);
-   const frame=card.querySelector('iframe');frame.title=item.title;frame.hidden=framePolicy.hidden;
+   const frame=card.querySelector('iframe');frame.title=item.title;frame.allowFullscreen=true;frame.setAttribute('allow','fullscreen');frame.hidden=framePolicy.hidden;
    if(frame.hidden){frame.removeAttribute('src');continue;}
    const sourceRun=!(account.broker==='MOTILAL_OSWAL')&&snapshot?.running&&(view.frozen||item.owned)&&snapshot?.chart_source_series?.some(c=>c.symbol===item.symbol&&c.frame===Number.parseInt(item.timeframe||view.timeframe||v.timeframe,10)&&c.brick===item.brick)?current?.run_id:null;
    const split=account.broker==='MOTILAL_OSWAL';

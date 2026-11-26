@@ -3486,3 +3486,14 @@ body:has(.desk:not(.sp-chart-show-navigation) .sp-main-chart.active #sp-chart-wo
     max-width: calc(100vw - 24px);
   }
 }
+
+/* Keep OHLC, order-preview buttons and study names together without a spare row. */
+.sp-main-chart .sp-chart-instrument-line { width:100%; min-width:0; }
+.sp-main-chart .sp-chart-instrument-line .sp-chart-trade-actions {
+  order:2; margin:0; align-self:center; gap:4px;
+}
+@container chart-main (max-width:1100px) {
+  .sp-main-chart .sp-chart-session-ohlc { flex:1 1 240px; }
+}
+.sp-main-chart .sp-chart-meta { padding-bottom:2px; gap:2px; }
+.sp-main-chart .sp-chart-legend { padding-top:2px; padding-bottom:2px; }

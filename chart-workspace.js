@@ -1,6 +1,32 @@
 (() => {
   'use strict';
   const feature = 'chart-workspace';
+  // Native fullscreen crosses the iframe boundary; CSS expansion alone cannot.
+  function chartFullscreenControl(panel, button, doc = document) {
+    const target = panel.closest?.('.sp-main-chart') || panel.parentElement || panel;
+    const sync = () => {
+      const expanded = doc.fullscreenElement === target;
+      panel.classList.toggle('sp-chart-expanded', expanded);
+      button.setAttribute('aria-pressed', String(expanded));
+      button.setAttribute('aria-label', expanded ? 'Exit fullscreen' : 'Fullscreen');
+    };
+    doc.addEventListener('fullscreenchange', sync);
+    return async () => {
+      try {
+        if (doc.fullscreenElement === target) await doc.exitFullscreen();
+        else await target.requestFullscreen();
+        sync();
+        button.title = 'Toggle chart fullscreen';
+      } catch (error) {
+        sync();
+        button.title = 'Fullscreen unavailable: ' + error.message;
+        const status = panel.querySelector('[data-history-status]');
+        if (status) status.textContent = button.title;
+      }
+    };
+  }
+
+  let toggleChartFullscreen;
   const aiSelectionParams=new URLSearchParams(location.search);
   if(aiSelectionParams.get('chartContext')==='renko'&&aiSelectionParams.get('aiRenko')==='1'&&window.parent!==window){
     document.documentElement.classList.add('sp-ai-embedded');
@@ -4489,6 +4515,8 @@
         replaying: () => Boolean(barReplay)
       });
       chartTrading.source(chartTradingContext);
+      const tradeActions = panel.querySelector('.sp-chart-trade-actions');
+      if (tradeActions) panel.querySelector('.sp-chart-instrument-line').append(tradeActions);
     }
     const favoriteDock = panel.querySelector('[data-drawing-shortcut-dock]');
     const favoriteStrip = panel.querySelector('[data-drawing-shortcuts]');
@@ -6102,6 +6130,7 @@
     }
 
     fullscreen.hidden = !panel.closest('.sp-main-chart');
+    toggleChartFullscreen = chartFullscreenControl(panel, fullscreen);
     document.addEventListener('keydown', event => {
       const expanded = panel.classList.contains('sp-chart-expanded');
       if (event.key !== 'Escape' || !panel.open || (!expanded && !panel.contains(event.target))
@@ -26027,9 +26056,7 @@
       return;
     }
     if (action.action === 'fullscreen') {
-      const expanded = panel.classList.toggle('sp-chart-expanded');
-      button.setAttribute('aria-pressed', String(expanded));
-      button.setAttribute('aria-label', expanded ? 'Exit fullscreen' : 'Fullscreen');
+      void toggleChartFullscreen();
       return;
     }
     if (['crosshair', 'dot', 'pointer', 'demonstration'].includes(action.cursor)) {
