@@ -68,17 +68,17 @@ test('deferred chart bootstraps survive dashboard body replacement',()=>{
  }
 });
 test('AI view restores only after matching account context is ready and never starts a runner',()=>{
- const src=fs.readFileSync('renko-ai-options.js','utf8'),start=src.indexOf(' function restoreAiView(){'),end=src.indexOf(" root.addEventListener('renko-ai-context-ready'",start);
+ const src=fs.readFileSync('renko-ai-options.js','utf8'),start=src.indexOf(' function restoreAiView(){'),end=src.indexOf(' function strategySectionEntry(){',start);
  const block=src.slice(start,end)+';restoreAiView();';
  function check(ready,account,saved){
   const calls=[],mode={value:'SUPERTREND',dispatchEvent:e=>calls.push(e.type)};
-  vm.runInNewContext(block,{section:{dataset:{aiContextReady:ready}},selected:()=>account,localStorage:{getItem:()=>saved},viewStorage:()=>account?.id,MODE:'AI_RENKO_OPTIONS',mode,restoredDraftAccount:null,restore:()=>calls.push('restore'),show:()=>{},refreshStatus:()=>{},Event:class{constructor(type){this.type=type;}}});
+  vm.runInNewContext(block,{section:{dataset:{aiContextReady:ready}},strategySectionVisible:()=>true,strategyVisit:{selected:()=>'AI_RENKO_OPTIONS'},applyingViewDefault:false,selected:()=>account,localStorage:{getItem:()=>saved},MODE:'AI_RENKO_OPTIONS',mode,restoredDraftAccount:null,restore:()=>calls.push('restore'),show:()=>{},refreshStatus:()=>{},Event:class{constructor(type){this.type=type;}}});
   return {mode:mode.value,calls};
  }
  assert.equal(check('0',{id:'a'},'AI_RENKO_OPTIONS').mode,'SUPERTREND');
  assert.equal(check('1',null,'AI_RENKO_OPTIONS').mode,'SUPERTREND');
  assert.deepEqual(check('1',{id:'a'},'AI_RENKO_OPTIONS'),{mode:'AI_RENKO_OPTIONS',calls:['change']});
- assert.equal(check('1',{id:'a'},'SUPERTREND').mode,'SUPERTREND');
+ assert.equal(check('1',{id:'a'},'SUPERTREND').mode,'AI_RENKO_OPTIONS');
 });
 
 test('AI Heikin Ashi keeps broker OHLC indicator source without false synthetic-bar invalidation',()=>{

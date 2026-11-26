@@ -554,11 +554,11 @@ class Service:
         with self.lock:
             try:from .release_state import require_ready
             except ImportError:from release_state import require_ready
-            require_ready({})
+            config=configuration(payload,self.owner)
+            require_ready(config)
             if self.launching or self.snapshot()['running']:raise ValueError('AI runner already running')
             legacy=self.legacy.snapshot()
             if legacy.get('running') or legacy.get('position') or legacy.get('pending'):raise ValueError('Selected legacy runner is active or recovering; it remains untouched')
-            config=configuration(payload,self.owner)
             if (self.snapshot().get('ownership') or {}).get('closing_legs'):raise ValueError('Previous option exits remain retained; use Stop recovery before starting a new run')
             if config['execution_route'] not in ('OPTIONS','DIRECT') or config['broker']=='FYERS' and (config['market'] not in ('NSE','BSE','MCX')) or config['broker']=='DELTA_INDIA' and config['market']!='CRYPTO':raise ValueError('Selected broker/product has no runtime adapter; no fallback')
             if (self.snapshot().get('ownership') or {}).get('detached_position'):raise ValueError('Detached broker holding retained; use Attach or Stop before starting new entries')

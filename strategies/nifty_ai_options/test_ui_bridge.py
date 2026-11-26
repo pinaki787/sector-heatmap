@@ -150,3 +150,22 @@ class DhanDirectConfigurationTests(unittest.TestCase):
   self.assertEqual(config['signal_source'],'UNDERLYING');self.assertEqual(config['exit_supertrend'],'underlying')
   self.assertEqual(config['exit_confirmation_mode'],'RENKO_BRICKS_ONLY')
   self.assertEqual(config['entry_order_type'],'MARKET_WITH_BROKER_MPP')
+
+class StartRouteAdmission(unittest.TestCase):
+ def test_start_checks_actual_selected_route_without_launching_or_creating_run(self):
+  from release_state import require_ready
+  for broker,route in [('FYERS','OPTIONS'),('DELTA_INDIA','DIRECT'),('MOTILAL_OSWAL','DIRECT')]:
+   with self.subTest(broker=broker):
+    legacy=Mock();legacy.snapshot.return_value={}
+    service=Service('fixture',legacy);service.snapshot=Mock(return_value=dict(running=False))
+    cfg=dict(broker=broker,execution_route=route,market='CRYPTO' if broker=='DELTA_INDIA' else 'NSE',reference_state='VERIFIED')
+    release=dict(ready=True,allowed_routes=[broker+':'+route],route_notices={})
+    with patch('ui_bridge.configuration',return_value=cfg),patch('release_state.snapshot',return_value=release),patch('ui_bridge.threading.Thread') as thread,patch('ui_bridge.subprocess.Popen') as process:
+     with self.assertRaisesRegex(ValueError,'Start button'):service.start(dict(mode='LIVE',start_requested=False))
+     thread.assert_not_called();process.assert_not_called();self.assertIsNone(service.run)
+ def test_unreleased_route_and_global_hold_still_fail_before_legacy_or_launch(self):
+  for release in [dict(ready=False,message='Hold'),dict(ready=True,allowed_routes=['FYERS:OPTIONS'],route_notices={})]:
+   legacy=Mock();service=Service('fixture',legacy)
+   with patch('ui_bridge.configuration',return_value=dict(broker='DELTA_INDIA',execution_route='DIRECT')),patch('release_state.snapshot',return_value=release),patch('ui_bridge.threading.Thread') as thread:
+    with self.assertRaises(ValueError):service.start(dict(mode='LIVE',start_requested=True))
+    legacy.snapshot.assert_not_called();thread.assert_not_called();self.assertIsNone(service.run)

@@ -2,6 +2,24 @@
 (function(root){
 'use strict';
 const MODE='AI_RENKO_OPTIONS';
+// An explicit alternative belongs to this visit, never to a later section entry.
+function manualRequestLabel(snapshot){
+ const receipt=snapshot?.manual_entry;if(!receipt)return 'Active quantity: '+(snapshot?.active_lots??'—')+' · '+(snapshot?.manual_entry_context?.mode||'runner stopped');
+ const owned=snapshot?.ownership;
+ const retained=owned?.pending||owned?.position||owned?.detached_position||owned?.stop_verification_position||(owned?.positions||[]).length||Object.keys(owned?.closing_legs||{}).length;
+ if(!snapshot.running&&owned&&!retained&&receipt.phase==='FAILED_OR_PENDING')return 'Previous run · manual request error (historical)';
+ return receipt.phase+(receipt.error?' · '+receipt.error:'');
+}
+function createStrategyVisit(){
+ let active=false,selection=MODE;
+ return {
+  enter(){if(!active){active=true;selection=MODE;}return selection;},
+  leave(){active=false;},
+  choose(value){if(active&&[MODE,'SUPERTREND','SIMPLE_BRICK'].includes(value))selection=value;return selection;},
+  selected(){return selection;}
+ };
+}
+
 
 function positionControlView(snapshot){
  const ownership=snapshot?.ownership||{},control=snapshot?.position_control||{};
@@ -316,11 +334,25 @@ function mount(){
  let manualParentAt=null;
  function saveDraft(){if(!settingsUser())return;const v=values();localStorage.setItem(storage(),JSON.stringify(v));writeInstrumentSettings(localStorage,settingsUser(),selected(),v);}
  const instrumentDefaults=Object.fromEntries(inputs.map(n=>[n.dataset.ai,n.type==='checkbox'?n.checked:n.value]));
- const viewStorage=()=>storage()+':view';
+ const strategyVisit=createStrategyVisit();let applyingViewDefault=false;
+ const strategySectionVisible=()=>section.classList.contains('active')&&!section.hidden;
  function restoreAiView(){
-  if(section.dataset.aiContextReady!=='1'||!selected()?.id)return;
-  try{if((localStorage.getItem(viewStorage())===null||localStorage.getItem(viewStorage())===MODE)&&mode.value!==MODE){mode.value=MODE;mode.dispatchEvent(new Event('change',{bubbles:true}));}else if(mode.value===MODE&&restoredDraftAccount!==selected().id){restore();show();refreshStatus();}}catch{}
+  if(!strategySectionVisible()||section.dataset.aiContextReady!=='1'||!selected()?.id)return;
+  const intended=strategyVisit.selected();
+  try{
+   if(mode.value!==intended){
+    applyingViewDefault=true;
+    try{mode.value=intended;mode.dispatchEvent(new Event('change',{bubbles:true}));}
+    finally{applyingViewDefault=false;}
+   }else if(mode.value===MODE&&restoredDraftAccount!==selected().id){restore();show();refreshStatus();}
+  }catch{}
  }
+ function strategySectionEntry(){
+  if(!strategySectionVisible()){strategyVisit.leave();return;}
+  strategyVisit.enter();restoreAiView();
+ }
+ const strategyEntryObserver=new MutationObserver(strategySectionEntry);
+ strategyEntryObserver.observe(section,{attributes:true,attributeFilter:['class','hidden']});
  root.addEventListener('renko-ai-context-ready',restoreAiView);
 
  style.textContent+='.renko-ai-chart-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px;padding-bottom:12px;border-bottom:1px solid #334154}.renko-ai-chart-tabs[hidden]{display:none}.renko-ai-chart-tabs [role=tab]{min-height:42px;padding:9px 18px;border:1px solid #40536a;border-radius:7px;background:#142337;color:#bfd1e1;font-weight:600;cursor:pointer}.renko-ai-chart-tabs [role=tab][aria-selected=true]{background:#24567b;border-color:#78b7e4;color:#fff}.renko-ai-chart-tabs [role=tab]:focus-visible{outline:2px solid #9bd3ff;outline-offset:3px}.renko-ai-chart-grid>article{min-width:0;width:100%}.renko-ai-chart-grid>article[hidden]{display:none!important}';
@@ -452,7 +484,7 @@ function mount(){
   if(manualDirection.dataset.route!==manualRoute){manualDirection.dataset.route=manualRoute||'';manualDirection.replaceChildren(new Option('Choose direction',''));for(const side of manualRoute==='DIRECT'?['LONG','SHORT']:['CE','PE'])manualDirection.add(new Option(side,side));}
   let manualReady=false;try{manualEntryPayload(snapshot,v,account,manualRoute==='DIRECT'?'LONG':'CE','0'.repeat(32));manualReady=true;}catch{}
   panel.querySelector('[data-ai-action=manual-entry]').disabled=!manualReady;
-  const receipt=snapshot?.manual_entry;panel.querySelector('[data-manual-status]').textContent=receipt?receipt.phase+(receipt.error?' · '+receipt.error:''):'Active quantity: '+(snapshot?.active_lots??'—')+' · '+(snapshot?.manual_entry_context?.mode||'runner stopped');
+  const receipt=snapshot?.manual_entry;panel.querySelector('[data-manual-status]').textContent=manualRequestLabel(snapshot);panel.querySelector('[data-manual-status]').title=receipt?.error||'';
   drawCharts(v);
  }
  async function refreshExpiries(){
@@ -751,7 +783,7 @@ referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&sele
    saveDraft();show();refreshStatus();return;
   }
   if(event.target!==mode)return;
-  try{localStorage.setItem(viewStorage(),mode.value);}catch{}
+  if(!applyingViewDefault)strategyVisit.choose(mode.value);
   if(mode.value===MODE){
    event.stopImmediatePropagation();
    root.dispatchEvent(new CustomEvent('renko-ai-mode-enter'));
@@ -911,9 +943,9 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  }
  setInterval(refreshStatus,5000);
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
- restoreAiView();show();
+ strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={manualRequestLabel,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

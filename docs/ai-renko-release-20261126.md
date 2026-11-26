@@ -22,7 +22,7 @@ Intraday maps to native VALUEPLUS; futures Margin maps to NORMAL. Cash direct sh
 
 ## Verification boundaries
 
-- The staged release snapshot passes 614 AI strategy tests, 115 focused frontend tests, and the separate chart-access/quote checks reported with the release.
+- The staged release snapshot passes 616 AI strategy tests, 119 focused frontend tests, and the separate chart-access/quote checks reported with the release.
 - Guarded dashboards were loaded for FYERS, Delta India, Motilal and the selected Dhan account. Six maintained source copies and future provisioning include the dependencies.
 - Desktop and narrow hosted Motilal controls were checked without initiating a runner.
 - The captured Sensex Call and Put history incidents recovered to validated completed regular-session histories through 15:29 IST. The anonymized regression fixture contains public instrument/OHLC data only.
@@ -31,3 +31,9 @@ Intraday maps to native VALUEPLUS; futures Margin maps to NORMAL. Cash direct sh
 - Account credentials, owner snapshots, journals, runtime ledgers and private audit records are excluded from Git.
 
 Delta remains available for the user's own test on a supported instrument, subject to normal sizing, fresh-data, ownership, funds and session checks. No settings or positions are changed by this release report.
+
+## Strategy selection on section entry
+The actual Strategy mode defaults to AI Renko Supertrend on every section entry/re-entry and refresh, ignoring legacy saved generic-mode values. A deliberately chosen alternative remains selected for the current visit. Account-context hydration cannot reinstate an old generic default. This client-only selection never activates or changes a running strategy. Hosted Delta re-entry/refresh and narrow layout checks passed; the focused frontend suite now contains 119 passing checks.
+
+## Start admission correction
+Start validates the actual captured broker/execution route against the release allowlist, rather than an empty configuration. A permitted route can proceed to the explicit user-Start gates; unreleased routes and a global hold remain blocked. No Start is replayed during deployment. Historical manual-request errors are contextualized when the stopped strategy ledger retains no exposure or intent, without deleting or altering their records.
