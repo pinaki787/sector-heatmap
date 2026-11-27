@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import coordinated_submit
 """Own AI ledger around the existing native Delta order/reconciliation boundary."""
 import fcntl,hashlib,json,math,time
 from pathlib import Path
@@ -15,7 +16,9 @@ class DeltaExecution:
         self.delta,self.owner,self.live,self.contracts=delta,owner,live,contracts
         self.native=native or NativeExecution(delta)
         directory=Path(state_dir)/owner;directory.mkdir(parents=True,exist_ok=True)
-        self.lock=(directory/'execution.lock').open('a');fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        self.lock=(directory/'execution.lock').open('a')
+        try:fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BaseException:self.lock.close();raise
         self.path=directory/('delta-live.json' if live else 'delta-paper.json')
         self.state=json.loads(self.path.read_text()) if self.path.exists() else dict(position=None,pending=None,seen=[])
         if management_only:return
@@ -57,6 +60,7 @@ class DeltaExecution:
         if self.delta._position(product_id)!=0 or not isinstance(active,list) or any(int(r.get('product_id',-1))==product_id for r in active):return
         self.state.setdefault('reconciled_intents',[]).append(dict(key=key,order=row,broker_flat=True,at=self.delta.clock()))
         self.state['pending']=None;self.save()
+    @coordinated_submit
     def submit(self,action,quote):
         from sector_heatmap.chart_trade_admission import entry_lock
         try:from .run import ROOT

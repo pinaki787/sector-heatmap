@@ -3621,15 +3621,17 @@ def run_server():
     # Isolated standalone AI runtime. Constructing/status/prepare never activates it.
     ai_options_services={}
     ai_options_services_lock=threading.RLock()
-    def ai_options_service(legacy):
+    def ai_options_service(legacy,fields=None):
         from strategies.nifty_ai_options.ui_bridge import Service
         owner=workspace_guard.account_id if workspace_guard else None
         if not owner:raise PermissionError('AI Renko options require the selected private broker account workspace.')
         with ai_options_services_lock:
-            key=(owner,id(legacy))
+            from strategies.nifty_ai_options.multi_runner import selected_symbol
+            instrument=selected_symbol(owner,fields)
+            key=(owner,instrument)
             if key not in ai_options_services:
                 from strategies.nifty_ai_options.ui_bridge import NativeLegacyView,owner_broker
-                ai_options_services[key]=Service(owner,NativeLegacyView(owner) if owner_broker(owner) in ('DHAN','MOTILAL_OSWAL') else legacy)
+                ai_options_services[key]=Service(owner,NativeLegacyView(owner) if owner_broker(owner) in ('DHAN','MOTILAL_OSWAL') else legacy,instrument=instrument)
             return ai_options_services[key]
 
     def renko_instance_owners(broker,exclude=None):
@@ -4235,17 +4237,17 @@ def run_server():
             if path == '/api/renko-supertrend/ai-options/chart-source':
                 try:
                     query={k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()}
-                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).chart_source(query))
+                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,({k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()})).chart_source(query))
                 except Exception as error:self.send_json(409,{'error':str(error)})
                 return
             if path == '/api/renko-supertrend/ai-options/search':
                 try:
                     query=parse_qs(urlparse(self.path).query)
-                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).search((query.get('q') or [''])[0],(query.get('market') or ['ALL'])[0],(query.get('route') or ['OPTIONS'])[0]))
+                    self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,({k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()})).search((query.get('q') or [''])[0],(query.get('market') or ['ALL'])[0],(query.get('route') or ['OPTIONS'])[0]))
                 except Exception as error:self.send_json(409,{'error':str(error)})
                 return
             if path == '/api/renko-supertrend/ai-options/status':
-                try:self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).snapshot())
+                try:self.send_json(200,ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,({k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()})).snapshot())
                 except Exception as error:self.send_json(409,{'error':str(error)})
                 return
             if path == "/api/renko-supertrend/runner":
@@ -4847,12 +4849,12 @@ def run_server():
                     origin = self.headers.get('Origin')
                     if origin and urlparse(origin).netloc != self.headers.get('Host'):
                         raise PermissionError('Cross-origin runner mutations are forbidden.')
-                    actions = {'/api/renko-supertrend/ai-options/prepare': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).prepare(p),
-                               '/api/renko-supertrend/ai-options/start': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).start(p),
-                               '/api/renko-supertrend/ai-options/reconfigure': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).reconfigure(p),
-                               '/api/renko-supertrend/ai-options/manual-entry': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).manual_entry(p),
-                               '/api/renko-supertrend/ai-options/position-control': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).position_action(p),
-                               '/api/renko-supertrend/ai-options/stop': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend).stop(p),
+                    actions = {'/api/renko-supertrend/ai-options/prepare': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).prepare(p),
+                               '/api/renko-supertrend/ai-options/start': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).start(p),
+                               '/api/renko-supertrend/ai-options/reconfigure': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).reconfigure(p),
+                               '/api/renko-supertrend/ai-options/manual-entry': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).manual_entry(p),
+                               '/api/renko-supertrend/ai-options/position-control': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).position_action(p),
+                               '/api/renko-supertrend/ai-options/stop': lambda p:ai_options_service(delta_renko.runner if workspace_guard and self.workspace_identity[1]['broker']=='DELTA_INDIA' else renko_supertrend,p).stop(p),
                                '/api/renko-supertrend/spread-filter': renko_supertrend.set_spread_filter,
                                '/api/renko-supertrend/trend-reentry': renko_supertrend.set_trend_reentry,
                                '/api/renko-supertrend/adopt': renko_adoptions.apply,

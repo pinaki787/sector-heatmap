@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor
 """One explicit Stop/Detach request for a stopped AI job; never starts entries.
 
 The existing execution ledger lock is held throughout. Unknown fills are never
@@ -44,7 +45,8 @@ def execute(args):
    raw=client(config['account']);api=Reads(raw)
    master=FyersInstrumentMaster(out/'control-master') if config['execution_route']=='DIRECT' else Master(out/'control-master')
    cls=DirectExecution if config['execution_route']=='DIRECT' else Execution
-   executor=cls(api,account_hash,ROOT/'.private/nifty-ai-options/runtime',live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],management_only=True)
+   executor=cls(api,account_hash,runtime_root(config),live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],management_only=True)
+   configure_executor(executor,config)
    view=FyersPositions(api,config,master,account_hash)
    def get_quote(symbol):
     nonlocal socket
@@ -74,7 +76,8 @@ def execute(args):
     try:from .dhan_direct_runtime import make_executor
     except ImportError:from dhan_direct_runtime import make_executor
     executor=make_executor(config,view,live=live,management_only=True)
-   else:executor=NativeIndianExecution(view,ROOT/'.private/nifty-ai-options/runtime',live=live,management_only=True)
+   else:executor=NativeIndianExecution(view,runtime_root(config),live=live,management_only=True)
+   configure_executor(executor,config)
    get_quote=lambda symbol:None
    def submit(action):
     if not view.session()['open']:return dict(deferred=True)
@@ -88,8 +91,9 @@ def execute(args):
     from delta_adapter import bound_delta
     from delta_execution import DeltaExecution
     from delta_live import SourceBroker
-   delta=bound_delta(config['account'],ROOT/'.private/nifty-ai-options/native-delta'/config['account']/('LIVE' if live else 'PAPER'))
-   executor=DeltaExecution(delta,config['account'],ROOT/'.private/nifty-ai-options/runtime',live=live,contracts=config['lots'],management_only=True)
+   delta=bound_delta(config['account'],runtime_root(config)/'native-delta'/config['account']/('LIVE' if live else 'PAPER'))
+   executor=DeltaExecution(delta,config['account'],runtime_root(config),live=live,contracts=config['lots'],management_only=True)
+   configure_executor(executor,config)
    view=DeltaPositions(delta,config,executor.native)
    def get_quote(symbol):
     nonlocal broker

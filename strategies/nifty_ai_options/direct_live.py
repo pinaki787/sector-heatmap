@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor,worker_admission
 """Explicitly user-started FYERS direct stock/future runtime; Paper by default."""
 import json,math,os,queue,threading,time
 from pathlib import Path
@@ -66,7 +67,7 @@ except ImportError:
 from contextlib import nullcontext
 
 def stream(args):
-    config=json.loads(Path(args.config).read_text());live=args.live
+    config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None));live=args.live
     if config.get('_verification_only'):raise ValueError('Verification-only config cannot start a stream or orders')
     if live and os.getenv('AI_RENKO_LIVE_ORDERS',os.getenv('NIFTY_AI_LIVE_ORDERS'))!='I_ACCEPT_REAL_ORDERS':raise ValueError('Explicit Live environment opt-in required')
     if not config.get('accept_close_source_renko_approximation'):raise ValueError('Review the confirmed-close Renko basis before Start')
@@ -78,7 +79,8 @@ def stream(args):
         master=FyersInstrumentMaster(out/'master');summary=inspect(config,api,master);meta=summary['instrument']
         atomic(out/'preflight.json',summary)
         if config.get('_managed_resume') and config.get('_resume_account_sha256')!=summary['account_sha256']:raise ValueError('Resume broker account identity differs from captured ownership')
-        executor=DirectExecution(api,summary['account_sha256'],ROOT/'.private/nifty-ai-options/runtime',live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],margin=margin_reader(raw),management_only=config.get('_managed_resume',False))
+        executor=DirectExecution(api,summary['account_sha256'],runtime_root(config),live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],margin=margin_reader(raw),management_only=config.get('_managed_resume',False))
+        configure_executor(executor,config)
         try:from .confirmed_close import ConfirmedClose,fyers_reader
         except ImportError:from confirmed_close import ConfirmedClose,fyers_reader
         confirmed=ConfirmedClose(fyers_reader(api),out/'confirmed-source')

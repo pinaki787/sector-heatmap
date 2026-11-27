@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import coordinated_submit
 """Direct stock/futures execution with durable ownership and explicit Live opt-in.
 
 Only an explicit runtime may call submit. Module import/constructor send no order.
@@ -18,7 +19,9 @@ class DirectExecution:
         self.management_only=management_only
         self.api,self.live,self.lots,self.product,self.master,self.account_folder,self.margin=api,live,lots,product,master,account_folder,margin
         directory=Path(state_dir)/account;directory.mkdir(parents=True,exist_ok=True)
-        self.lock=(directory/'execution.lock').open('a');fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        self.lock=(directory/'execution.lock').open('a')
+        try:fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BaseException:self.lock.close();raise
         self.path=directory/('direct-live.json' if live else 'direct-paper.json')
         self.state=json.loads(self.path.read_text()) if self.path.exists() else dict(position=None,pending=None,seen=[])
         for name in (('live.json' if live else 'paper.json'),('native-indian-live.json' if live else 'native-indian-paper.json')):
@@ -69,6 +72,7 @@ class DirectExecution:
         receipt=dict(kind='DIRECT_ORDER_VERIFIED',action=intent,order_id=str(identifier),filled_quantity=filled,fill_price=row.get('tradedPrice') if filled else None,broker_quantity=signed,broker_flat=signed==0,checked_at=time.time(),orders_submitted=0)
         self.state.setdefault('reconciliations',[]).append(receipt)
         self.state['pending']=None;self.save();return receipt
+    @coordinated_submit
     def submit(self,action,quote,now=None):
         if self.management_only and action.get('action','').startswith('OPEN_'):raise ValueError('Position-management worker cannot place new entries')
         if action.get('action') not in ACTIONS:raise ValueError('Unknown direct action')

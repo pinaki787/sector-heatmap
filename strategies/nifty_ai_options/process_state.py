@@ -32,7 +32,7 @@ class RecoveredProcess:
         # Validate immediately before signalling; a reused PID never qualifies.
         if self.poll() is None:os.kill(self.pid,signal.SIGTERM)
 
-def recover(owner,data):
+def recover(owner,data,instrument=None):
     directory=Path(data)/'runs'/owner
     candidates=sorted((p for p in directory.iterdir() if p.is_dir() and (p/'config.json').exists()),reverse=True) if directory.exists() else []
     active=[];latest=None
@@ -40,6 +40,7 @@ def recover(owner,data):
         config=json.loads((path/'config.json').read_text())
         if config.get('account')!=owner:raise ValueError('Saved AI run account differs from private owner')
         if config.get('_verification_only'):continue
+        if instrument is not None and config.get('underlying')!=instrument:continue
         run=dict(id=path.name,directory=path,mode=config.get('execution_mode','PAPER'))
         if latest is None:latest=(run,None)
         record=path/'process.json'
@@ -60,8 +61,9 @@ def assert_stopped(source,root=Path('/home/trading/sector-heatmap')):
     else:return
     for owner in owners:
         if len(owner)!=32 or any(c not in '0123456789abcdef' for c in owner):continue
-        run,process=recover(owner,data)
-        if process and process.poll() is None:raise ValueError('Restart blocked: user-started AI Renko job '+run['id']+' is running; no restart was sent.')
+        for record_path in (data/'runs'/owner).glob('*/process.json'):
+            record=json.loads(record_path.read_text())
+            if identity(record.get('pid'),record_path.parent.resolve())==record:raise ValueError('Restart blocked: user-started AI Renko job '+record_path.parent.name+' is running; no restart was sent.')
         for directory in (data/'runs'/owner).iterdir() if (data/'runs'/owner).exists() else []:
             if not directory.is_dir():continue
             config_path=directory/'config.json'
@@ -70,9 +72,9 @@ def assert_stopped(source,root=Path('/home/trading/sector-heatmap')):
             proof=directory/'preflight/preflight.json'
             if not proof.exists():proof=directory/'preflight.json'
             details=json.loads(proof.read_text()) if proof.exists() else {}
-            key=owner if config.get('broker')=='DELTA_INDIA' else details.get('account_sha256')
+            key=owner if config.get('broker') in ('DELTA_INDIA','DHAN','MOTILAL_OSWAL') else details.get('account_sha256')
             if not isinstance(key,str) or len(key) not in (32,64) or any(c not in '0123456789abcdef' for c in key):continue
-            for path in (data/'runtime'/key).glob('*.json'):
+            for path in list((data/'runtime'/key).rglob('*.json'))+list((data/'runtime'/'instruments'/owner).rglob('*.json')):
                 state=json.loads(path.read_text())
                 if any(state.get(k) for k in ('position','pending','positions','closing_legs','detached_position','stop_verification_position')):
                     raise ValueError('Restart blocked: AI Renko retained position/pending intent for '+owner+' requires reconciliation; no restart was sent.')

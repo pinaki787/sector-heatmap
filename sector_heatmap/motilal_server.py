@@ -19,13 +19,17 @@ ROOT=Path(__file__).resolve().parents[1]
 def handler_factory(guard,service):
     from .motilal_login import SavedLogin
     saved_login=None
-    ai_bridge=None
-    def ai():
-        nonlocal ai_bridge
-        if ai_bridge is None:
+    ai_bridges={}
+    import threading
+    ai_lock=threading.RLock()
+    def ai(fields=None):
+        from strategies.nifty_ai_options.multi_runner import selected_symbol
+        instrument=selected_symbol(guard.account_id,fields)
+        with ai_lock:
+         if instrument not in ai_bridges:
             from strategies.nifty_ai_options.ui_bridge import Service as AiService,NativeLegacyView
-            ai_bridge=AiService(guard.account_id,NativeLegacyView(guard.account_id))
-        return ai_bridge
+            ai_bridges[instrument]=AiService(guard.account_id,NativeLegacyView(guard.account_id),instrument=instrument)
+        return ai_bridges[instrument]
     def login():
         nonlocal saved_login
         if saved_login is None:saved_login=SavedLogin(service)
@@ -59,9 +63,9 @@ def handler_factory(guard,service):
                     query={k:v[0] for k,v in parse_qs(urlparse(self.path).query).items()}
                     action=path.rsplit('/',1)[-1]
                     if query.get('account_id') not in (None,account['id']):raise PermissionError('AI account binding mismatch')
-                    if action=='status':result=ai().snapshot()
-                    elif action=='chart-source':result=ai().chart_source(query)
-                    elif action=='search':result=ai().search(query.get('q',''),query.get('market','ALL'),query.get('route','OPTIONS'))
+                    if action=='status':result=ai(query).snapshot()
+                    elif action=='chart-source':result=ai(query).chart_source(query)
+                    elif action=='search':result=ai(query).search(query.get('q',''),query.get('market','ALL'),query.get('route','OPTIONS'))
                     else:raise ValueError('Unsupported native AI read action')
                     self.send_json(200,result);return
                 if path in {'/','/index.html','/workspace-entry'}:self.response(200,(ROOT/'motilal-oswal.html').read_bytes());return
@@ -197,7 +201,7 @@ def handler_factory(guard,service):
                     action=path.rsplit('/',1)[-1]
                     methods={'prepare':'prepare','start':'start','stop':'stop','manual-entry':'manual_entry','reconfigure':'reconfigure','position-control':'position_action'}
                     if action not in methods:raise ValueError('Unsupported native AI action')
-                    self.send_json(200,getattr(ai(),methods[action])(payload));return
+                    self.send_json(200,getattr(ai(payload),methods[action])(payload));return
                 if path=='/api/motilal/disconnect-session':self.send_json(200,login().disconnect_rechallenge(user,cookie_token(self.headers)));return
                 if path=='/api/motilal/saved-login':self.send_json(200,login().save(payload));return
                 if path=='/api/motilal/saved-login-forget':self.send_json(200,login().forget());return

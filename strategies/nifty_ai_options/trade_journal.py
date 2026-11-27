@@ -180,11 +180,12 @@ def calculated(row,now):
  row['cost_status']='Recorded' if known_costs else 'Unavailable · gross only'
  return row
 
-def report(owner,run_id=None,data=DATA,mode='ALL',limit=500):
+def report(owner,run_id=None,data=DATA,mode='ALL',limit=500,instrument=None):
  if mode not in ('ALL','PAPER','LIVE'):raise ValueError('Choose All, Paper or Live')
  db=connect(data,owner)
  try:
   where='account=?';args=[owner]
+  if instrument is not None:where+=' AND underlying=?';args.append(instrument)
   if mode!='ALL':where+=' AND mode=?';args.append(mode)
   total=db.execute('SELECT count(*) FROM trades WHERE '+where,args).fetchone()[0]
   rows=[calculated(row,time.time()) for row in db.execute('SELECT * FROM trades WHERE '+where+' ORDER BY COALESCE(exit_time,entry_time,0) DESC LIMIT ?',args+[limit])]
@@ -198,7 +199,7 @@ def report(owner,run_id=None,data=DATA,mode='ALL',limit=500):
   return dict(rows=rows,total=total,limit=limit,mode=mode,current_run=pnl,read_only=True)
  finally:db.close()
 
-def snapshot(owner,run_id=None):
+def snapshot(owner,run_id=None,instrument=None):
  if len(owner)!=32 or any(c not in '0123456789abcdef' for c in owner):raise ValueError('Exact journal account required')
  with _META_LOCK:
   lock=_LOCKS.setdefault(owner,threading.Lock())
@@ -209,5 +210,5 @@ def snapshot(owner,run_id=None):
     except Exception as error:_JOBS[owner]=dict(state='ERROR',at=time.time(),error=str(error))
     finally:lock.release()
    threading.Thread(target=work,daemon=True,name='ai-trade-journal-'+owner[:6]).start()
- try:return dict(report(owner,run_id),sync=_JOBS.get(owner,dict(state='PENDING')))
+ try:return dict(report(owner,run_id,instrument=instrument),sync=_JOBS.get(owner,dict(state='PENDING')))
  except sqlite3.OperationalError:return dict(rows=[],total=0,sync=dict(state='RUNNING'),current_run=None)

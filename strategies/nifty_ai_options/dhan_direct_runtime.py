@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor,worker_admission
 """User-started Dhan direct runtime: completed-unit signals, durable net reversals."""
 import copy,json,time,os,hashlib
 from pathlib import Path
@@ -27,10 +28,10 @@ except ImportError:
  from reversal import execute,advance,suppress_pending,entered
 
 def make_executor(config,adapter,*,live=False,management_only=False,state_dir=None):
- executor=DirectExecution(adapter.api,config['account'],state_dir or ROOT/'.private/nifty-ai-options/runtime',
+ executor=DirectExecution(adapter.api,config['account'],state_dir or runtime_root(config),
   live=live,lots=config['lots'],product=config['product'],master=adapter.metadata,
   account_folder=adapter.native.service.folder,margin=adapter.api.margin,management_only=management_only,broker=config['broker'])
- adapter.api.bind(executor);return executor
+ configure_executor(executor,config);adapter.api.bind(executor);return executor
 
 def inspect(config,adapter):
  if config.get('_verification_only'):raise ValueError('Verification configuration cannot launch')
@@ -148,7 +149,7 @@ def preflight(args):
  atomic(Path(args.output)/'preflight.json',proof);print(json.dumps(proof))
 
 def stream(args):
- config=json.loads(Path(args.config).read_text());live=bool(args.live)
+ config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None));live=bool(args.live)
  if config.get('_verification_only') or live!=(config.get('execution_mode')=='LIVE'):raise ValueError('Dhan direct saved/run mode mismatch')
  if live and os.getenv('AI_RENKO_LIVE_ORDERS')!='I_ACCEPT_REAL_ORDERS':raise ValueError('Explicit user Live Start gate required')
  if not config.get('_managed_resume'):config=runtime_configuration(args.config)

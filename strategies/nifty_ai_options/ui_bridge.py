@@ -1,6 +1,8 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,scope,selected_symbol,inventory,assert_start,account_lock,capacity,REVISION as MULTI_RUNNER_REVISION
 """Explicit UI-to-standalone bridge. No process is launched by import or preview."""
 from pathlib import Path
 import hashlib,json,os,secrets,subprocess,threading,time
+from contextlib import nullcontext
 BASE=Path('/home/trading/sector-heatmap/strategies/nifty_ai_options')
 DATA=Path('/home/trading/sector-heatmap/.private/nifty-ai-options')
 MODE='AI_RENKO_OPTIONS'
@@ -290,13 +292,13 @@ class NativeLegacyView:
 
 
 class Service:
-    def __init__(self,owner,legacy):
-        self.owner,self.legacy=owner,legacy
+    def __init__(self,owner,legacy,instrument=None):
+        self.owner,self.legacy,self.instrument=owner,legacy,instrument
         self.lock=threading.RLock();self.process=None;self.run=None;self.launching=False;self.error=None;self.cancelled=False;self.control_process=None
         try:
             try:from .process_state import recover
             except ImportError:from process_state import recover
-            self.run,self.process=recover(self.owner,DATA)
+            self.run,self.process=recover(self.owner,DATA,instrument=getattr(self,'instrument',None))
             if self.run:
                 change=self.run['directory']/'reconfigure.json'
                 if change.exists():
@@ -325,7 +327,7 @@ class Service:
                     handover=json.loads(receipt.read_text())
                     if handover.get('phase')=='HANDED_OVER' and handover.get('account_id')==self.owner:
                         from .process_state import recover
-                        recovered,child=recover(self.owner,DATA)
+                        recovered,child=recover(self.owner,DATA,instrument=getattr(self,'instrument',None))
                         if recovered and child and child.poll() is None and recovered['id']==handover.get('replacement_run'):
                             self.run,self.process=recovered,child
                             self.error=None;self.launching=False
@@ -343,6 +345,10 @@ class Service:
             except ImportError:from release_state import snapshot as release_snapshot
             release=release_snapshot()
             result=dict(dhan_direct_ready=True,motilal_direct_ready=True,motilal_fyers_data_ready=True,hybrid_completed_units_ready=True,sma_retest_optional_ready=True,manual_parent_override_ready=True,sma_entry_policy_revision=ENTRY_POLICY_REVISION,sma_only_capable=True,native_broker_integration_ready=True,entry_exit_source_ready=True,live_capability=live_capability(self.owner),phase='PREFLIGHT' if self.launching else 'FAILED' if self.error or (self.process and self.process.poll() not in (None,0)) else 'STREAM' if self.process and self.process.poll() is None else 'STOPPED',error=self.error,revision='ai-renko-options-v1',sizing_policy_revision='selected-native-20261122',parent_contract_revision='parent-candles-20261124',native_acquisition_ready=False,running=bool(self.process and self.process.poll() is None),run_id=self.run['id'] if self.run else None)
+            result.update(multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
+            if self.run and not result['running']:
+                claims=[r for r in result['runner_inventory'] if r['run_id']==self.run['id'] and r['state']=='Preparing']
+                if claims:result['phase']='PREFLIGHT'
             result.update(release_ready=release['ready'],execution_lifecycle_revision=release['revision'],release_notice=release.get('message'))
             try:
                 try:from .native_sizing import authorize,jobs,REVISION
@@ -414,7 +420,7 @@ class Service:
                 suffix='live' if self.run['mode']=='LIVE' else 'paper'
                 ledger_name=('direct-'+suffix if config.get('broker') in ('DHAN','MOTILAL_OSWAL') and config.get('execution_route')=='DIRECT' else 'native-indian-'+suffix if config.get('broker') in ('DHAN','MOTILAL_OSWAL') else 'delta-'+suffix if config.get('broker')=='DELTA_INDIA' else 'direct-'+suffix if config.get('execution_route')=='DIRECT' else suffix)+'.json'
                 if isinstance(key,str) and len(key) in (32,64) and all(c in '0123456789abcdef' for c in key):
-                    ledger=DATA/'runtime'/key/ledger_name
+                    ledger=runtime_root(config,DATA)/key/ledger_name
                     if ledger.exists():
                         owned=json.loads(ledger.read_text())
                         try:from .exit_alerts import notices
@@ -469,7 +475,7 @@ class Service:
             try:
                 try:from .trade_journal import snapshot as journal_snapshot
                 except ImportError:from trade_journal import snapshot as journal_snapshot
-                result['trade_journal']=journal_snapshot(self.owner,result.get('run_id'))
+                result['trade_journal']=journal_snapshot(self.owner,result.get('run_id'),instrument=getattr(self,'instrument',None))
             except (ValueError,OSError) as error:result['trade_journal']=dict(rows=[],sync=dict(state='ERROR',error=str(error)))
             return result
     def chart_source(self,query):
@@ -560,10 +566,14 @@ class Service:
         return dict(config=config,preview=preview,native_job=native_job,revision='ai-renko-options-v1',activation_required=True,
                     limitations=['Sizing uses the authorized official TradingView native calculation; execution uses the selected broker','Unavailable or stale native sizing blocks new entries'])
     def start(self,payload):
-        with self.lock:
+        with self.lock,account_lock(self.owner,DATA) if getattr(self,'instrument',None) else nullcontext():
             try:from .release_state import require_ready
             except ImportError:from release_state import require_ready
             config=configuration(payload,self.owner)
+            if getattr(self,'instrument',None):
+                if config['underlying']!=self.instrument:raise ValueError('Start instrument differs from selected runner')
+                config['runner_scope']=scope(self.instrument)
+                assert_start(config,DATA)
             require_ready(config)
             if self.launching or self.snapshot()['running']:raise ValueError('AI runner already running')
             legacy=self.legacy.snapshot()
@@ -588,6 +598,9 @@ class Service:
             try:from .run import atomic
             except ImportError:from run import atomic
             atomic(directory/'config.json',config)
+            if config.get('runner_scope'):
+                from .process_state import fingerprint
+                atomic(directory/'launching.json',dict(at=time.time(),pid=os.getpid(),start_ticks=fingerprint(os.getpid())))
             self.run=dict(id=identifier,directory=directory,mode='LIVE' if live else 'PAPER')
             self.launching=True;self.error=None;self.cancelled=False
             threading.Thread(target=self._launch,args=(directory,live),daemon=True).start()
@@ -624,6 +637,11 @@ class Service:
                     try:from .process_state import identity
                     except ImportError:from process_state import identity
                     record=identity(self.process.pid,directory)
+                    if config.get('runner_scope'):
+                        deadline=time.monotonic()+2
+                        while not record and self.process.poll() is None and time.monotonic()<deadline:
+                            time.sleep(.02);record=identity(self.process.pid,directory)
+                        if not record:raise ValueError('Instrument worker launch identity unavailable; initialization remains blocked')
                     if record:
                         try:from .run import atomic
                         except ImportError:from run import atomic
@@ -633,6 +651,7 @@ class Service:
             with self.lock:self.error=str(error)
             fail_position_request(directory,'Position management did not launch; broker exposure is preserved. '+str(error))
         finally:
+            (directory/'launching.json').unlink(missing_ok=True)
             with self.lock:self.launching=False
     def _watch(self,process,directory):
         code=process.wait()
@@ -660,6 +679,7 @@ class Service:
                 command=enqueue(directory,config,payload)
                 return dict(self.snapshot(),reconfiguration=command)
             symbol=payload.get('underlying')
+            if config.get('runner_scope') and symbol!=config['underlying']:raise ValueError('Select another instrument runner instead of moving this worker')
             if not isinstance(symbol,str) or not symbol:raise ValueError('Exact target instrument required')
             target=dict(config,underlying=symbol,reference_symbol=symbol,timeframe=payload.get('timeframe'),calculation_mode=payload.get('calculation_mode',config.get('calculation_mode','RENKO')),expiry_policy='nearest_tradable');target.pop('expiry',None)
             target['market']=symbol.split(':')[0].split('_')[0] if config['broker'] in ('FYERS','DHAN','MOTILAL_OSWAL') else 'CRYPTO'

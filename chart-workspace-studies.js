@@ -5104,7 +5104,7 @@
   }
 
   // Display-only Close-source projections. Never feed these into confirmed studies.
-  function closeRenkoProjection(previous,price,size,sourceTime) {
+  function closeRenkoProjection(previous,price,size,sourceTime,options={}) {
     if(!previous||![previous.open,previous.close,price,size,sourceTime].every(Number.isFinite)||size<=0)
       throw new TypeError('Invalid Renko projection input');
     const direction=Math.sign(previous.close-previous.open);
@@ -5113,7 +5113,13 @@
     const delta=price-previous.close,step=Math.sign(delta),reversal=step!==direction;
     if(!step)return [];
     let open=previous.close+(reversal?step*size:0);
-    if(step*(price-open)<=size*1e-10)return [];
+    if(step*(price-open)<=size*1e-10){
+      // Before a reversal's first gap, show the actual unfinished movement from
+      // the committed close. This is a translucent price tail, not a full brick.
+      return options.showReversalRemainder===true&&Math.abs(delta)>size*1e-10
+        ?[{sourceTime,provisional:true,reversalPending:true,open:previous.close,
+          high:Math.max(previous.close,price),low:Math.min(previous.close,price),close:price}]:[];
+    }
     const count=Math.ceil(Math.abs(price-open)/size-1e-10);
     if(count>1000)throw new RangeError('Increase the projection brick size');
     const result=[];
@@ -5123,6 +5129,28 @@
       open=close;
     }
     return result;
+  }
+  // A separate display series keeps forming prices out of confirmed strategy inputs.
+  function mountCompletedRenkoProjection({chart,getBars,size,enabled=()=>true,priceScaleId,priceFormat}) {
+    const series=chart.addCandlestickSeries({priceScaleId,priceFormat,
+      upColor:'rgba(8,153,129,0.28)',downColor:'rgba(242,54,69,0.28)',
+      borderUpColor:'#089981',borderDownColor:'#f23645',wickVisible:false,
+      priceLineVisible:false,lastValueVisible:false,title:''});
+    let lastPrice,lastTime,signature='',points=[];
+    function update(price,sourceTime) {
+      lastPrice=price;lastTime=sourceTime;
+      const previous=getBars().at(-1);
+      const next=enabled()&&previous&&Number.isFinite(price)&&Number.isFinite(sourceTime)
+        ?closeRenkoProjection(previous,price,size,Math.max(sourceTime,previous.sourceTime??sourceTime),{showReversalRemainder:true})
+          .map((bar,index)=>({...bar,time:previous.time+index+1})):[];
+      const key=JSON.stringify(next);
+      if(key===signature)return;
+      if(next.length===points.length&&next.length&&next.every((bar,index)=>bar.time===points[index].time
+          &&(index===next.length-1||JSON.stringify(bar)===JSON.stringify(points[index]))))series.update(next.at(-1));
+      else series.setData(next);
+      signature=key;points=next;
+    }
+    return {update,refresh:()=>update(lastPrice,lastTime)};
   }
   function calculateRenkoTimeframeStudy(options) {
     const {sourceBars,hostBars,renko,run,size,previousBrick,liveState}=options;
@@ -5135,7 +5163,7 @@
     const plots=applyRenkoStudyPublication(aligned,sourcePlots,reference,hostBars,liveState,options.publication);
     return {reference,plots,size,projectionAvailable:false};
   }
-  root.SectorPulseRenkoStudyAlignment={renkoStudyClock,alignRenkoStudyPlots,applyConfirmedRenkoStudyTail,calculateRenkoTimeframeStudy,closeRenkoProjection,applyRenkoStudyPublication,renkoStudyPublication};
+  root.SectorPulseRenkoStudyAlignment={renkoStudyClock,alignRenkoStudyPlots,applyConfirmedRenkoStudyTail,calculateRenkoTimeframeStudy,closeRenkoProjection,mountCompletedRenkoProjection,applyRenkoStudyPublication,renkoStudyPublication};
   if(typeof module!=='undefined'&&module.exports)module.exports=root.SectorPulseRenkoStudyAlignment;
 })(typeof window==='undefined'?globalThis:window);
 

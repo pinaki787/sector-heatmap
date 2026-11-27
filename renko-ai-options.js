@@ -3,12 +3,27 @@
 'use strict';
 const MODE='AI_RENKO_OPTIONS';
 // An explicit alternative belongs to this visit, never to a later section entry.
+function runnerMarket(symbol,fields={}){
+ const index=String(symbol||'').match(/^(NSE|BSE):.+-INDEX$/);
+ return index?index[1]+'_INDEX':fields.instrument_market||'';
+}
+function defaultProduct(account,values){
+ if(values.product)return values.product;
+ if(account?.broker==='FYERS')return 'INTRADAY';
+ if(['DHAN','MOTILAL_OSWAL'].includes(account?.broker)&&values.route==='DIRECT')return 'INTRADAY';
+ return values.product||'';
+}
 function manualRequestLabel(snapshot){
  const receipt=snapshot?.manual_entry;if(!receipt)return 'Active quantity: '+(snapshot?.active_lots??'—')+' · '+(snapshot?.manual_entry_context?.mode||'runner stopped');
  const owned=snapshot?.ownership;
  const retained=owned?.pending||owned?.position||owned?.detached_position||owned?.stop_verification_position||(owned?.positions||[]).length||Object.keys(owned?.closing_legs||{}).length;
  if(!snapshot.running&&owned&&!retained&&['FAILED_OR_PENDING','REJECTED'].includes(receipt.phase))return 'Previous run · manual request error (historical)';
  return receipt.phase+(receipt.error?' · '+receipt.error:'');
+}
+function manualRequestNotice(snapshot){
+ const phase=snapshot?.manual_entry?.phase;
+ return ['FILLED','REJECTED','FAILED_OR_PENDING'].includes(phase)
+  ?manualRequestLabel(snapshot):'Manual entry queued · awaiting runner and broker confirmation.';
 }
 function createStrategyVisit(){
  let active=false,selection=MODE;
@@ -150,9 +165,12 @@ function restoredDataAccount(current,accounts){
  if(eligible.some(a=>a.id===current))return current;
  return eligible.length===1?eligible[0].id:'';
 }
-function restoredInstrumentValues(defaults,saved,symbol){
+function restoredInstrumentValues(defaults,saved,symbol,market){
  const values={...defaults,...(saved||{}),underlying:symbol};
- if(!saved){values.manualParent='';values.manualParentAt=null;}
+ if(!saved){values.manualParent='';values.manualParentAt=null;
+  if(['NSE_EQUITY','BSE_EQUITY'].includes(market)){values.route='DIRECT';values.product='INTRADAY';}
+  else if(['NSE_STOCK','BSE_STOCK'].includes(market))values.route='OPTIONS';
+ }
  return values;
 }
 function manualSizingValues(fields){
@@ -256,7 +274,7 @@ function configuration(fields,account,preview=false){
  return {...(account.broker==='MOTILAL_OSWAL'?{ai_market_data_broker:'FYERS',ai_market_data_account:fields.dataAccount}:{}),...bands,ai_sma_retest_required:fields.smaRetest===true,ai_sizing_mode:sizingMode,ai_manual_parent_value:sizingMode==='MANUAL_PARENT'?Number(fields.manualParent):null,...(sizingMode==='MANUAL_PARENT'&&fields.manualParentAt?{ai_manual_parent_entered_at:fields.manualParentAt}:{}),ai_supertrend_enabled:fields.supertrend!==false,ai_indicator_inputs:{length:5,factor,adx_enabled:false},strategy_mode:MODE,broker:account.broker,account_id:account.id,underlying:fields.underlying,timeframe:fields.timeframe,
  mode:fields.execution,ai_calculation_mode:fields.decisionMode||'HYBRID',ai_display_mode:fields.calculationMode||'CANDLES',ai_signal_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_entry_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_option_moneyness:moneyness,lots:preview?null:lots,preview_options:preview,target_premium:Number(fields.premium||40),ai_product:fields.product,
  ai_execution_route:fields.route||'OPTIONS',ai_market:context.market,ai_asset:context.asset,ai_parent_hours:context.parentHours,ai_atr_length:context.atrLength,ai_baseline_minutes:30,
- ai_expiry_policy:fields.expiry?'explicit_listed':'nearest_tradable',...(fields.expiry?{ai_expiry:String(fields.expiry)}:{}),ai_reference_value:value,ai_reference_session:fields.session,ai_reference_symbol:fields.underlying,
+ ai_expiry_policy:fields.route!=='DIRECT'&&fields.expiry?'explicit_listed':'nearest_tradable',...(fields.route!=='DIRECT'&&fields.expiry?{ai_expiry:String(fields.expiry)}:{}),ai_reference_value:value,ai_reference_session:fields.session,ai_reference_symbol:fields.underlying,
  ai_reference_evidence:fields.evidence,ai_sma_exit_enabled:fields.sma===true,ai_accept_chart_basis:true};
 }
 function manualEntryPayload(snapshot,fields,account,direction,requestId){
@@ -367,7 +385,7 @@ function mount(){
  strategyEntryObserver.observe(section,{attributes:true,attributeFilter:['class','hidden']});
  root.addEventListener('renko-ai-context-ready',restoreAiView);
 
- style.textContent+='.renko-ai-chart-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px;padding-bottom:12px;border-bottom:1px solid #334154}.renko-ai-chart-tabs[hidden]{display:none}.renko-ai-chart-tabs [role=tab]{min-height:42px;padding:9px 18px;border:1px solid #40536a;border-radius:7px;background:#142337;color:#bfd1e1;font-weight:600;cursor:pointer}.renko-ai-chart-tabs [role=tab][aria-selected=true]{background:#24567b;border-color:#78b7e4;color:#fff}.renko-ai-chart-tabs [role=tab]:focus-visible{outline:2px solid #9bd3ff;outline-offset:3px}.renko-ai-chart-grid>article{min-width:0;width:100%}.renko-ai-chart-grid>article[hidden]{display:none!important}';
+ style.textContent+='.renko-ai-runners{padding:12px 0;border-bottom:1px solid #334154;margin-bottom:12px}.renko-ai-runners summary{cursor:pointer;font-weight:600}.renko-ai-runners [data-runner-list]{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.renko-ai-runners button{white-space:normal;text-align:left;max-width:100%}.renko-ai-chart-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px;padding-bottom:12px;border-bottom:1px solid #334154}.renko-ai-chart-tabs[hidden]{display:none}.renko-ai-chart-tabs [role=tab]{min-height:42px;padding:9px 18px;border:1px solid #40536a;border-radius:7px;background:#142337;color:#bfd1e1;font-weight:600;cursor:pointer}.renko-ai-chart-tabs [role=tab][aria-selected=true]{background:#24567b;border-color:#78b7e4;color:#fff}.renko-ai-chart-tabs [role=tab]:focus-visible{outline:2px solid #9bd3ff;outline-offset:3px}.renko-ai-chart-grid>article{min-width:0;width:100%}.renko-ai-chart-grid>article[hidden]{display:none!important}';
  let activeChartTab='underlying',activeChartTabScope='',factorDraftValue=null,supertrendDraftValue=null,retestDraftValue=null;
  const values=()=>manualSizingValues({...Object.fromEntries(inputs.map(n=>[n.dataset.ai,n.type==='checkbox'?n.checked:n.value])),manualParentAt,underlying:document.getElementById('renko-symbol')?.value,instrument_market:document.getElementById('renko-market')?.value,decisionMode:snapshot?.running?snapshot.calculation_mode:(snapshot?.hybrid_completed_units_ready?'HYBRID':'CANDLES')});
  const selectionSync=new SelectionSync();
@@ -395,7 +413,7 @@ function mount(){
   for(const key of ['dataBroker','dataAccount'])panel.querySelector('[data-ai='+key+']').disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';
   const v=values();
   const directRouteOption=[...panel.querySelector('[data-ai=route]').options].find(o=>o.value==='DIRECT');directRouteOption.disabled=false;directRouteOption.title=account?.broker==='MOTILAL_OSWAL'?'Protected limit · 1 tick beyond fresh bid/ask · IOC; fill not guaranteed.':'';
-  if(['FYERS','DHAN','MOTILAL_OSWAL'].includes(account?.broker)&&v.route==='DIRECT'&&!v.product&&!snapshot?.running){panel.querySelector('[data-ai=product]').value='INTRADAY';v.product='INTRADAY';}
+  if(!snapshot?.running&&!v.product){const product=defaultProduct(account,v);if(product){panel.querySelector('[data-ai=product]').value=product;v.product=product;}}
   const manualMode=v.sizingMode==='MANUAL_PARENT';
   panel.querySelector('[data-manual-parent-field]').hidden=!manualMode;
   for(const key of ['sizingMode','manualParent'])panel.querySelector('[data-ai='+key+']').disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';
@@ -441,6 +459,17 @@ function mount(){
   panel.querySelector('[data-ai-entry-source]').hidden=v.route==='DIRECT';
   if(snapshot?.running&&snapshot.signal_source){entrySource.checked=snapshot.signal_source==='UNDERLYING';v.underlyingSignals=entrySource.checked;}
   panel.querySelector('[data-ai-entry-running]').textContent=snapshot?.running&&!snapshot.signal_source?'Active run retains its captured entry and exit rules. The shared source choice applies on the next Start.':!snapshot?.entry_exit_source_ready?'Entry/exit source update awaits the broker dashboard reload. Start remains unavailable until the backend is ready.':'';
+  if(snapshot?.multi_runner_ready){
+   let list=panel.querySelector('[data-ai-runners]');
+   if(!list){list=document.createElement('details');list.dataset.aiRunners='1';list.className='renko-ai-runners';const title=document.createElement('summary');title.textContent='Instrument runners';list.append(title);panel.prepend(list);}
+   const active=(snapshot.runner_inventory||[]).filter(r=>r.running||r.state==='Preparing').length;list.querySelector('summary').textContent='Instrument runners · '+active+' / '+snapshot.multi_runner_capacity+' active';
+   let body=list.querySelector('[data-runner-list]');if(!body){body=document.createElement('div');body.dataset.runnerList='1';list.append(body);}
+   const rows=snapshot.runner_inventory||[];const signature=JSON.stringify(rows.map(r=>[r.instrument,r.mode,r.state,r.has_position,r.has_pending]));
+   if(body.dataset.signature!==signature){body.dataset.signature=signature;body.replaceChildren();
+    for(const row of rows){const button=document.createElement('button');button.type='button';button.className='button secondary';button.textContent=row.instrument+' · '+row.mode+' · '+row.state+(row.has_pending?' · Order review':row.has_position?' · Exposure recorded':'');button.onclick=async()=>{try{await applySelection({...values(),underlying:row.instrument});}catch(error){status.textContent=error.message;}};body.append(button);}
+    if(!rows.length)body.textContent='Select an instrument above to configure its runner. Start each runner separately.';
+   }
+  }
   const bandState=snapshot?.running?snapshot?.heartbeat?.moving_bands:null;
   panel.querySelector('[data-ai-band-status]').textContent=bandState?.error?'Band unavailable · '+bandState.error:bandState?.bands?.length?bandState.bands.map(b=>b.kind+' '+b.period+' · '+(b.ready?'ready':'waiting for completed candles')).join(' · '):'';
   acceptedSelection={account:account?.id,underlying:v.underlying,timeframe:v.timeframe};const reference=manualMode||referenceLoaded?Number(v.reference):NaN;
@@ -449,6 +478,8 @@ function mount(){
   const supported=account?.broker==='FYERS'&&(v.route==='DIRECT'?['NSE','BSE','MCX']:['NSE','BSE','MCX']).includes(context?.market)||account?.broker==='DELTA_INDIA'&&context?.market==='CRYPTO'||['DHAN','MOTILAL_OSWAL'].includes(account?.broker)&&(v.route==='OPTIONS'||v.route==='DIRECT'&&snapshot?.[account.broker==='DHAN'?'dhan_direct_ready':'motilal_direct_ready']===true)&&['NSE','BSE','MCX'].includes(context?.market);
   panel.querySelector('.renko-ai-capability').textContent=supported?'':!v.underlying?'Select broker and instrument.':'Execution adapter unavailable for this selection.';
   panel.querySelector('[data-ai=product]').closest('label').hidden=account?.broker==='DELTA_INDIA';
+  const quantityField=panel.querySelector('[data-ai=lots]').closest('label');const cash=v.route==='DIRECT'&&(['NSE_EQUITY','BSE_EQUITY'].includes(document.getElementById('renko-market')?.value)||/-EQ$/.test(v.underlying));
+  if(quantityField.firstChild?.nodeType===3)quantityField.firstChild.textContent=cash?'Quantity · shares':account?.broker==='DELTA_INDIA'?'Contracts':'Lots';
   panel.querySelector('[data-ai=premium]').closest('label').hidden=v.route==='DIRECT'||v.moneyness==='ATM';
   panel.querySelector('[data-ai=moneyness]').closest('label').hidden=v.route==='DIRECT';
   panel.querySelector('[data-ai=moneyness]').disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';panel.querySelector('[data-ai-expiry]').closest('.field').hidden=v.route==='DIRECT';
@@ -488,7 +519,10 @@ function mount(){
   if(controlStatus)controlStatus.textContent=controlView.status||disabledReasons.join(' ');
   stop.title=controlView.capable?(controlView.blocked?'Resolve the pending position request or broker order.':''):'Backend position-control update required.';
   toggle.title=stop.title;
-  let complete=false;try{configuration(v,account);complete=true;}catch{}
+  let complete=false,configurationError='';try{configuration(v,account);complete=true;}catch(error){configurationError=error.message;}
+  const startButton=panel.querySelector('[data-ai-action=start]');startButton.title=configurationError;
+  let startReason=panel.querySelector('[data-ai-start-reason]');if(!startReason){startReason=document.createElement('p');startReason.dataset.aiStartReason='1';startReason.setAttribute('role','status');startButton.closest('.packet-actions').after(startReason);}
+  startReason.textContent=configurationError;startReason.hidden=!configurationError;
   panel.querySelector('[data-ai-action=prepare]').disabled=!complete;
   panel.querySelector('[data-ai-action=start]').textContent='Start strategy · '+(v.execution==='LIVE'?'Live':'Paper');
   panel.querySelector('[data-ai-action=start]').disabled=snapshot?.release_ready!==true||snapshot?.execution_lifecycle_revision!=='option-legs-direct-reversal-v1'||(v.supertrend===false&&!snapshot?.sma_only_capable)||!nativeBrokerReady(snapshot,account,v)||!complete||!snapshot?.entry_exit_source_ready||!snapshot?.hybrid_completed_units_ready||!snapshot?.sma_retest_optional_ready||(manualMode?!snapshot?.manual_parent_override_ready:!snapshot?.native_acquisition_ready)||!!snapshot?.running||snapshot?.phase==='PREFLIGHT'||!!snapshot?.ownership?.detached_position||!!snapshot?.ownership?.pending||!supported;
@@ -497,6 +531,7 @@ function mount(){
   let manualReady=false;try{manualEntryPayload(snapshot,v,account,manualRoute==='DIRECT'?'LONG':'CE','0'.repeat(32));manualReady=true;}catch{}
   panel.querySelector('[data-ai-action=manual-entry]').disabled=!manualReady;
   const receipt=snapshot?.manual_entry;panel.querySelector('[data-manual-status]').textContent=manualRequestLabel(snapshot);panel.querySelector('[data-manual-status]').title=receipt?.error||'';
+  if(receipt?.request_id&&receipt.request_id===status.dataset.manualRequestId)status.textContent=manualRequestNotice(snapshot);
   drawCharts(v);
  }
  async function refreshExpiries(){
@@ -618,6 +653,11 @@ function mount(){
    if(!dataAccount||!mapped){frame.removeAttribute('src');frame.hidden=true;card.querySelector('.chart-load-status').hidden=false;card.querySelector('.chart-load-status').textContent='Preview contracts to verify this instrument in the selected FYERS data account.';continue;}
    const baseUrl=root.RenkoSupertrend.embeddedRenkoChartUrl(location.href,{accountId:dataAccount.id,broker:dataAccount.broker,symbol:mapped,instance:'ai-'+(split?'motilal-'+account.id+'-':'')+(sourceRun||'draft')+'-'+i+framePolicy.instanceSuffix,timeframe:item.timeframe||view.timeframe||v.timeframe,brick:item.brick,ai:true,runId:split?null:sourceRun});
    const chartLink=new URL(baseUrl);
+   // A restarted exact run reseeds its rolling history and brick indexes.
+   // Reconcile once from the new worker session; never mix its incremental tail
+   // into the previous session's immutable confirmed-brick cache.
+   if(sourceRun&&snapshot?.heartbeat?.runtime_session)
+    chartLink.searchParams.set('aiRuntimeSession',snapshot.heartbeat.runtime_session);
    if(split){chartLink.searchParams.set('aiExecutionBroker','MOTILAL_OSWAL');chartLink.searchParams.set('aiExecutionAccount',account.id);}
    if(snapshot?.running?snapshot.supertrend_basis==='COMPLETED_RENKO':snapshot?.hybrid_completed_units_ready)chartLink.searchParams.set('aiSignalBasis','COMPLETED_RENKO');
    if(framePolicy.pending)chartLink.searchParams.set('aiSizingPending','1');
@@ -665,10 +705,11 @@ frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-run
  }
  async function applySelection(next){
   const account=selected();
+  if(snapshot?.multi_runner_ready&&next.underlying!==snapshot.underlying&&next.underlying!==values().underlying){snapshot=null;current=null;statusSequence++;}
   if(!snapshot?.running&&next.underlying!==values().underlying){
    saveDraft();
    const saved=readInstrumentSettings(localStorage,settingsUser(),account,next.underlying);
-   next=restoredInstrumentValues(instrumentDefaults,saved,next.underlying);
+   next=restoredInstrumentValues(instrumentDefaults,saved,next.underlying,document.getElementById('renko-market')?.value);
   }
   return selectionSync.change(next,async desired=>{
     sizingContext(desired.underlying,account.broker,desired.category);
@@ -700,7 +741,7 @@ frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-run
      for(const n of inputs)if(!['reference','session','evidence'].includes(n.dataset.ai)&&Object.hasOwn(desired,n.dataset.ai)){if(n.type==='checkbox')n.checked=desired[n.dataset.ai]===true;else n.value=desired[n.dataset.ai];}
      manualParentAt=desired.manualParentAt||null;
     }
-    symbol.value=desired.underlying;panel.querySelector('[data-ai=timeframe]').value=desired.timeframe;displayInput.value=desired.calculationMode||'CANDLES';chartViewInput.value=desired.chartView||((desired.calculationMode||'CANDLES')==='RENKO'?'Renko':'Candles');
+    symbol.value=desired.underlying;const market=runnerMarket(desired.underlying,desired);if(market)document.getElementById('renko-market').value=market;panel.querySelector('[data-ai=timeframe]').value=desired.timeframe;displayInput.value=desired.calculationMode||'CANDLES';chartViewInput.value=desired.chartView||((desired.calculationMode||'CANDLES')==='RENKO'?'Renko':'Candles');
     if(referenceSymbol!==desired.underlying&&!changedInstrument)clearInstrumentReference();
     saveDraft();show();refreshStatus();
    });
@@ -732,7 +773,7 @@ frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-run
    const v=saved||draft;manualParentAt=v?.manualParentAt||null;
    if(v?.sizingMode==='MANUAL_PARENT'&&!manualParentAt){v.manualParent='';v.sizingMode='AUTO';}
    if(legacy&&v){localStorage.setItem(storage(),JSON.stringify(v));writeInstrumentSettings(localStorage,settingsUser(),selected(),v);}
-referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&selected()?.broker==='DELTA_INDIA')panel.querySelector('[data-ai=route]').value='DIRECT';if(v?.underlying){const symbol=document.getElementById('renko-symbol');if(![...symbol.options].some(o=>o.value===v.underlying))symbol.add(new Option(v.underlying,v.underlying));symbol.value=v.underlying;if(v.instrument_market)document.getElementById('renko-market').value=v.instrument_market;}if(v)for(const n of inputs)if(!['reference','session','evidence'].includes(n.dataset.ai)&&Object.hasOwn(v,n.dataset.ai)){if(n.type==='checkbox')n.checked=v[n.dataset.ai]===true;else n.value=v[n.dataset.ai];}}catch{}
+referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&selected()?.broker==='DELTA_INDIA')panel.querySelector('[data-ai=route]').value='DIRECT';if(v?.underlying){const symbol=document.getElementById('renko-symbol');if(![...symbol.options].some(o=>o.value===v.underlying))symbol.add(new Option(v.underlying,v.underlying));symbol.value=v.underlying;const market=runnerMarket(v.underlying,v);if(market)document.getElementById('renko-market').value=market;}if(v)for(const n of inputs)if(!['reference','session','evidence'].includes(n.dataset.ai)&&Object.hasOwn(v,n.dataset.ai)){if(n.type==='checkbox')n.checked=v[n.dataset.ai]===true;else n.value=v[n.dataset.ai];}}catch{}
   try{
    const saved=JSON.parse(localStorage.getItem(storage()+':attachment')||'null');
    if(saved?.account===selected()?.id&&saved.underlying===values().underlying){
@@ -746,7 +787,7 @@ referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&sele
  const aiContext=createAiContextLoader(root.fetch.bind(root));
  async function request(action,body){
   const context=body?await aiContext(root.BrokerForms?.context?.()||root.SectorPulseWorkspace):null;
-  const response=await root.BrokerForms.fetch('renko','/api/renko-supertrend/ai-options/'+action,aiRequestOptions(body,context));
+  const response=await root.BrokerForms.fetch('renko','/api/renko-supertrend/ai-options/'+action+'?runner_symbol='+encodeURIComponent(body?.runner_symbol||body?.underlying||values().underlying||''),aiRequestOptions(body?{...body,runner_symbol:body.runner_symbol||body.underlying||values().underlying}:body,context));
   if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('The selected broker backend has not loaded the AI strategy route.');
   const result=await response.json(),error=responseError(result,response.ok);if(error)throw Error(error);return result;
  }
@@ -788,9 +829,10 @@ referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&sele
     if(prior?.account===selected()?.id){event.target.value=prior.underlying;}
     applySelection(next).catch(error=>{status.textContent=error.message;});return;
    }
-   if(snapshot?.running){status.textContent='Select the instrument directly; the active runner market remains unchanged.';return;}
+   if(snapshot?.running&&!snapshot?.multi_runner_ready){status.textContent='Select the instrument directly; the active runner market remains unchanged.';return;}
+   if(snapshot?.multi_runner_ready){saveDraft();snapshot=null;current=null;statusSequence++;}
    clearInstrumentReference();
-   if(event.target.id==='renko-market'){document.getElementById('renko-symbol').value='';document.getElementById('renko-search').value='';searchAiInstruments();}
+   if(event.target.id==='renko-market'){if(['NSE_EQUITY','BSE_EQUITY'].includes(event.target.value)){panel.querySelector('[data-ai=route]').value='DIRECT';if(!values().product)panel.querySelector('[data-ai=product]').value='INTRADAY';}else if(['NSE_STOCK','BSE_STOCK'].includes(event.target.value))panel.querySelector('[data-ai=route]').value='OPTIONS';document.getElementById('renko-symbol').value='';document.getElementById('renko-search').value='';searchAiInstruments();}
    else if(event.target.selectedOptions[0]?.dataset.aiProductType==='FUTURE')panel.querySelector('[data-ai=route]').value='DIRECT';
    saveDraft();show();refreshStatus();return;
   }
@@ -874,7 +916,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
     const id=root.crypto.randomUUID().replaceAll('-',''),direction=panel.querySelector('[data-manual-direction]').value;
     const body=manualEntryPayload(snapshot,values(),selected(),direction,id);
     if(!root.confirm('Request '+direction+' for '+body.underlying+' · '+body.mode+' · '+snapshot.active_lots+' lots/contracts? Strategy exits will manage the confirmed position.'))return;
-    snapshot=await request('manual-entry',body);current=snapshot;status.textContent=snapshot.notice||'Manual entry requested.';show();return;
+    snapshot=await request('manual-entry',body);current=snapshot;status.dataset.manualRequestId=id;status.textContent=manualRequestNotice(snapshot);show();return;
    }
    const payload=action==='stop'?{broker:selected()?.broker,account_id:selected()?.id,underlying:values().underlying}:configuration(values(),selected(),action==='preview');
    if(action==='start'&&values().supertrend===false&&!snapshot?.sma_only_capable)throw Error('SMA-only runtime update is not loaded yet.');
@@ -957,7 +999,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
  strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={journalQuantity,manualRequestLabel,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

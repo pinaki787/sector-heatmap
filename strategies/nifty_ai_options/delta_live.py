@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor,worker_admission
 """Selected Delta instrument runtime. Paper default; explicit Live opt-in only."""
 import json,math,os,queue,time
 from pathlib import Path
@@ -103,7 +104,7 @@ except ImportError:
 from contextlib import nullcontext
 
 def stream(args):
-    config=json.loads(Path(args.config).read_text());live=args.live
+    config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None));live=args.live
     if config.get('_verification_only'):raise ValueError('Verification-only configuration cannot start a stream or orders')
     if live and os.getenv('AI_RENKO_LIVE_ORDERS',os.getenv('NIFTY_AI_LIVE_ORDERS'))!='I_ACCEPT_REAL_ORDERS':raise ValueError('Explicit Live environment opt-in required')
     if not config.get('accept_close_source_renko_approximation'):raise ValueError('Review the confirmed-close Renko basis before Start')
@@ -114,11 +115,12 @@ def stream(args):
     config['entry_order_type']='market_order'
     atomic(Path(args.config),config)
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
-    delta=bound_delta(config['account'],ROOT/'.private/nifty-ai-options/native-delta'/config['account']/('LIVE' if live else 'PAPER'))
+    delta=bound_delta(config['account'],runtime_root(config)/'native-delta'/config['account']/('LIVE' if live else 'PAPER'))
     broker=executor=engine=None;symbol=None
     try:
         summary=inspect(config,delta);atomic(out/'preflight.json',summary)
-        executor=DeltaExecution(delta,config['account'],ROOT/'.private/nifty-ai-options/runtime',live=live,contracts=config['lots'],management_only=config.get('_managed_resume',False))
+        executor=DeltaExecution(delta,config['account'],runtime_root(config),live=live,contracts=config['lots'],management_only=config.get('_managed_resume',False))
+        configure_executor(executor,config)
         executor.fill_evidence_path=out/'confirmed-fills.jsonl'
         try:from .confirmed_close import ConfirmedClose,delta_reader
         except ImportError:from confirmed_close import ConfirmedClose,delta_reader

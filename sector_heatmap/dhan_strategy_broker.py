@@ -408,7 +408,8 @@ class Broker:
                 if retained.get('status') in ('SUBMITTING','UNKNOWN'):
                     from .native_exit_scope import managed_closing_exit
                     ticket=retained.get('ticket') or {}
-                    if folder!='dhan-strategy-intents' or not managed_closing_exit(self,ticket.get('correlationId'),ticket,dhan_ticket=True):
+                    from strategies.nifty_ai_options.multi_runner import independent_native_intent
+                    if folder!='dhan-strategy-intents' or not (managed_closing_exit(self,ticket.get('correlationId'),ticket,dhan_ticket=True) or independent_native_intent(self,ticket.get('correlationId'),ticket,order['symbol'],dhan_ticket=True)):
                         raise ValueError('Uncertain Dhan submission requires reconciliation before another entry.')
         quote=self.quote(order['symbol'])
         funds=client.request('GET','/fundlimit')

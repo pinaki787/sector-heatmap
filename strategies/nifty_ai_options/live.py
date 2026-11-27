@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor,worker_admission
 """Explicitly opted-in live or default paper WebSocket runtime; no dashboard calls."""
 import csv,hashlib,io,json,math,os,queue,threading,time
 from datetime import datetime,timedelta
@@ -225,7 +226,7 @@ except ImportError:
 from contextlib import nullcontext
 
 def stream(args):
-    config=json.loads(Path(args.config).read_text())
+    config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None))
     if config.get('_verification_only'):raise ValueError('Verification-only configuration cannot start a stream or submit orders')
     live=args.live
     if live and os.getenv('AI_RENKO_LIVE_ORDERS',os.getenv('NIFTY_AI_LIVE_ORDERS'))!='I_ACCEPT_REAL_ORDERS':raise ValueError('Live requires user-set NIFTY_AI_LIVE_ORDERS=I_ACCEPT_REAL_ORDERS')
@@ -239,7 +240,8 @@ def stream(args):
         if config.get('_managed_resume') and summary['account_sha256']!=config.get('_resume_account_sha256'):raise ValueError('Resume account identity mismatch')
         if config.get('execution_mode')=='LIVE' and summary.get('existing_nifty_positions',0)>0 and not config.get('attach_position'):raise ValueError('Open broker position is not selected for attachment. Refresh open positions, select the holding, then Start.')
         master=Master(out/'master')
-        executor=Execution(api,summary['account_sha256'],ROOT/'.private/nifty-ai-options/runtime',live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],attachment_config=config if config.get('attach_position') else None,management_only=config.get('_managed_resume',False))
+        executor=Execution(api,summary['account_sha256'],runtime_root(config),live=live,lots=config['lots'],product=config['product'],master=master,account_folder=ROOT/'.private/dashboard-login/accounts'/config['account'],attachment_config=config if config.get('attach_position') else None,management_only=config.get('_managed_resume',False))
+        configure_executor(executor,config)
         try:from .confirmed_close import ConfirmedClose,fyers_reader
         except ImportError:from confirmed_close import ConfirmedClose,fyers_reader
         confirmed=ConfirmedClose(fyers_reader(api),out/'confirmed-source')

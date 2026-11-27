@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import runtime_root,configure_executor,worker_admission
 """Selected Dhan/Motilal AI runner. No shared runner start/stop or source fallback."""
 import json,os,time
 from pathlib import Path
@@ -228,14 +229,15 @@ class Runtime:
   if hasattr(self.engine,'close_native_sizing'):self.engine.close_native_sizing()
 
 def stream(args):
- config=json.loads(Path(args.config).read_text());live=bool(args.live)
+ config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None));live=bool(args.live)
  if config.get('_verification_only'):raise ValueError('Verification configurations cannot run')
  if live!=(config.get('execution_mode')=='LIVE'):raise ValueError('Native saved/run mode mismatch')
  if live and os.getenv('AI_RENKO_LIVE_ORDERS')!='I_ACCEPT_REAL_ORDERS':raise ValueError('Explicit native Live Start gate required')
  if not config.get('_managed_resume'):config=runtime_configuration(args.config)
  adapter=bound_native(config);proof=adapter.validate()
  if config.get('_managed_resume') and config.get('_resume_account_identity')!=proof.get('account_identity'):raise ValueError('Native management resume account identity mismatch')
- executor=NativeIndianExecution(adapter,ROOT/'.private/nifty-ai-options/runtime',live=live,management_only=config.get('_managed_resume',False))
+ executor=NativeIndianExecution(adapter,runtime_root(config),live=live,management_only=config.get('_managed_resume',False))
+ configure_executor(executor,config)
  runtime=None
  try:
   runtime=Runtime(config,args.output,adapter,executor)

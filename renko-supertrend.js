@@ -93,7 +93,7 @@
     if(url.pathname.startsWith('/broker-workspace/'))url.pathname='/';
     for(const key of [...url.searchParams.keys()])url.searchParams.delete(key);
     const interval={'1 minute':'1','5 minutes':'5','30 minutes':'30'}[timeframe]||String(parseInt(timeframe,10)||5);
-    for(const [key,value] of Object.entries({view:'chart-workspace',chartContext:'renko',chartInstance:instance,chartSource:accountId,symbol,interval,type:'Renko',renkoSource:'close',projection:'0',wicks:'0'}))url.searchParams.set(key,value);
+    for(const [key,value] of Object.entries({view:'chart-workspace',chartContext:'renko',chartInstance:instance,chartSource:accountId,symbol,interval,type:'Renko',renkoSource:'close',projection:ai?'1':'0',wicks:'0'}))url.searchParams.set(key,value);
     if(Number.isFinite(Number(brick))&&Number(brick)>0){url.searchParams.set('method','fixed');url.searchParams.set('brick',String(brick));}
     if(ai)url.searchParams.set('aiRenko','1');
     if(ai&&runId)url.searchParams.set('aiRun',runId);

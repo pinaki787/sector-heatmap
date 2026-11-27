@@ -109,7 +109,9 @@ class MotilalDirectAPI:
    for row in self.native.service.book('orders')['data']:
     if row['exchange']==self.meta['exchange'] and str(row['symboltoken'])==str(self.meta['token']) and str(row.get('orderstatus','')).strip().upper() not in ('CANCEL','TRADED','REJECTED','ERROR'):raise ValueError('Native contract has an unresolved order')
    with self.native.db() as db:
-    if db.execute("SELECT 1 FROM intents WHERE state IN ('SUBMITTING','UNCERTAIN','ACKNOWLEDGED') LIMIT 1").fetchone():raise ValueError('Native intent requires reconciliation')
+    from strategies.nifty_ai_options.multi_runner import independent_native_intent
+    for tag_value,body_value in db.execute("SELECT full_tag,body FROM intents WHERE state IN ('SUBMITTING','UNCERTAIN','ACKNOWLEDGED')").fetchall():
+     if not independent_native_intent(self.native,tag_value,json.loads(body_value),data['symbol']):raise ValueError('Native intent requires reconciliation')
     if db.execute('SELECT 1 FROM intents WHERE full_tag=?',(data['orderTag'],)).fetchone():raise ValueError('Intent already attempted')
    with self.native.service.tickets.db() as db:
     if db.execute("SELECT 1 FROM tickets WHERE state IN ('SUBMITTING','UNCERTAIN','ACCEPTED','BROKER_CONFIRM','BROKER_PARTIAL','BROKER_SENT') LIMIT 1").fetchone():raise ValueError('Manual ticket requires reconciliation')

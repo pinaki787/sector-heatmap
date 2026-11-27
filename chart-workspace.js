@@ -16441,7 +16441,7 @@
         if(!output){output=document.createElement('span');output.dataset.aiRuntimeLtp='1';output.style.cssText='margin-inline-start:12px;font-size:12px';panel.querySelector('.sp-chart-instrument-line')?.append(output);}
         const text=fresh?'LTP '+formatChartPrice(frame.latest_price):'LTP waiting';
         if(output.textContent!==text)output.textContent=text;
-        if(fresh)updateRuntimeQuotePrice?.(frame.latest_price);
+        updateRuntimeQuotePrice?.(fresh?frame.latest_price:null,latestLiveTick);
         const forming=frame.forming_row,now=Date.now()/1000,formingAt=Number(frame.forming_at);
         if(fresh&&Number(frame.forming_frame)===Number(interval)&&Array.isArray(forming)&&forming.length===6
           &&forming.slice(0,5).every(Number.isFinite)&&forming[1]>0&&forming[3]>0
@@ -18134,8 +18134,19 @@
         price: rows.at(-1).close, color: '#787b86', lineWidth: 1,
         lineVisible: false, axisLabelVisible: true, title: 'Broker'
       }) : undefined;
-    updateRuntimeQuotePrice = settings.type==='Renko'&&window.RenkoAiChartSource?.context(location.href)
-      ? price => brokerPriceLine?.applyOptions({price,title:'LTP'}) : undefined;
+    const ownedProjectionContext=isRenko&&window.RenkoAiChartSource?.context(location.href);
+    const completedProjection=isRenko&&completedBrickSignalView()
+      ? window.SectorPulseRenkoStudyAlignment.mountCompletedRenkoProjection({chart,size,
+        getBars:()=>ownedProjectionContext
+          ? (window.RenkoAiChartSource.signalBars(location.href,chartSymbol())||[])
+          : completedPreviewSignalBars(),
+        enabled:()=>settings.renkoProjection!==false,priceScaleId:priceAxis(),priceFormat:mainSeries.options().priceFormat}) : undefined;
+    updateRuntimeQuotePrice = ownedProjectionContext
+      ? (price,time) => {
+        if(Number.isFinite(price))brokerPriceLine?.applyOptions({price,title:'LTP'});
+        completedProjection?.update(price,time);
+      } : undefined;
+    if(!ownedProjectionContext)completedProjection?.update(rows.at(-1)?.close,rows.at(-1)?.time);
     if (lineOptions || settings.type === 'Area') updateLineStyle = options => mainSeries.applyOptions(options);
     mainSeries.setData(bars.map((bar, index) => pricePoint(bar, bars[index - 1]?.close, index)));
     applyAiRuntimeMarkers(mainSeries,bars);
@@ -23284,6 +23295,8 @@
         return true;
       };
       updateLastPrice = bar => {
+        if(ownedProjectionContext)completedProjection?.refresh();
+        else completedProjection?.update(bar.close,bar.time);
         const nextSize = renkoBoxSize(settings, completedRenkoCandles(), chartTickSize());
         const sizeChanged = nextSize !== size;
         let next = bars;

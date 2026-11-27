@@ -18,7 +18,7 @@ class DashboardAiRoutes(unittest.TestCase):
     class Handler:
      path='/api/renko-supertrend/ai-options/search?q=GOLDM&market=MCX&route=DIRECT'
      def send_json(self,status,value):self.result=(status,value)
-    ns=dict(parse_qs=parse_qs,urlparse=urlparse,workspace_guard=False,renko_supertrend=object(),ai_options_service=lambda _:Service())
+    ns=dict(parse_qs=parse_qs,urlparse=urlparse,workspace_guard=False,renko_supertrend=object(),ai_options_service=lambda _,*binding:Service())
     exec('def dispatch(self,path):\n'+textwrap.indent(body,' '),ns)
     handler=Handler();ns['dispatch'](handler,'/api/renko-supertrend/ai-options/search')
     self.assertEqual(calls,[('GOLDM','MCX','DIRECT')]);self.assertEqual(handler.result,(200,{'matches':[]}))

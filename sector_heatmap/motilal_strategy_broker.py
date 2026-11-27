@@ -299,7 +299,8 @@ class Broker:
         with self.db() as db:
             pending=db.execute("SELECT full_tag,body FROM intents WHERE state IN ('SUBMITTING','UNCERTAIN','ACKNOWLEDGED')").fetchall()
         for full_tag,body in pending:
-            if not managed_closing_exit(self,full_tag,json.loads(body)):raise ValueError('Reconcile outstanding native intent before another entry.')
+            from strategies.nifty_ai_options.multi_runner import independent_native_intent
+            if not (managed_closing_exit(self,full_tag,json.loads(body)) or independent_native_intent(self,full_tag,json.loads(body),order['symbol'])):raise ValueError('Reconcile outstanding native intent before another entry.')
         with self.service.tickets.db() as db:
             if db.execute("SELECT 1 FROM tickets WHERE state IN ('SUBMITTING','UNCERTAIN') LIMIT 1").fetchone():raise ValueError('Reconcile uncertain manual ticket before another entry.')
             accepted=db.execute("SELECT id,user_id FROM tickets WHERE state IN ('ACCEPTED','BROKER_CONFIRM','BROKER_PARTIAL','BROKER_SENT')").fetchall()

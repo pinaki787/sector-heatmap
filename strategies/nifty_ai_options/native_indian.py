@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import coordinated_submit
 """AI-specific boundary for selected Dhan/Motilal native adapters.
 
 Construction is inert. No FYERS fallback and no shared runner lifecycle methods.
@@ -235,7 +236,9 @@ class NativeIndianExecution:
  def __init__(self,adapter,state_dir,*,live=False,management_only=False):
   self.adapter=adapter;self.native=adapter.native;self.live=live;self.management_only=management_only
   root=Path(state_dir)/adapter.account;root.mkdir(parents=True,exist_ok=True)
-  self.lock=(root/'execution.lock').open('a');fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  self.lock=(root/'execution.lock').open('a')
+  try:fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  except BaseException:self.lock.close();raise
   self.path=root/('native-indian-live.json' if live else 'native-indian-paper.json')
   self.state=json.loads(self.path.read_text()) if self.path.exists() else dict(position=None,pending=None,seen=[])
   direct=root/('direct-live.json' if live else 'direct-paper.json')
@@ -277,6 +280,7 @@ class NativeIndianExecution:
    capture_fill(self.state,intent,dict(order_id=str(row['id']),filled_quantity=filled,fill_price=row.get('tradedPrice')),receipt['checked_at'],pending.get('key'))
   if not entry and self.state.get('position'):self.state['retained_exit_failure']=dict(pending,stage='CANCELLED_WITHOUT_FILL' if not filled else 'PARTIAL_EXIT_REMAINS',filled_quantity=filled)
   self.state['pending']=None;self.save();return receipt
+ @coordinated_submit
  def submit(self,action,quote=None):
   from sector_heatmap.native_exit_scope import closing_exits
   with closing_exits(self.native,self.state),native_entry_admission(self.adapter,action.get('action')=='BUY',self.live):

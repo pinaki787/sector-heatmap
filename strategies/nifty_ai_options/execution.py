@@ -1,3 +1,4 @@
+from strategies.nifty_ai_options.multi_runner import coordinated_submit
 """Isolated account-scoped write-ahead order journal; never retries a submission."""
 import fcntl,hashlib,json,math,os,time
 from contextlib import nullcontext
@@ -32,7 +33,8 @@ class Execution:
         directory=Path(state_dir)/account
         directory.mkdir(parents=True,exist_ok=True)
         self.lock=(directory/'execution.lock').open('a')
-        fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try:fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BaseException:self.lock.close();raise
         self.path=directory/('live.json' if live else 'paper.json')
         self.state=json.loads(self.path.read_text()) if self.path.exists() else dict(position=None,pending=None,seen=[])
         other=directory/('direct-live.json' if live else 'direct-paper.json')
@@ -126,6 +128,7 @@ class Execution:
             capture_fill(self.state,intent,dict(order_id=str(identifier),filled_quantity=filled,fill_price=row.get('tradedPrice')),receipt['checked_at'],pending.get('key'))
         elif not entry and self.state.get('position'):self.state['retained_exit_failure']=dict(pending,stage='CANCELLED_WITHOUT_FILL')
         self.state['pending']=None;self.save();return receipt
+    @coordinated_submit
     def submit(self,action,quote,now=None):
         if self.management_only and action.get('action')=='BUY':raise ValueError('Position-management worker cannot place new entries')
         from sector_heatmap.chart_trade_admission import entry_lock
