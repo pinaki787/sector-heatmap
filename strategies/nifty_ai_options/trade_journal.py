@@ -27,7 +27,7 @@ def connect(data,owner):
  return db
 
 def multiplier(position,config,data):
- for key in ('qtyMultiplier','contract_multiplier','contract_value'):
+ for key in ('qtyMultiplier','contract_multiplier','contract_value','quantity_multiplier'):
   v=number(position.get(key))
   if v is not None and v>0:return v,'recorded '+key
  symbol=position.get('symbol','')
@@ -143,24 +143,27 @@ def sync_account(owner,data=DATA):
        db.execute("""INSERT OR IGNORE INTO trades(id,account,broker,mode,run_id,managed_run,symbol,underlying,side,quantity,multiplier,multiplier_source,currency,entry_premium,entry_time_basis,status,source)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(identity,owner,config.get('broker'),config.get('execution_mode'),run,run,position['symbol'],config.get('underlying'),position.get('side'),position.get('quantity'),mult,source,config.get('quote_currency') or ('INR' if config.get('broker')=='FYERS' else 'USD'),position.get('fill_price'),'broker average; original fill time unavailable','OPEN','verified broker attachment'))
      db.execute('INSERT OR REPLACE INTO imports VALUES(?,?)',(run,stamp))
-   path=directory/'events.jsonl'
-   if not path.exists():continue
-   stat=path.stat();cursor=db.execute('SELECT inode,offset FROM cursors WHERE run_id=?',(run,)).fetchone()
-   offset=cursor['offset'] if cursor and cursor['inode']==stat.st_ino and cursor['offset']<=stat.st_size else 0
-   with path.open('rb') as stream:
-    stream.seek(offset)
-    while True:
-     start=stream.tell();line=stream.readline()
-     if not line:break
-     if not line.endswith(b'\n'):stream.seek(start);break
-     try:record=json.loads(line)
-     except (ValueError,UnicodeError):continue
-     if 'action' in record:ingest(db,owner,run,config,record,data,markers);counts+=1
-     event=record.get('event') or {}
-     if event.get('kind')=='price' and number(event.get('close')) is not None:
-      db.execute("UPDATE trades SET latest_price=?,latest_time=? WHERE account=? AND managed_run=? AND symbol=? AND status='OPEN' AND (latest_time IS NULL OR latest_time<=?)",(event['close'],event.get('available_at',event.get('timestamp')),owner,run,event.get('symbol'),event.get('available_at',event.get('timestamp'))))
-    offset=stream.tell()
-   db.execute('INSERT OR REPLACE INTO cursors VALUES(?,?,?,?)',(run,stat.st_ino,offset,time.time()));db.commit()
+   for filename in ('confirmed-fills.jsonl','events.jsonl'):
+    path=directory/filename
+    cursor_key=run if filename=='events.jsonl' else run+'|confirmed-fills'
+    if not path.exists():continue
+    stat=path.stat();cursor=db.execute('SELECT inode,offset FROM cursors WHERE run_id=?',(cursor_key,)).fetchone()
+    offset=cursor['offset'] if cursor and cursor['inode']==stat.st_ino and cursor['offset']<=stat.st_size else 0
+    with path.open('rb') as stream:
+     stream.seek(offset)
+     while True:
+      start=stream.tell();line=stream.readline()
+      if not line:break
+      if not line.endswith(b'\n'):stream.seek(start);break
+      try:record=json.loads(line)
+      except (ValueError,UnicodeError):continue
+      if 'action' in record:ingest(db,owner,run,config,record,data,markers);counts+=1
+      event=record.get('event') or {}
+      if event.get('kind')=='price' and number(event.get('close')) is not None:
+       quote_at=event.get('available_at',event.get('timestamp'))
+       db.execute("UPDATE trades SET latest_price=?,latest_time=? WHERE account=? AND managed_run=? AND symbol=? AND status='OPEN' AND (latest_time IS NULL OR latest_time<=?) AND (entry_time IS NULL OR entry_time<=?)",(event['close'],quote_at,owner,run,event.get('symbol'),quote_at,quote_at))
+     offset=stream.tell()
+    db.execute('INSERT OR REPLACE INTO cursors VALUES(?,?,?,?)',(cursor_key,stat.st_ino,offset,time.time()));db.commit()
   return counts
  finally:db.close()
 

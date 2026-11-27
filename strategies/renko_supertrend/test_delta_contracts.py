@@ -111,3 +111,26 @@ class DeltaBoundaryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class MarketReceiptTests(DeltaBoundaryTests):
+    def market(self,**changes):
+        owned=self.owned();owned.update(product=dict(contract_type='perpetual_futures'),status='closed',filled_contracts=4)
+        owned['request'].update(side='buy',reduce_only=False,order_type='market_order')
+        owned['request'].pop('limit_price');owned.update(changes);return owned
+    def test_actual_market_entry_fill_without_limit_is_normalized(self):
+        row=owned_order(self.market(),'account-a')
+        self.assertEqual(row['status'],2);self.assertEqual(row['tradedPrice'],22.3)
+        self.assertIsNone(row['limit_price']);self.assertEqual(row['order_type'],'market_order')
+    def test_market_exit_retains_reduce_only_and_side(self):
+        owned=self.market();owned['request'].update(side='sell',reduce_only=True)
+        row=owned_order(owned,'account-a');self.assertTrue(row['reduce_only']);self.assertEqual(row['side'],-1)
+    def test_market_partial_unknown_and_rejected_are_not_complete_fills(self):
+        for state,filled,expected in [('cancelled',2,1),('UNKNOWN',0,6),('REJECTED',0,5)]:
+            owned=self.market(status=state,filled_contracts=filled,average_fill_price='22.3' if filled else None)
+            row=owned_order(owned,'account-a');self.assertEqual(row['status'],expected);self.assertEqual(row['filledQty'],filled)
+    def test_market_terms_and_identity_cannot_be_weakened(self):
+        for change in [dict(account_identity='other'),dict(filled_contracts=5)]:
+            with self.assertRaises(ValueError):owned_order(self.market(**change),'account-a')
+        for change in [dict(limit_price='20'),dict(time_in_force='gtc'),dict(order_type='stop_order')]:
+            owned=self.market();owned['request'].update(change)
+            with self.assertRaises(ValueError):owned_order(owned,'account-a')

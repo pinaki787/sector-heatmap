@@ -7,7 +7,7 @@ function manualRequestLabel(snapshot){
  const receipt=snapshot?.manual_entry;if(!receipt)return 'Active quantity: '+(snapshot?.active_lots??'—')+' · '+(snapshot?.manual_entry_context?.mode||'runner stopped');
  const owned=snapshot?.ownership;
  const retained=owned?.pending||owned?.position||owned?.detached_position||owned?.stop_verification_position||(owned?.positions||[]).length||Object.keys(owned?.closing_legs||{}).length;
- if(!snapshot.running&&owned&&!retained&&receipt.phase==='FAILED_OR_PENDING')return 'Previous run · manual request error (historical)';
+ if(!snapshot.running&&owned&&!retained&&['FAILED_OR_PENDING','REJECTED'].includes(receipt.phase))return 'Previous run · manual request error (historical)';
  return receipt.phase+(receipt.error?' · '+receipt.error:'');
 }
 function createStrategyVisit(){
@@ -21,15 +21,27 @@ function createStrategyVisit(){
 }
 
 
+function journalQuantity(quantity,multiplier){
+ const format=value=>Number.isFinite(value)?value.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'Unavailable';
+ let factor=format(multiplier);
+ if(Number.isFinite(multiplier)&&multiplier>0&&multiplier<.01){
+  const reciprocal=1/multiplier;
+  factor=Number.isSafeInteger(reciprocal)?'1/'+reciprocal.toLocaleString('en-IN'):multiplier.toExponential(2);
+ }
+ return format(quantity)+' × '+factor;
+}
 function positionControlView(snapshot){
  const ownership=snapshot?.ownership||{},control=snapshot?.position_control||{};
- const receipt=snapshot?.position_control_receipt;
+ const recovered=snapshot?.reconciliation;
+ const previous=snapshot?.position_control_receipt;
+ const reconciled=!snapshot?.running&&!ownership.position&&!ownership.pending&&recovered?.phase==='RECOVERED_CLOSED'&&previous?.phase==='RECOVERY_REQUIRED'&&previous?.retained_pending?.key===recovered.key&&previous.updated_at<=recovered.completed_at;
+ const receipt=reconciled?null:previous;
  const busy=['QUEUED','CLAIMED','WAITING_FOR_SOURCE','VERIFYING_FLAT','HANDED_OVER'].includes(receipt?.phase);
  const detached=!!ownership.detached_position||control.mode==='DETACHED';
  const owned=ownership.position||snapshot?.heartbeat?.position;
  return {label:detached||!owned?'Attach':'Detach',operation:detached||!owned?'ATTACH':'DETACH',
   blocked:busy||!!ownership.pending,stopBlocked:busy,capable:snapshot?.position_control_capable===true,
-  status:receipt?(receipt.error||({STOPPED:receipt.simulated_flat_confirmed?'Paper position closed · stopped':receipt.broker_flat_confirmed?'Squared off · stopped':'Stopped · no owned position',DETACHED:'Detached · broker holding remains open',ATTACHED:'Attached · managing selected holding; new entries paused'})[receipt.phase]||receipt.notice||receipt.phase):detached?'Detached · broker holding remains open':''};
+  status:reconciled?'Prior broker fill and close reconciled · stopped':receipt?(receipt.error||({STOPPED:receipt.simulated_flat_confirmed?'Paper position closed · stopped':receipt.broker_flat_confirmed?'Squared off · stopped':'Stopped · no owned position',DETACHED:'Detached · broker holding remains open',ATTACHED:'Attached · managing selected holding; new entries paused'})[receipt.phase]||receipt.notice||receipt.phase):detached?'Detached · broker holding remains open':''};
 }
 function positionControlPayload(snapshot,values,account,operation,requestId,holding){
  const context=snapshot?.position_control_context;
@@ -316,7 +328,7 @@ function mount(){
  function renderJournal(){
   const data=snapshot?.trade_journal||{},filter=journal.querySelector('select').value,rows=(data.rows||[]).filter(r=>filter==='ALL'||r.mode===filter),body=journal.querySelector('tbody');
   body.replaceChildren();
-  for(const r of rows){const tr=document.createElement('tr');for(const value of [r.mode,r.symbol,journalTime(r.entry_time),r.status==='OPEN'?'—':journalTime(r.exit_time),journalNumber(r.quantity)+' × '+journalNumber(r.multiplier),journalNumber(r.entry_premium),r.status==='OPEN'?'—':journalNumber(r.exit_premium),journalNumber(r.gross_profit),journalNumber(r.costs),journalNumber(r.net_profit),r.status==='OPEN'?'Exit not recorded':r.status]){const td=document.createElement('td');td.textContent=value;td.style.cssText='padding:8px;white-space:nowrap;border-bottom:1px solid #334154';tr.append(td);}tr.title=r.entry_time_basis+'; '+r.multiplier_source;body.append(tr);}
+  for(const r of rows){const tr=document.createElement('tr');for(const value of [r.mode,r.symbol,journalTime(r.entry_time),r.status==='OPEN'?'—':journalTime(r.exit_time),journalQuantity(r.quantity,r.multiplier),journalNumber(r.entry_premium),r.status==='OPEN'?'—':journalNumber(r.exit_premium),journalNumber(r.gross_profit),journalNumber(r.costs),journalNumber(r.net_profit),r.status==='OPEN'?'Exit not recorded':r.status]){const td=document.createElement('td');td.textContent=value;td.style.cssText='padding:8px;white-space:nowrap;border-bottom:1px solid #334154';tr.append(td);}tr.title=r.entry_time_basis+'; '+r.multiplier_source;body.append(tr);}
   journal.querySelector('[data-journal-note]').textContent=(data.sync?.state==='ERROR'?'Journal error: '+data.sync.error:((data.total||0)+' recorded trades · '+rows.length+' shown · '+(data.sync?.state==='RUNNING'?'Updating journal':data.sync?.state==='READY'?'Journal current':data.sync?.state||'Loading')))+' · Times IST. Unavailable costs mean net profit is unavailable; gross excludes costs. Historical holdings are recorded evidence, not confirmation of current broker exposure.';
  }
  journal.querySelector('select').addEventListener('change',renderJournal);
@@ -945,7 +957,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
  strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={manualRequestLabel,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={journalQuantity,manualRequestLabel,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

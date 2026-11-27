@@ -72,3 +72,44 @@ horizontal/vertical dragging and wheel zoom were exercised without trading.
 OHLC and order-preview controls share a compact header row, preserving the
 indicator information. Fifteen focused UI checks pass. This static change adds
 no broker requests or tick processing.
+
+## Delta market-order reconciliation — 27 November
+
+The fill normalizer now accepts the captured IOC market-order policy without
+requiring a limit price. IOC remains a time-in-force setting, independent of
+market versus limit order type, as documented by Delta India. Account identity,
+requested/filled quantity, side, reduce-only intent and terminal-state validation
+remain enforced. Direct perpetual market exits retain reduce-only; the existing
+bought-option exit policy is preserved. Unknown and partial outcomes remain
+retained rather than resubmitted.
+
+A stopped-worker recovery utility validates complete selected-account order and
+fill evidence, native/client-order identity, the exact full closing order and
+current broker exposure before resolving an older intent. A separately verified
+later manual holding remains external and is never attached or altered. Recovery
+appends durable journal evidence and confirmed markers idempotently; decision
+times are not substituted for known broker fill times. Unverified total costs and
+net profit remain unavailable. Small contract multipliers display as exact
+fractions instead of rounding to zero.
+
+The hosted selected Delta dashboard was guarded-reloaded with trading stopped.
+The recovered closed trade is visible, the matching obsolete recovery error is
+historical, and Start eligibility is restored after a fresh flat/no-order check.
+No live worker was started and no broker order was submitted, changed or cancelled.
+The corrected real-order fill path has offline boundary coverage; it was not
+exercised with a new live test trade.
+
+Official references:
+- https://docs.delta.exchange/#createorderrequest
+- https://guides.delta.exchange/delta-exchange-india-user-guide/exchange-sop-and-policies/allowed-trading-bands
+
+The P&L path also consumes an independent, incremental confirmed-fill receipt
+stream. Delta persists a validated full fill and its position before downstream
+worker callbacks; receipt ingestion is idempotent with the ordinary action log.
+Unknown/partial outcomes never become full-fill evidence. Delta's recorded
+quantity multiplier is included, so contract counts convert correctly to USD
+gross P&L. Existing chart/journal quotes are reused with the existing freshness
+and exact-entry-order matching checks; unrelated manual holdings are excluded.
+Isolated browser fixtures verify gains, losses, stale fallback and zero lines
+after close. This adds no broker request or per-tick history download. Real
+open-position overlay validation remains unperformed while the account is flat.

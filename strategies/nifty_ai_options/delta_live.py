@@ -119,6 +119,7 @@ def stream(args):
     try:
         summary=inspect(config,delta);atomic(out/'preflight.json',summary)
         executor=DeltaExecution(delta,config['account'],ROOT/'.private/nifty-ai-options/runtime',live=live,contracts=config['lots'],management_only=config.get('_managed_resume',False))
+        executor.fill_evidence_path=out/'confirmed-fills.jsonl'
         try:from .confirmed_close import ConfirmedClose,delta_reader
         except ImportError:from confirmed_close import ConfirmedClose,delta_reader
         confirmed=ConfirmedClose(delta_reader(delta),out/'confirmed-source')

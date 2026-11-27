@@ -85,3 +85,15 @@ test('same-contract P&L cannot use another entry order or an unproven order matc
  assert.equal(currentLine(p,bars,'CE',{...t,entry_order:''},201).title,'+2.00 pts');
  assert.equal(currentLine(p,bars,'CE',{...t,entry_order:'new-entry'},201).title,'INR +40.00 gross');
 });
+
+test('PAXG current gross P&L uses recorded contracts and multiplier in both directions',()=>{
+ const {currentLine}=require('../renko-ai-chart-markers.js');
+ const p={symbol:'PAXGUSD',side:'LONG',quantity:10,fill_price:3566.3,order_id:'confirmed-entry'};
+ const bars=[{time:100,close:3568.3}];
+ const trade={symbol:'PAXGUSD',status:'OPEN',quantity:10,entry_premium:3566.3,entry_order:'confirmed-entry',latest_time:100,latest_price:3568.3,currency:'USD',unrealized_gross:(3568.3-3566.3)*10*.001};
+ assert.equal(currentLine(p,bars,p.symbol,trade,101).title,'USD +0.02 gross');
+ assert.equal(currentLine(p,bars,p.symbol,{...trade,latest_price:3564.3,unrealized_gross:-.02},101).title,'USD -0.02 gross');
+ assert.equal(currentLine({...p,side:'SHORT'},bars,p.symbol,{...trade,unrealized_gross:-.02},101).title,'USD -0.02 gross');
+ assert.equal(currentLine(null,bars,p.symbol,trade,101),null);
+ assert.match(currentLine(p,bars,p.symbol,{...trade,entry_order:'unrelated-manual'},101).title,/pts$/);
+});

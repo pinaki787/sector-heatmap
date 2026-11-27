@@ -69,7 +69,7 @@ class Execution:
             payload = order_intent(symbol, size, side, quote, product, self.delta.clock(), reduce_only=reduce_only)
             if order_type not in ('limit_order','market_order'):raise ValueError('Unsupported Delta strategy order type')
             if order_type=='market_order':
-                if payload['reduce_only'] or price_limit is not None:raise ValueError('Market entry cannot change exit terms or carry a limit')
+                if price_limit is not None or (payload['reduce_only'] and product.get('contract_type')!='perpetual_futures'):raise ValueError('Market order cannot carry a limit or change bought-option exit terms')
                 payload['order_type']='market_order';payload.pop('limit_price',None)
             if price_limit is not None:
                 boundary=Decimal(str(price_limit));candidate=Decimal(payload['limit_price']);tick=Decimal(str(product['tick_size']))

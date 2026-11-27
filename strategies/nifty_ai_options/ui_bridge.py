@@ -429,6 +429,15 @@ class Service:
                 if result.get('ownership'):
                     result['heartbeat']=dict(result.get('heartbeat') or {},position=result['ownership']['position'],pending=result['ownership']['pending'])
                 result['heartbeat']=dict(result.get('heartbeat') or {},timeframe=config.get('timeframe'))
+                recovered=self.run['directory']/'reconciliation.json'
+                if recovered.exists() and not result['running']:
+                    receipt=json.loads(recovered.read_text());owned=result.get('ownership') or {}
+                    if receipt.get('phase')=='RECOVERED_CLOSED' and receipt.get('account_id')==self.owner and receipt.get('run_id')==self.run['id'] and receipt.get('runtime_session')==config.get('runtime_session') and not any(owned.get(k) for k in ('position','pending','detached_position','positions','closing_legs','stop_verification_position')):
+                        result.update(reconciliation={k:receipt.get(k) for k in ('phase','key','completed_at','entry_order','exit_order','broker_flat','external_position')},phase='STOPPED',error=None,notice='Historical fill and external broker close reconciled; automation is stopped.')
+                        external=receipt.get('external_position')
+                        if external:result['notice']='Historical trade reconciled. Separate broker holding last verified: '+str(external['quantity'])+' contracts; not attached to automation. Fresh broker preflight remains required.'
+
+
                 change=self.run['directory']/'reconfigure.json'
                 if change.exists():result['reconfiguration']=json.loads(change.read_text())
                 latest=self.run['directory']/'manual-entry/latest.json'

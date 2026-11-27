@@ -128,6 +128,21 @@ class DeltaExecution:
         active=self.native.active_orders()
         return isinstance(active,list) and not any(int(r.get('product_id',-1))==meta['product_id'] for r in active) and self.delta._position(meta['product_id'])==0
 
+    def _record_verified_fill(self,action,row,quantity,key):
+        # Commit fill evidence before downstream flat/reversal/worker callbacks.
+        result=dict(dry_run=False,order_id=row['id'],filled_quantity=quantity,fill_price=row.get('tradedPrice'),filled_at=self.delta.clock())
+        try:from .option_legs import capture_fill
+        except ImportError:from option_legs import capture_fill
+        capture_fill(self.state,action,result,result['filled_at'],key)
+        self.save()
+        path=getattr(self,'fill_evidence_path',None)
+        if path:
+            import os
+            record=dict(action=action,result=result,recorded_at=result['filled_at'],source='VALIDATED_NATIVE_BROKER_FILL')
+            with Path(path).open('a') as stream:
+                stream.write(json.dumps(record,sort_keys=True)+'\n');stream.flush();os.fsync(stream.fileno())
+        return result
+
     def _live_attempts(self,action,quote,entry,side,quantity,key,meta,original_limit):
         p=action['position'];symbol=p['symbol']
         for attempt in range(2 if entry else 1):
@@ -150,6 +165,10 @@ class DeltaExecution:
                 row=self.native.reconcile(native_key);last=row
                 filled=int(row.get('filledQty',0))
                 if row.get('status')==2 and filled==quantity:
+                    if entry:
+                        self.state['position']=dict(p,quantity=quantity,order_id=row['id'],fill_price=row.get('tradedPrice'))
+                        self.state['pending']['stage']='FILLED_VERIFIED'
+                    result=self._record_verified_fill(action,row,quantity,key)
                     if not entry:
                         self.state['pending']['stage']='FILLED_AWAITING_FLAT';self.save()
                         active=self.native.active_orders()
@@ -157,10 +176,6 @@ class DeltaExecution:
                             raise RuntimeError('Delta exit fill acknowledged but signed flat state unconfirmed; no reversal or duplicate exit')
                     self.state['position']=dict(p,quantity=quantity,order_id=row['id'],fill_price=row.get('tradedPrice')) if entry else None
                     self.state.setdefault('entry_attempts',[]).append(dict(self.state['pending'],outcome='FILLED',completed_at=self.delta.clock()))
-                    result=dict(dry_run=False,order_id=row['id'],filled_quantity=quantity,fill_price=row.get('tradedPrice'))
-                    try:from .option_legs import capture_fill
-                    except ImportError:from option_legs import capture_fill
-                    capture_fill(self.state,action,result,self.delta.clock(),key)
                     self.state['pending']=None;self.save()
                     return result
                 if entry and row.get('native_status')=='cancelled' and filled==0:

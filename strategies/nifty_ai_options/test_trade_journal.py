@@ -46,3 +46,32 @@ class PartialJournalTests(unittest.TestCase):
    with events.open('a') as out:out.write(json.dumps(dict(action=dict(action='SELL',timestamp=30,position=p),result=dict(fill_price=21,filled_quantity=5,filled_at=31,order_id='remaining',total_costs=2)))+'\n')
    sync_account(owner,base);r=report(owner,'run',base)
    self.assertEqual(r['current_run']['open_trades'],0);self.assertEqual(r['current_run']['net_profit'],9)
+
+class DeltaLivePnlTests(unittest.TestCase):
+ def test_independent_confirmed_receipt_supplies_live_pnl_even_without_worker_action_log(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   data=Path(tmp);owner='a'*32;run=data/'runs'/owner/'run';run.mkdir(parents=True)
+   (run/'config.json').write_text(json.dumps(dict(account=owner,broker='DELTA_INDIA',execution_mode='LIVE',underlying='PAXGUSD')))
+   record=dict(action=dict(action='OPEN_LONG',timestamp=100,position=dict(symbol='PAXGUSD',side='LONG',quantity_multiplier=.001)),result=dict(order_id='verified-order',fill_price=3566.3,filled_quantity=10,filled_at=101),source='VALIDATED_NATIVE_BROKER_FILL')
+   (run/'confirmed-fills.jsonl').write_text(json.dumps(record)+'\n')
+   event=dict(event=dict(kind='price',symbol='PAXGUSD',close=3568.3,timestamp=102,available_at=102))
+   (run/'events.jsonl').write_text(json.dumps(event)+'\n')
+   sync_account(owner,data);sync_account(owner,data)
+   row=report(owner,'run',data)['rows'][0]
+   self.assertEqual(row['entry_order'],'verified-order')
+   self.assertAlmostEqual(row['unrealized_gross'],.02)
+   self.assertEqual(row['currency'],'USD');self.assertIsNone(row['net_profit'])
+   # The worker subsequently logging the same receipt cannot create a second trade.
+   with (run/'events.jsonl').open('a') as f:f.write(json.dumps(record)+'\n')
+   sync_account(owner,data);self.assertEqual(report(owner,'run',data)['total'],1)
+
+class IndependentFillQuoteOrdering(unittest.TestCase):
+ def test_pre_fill_quote_cannot_supply_current_money_pnl(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   data=Path(tmp);owner='a'*32;run=data/'runs'/owner/'run';run.mkdir(parents=True)
+   (run/'config.json').write_text(json.dumps(dict(account=owner,broker='DELTA_INDIA',execution_mode='LIVE',underlying='PAXGUSD')))
+   record=dict(action=dict(action='OPEN_LONG',timestamp=100,position=dict(symbol='PAXGUSD',side='LONG',quantity_multiplier=.001)),result=dict(order_id='verified',fill_price=3566.3,filled_quantity=10,filled_at=101))
+   (run/'confirmed-fills.jsonl').write_text(json.dumps(record)+'\n')
+   (run/'events.jsonl').write_text(json.dumps(dict(event=dict(kind='price',symbol='PAXGUSD',close=3500,timestamp=100,available_at=100)))+'\n')
+   sync_account(owner,data);row=report(owner,'run',data)['rows'][0]
+   self.assertIsNone(row['unrealized_gross']);self.assertIsNone(row['latest_time'])

@@ -88,9 +88,14 @@ class NativeMarketTests(unittest.TestCase):
    n,d=self.native();q=dict(symbol='BTCUSD',bid=100,ask=101,exchange_at=100,received_at=100)
    result=n.submit('BTCUSD',2,side,q,'market','BTCUSD','TEST',reduce_only=False,order_type='market_order')
    self.assertEqual(result['order_type'],'market_order');self.assertEqual(result['time_in_force'],'ioc');self.assertNotIn('limit_price',result);self.assertFalse(result['reduce_only'])
- def test_market_mode_cannot_silently_change_exit_execution(self):
+ def test_direct_market_exit_preserves_reduce_only_without_limit(self):
+  for side in [1,-1]:
+   n,d=self.native();q=dict(symbol='BTCUSD',bid=100,ask=101,exchange_at=100,received_at=100)
+   result=n.submit('BTCUSD',2,side,q,'market','BTCUSD','TEST',reduce_only=True,order_type='market_order')
+   self.assertTrue(result['reduce_only']);self.assertEqual(result['order_type'],'market_order');self.assertNotIn('limit_price',result)
+ def test_market_execution_cannot_carry_a_limit(self):
   n,d=self.native();q=dict(symbol='BTCUSD',bid=100,ask=101,exchange_at=100,received_at=100)
-  with self.assertRaises(ValueError):n.submit('BTCUSD',2,1,q,'market','BTCUSD','TEST',reduce_only=True,order_type='market_order')
+  with self.assertRaises(ValueError):n.submit('BTCUSD',2,1,q,'market','BTCUSD','TEST',reduce_only=False,order_type='market_order',price_limit='102')
   d.submit.assert_not_called()
 
 class ManualMarketPathTests(unittest.TestCase):
@@ -105,3 +110,20 @@ class ManualMarketPathTests(unittest.TestCase):
   self.assertIsNone(self.e.state['pending'])
 
 if __name__=='__main__':unittest.main()
+
+class DurableFillEvidenceTests(unittest.TestCase):
+ setUp=RetryTests.setUp
+ book=RetryTests.book
+ submit=RetryTests.submit
+ def test_full_fill_is_durable_before_a_worker_callback_can_fail(self):
+  self.responses=['fill'];self.e.fill_evidence_path=Path(self.tmp.name)/'confirmed-fills.jsonl'
+  result=self.submit()
+  record=json.loads(self.e.fill_evidence_path.read_text())
+  self.assertEqual(record['result']['order_id'],result['order_id'])
+  self.assertEqual(record['result']['filled_at'],100)
+  self.assertEqual(json.loads(self.e.path.read_text())['position']['quantity'],2)
+  self.assertEqual(record['source'],'VALIDATED_NATIVE_BROKER_FILL')
+ def test_unknown_result_never_creates_confirmed_fill_evidence(self):
+  self.responses=['unknown'];self.e.fill_evidence_path=Path(self.tmp.name)/'confirmed-fills.jsonl'
+  with self.assertRaises(RuntimeError):self.submit()
+  self.assertFalse(self.e.fill_evidence_path.exists())

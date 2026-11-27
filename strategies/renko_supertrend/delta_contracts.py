@@ -209,8 +209,13 @@ def owned_order(owned, expected_account):
     futures = (owned.get('product') or {}).get('contract_type') == 'perpetual_futures'
     if side not in ('buy', 'sell') or not isinstance(request.get('reduce_only'), bool) or (not futures and request['reduce_only'] is not (side == 'sell')):
         raise ValueError('Renko exits must be reduce-only; entries must BUY.')
-    if request.get('order_type') != 'limit_order' or request.get('time_in_force') != 'ioc':
-        raise ValueError('Delta Renko order terms differ from IOC-limit policy.')
+    order_type = request.get('order_type')
+    if order_type not in ('limit_order', 'market_order') or request.get('time_in_force') != 'ioc':
+        raise ValueError('Unsupported Delta strategy order type or time-in-force.')
+    if order_type == 'market_order' and request.get('limit_price') is not None:
+        raise ValueError('Delta market order must not carry a limit price.')
+    if order_type == 'limit_order':
+        decimal(request.get('limit_price'), 'Limit price', True)
     price = float(decimal(owned.get('average_fill_price'), 'Fill average', True)) if filled else None
     status = TERMINAL.get(state, 6)
     return dict(id=str(owned.get('order_id') or owned['client_order_id']),
@@ -219,5 +224,5 @@ def owned_order(owned, expected_account):
                 tradedPrice=price, productType=FUTURES_PRODUCT if futures else PRODUCT, status=status,
                 orderTag=owned['request_id'], native_status=state,
                 product_id=whole(request.get('product_id'), 'Order product ID', True),
-                reduce_only=request['reduce_only'], limit_price=request['limit_price'],
+                reduce_only=request['reduce_only'], order_type=order_type, time_in_force=request['time_in_force'], limit_price=request.get('limit_price'),
                 commission=owned.get('commission'), broker='DELTA_INDIA')
