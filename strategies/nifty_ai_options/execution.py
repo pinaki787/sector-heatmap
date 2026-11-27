@@ -97,6 +97,13 @@ class Execution:
         orders=ok(self.api.orderbook()).get('orderBook')
         if not isinstance(positions,list) or not isinstance(orders,list):raise ValueError('Unknown broker positions/orders response')
         return positions,orders
+    def reconcile_external_close(self,owned):
+        if not self.live or self.state.get('pending'):return None
+        # Only the FYERS implementation uses this method; native adapters retain
+        # their own identity/inventory semantics.
+        if not callable(getattr(self.api,'get_profile',None)):return None
+        from strategies.nifty_ai_options.fyers_external_exit import read
+        return read(self,owned)
     def reconcile_pending(self):
         pending=self.state.get('pending')
         if not pending:return

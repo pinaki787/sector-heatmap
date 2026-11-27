@@ -145,6 +145,27 @@ class OptionLegBook:
    if slot.get('pending'):continue
    if not slot.get('position'):
     self._complete_leg(key,slot,now);continue
+   reconcile=getattr(child,'reconcile_external_close',None)
+   if self.base.live and callable(reconcile):
+    if now-slot.get('external_check_at',0)>=5:
+     slot['external_check_at']=now
+     try:
+      proof=reconcile(slot['position'])
+      slot.pop('external_check_blocked',None)
+      if proof:
+       owned=copy.deepcopy(slot['position'])
+       action=dict(slot['exit_intent'],position=owned,timestamp=proof.get('broker_trade_at',proof['broker_order_at']),reason='EXTERNAL_BROKER_CLOSE')
+       result=dict(dry_run=False,order_id=proof['exit_order'],filled_quantity=proof['quantity'],fill_price=proof['fill_price'],external_exit=True,broker_order_at=proof['broker_order_at'],fill_time_basis='broker order timestamp; execution time unavailable',costs_unavailable_reason='Brokerage and taxes not reconciled')
+       if proof.get('broker_trade_at') is not None:result.update(filled_at=proof['broker_trade_at'],fill_time_basis=proof['fill_time_basis'])
+       slot['external_close_proof']=proof
+       slot['last_fill']=dict(id='external|'+proof['proof'],action=action,result=result,confirmed_at=now)
+       slot['position']=None
+       self.root.setdefault('reconciliations',[]).append(proof)
+       self.save();self._deliver(slot);self._complete_leg(key,slot,now);continue
+     except (ValueError,RuntimeError) as error:
+      slot['external_check_blocked']=str(error);slot['last_error']=str(error)
+     self.save()
+    if slot.get('external_check_blocked'):continue
    if not self.ready():continue
    owned=slot['position']
    action=dict(slot['exit_intent'],position=copy.deepcopy(owned),timestamp=now if slot['attempts'] else slot['exit_intent']['timestamp'])

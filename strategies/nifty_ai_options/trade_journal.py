@@ -61,6 +61,7 @@ def recorded_fill(action,result,marker=None,recorded_at=None):
  at=number(result.get('filled_at')) or number((marker or {}).get('confirmed_at')) or number(recorded_at)
  basis='recorded fill confirmation'
  if at is None:at=number(action.get('timestamp'));basis='recorded decision time; fill time unavailable'
+ if result.get('fill_time_basis'):basis=str(result['fill_time_basis'])
  return dict(price=price,quantity=qty,time=at,time_basis=basis,order=str(result.get('order_id') or ''),cost=costs(result))
 
 def ingest(db,owner,run,config,record,data,markers):

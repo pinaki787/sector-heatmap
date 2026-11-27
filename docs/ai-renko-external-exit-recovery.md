@@ -1,0 +1,9 @@
+# External option exit and Stop recovery
+
+FYERS bought-option Stop previously moved its owned leg into closing_legs and kept trying an exit precheck. A manual broker closure made that precheck fail because the expected held quantity was already zero. The leg was retained indefinitely, even though the broker had confirmed the manual closing fill.
+
+Closing-leg recovery now checks the authenticated execution-account identity, exact symbol/product position, broker order history and tradebook before another exit. A completely filled owned entry followed by exact full external closing fills, an explicit flat position row and no open/unknown selected-contract order permits cleanup without another order. The full exit quantity, weighted price, order IDs, trade IDs and broker tradebook timestamp are retained as evidence. Historical fees/taxes remain unavailable. Partial, uncertain, missing or contradictory evidence remains blocked. Checks are bounded to once per five seconds per closing leg; quantity-mode quote ticks do not trigger these reads when no leg is closing.
+
+A verified external close creates one durable journal/marker receipt and retires the leg idempotently. Stop then independently verifies every captured managed leg is broker-flat, records STOPPED and clears obsolete recovery errors. Direct-position Stop already performs its existing broker-flat verification; the new external-fill collector is FYERS-specific. Other brokers retain their existing order-reconciliation paths.
+
+Stop remains a request to stop trading. Cleaning a stale holding does not start a worker, replay a signal or rearm a stopped strategy. A subsequent user Start may proceed after the original Stop is complete and other normal preflight checks pass. Broker holdings and journal history are never deleted to make a failed Stop look successful.

@@ -92,6 +92,9 @@ class PositionManager:
   return dict(revision=REVISION,mode=self.mode,entries_paused=self.entry_blocked,
               detached_position=self.executor.state.get('detached_position'),pending_request=self.request)
  def update(self,phase,**details):
+  if phase in ('STOPPED','DETACHED','ATTACHED'):
+   details=dict(details);details.update(error=None,retained_position=None,retained_pending=None)
+   details.setdefault('notice',{'STOPPED':'Stopped · broker exposure reconciled','DETACHED':'Position detached','ATTACHED':'Position attached'}[phase])
   request=dict(self.request,phase=phase,updated_at=self.clock(),**details)
   root=self.directory/'position-controls'
   atomic(root/'receipts'/(request['request_id']+'.json'),request);atomic(root/'latest.json',request)
@@ -134,8 +137,10 @@ class PositionManager:
      if not stopped['flat']:
       self.update('VERIFYING_FLAT',notice='Closing every managed option leg; unresolved orders remain retained',positions=stopped['positions'])
       return False
-     self.save_mode('STOPPED')
      positions=stopped['positions']
+     if self.config['execution_mode']=='LIVE':
+      for owned_leg in positions:self.verify(owned_leg,flat=True)
+     self.save_mode('STOPPED')
      self.update('STOPPED',broker_flat_confirmed=bool(positions) and self.config['execution_mode']=='LIVE',simulated_flat_confirmed=bool(positions) and self.config['execution_mode']=='PAPER',no_owned_position=not bool(positions),positions=positions)
      return True
    if self.executor.state.get('pending') and operation=='STOP' and callable(getattr(self.executor,'reconcile_pending',None)):
