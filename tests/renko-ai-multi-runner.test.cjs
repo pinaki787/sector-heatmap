@@ -10,7 +10,9 @@ test('Intraday default applies to unset FYERS products, retaining deliberate cho
 });
 test('Runner selection and controls send explicit selected instrument with normal runtime proof',()=>{
  const s=fs.readFileSync(require.resolve('../renko-ai-options.js'),'utf8');
- assert.match(s,/runner_symbol=.*encodeURIComponent/);
+ const {aiActionUrl}=require('../renko-ai-options.js');
+ const u=new URL(aiActionUrl('status','NSE:NIFTY50-INDEX'),'https://example.test');
+ assert.equal(u.searchParams.get('runner_symbol'),'NSE:NIFTY50-INDEX');
  assert.match(s,/configurationError=error.message/);
  assert.match(s,/startReason.textContent=configurationError/);
  assert.match(s,/Instrument runners/);

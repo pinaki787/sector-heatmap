@@ -14082,6 +14082,7 @@
       if(aiSourceRequest?.kind==='quote')return window.RenkoAiChartSource.quote(body,location.href,chartSymbol());
       if(aiSourceRequest?.kind==='history'){
         window.RenkoAiChartSource.verify(body,location.href,chartSymbol());
+        syncOwnedRenkoSignals();
         let note=panel.querySelector('[data-ai-source-note]');
         if(!note){note=document.createElement('div');note.dataset.aiSourceNote='1';note.style.cssText='padding:6px 14px;flex:0 0 auto;font-size:12px;line-height:1.4;color:#17496b;background:#eef7fc;border-bottom:1px solid #c9dce8';panel.prepend(note);}
         note.dataset.verificationOnly=body.verification_only?'1':'0';
@@ -17054,7 +17055,7 @@
     if(completedBrickSignalView()&&!aiRuntimeParams.get('aiRun'))return completedPreviewSignalBars();
     if(completedBrickSignalView()&&aiRuntimeParams.get('aiRun')){
       const exact=window.RenkoAiChartSource?.signalBars(location.href,chartSymbol());
-      if(exact)return exact;
+      if(exact)return exact.slice();
     }
     const source = settings.renkoProjection === false ? rows.filter(bar => !bar.provisional) : rows;
     const showWicks = renkoWicksVisible();
@@ -17077,6 +17078,24 @@
       }
     }
     return renko(source, size, undefined, settings.renkoSource, showWicks);
+  }
+
+  function noteOwnedRenkoTail(bars) {
+    if(!stage||!window.RenkoAiChartSource?.context(location.href)||settings.type!=='Renko')return;
+    const last=bars.at(-1);
+    stage.dataset.aiConfirmedTail=JSON.stringify({count:bars.length,time:last?.time,open:last?.open,close:last?.close,sourceTime:last?.sourceTime});
+  }
+
+  function syncOwnedRenkoSignals() {
+    if(settings.type!=='Renko'||!completedBrickSignalView()||!window.RenkoAiChartSource?.context(location.href)||!rows.length||!displayedBars.length||chartGestureActive())return false;
+    const exact=window.RenkoAiChartSource.signalBars(location.href,chartSymbol());
+    if(!exact||exact.length<=displayedBars.length)return false;
+    const bar=rows.at(-1);
+    let updated=updateLastPrice?.(bar);
+    if(!updated)updated=reconcileRecentBars?.();
+    if(!updated){redrawKeepingViewport();return false;}
+    noteOwnedRenkoTail(displayedBars);
+    return true;
   }
 
   function renkoRebasedRange(previous, next, range) {
@@ -17277,6 +17296,7 @@
   let renderedPriceSeries;
   let aiRuntimeEvents=[],aiRuntimeBars=[],aiBandSpecs=[],aiBandCloud,aiBandBasis='UNDERLYING';
   let aiActivePosition=null,aiActiveTrade=null,aiEntryLine=null,aiEntryLineSeries=null,aiEntryLineKey=null,aiCurrentLine=null,aiCurrentLineSeries=null;
+  let aiPositionStrip=null;
   const aiPremiumBandCache=new Map();
   let aiPremiumBandRequest;
   const aiRuntimeParams=new URLSearchParams(location.search);
@@ -17309,6 +17329,7 @@
     if(!aiRuntimeEmbedded||!series||!window.RenkoAiChartMarkers)return;
     aiBandCloud?.refresh();
     aiRuntimeBars=bars;series.setMarkers(window.RenkoAiChartMarkers.markers(aiRuntimeEvents,bars,chartSymbol()));
+    noteOwnedRenkoTail(bars);
     const line=window.RenkoAiChartMarkers.entryLine(aiActivePosition,bars,chartSymbol());
     const key=line?JSON.stringify(line):null;
     if(aiEntryLine&&(aiEntryLineSeries!==series||key!==aiEntryLineKey)){
@@ -17319,7 +17340,11 @@
     aiEntryLineKey=key;
     const current=window.RenkoAiChartMarkers.currentLine(aiActivePosition,bars,chartSymbol(),aiActiveTrade);
     if(aiCurrentLine&&(aiCurrentLineSeries!==series||!current)){try{aiCurrentLineSeries.removePriceLine(aiCurrentLine);}catch{}aiCurrentLine=null;}
-    if(current){if(aiCurrentLine)aiCurrentLine.applyOptions(current);else{aiCurrentLine=series.createPriceLine(current);aiCurrentLineSeries=series;}}
+    const stripApi=window.RenkoAiPositionStrip;
+    if(stripApi&&!aiPositionStrip&&stage)aiPositionStrip=stripApi.mount(stage,{key:'sector-pulse:ai-position-pnl:'+aiRuntimeParams.get('chartSource')+':'+chartSymbol()});
+    aiPositionStrip?.update(current);
+    const currentOptions=stripApi?stripApi.lineOptions(current):{...current,title:''};
+    if(current){if(aiCurrentLine)aiCurrentLine.applyOptions(currentOptions);else{aiCurrentLine=series.createPriceLine(currentOptions);aiCurrentLineSeries=series;}}
   }
   if(aiRuntimeEmbedded)window.addEventListener('message',event=>{
     const d=event.data;
@@ -23269,7 +23294,7 @@
         });
         mainSeries.setData(bars.map((brick, index) => pricePoint(brick, bars[index - 1]?.close, index)));
         applyAiRuntimeMarkers(mainSeries, bars);
-        brokerPriceLine?.applyOptions({price: bar.close});
+        if(!ownedProjectionContext)brokerPriceLine?.applyOptions({price: bar.close});
         for (const study of activeRenkoStudies) {
           if (study.workerRuntime) {
             pendingSyntheticPlots.set(study, 0);
@@ -23300,7 +23325,7 @@
         const nextSize = renkoBoxSize(settings, completedRenkoCandles(), chartTickSize());
         const sizeChanged = nextSize !== size;
         let next = bars;
-        if (sizeChanged || renkoSourceGeometryChanged(renkoSourceByTime.get(bar.time), bar, settings)) {
+        if (ownedProjectionContext || sizeChanged || renkoSourceGeometryChanged(renkoSourceByTime.get(bar.time), bar, settings)) {
           try {
             next = chartRenkoBricks(nextSize);
           } catch {
@@ -23333,7 +23358,7 @@
         if (changesBricks && (drawingsNeedNewSeries || !canUpdateRenkoStudies
             || (confirmsBricks && studiesNeedConfirmedBricks))) return false;
         renkoSourceByTime.set(bar.time, bar);
-        brokerPriceLine?.applyOptions({price: bar.close});
+        if(!ownedProjectionContext)brokerPriceLine?.applyOptions({price: bar.close});
         let inspected = inspectedBarTime();
         const inspectedBrick = byTime.get(inspected);
         const hoveredBrick = byTime.get(cursorTime);

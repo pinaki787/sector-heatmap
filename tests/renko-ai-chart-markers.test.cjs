@@ -55,7 +55,7 @@ test('entry/current lines update existing series and both disappear on close wit
  const start=source.indexOf('  function applyAiRuntimeMarkers('),end=source.indexOf('  if(aiRuntimeEmbedded)window.addEventListener',start);
  const helper=require('../renko-ai-chart-markers.js');let created=0,updated=0,removed=0;
  const series={setMarkers(){},createPriceLine(){created++;return {applyOptions(){updated++;}}},removePriceLine(){removed++;}};
- const c={window:{RenkoAiChartMarkers:helper},aiRuntimeEmbedded:true,aiBandCloud:null,aiRuntimeBars:[],aiRuntimeEvents:[],aiActivePosition:{symbol:'CE',quantity:1,side:'CE',fill_price:40},aiActiveTrade:null,aiEntryLine:null,aiEntryLineSeries:null,aiEntryLineKey:null,aiCurrentLine:null,aiCurrentLineSeries:null,chartSymbol:()=> 'CE',series,bars:[{time:100,close:42}]};
+ const c={window:{RenkoAiChartMarkers:helper},aiRuntimeEmbedded:true,aiBandCloud:null,aiRuntimeBars:[],aiRuntimeEvents:[],aiActivePosition:{symbol:'CE',quantity:1,side:'CE',fill_price:40},aiActiveTrade:null,aiEntryLine:null,aiEntryLineSeries:null,aiEntryLineKey:null,aiCurrentLine:null,aiCurrentLineSeries:null,aiPositionStrip:null,stage:null,noteOwnedRenkoTail(){},chartSymbol:()=> 'CE',series,bars:[{time:100,close:42}]};
  vm.createContext(c);vm.runInContext(source.slice(start,end)+';applyAiRuntimeMarkers(series,bars);applyAiRuntimeMarkers(series,bars);aiActivePosition=null;applyAiRuntimeMarkers(series,bars);',c);
  assert.equal(created,2);assert.equal(updated,1);assert.equal(removed,2);
 });
