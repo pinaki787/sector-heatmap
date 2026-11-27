@@ -1,0 +1,11 @@
+# AI Renko position allocation
+
+Quantity mode retains explicit shares, lots or contracts. INR amount mode uses the exact selected execution contract's fresh last-trade price and verified economic multiplier, then rounds down to whole shares or exchange lots. A read-only preview shows each selected option contract separately, calculated quantity, price and estimated value. Start requires a recent displayed preview; the backend independently validates current quotes. Every later entry recalculates from the captured amount, rather than an old quantity. Exits retain the actual owned fill quantity.
+
+The amount means gross share value, bought-option premium, or futures notional. It is not leveraged margin, includes no brokerage/tax, and cannot cap market-order spending. Price movement can change the calculated quantity or final value. Missing/stale quotes, unverified multipliers and an allocation smaller than one minimum lot block entry. Existing account funding, ownership and duplicate-intent checks remain in force. INR amount mode is unavailable for Delta's non-INR contracts until a verified conversion source is supported; quantity mode remains available.
+
+No extra request is added to a quantity-mode tick. INR previews use bounded read-only selected-account requests. Entries reuse their executable quote where available; native options retain their existing fresh-quote validation. Public exact-symbol MCX multiplier metadata must be current; absent evidence blocks sizing rather than assuming a multiplier.
+
+Manual fill feedback shows the broker order ID, exact contract, direction, filled units, price and confirmation time in IST. A confirmation timestamp is not relabeled as an exchange execution timestamp. The same receipt previously appeared both as a FILLED-only manual status and a FILLED-only global status; two labels did not establish two orders. Position open/close labels require corresponding fill evidence.
+
+Deployment must not restart an active worker without authorization. The frontend checks backend capability before enabling amount preview/Start; an old backend cannot silently interpret amount mode as fixed quantity. Existing captured workers and holdings retain their original sizing.

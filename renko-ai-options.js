@@ -18,12 +18,21 @@ function manualRequestLabel(snapshot){
  const owned=snapshot?.ownership;
  const retained=owned?.pending||owned?.position||owned?.detached_position||owned?.stop_verification_position||(owned?.positions||[]).length||Object.keys(owned?.closing_legs||{}).length;
  if(!snapshot.running&&owned&&!retained&&['FAILED_OR_PENDING','REJECTED'].includes(receipt.phase))return 'Previous run · manual request error (historical)';
+ if(receipt.phase==='FILLED'){
+  const format=n=>n!==null&&n!==undefined&&Number.isFinite(Number(n))?Number(n).toLocaleString('en-IN',{maximumFractionDigits:2}):'unavailable';
+  const direction=receipt.direction||'';
+  const side=['LONG','CE','PE'].includes(direction)?'Buy':direction==='SHORT'?'Sell':direction||'Side unavailable';
+  const at=receipt.filled_at||receipt.confirmed_at||receipt.updated_at;
+  const stamp=typeof at==='number'?new Date(at*1000):new Date(at);
+  const when=Number.isFinite(stamp.getTime())?stamp.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',hour12:false})+' IST':'time unavailable';
+  return 'Order '+(receipt.order_id||'ID unavailable')+' · '+(receipt.symbol||'Instrument unavailable')+' · '+side+(direction?' / '+direction:'')+' · '+format(receipt.quantity)+' units @ '+format(receipt.fill_price)+' · '+(receipt.filled_at?'Executed ':'Confirmed ')+when+(receipt.operation==='CLOSE'?' · Closed position':receipt.strategy_exits_active||receipt.operation==='OPEN'?' · Opened position':'');
+ }
  return receipt.phase+(receipt.error?' · '+receipt.error:'');
 }
 function manualRequestNotice(snapshot){
  const phase=snapshot?.manual_entry?.phase;
- return ['FILLED','REJECTED','FAILED_OR_PENDING'].includes(phase)
-  ?manualRequestLabel(snapshot):'Manual entry queued · awaiting runner and broker confirmation.';
+ return ['REJECTED','FAILED_OR_PENDING'].includes(phase)
+  ?manualRequestLabel(snapshot):phase==='FILLED'?'Manual order confirmed · details below.':'Manual entry queued · awaiting runner and broker confirmation.';
 }
 function createStrategyVisit(){
  let active=false,selection=MODE;
@@ -267,12 +276,16 @@ function configuration(fields,account,preview=false){
  }
  const factor=Number(fields.factor??3);
  if(fields.supertrend!==false&&(!Number.isFinite(factor)||factor<0.1))throw Error('Enter a Supertrend multiplier of at least 0.10.');
- const lots=Number(fields.lots);if(!preview&&(!Number.isInteger(lots)||lots<1))throw Error('Enter whole lots or contracts.');
+ const quantityMode=fields.quantityMode||'QUANTITY',amount=Number(fields.allocationAmount);
+ if(!['QUANTITY','AMOUNT_INR'].includes(quantityMode))throw Error('Choose quantity or INR amount.');
+ if(quantityMode==='AMOUNT_INR'&&(!Number.isFinite(amount)||amount<=0))throw Error('Enter a positive INR amount.');
+ if(quantityMode==='AMOUNT_INR'&&account.broker==='DELTA_INDIA')throw Error('INR allocation requires verified currency conversion. Use contracts for Delta.');
+ const lots=Number(fields.lots);if(quantityMode==='QUANTITY'&&!preview&&(!Number.isInteger(lots)||lots<1))throw Error('Enter whole lots or contracts.');
  if(!preview&&account.broker==='FYERS'&&!(fields.route==='DIRECT'?['MARGIN','INTRADAY','CNC']:['MARGIN','INTRADAY']).includes(fields.product))throw Error('Choose a product.');
  if(!['1 minute','5 minutes','30 minutes'].includes(fields.timeframe))throw Error('Choose 1, 5 or 30 minutes.');
  if(moneyness==='OTM'&&!(Number(fields.premium||40)>0))throw Error('Enter a positive premium target.');
  return {...(account.broker==='MOTILAL_OSWAL'?{ai_market_data_broker:'FYERS',ai_market_data_account:fields.dataAccount}:{}),...bands,ai_sma_retest_required:fields.smaRetest===true,ai_sizing_mode:sizingMode,ai_manual_parent_value:sizingMode==='MANUAL_PARENT'?Number(fields.manualParent):null,...(sizingMode==='MANUAL_PARENT'&&fields.manualParentAt?{ai_manual_parent_entered_at:fields.manualParentAt}:{}),ai_supertrend_enabled:fields.supertrend!==false,ai_indicator_inputs:{length:5,factor,adx_enabled:false},strategy_mode:MODE,broker:account.broker,account_id:account.id,underlying:fields.underlying,timeframe:fields.timeframe,
- mode:fields.execution,ai_calculation_mode:fields.decisionMode||'HYBRID',ai_display_mode:fields.calculationMode||'CANDLES',ai_signal_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_entry_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_option_moneyness:moneyness,lots:preview?null:lots,preview_options:preview,target_premium:Number(fields.premium||40),ai_product:fields.product,
+ mode:fields.execution,ai_calculation_mode:fields.decisionMode||'HYBRID',ai_display_mode:fields.calculationMode||'CANDLES',ai_signal_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_entry_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_option_moneyness:moneyness,lots:quantityMode==='AMOUNT_INR'?null:preview?null:lots,entry_quantity_mode:quantityMode,entry_amount_inr:quantityMode==='AMOUNT_INR'?amount:null,preview_options:preview,target_premium:Number(fields.premium||40),ai_product:fields.product,
  ai_execution_route:fields.route||'OPTIONS',ai_market:context.market,ai_asset:context.asset,ai_parent_hours:context.parentHours,ai_atr_length:context.atrLength,ai_baseline_minutes:30,
  ai_expiry_policy:fields.route!=='DIRECT'&&fields.expiry?'explicit_listed':'nearest_tradable',...(fields.route!=='DIRECT'&&fields.expiry?{ai_expiry:String(fields.expiry)}:{}),ai_reference_value:value,ai_reference_session:fields.session,ai_reference_symbol:fields.underlying,
  ai_reference_evidence:fields.evidence,ai_sma_exit_enabled:fields.sma===true,ai_accept_chart_basis:true};
@@ -321,6 +334,9 @@ function mount(){
  <label class="field renko-ai-wide" data-ai-entry-source><span>Option entry and exit source</span><span class="renko-ai-toggle"><input type="checkbox" data-ai="underlyingSignals" aria-label="Use underlying chart for option entry and exit" checked>Use underlying chart</span><small data-ai-entry-running></small></label>
  <label class="field">Option selection<select data-ai="moneyness"><option value="OTM">OTM · premium target</option><option value="ATM">ATM · nearest strike</option></select><small hidden></small></label>
  <label class="field">Target premium · quote currency<input data-ai="premium" type="number" min="0.01" step="0.01" value="40"></label>
+ <label class="field">Position sizing<select data-ai="quantityMode"><option value="QUANTITY">Quantity</option><option value="AMOUNT_INR">Amount · INR</option></select></label>
+ <label class="field" data-allocation-field hidden>Amount · INR<input data-ai="allocationAmount" type="number" min="0.01" step="0.01" placeholder="e.g. 20000"><small>Share value, option premium or futures notional; not margin. Fees excluded. Execution may exceed this estimate.</small></label>
+ <div class="field renko-ai-wide" data-allocation-panel hidden><button type="button" class="button secondary" data-ai-action="allocation">Calculate quantity</button><small data-allocation-preview role="status">Calculate from the selected broker’s fresh LTP before Start.</small></div>
  <label class="field">Lots<input data-ai="lots" type="number" min="1" step="1" placeholder="Choose quantity"></label>
  <label class="field">Product<select data-ai="product"><option value="">Choose product</option><option value="MARGIN">MARGIN · carry forward</option><option value="INTRADAY">INTRADAY · broker square-off applies</option><option value="CNC">CNC · cash shares</option></select></label>
  <label class="field">Option expiry<select data-ai="expiry"><option value="">Automatic · nearest valid expiry</option></select><small data-ai-expiry hidden></small></label>
@@ -478,7 +494,13 @@ function mount(){
   const supported=account?.broker==='FYERS'&&(v.route==='DIRECT'?['NSE','BSE','MCX']:['NSE','BSE','MCX']).includes(context?.market)||account?.broker==='DELTA_INDIA'&&context?.market==='CRYPTO'||['DHAN','MOTILAL_OSWAL'].includes(account?.broker)&&(v.route==='OPTIONS'||v.route==='DIRECT'&&snapshot?.[account.broker==='DHAN'?'dhan_direct_ready':'motilal_direct_ready']===true)&&['NSE','BSE','MCX'].includes(context?.market);
   panel.querySelector('.renko-ai-capability').textContent=supported?'':!v.underlying?'Select broker and instrument.':'Execution adapter unavailable for this selection.';
   panel.querySelector('[data-ai=product]').closest('label').hidden=account?.broker==='DELTA_INDIA';
-  const quantityField=panel.querySelector('[data-ai=lots]').closest('label');const cash=v.route==='DIRECT'&&(['NSE_EQUITY','BSE_EQUITY'].includes(document.getElementById('renko-market')?.value)||/-EQ$/.test(v.underlying));
+  const amountMode=v.quantityMode==='AMOUNT_INR';
+  panel.querySelector('[data-allocation-field]').hidden=!amountMode;
+  panel.querySelector('[data-allocation-panel]').hidden=!amountMode;
+  panel.querySelector('[data-ai=quantityMode]').disabled=!!snapshot?.running;
+  panel.querySelector('[data-ai=allocationAmount]').disabled=!!snapshot?.running;
+  panel.querySelector('[data-ai-action=allocation]').disabled=snapshot?.amount_allocation_ready!==true||!!snapshot?.running;
+  const quantityField=panel.querySelector('[data-ai=lots]').closest('label');quantityField.hidden=amountMode;const cash=v.route==='DIRECT'&&(['NSE_EQUITY','BSE_EQUITY'].includes(document.getElementById('renko-market')?.value)||/-EQ$/.test(v.underlying));
   if(quantityField.firstChild?.nodeType===3)quantityField.firstChild.textContent=cash?'Quantity · shares':account?.broker==='DELTA_INDIA'?'Contracts':'Lots';
   panel.querySelector('[data-ai=premium]').closest('label').hidden=v.route==='DIRECT'||v.moneyness==='ATM';
   panel.querySelector('[data-ai=moneyness]').closest('label').hidden=v.route==='DIRECT';
@@ -519,7 +541,7 @@ function mount(){
   if(controlStatus)controlStatus.textContent=controlView.status||disabledReasons.join(' ');
   stop.title=controlView.capable?(controlView.blocked?'Resolve the pending position request or broker order.':''):'Backend position-control update required.';
   toggle.title=stop.title;
-  let complete=false,configurationError='';try{configuration(v,account);complete=true;}catch(error){configurationError=error.message;}
+  let complete=false,configurationError='';try{configuration(v,account);if(amountMode&&snapshot?.amount_allocation_ready!==true)throw Error('Amount sizing backend is not loaded. Quantity mode remains available.');complete=true;}catch(error){configurationError=error.message;}
   const startButton=panel.querySelector('[data-ai-action=start]');startButton.title=configurationError;
   let startReason=panel.querySelector('[data-ai-start-reason]');if(!startReason){startReason=document.createElement('p');startReason.dataset.aiStartReason='1';startReason.setAttribute('role','status');startButton.closest('.packet-actions').after(startReason);}
   startReason.textContent=configurationError;startReason.hidden=!configurationError;
@@ -531,7 +553,7 @@ function mount(){
   let manualReady=false;try{manualEntryPayload(snapshot,v,account,manualRoute==='DIRECT'?'LONG':'CE','0'.repeat(32));manualReady=true;}catch{}
   panel.querySelector('[data-ai-action=manual-entry]').disabled=!manualReady;
   const receipt=snapshot?.manual_entry;panel.querySelector('[data-manual-status]').textContent=manualRequestLabel(snapshot);panel.querySelector('[data-manual-status]').title=receipt?.error||'';
-  if(receipt?.request_id&&receipt.request_id===status.dataset.manualRequestId)status.textContent=manualRequestNotice(snapshot);
+  if(receipt?.phase!=='FILLED'&&receipt?.request_id&&receipt.request_id===status.dataset.manualRequestId)status.textContent=manualRequestNotice(snapshot);
   drawCharts(v);
  }
  async function refreshExpiries(){
@@ -904,6 +926,14 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
     panel.querySelector('[data-ai-attachment-status]').textContent=attachmentChoice?'Attachment retained and refreshed: '+attachmentChoice.symbol+' · '+attachmentChoice.quantity+' units · '+attachmentChoice.product+'. Rechecked when you click Attach.':attachmentRows.length+' eligible open position(s). Select one, then Attach.';
     status.textContent='Broker position read complete · no runner or orders started.';return;
    }
+   if(action==='allocation'){
+    const v=values(),account=selected(),key=JSON.stringify([account.id,v.underlying,v.route,v.moneyness,v.premium,v.quantityMode,v.allocationAmount]);
+    const result=await request('prepare',{...configuration(v,account,true),allocation_preview:true});
+    if(JSON.stringify([selected().id,values().underlying,values().route,values().moneyness,values().premium,values().quantityMode,values().allocationAmount])!==key)throw Error('Selection changed; calculate again.');
+    const node=panel.querySelector('[data-allocation-preview]');node.dataset.key=key;node.dataset.at=Date.now();
+    node.textContent=result.allocation.map(r=>r.symbol+' · '+r.quantity.toLocaleString('en-IN')+' units ('+r.lots+' shares/lots) · estimated ₹'+r.estimated_cost_inr.toLocaleString('en-IN',{maximumFractionDigits:2})+' · '+r.basis).join(' | ')+'. Fresh LTP estimate; fees and price movement excluded.';
+    status.textContent='Read-only allocation calculated; no order submitted.';show();return;
+   }
    if(action==='stop'||action==='position-toggle'){
     const operation=action==='stop'?'STOP':positionControlView(snapshot).operation;
     const body=positionControlPayload(snapshot,values(),selected(),operation,root.crypto.randomUUID().replaceAll('-',''),attachmentChoice);
@@ -915,7 +945,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
    if(action==='manual-entry'){
     const id=root.crypto.randomUUID().replaceAll('-',''),direction=panel.querySelector('[data-manual-direction]').value;
     const body=manualEntryPayload(snapshot,values(),selected(),direction,id);
-    if(!root.confirm('Request '+direction+' for '+body.underlying+' · '+body.mode+' · '+snapshot.active_lots+' lots/contracts? Strategy exits will manage the confirmed position.'))return;
+    if(!root.confirm('Request '+direction+' for '+body.underlying+' · '+body.mode+' · '+(snapshot.active_quantity_mode==='AMOUNT_INR'?'₹'+snapshot.active_amount_inr+' allocation (quantity recalculated at fresh LTP)':snapshot.active_lots+' shares/lots/contracts')+'? Strategy exits will manage the confirmed position.'))return;
     snapshot=await request('manual-entry',body);current=snapshot;status.dataset.manualRequestId=id;status.textContent=manualRequestNotice(snapshot);show();return;
    }
    const payload=action==='stop'?{broker:selected()?.broker,account_id:selected()?.id,underlying:values().underlying}:configuration(values(),selected(),action==='preview');
@@ -964,6 +994,11 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
       show();throw Error('Previous holding is closed or changed. Attachment cleared. Press Start to run the strategy without that attachment.');
      }
      payload.ai_attach_position={symbol:attachmentChoice.symbol,quantity:attachmentChoice.quantity,product:attachmentChoice.product};
+    }
+    if(values().quantityMode==='AMOUNT_INR'){
+     const v=values(),node=panel.querySelector('[data-allocation-preview]'),key=JSON.stringify([selected().id,v.underlying,v.route,v.moneyness,v.premium,v.quantityMode,v.allocationAmount]);
+     if(node.dataset.key!==key||Date.now()-Number(node.dataset.at)>30000)throw Error('Calculate quantity from a fresh LTP before Start.');
+     if(!root.confirm(node.textContent+' Quantity is recalculated at each entry. Market execution is not capped at the allocation. Continue?'))return;
     }
     payload.start_requested=true;
     snapshot=await request('start',payload);current=snapshot;

@@ -45,6 +45,9 @@ def configuration(payload,owner):
         entry_gate='underlying_flip' if payload.get('ai_execution_route')=='DIRECT' else 'underlying_flip_premium_bullish',exit_supertrend='underlying' if payload.get('ai_execution_route')=='DIRECT' else 'premium',indicator_brick_mode='Manual',
         sma_exit_enabled=payload.get('ai_sma_exit_enabled',False),sma_price_basis='underlying',
         accept_close_source_renko_approximation=payload.get('ai_accept_chart_basis',False))
+    from strategies.nifty_ai_options.allocation import policy
+    config.update(policy(payload))
+    if config['entry_quantity_mode']=='AMOUNT_INR':config['lots']=1 # constructor seed only; every entry resolves fresh amount
     if config['broker'] in ('FYERS','DHAN','MOTILAL_OSWAL') and config['execution_route']=='DIRECT' and not config['product']:config['product']='INTRADAY'
     if config['broker'] in ('DHAN','MOTILAL_OSWAL'):
         expected='MARGIN' if config['broker']=='DHAN' else 'NORMAL'
@@ -345,7 +348,7 @@ class Service:
             except ImportError:from release_state import snapshot as release_snapshot
             release=release_snapshot()
             result=dict(dhan_direct_ready=True,motilal_direct_ready=True,motilal_fyers_data_ready=True,hybrid_completed_units_ready=True,sma_retest_optional_ready=True,manual_parent_override_ready=True,sma_entry_policy_revision=ENTRY_POLICY_REVISION,sma_only_capable=True,native_broker_integration_ready=True,entry_exit_source_ready=True,live_capability=live_capability(self.owner),phase='PREFLIGHT' if self.launching else 'FAILED' if self.error or (self.process and self.process.poll() not in (None,0)) else 'STREAM' if self.process and self.process.poll() is None else 'STOPPED',error=self.error,revision='ai-renko-options-v1',sizing_policy_revision='selected-native-20261122',parent_contract_revision='parent-candles-20261124',native_acquisition_ready=False,running=bool(self.process and self.process.poll() is None),run_id=self.run['id'] if self.run else None)
-            result.update(multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
+            result.update(amount_allocation_ready=True,multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
             if self.run and not result['running']:
                 claims=[r for r in result['runner_inventory'] if r['run_id']==self.run['id'] and r['state']=='Preparing']
                 if claims:result['phase']='PREFLIGHT'
@@ -467,7 +470,7 @@ class Service:
                     result.update(phase='STOPPED',error=None,exit_code=0)
                 result['position_control']=heartbeat.get('position_control') or dict(mode=(result.get('ownership') or {}).get('management_mode','MANAGED'))
                 if (result.get('ownership') or {}).get('detached_position'):result['position_control']['mode']='DETACHED'
-                result['active_lots']=config.get('lots');result['active_product']=config.get('product')
+                result['active_quantity_mode']=config.get('entry_quantity_mode','QUANTITY');result['active_amount_inr']=config.get('entry_amount_inr');result['active_lots']=config.get('lots');result['active_product']=config.get('product')
                 if result['manual_entry_ready']:
                     try:from .manual_entry import runtime_identity
                     except ImportError:from manual_entry import runtime_identity
@@ -514,6 +517,9 @@ class Service:
 
     def prepare(self,payload):
         config=configuration(payload,self.owner)
+        if payload.get('allocation_preview') is True:
+            from strategies.nifty_ai_options.allocation import preview
+            return dict(allocation=preview(self.owner,config,DATA),read_only=True,orders_submitted=0)
         if config.get('sizing_mode')=='MANUAL_PARENT' and not config.get('sizing_fallback'):
             try:from .native_sizing import remember_manual
             except ImportError:from native_sizing import remember_manual
@@ -575,6 +581,10 @@ class Service:
                 config['runner_scope']=scope(self.instrument)
                 assert_start(config,DATA)
             require_ready(config)
+            if config.get('entry_quantity_mode')=='AMOUNT_INR':
+                from strategies.nifty_ai_options.allocation import preview
+                config['allocation_preview']=preview(self.owner,config,DATA)
+                config['lots']=min(r['lots'] for r in config['allocation_preview'])
             if self.launching or self.snapshot()['running']:raise ValueError('AI runner already running')
             legacy=self.legacy.snapshot()
             if legacy.get('running') or legacy.get('position') or legacy.get('pending'):raise ValueError('Selected legacy runner is active or recovering; it remains untouched')

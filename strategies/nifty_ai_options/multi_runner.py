@@ -206,6 +206,9 @@ def coordinated_submit(method):
  @functools.wraps(method)
  def wrapped(self,action,*args,**kwargs):
   c=getattr(self,'runner_config',{})
+  if c.get('entry_quantity_mode')=='AMOUNT_INR':
+   from strategies.nifty_ai_options.allocation import apply
+   apply(self,action,args or ((kwargs['quote'],) if 'quote' in kwargs else ()))
   if not c.get('runner_scope'):return method(self,action,*args,**kwargs)
   entry=action.get('action') in ('BUY','OPEN_LONG','OPEN_SHORT')
   # Exits never wait for a different instrument's entry acknowledgement.

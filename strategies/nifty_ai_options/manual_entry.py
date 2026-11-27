@@ -90,7 +90,7 @@ class ManualDispatcher:
             own=self.executor.state.get('position')
             if self.executor.state.get('pending') or not own or own.get('symbol')!=action['position']['symbol']:raise RuntimeError('Manual fill is unresolved; retained for reconciliation')
             if self.engine.position is not None:self.engine.position['entry_confirmed_at']=self.clock()
-            self.inbox.update(request,'FILLED',symbol=own['symbol'],quantity=own.get('quantity'),fill_price=own.get('fill_price',own.get('entry_price')),order_id=result.get('order_id'),strategy_exits_active=True)
+            self.inbox.update(request,'FILLED',operation='OPEN',confirmed_at=self.clock(),symbol=own['symbol'],quantity=own.get('quantity'),fill_price=own.get('fill_price',own.get('entry_price')),order_id=result.get('order_id'),strategy_exits_active=True)
             self.pending=None
         except Exception as error:
             self.inbox.update(request,'FAILED_OR_PENDING',error=str(error) if isinstance(error,(ValueError,RuntimeError)) else 'Manual entry result requires reconciliation')
