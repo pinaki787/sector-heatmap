@@ -47,6 +47,7 @@ def inspect(config,delta):
     if not config.get('reference_evidence') or not config.get('reference_session'):raise ValueError('Dated native parent reference required')
     if isinstance(config.get('lots'),bool) or not isinstance(config.get('lots'),int) or config['lots']<1:raise ValueError('Explicit whole contracts required')
     meta=perpetual_contract(delta.product(config['underlying']))
+    if config.get('execution_mode')=='LIVE' and config['execution_route']=='DIRECT':meta['collateral_policy']='BROKER_CONFIGURED_MARGIN'
     engine=DirectStrategy(config) if config['execution_route']=='DIRECT' else Strategy(config)
     return dict(read_only=True,orders_submitted=0,underlying=config['underlying'],instrument=meta,spot_brick=engine.spot_size,execution_route=config['execution_route'],stream_started=False,entry_order_type='market_order',entry_execution_policy=ENTRY_POLICY_REVISION)
 
@@ -74,6 +75,11 @@ def preflight(args):
         if config.get('execution_mode')=='LIVE':
             symbols=[c['symbol'] for c in summary.get('contracts',{}).values()] if config['execution_route']=='OPTIONS' else [config['underlying']]
             summary['live_readiness']=live_readiness(delta,symbols)
+            if config['execution_route']=='DIRECT':
+                from strategies.nifty_ai_options.delta_entry_policy import read_depth
+                from strategies.nifty_ai_options.delta_margin import requirement
+                quote=delta.ticker(config['underlying'])
+                summary['margin_preflight']=requirement(delta,delta.product(config['underlying']),config['lots'],quote)
         atomic(Path(args.output)/'preflight.json',summary);print(json.dumps(summary,indent=2))
     finally:delta.requester.close()
 

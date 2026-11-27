@@ -31,6 +31,30 @@ class RetryTests(unittest.TestCase):
   return dict(result=dict(symbol='BTCUSD',last_updated_at=100000000,buy=[dict(price=bid,size=size)],sell=[dict(price=ask,size=size)]))
  def submit(self):
   return self.e.submit(dict(action='OPEN_LONG',timestamp=100,position=dict(symbol='BTCUSD',underlying='BTCUSD',product_id=27,side='LONG',entry_timestamp=100)),dict(symbol='BTCUSD',bid=99,ask=102,exchange_at=100,received_at=100))
+ def test_direct_entry_selects_verified_leveraged_policy(self):
+  from unittest.mock import patch
+  action=dict(action='OPEN_LONG',timestamp=100,position=dict(symbol='BTCUSD',underlying='BTCUSD',product_id=27,side='LONG',entry_timestamp=100,execution_route='DIRECT'))
+  self.responses=['fill']
+  self.e.submit(action,dict(symbol='BTCUSD',bid=100,ask=101,exchange_at=100))
+  self.assertEqual(self.calls[0][1]['collateral_policy'],'BROKER_CONFIGURED_MARGIN')
+ def test_local_funds_rejection_clears_pending_without_retry(self):
+  from strategies.renko_supertrend.delta_execution import EntryFundsRejected
+  self.n.submit.side_effect=EntryFundsRejected(Decimal('368.45'),Decimal('166.24'),'USD')
+  r=self.submit()
+  self.assertEqual(r['reason'],'ENTRY_FUNDS_UNAVAILABLE');self.assertEqual(r['orders_submitted'],0)
+  self.assertIsNone(self.e.state['pending']);self.assertIsNone(self.e.state['position'])
+  self.n.submit.assert_called_once();self.n.reconcile.assert_not_called()
+  saved=json.loads(self.e.path.read_text());self.assertEqual(saved['entry_attempts'][-1]['attempts'][-1]['required'],'368.45')
+ def test_unavailable_read_only_margin_does_not_become_unknown_order(self):
+  from strategies.renko_supertrend.delta_execution import EntryMarginUnavailable
+  self.n.submit.side_effect=EntryMarginUnavailable('Leverage snapshot unavailable before submission')
+  r=self.submit();self.assertEqual(r['reason'],'ENTRY_MARGIN_UNAVAILABLE')
+  self.assertEqual(r['orders_submitted'],0);self.assertIsNone(self.e.state['pending'])
+  self.n.submit.assert_called_once();self.n.reconcile.assert_not_called()
+ def test_unknown_submission_error_keeps_pending(self):
+  self.n.submit.side_effect=TimeoutError('unknown acknowledgement')
+  with self.assertRaises(TimeoutError):self.submit()
+  self.assertIsNotNone(self.e.state['pending']);self.n.submit.assert_called_once()
  def test_one_retry_after_confirmed_zero_fill_and_flat(self):
   r=self.submit();self.assertEqual(r['filled_quantity'],2);self.assertEqual(len(self.calls),2)
   self.assertEqual(self.calls[1][0][4],self.calls[0][0][4]+'_r1')

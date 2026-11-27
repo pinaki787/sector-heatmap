@@ -162,7 +162,15 @@ class DeltaExecution:
             self.save()  # Durable retry identity and budget precede native POST.
             kwargs=dict(reduce_only=not entry)
             if entry or p.get('execution_route')=='DIRECT':kwargs['order_type']='market_order'
-            self.native.submit(symbol,quantity,side,quote,native_key,p['underlying'],action.get('reason','AI_RENKO_CONFIRMED_FLIP'),**kwargs)
+            if entry and p.get('execution_route')=='DIRECT':kwargs['collateral_policy']='BROKER_CONFIGURED_MARGIN'
+            from strategies.renko_supertrend.delta_execution import EntryFundsRejected,EntryMarginUnavailable
+            try:
+                self.native.submit(symbol,quantity,side,quote,native_key,p['underlying'],action.get('reason','AI_RENKO_CONFIRMED_FLIP'),**kwargs)
+            except (EntryFundsRejected,EntryMarginUnavailable) as error:
+                if not entry:raise
+                self.state['pending']['attempts'][-1].update(outcome='LOCAL_FUNDS_REJECTED',orders_submitted=0,required=getattr(error,'required',None),available=getattr(error,'available',None),currency=getattr(error,'currency',None))
+                result=self._no_fill('ENTRY_FUNDS_UNAVAILABLE' if isinstance(error,EntryFundsRejected) else 'ENTRY_MARGIN_UNAVAILABLE',str(error));result['orders_submitted']=0
+                return result
             self.state['pending']['stage']='SUBMITTED_OR_UNCERTAIN';self.save()
             deadline=time.monotonic()+getattr(self,'confirmation_timeout',20);last=None
             while time.monotonic()<deadline:

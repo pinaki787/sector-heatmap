@@ -188,7 +188,7 @@ class DeltaIndia:
             os.replace(tmp,mcp_path);return self.status()
     @serialized_delta_request
     def _private(self,method,path,params=None,body=None,credentials=None):
-        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders','/v2/orders/history') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path))) or (method in ('POST','PUT','DELETE') and path=='/v2/orders')
+        allowed=(method=='GET' and (path in ('/v2/wallet/balances','/v2/positions','/v2/positions/margined','/v2/fills','/v2/orders','/v2/orders/history') or re.fullmatch(r'/v2/orders/client_order_id/[a-zA-Z0-9_-]{1,32}',path) or re.fullmatch(r'/v2/products/[1-9][0-9]*/orders/leverage',path))) or (method in ('POST','PUT','DELETE') and path=='/v2/orders')
         if not allowed:raise ValueError('Unsupported Delta India authenticated endpoint.')
         c=credentials or self._credentials();key,secret=c.get('DELTA_INDIA_API_KEY'),c.get('DELTA_INDIA_API_SECRET')
         if not key or not secret:raise PermissionError('Delta India is not connected. Enter India API key and secret in Connection settings.')
@@ -305,7 +305,7 @@ class DeltaIndia:
             result=dict(broker='DELTA_INDIA',complete=True,available_types=sorted({r['contract_type'] for r in instruments}),instruments=instruments,listed_count=len(unique),supported_live_count=len(instruments),fetched_at=self.clock(),forex_supported=False,forex_message='Only listed supported India crypto derivatives are selectable. This integration provides no forex pair routing.')
             self.cache[cache_key]=(self.clock(),result);return deepcopy(result)
     def _metadata(self,r):
-        return {k:r.get(k) for k in ('id','symbol','description','contract_type','launch_time','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate','initial_margin','maintenance_margin','product_specs')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
+        return {k:r.get(k) for k in ('id','symbol','description','contract_type','launch_time','contract_value','contract_unit_currency','notional_type','is_quanto','tick_size','state','trading_status','settlement_time','strike_price','taker_commission_rate','maker_commission_rate','initial_margin','maintenance_margin','product_specs','max_leverage_notional','default_leverage','initial_margin_scaling_factor','position_size_limit','position_notional_limit')}|{'underlying':(r.get('underlying_asset') or {}).get('symbol'),'quoting_currency':(r.get('quoting_asset') or {}).get('symbol'),'settlement_currency':(r.get('settling_asset') or {}).get('symbol')}
     def product(self,symbol, *, chart=False):
         supported = CHART_SUPPORTED if chart else SUPPORTED
         if not isinstance(symbol,str) or not re.fullmatch(r'[A-Z0-9][A-Z0-9_-]{0,79}',symbol):raise ValueError('Select an exact listed Delta India symbol.')

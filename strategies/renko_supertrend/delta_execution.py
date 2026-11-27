@@ -7,6 +7,15 @@ from copy import deepcopy
 from .delta_contracts import owned_order, order_intent, position, perpetual_contract
 from decimal import Decimal
 
+class EntryMarginUnavailable(ValueError):
+    """A read-only margin prerequisite failed before native submission."""
+    pass
+
+class EntryFundsRejected(ValueError):
+    """Known local rejection raised before durable native intent or broker POST."""
+    def __init__(self,required,available,currency):
+        self.required,self.available,self.currency=str(required),str(available) if available is not None else None,currency
+        super().__init__('Entry not submitted: verified collateral policy requires '+format(required,'.2f')+' '+currency+'; available '+(format(available,'.2f') if available is not None else 'unverified')+'.')
 
 class Execution:
     def __init__(self, delta):
@@ -59,7 +68,7 @@ class Execution:
             raise ValueError('Order is not owned by the Renko strategy.')
         return owned_order(owned, self.account_identity)
 
-    def submit(self, symbol, size, side, quote, token, signal_symbol, reason, reduce_only=None, price_limit=None, order_type='limit_order'):
+    def submit(self, symbol, size, side, quote, token, signal_symbol, reason, reduce_only=None, price_limit=None, order_type='limit_order', collateral_policy='FULL_NOTIONAL'):
         """Only a server-owned runner may invoke this; no client runner flag exists."""
         self.authenticate()
         with self.delta.lock:
@@ -87,9 +96,16 @@ class Execution:
                 meta=perpetual_contract(product)
                 funds=self.delta._private('GET','/v2/wallet/balances')['result']
                 balances=[Decimal(str(w['available_balance'])) for w in funds if (w.get('asset_symbol') or (w.get('asset') or {}).get('symbol'))==meta['settlement_currency']]
-                required=Decimal(str(size))*Decimal(meta['contract_value'])*Decimal(str(quote['ask']))*(1+Decimal(str(meta['taker_commission_rate']))*Decimal('1.18')+Decimal('.01'))
+                if collateral_policy=='BROKER_CONFIGURED_MARGIN':
+                    from strategies.nifty_ai_options.delta_margin import requirement
+                    try:margin=requirement(self.delta,product,size,quote)
+                    except (ValueError,ConnectionError,KeyError,TypeError) as error:raise EntryMarginUnavailable('Entry not submitted: verified broker margin unavailable · '+str(error)) from None
+                    required=Decimal(margin['required'])
+                elif collateral_policy=='FULL_NOTIONAL':
+                    required=Decimal(str(size))*Decimal(meta['contract_value'])*Decimal(str(quote['ask']))*(1+Decimal(str(meta['taker_commission_rate']))*Decimal('1.18')+Decimal('.01'))
+                else:raise ValueError('Unknown Delta collateral policy')
                 if len(balances)!=1 or not balances[0].is_finite() or balances[0]<required:
-                    raise ValueError('Full perpetual notional, fees/GST and reserve must be covered by verified same-currency funds.')
+                    raise EntryFundsRejected(required,balances[0] if len(balances)==1 and balances[0].is_finite() else None,meta['settlement_currency'])
             if not payload['reduce_only']:
                 if self.delta._position(product['id']) != 0:
                     raise ValueError('Existing broker position blocks a new Renko entry.')
