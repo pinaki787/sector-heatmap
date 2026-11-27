@@ -55,14 +55,14 @@ class FyersPositions:
   positions,orders=self.books()
   if owned is None:return dict(flat=True)
   symbol=owned['symbol'];product=owned.get('product',self.config['product'])
-  if any(o.get('symbol')==symbol and o.get('status') in (4,6) for o in orders):raise ValueError('Open broker order blocks position control')
+  if any(o.get('symbol')==symbol and o.get('status') not in (1,2,5) for o in orders):raise ValueError('Open or unknown broker order blocks position control')
   matching=[p for p in positions if p.get('symbol')==symbol and p.get('productType')==product]
   if len(matching)>1:raise ValueError('Ambiguous broker position')
-  qty=whole(matching[0].get('netQty',0)) if matching else 0
+  qty=whole(matching[0].get('netQty')) if matching else 0
   expected=whole(owned['quantity'])*(-1 if owned.get('side')=='SHORT' else 1)
   if flat is True and qty!=0:raise ValueError('Broker has not confirmed square-off')
   if flat is False and qty!=expected or flat is None and qty not in (0,expected):raise ValueError('Broker quantity differs from strategy ownership')
-  return dict(flat=qty==0,quantity=qty)
+  return dict(flat=qty==0,quantity=qty,checked_at=time.time(),broker='FYERS',account=self.config.get('account'))
 
 class DeltaPositions:
  def __init__(self,delta,config,native):self.delta=delta;self.config=config;self.native=native
@@ -106,4 +106,4 @@ class DeltaPositions:
   expected=whole(owned['quantity'])*(-1 if owned.get('side')=='SHORT' else 1)
   if flat is True and qty!=0:raise ValueError('Delta has not confirmed square-off')
   if flat is False and qty!=expected or flat is None and qty not in (0,expected):raise ValueError('Delta signed ownership differs')
-  return dict(flat=qty==0,quantity=qty)
+  return dict(flat=qty==0,quantity=qty,checked_at=self.delta.clock(),broker='DELTA_INDIA',account=self.config.get('account'))

@@ -11,7 +11,7 @@ function context(href){
  }
  if(q.get('chartContext')!=='renko'||q.get('aiRenko')!=='1'||!run)return null;
  if(!/^[A-Za-z0-9_-]{1,80}$/.test(run)||!/^[a-f0-9]{32}$/.test(q.get('chartSource')||''))throw Error('Invalid owned AI chart context.');
- return {run,account:q.get('chartSource'),frame:Number(q.get('interval')),brick:Number(q.get('brick'))};
+ return {run,account:q.get('chartSource'),frame:Number(q.get('interval')),brick:Number(q.get('brick')),...(q.has('aiSourceSymbol')?{sourceSymbol:q.get('aiSourceSymbol')}:{})};
 }
 function request(path,href,symbol,displayType='Renko'){
  const c=context(href);if(!c||!['Renko','Candles'].includes(displayType))return null;
@@ -20,7 +20,8 @@ function request(path,href,symbol,displayType='Renko'){
  const original=new URLSearchParams(path.split('?')[1]);
  if(Number(original.get('interval'))!==c.frame)throw Error('Runtime charts retain the source timeframe captured at Start.');
  if(original.has('before'))throw Error('Runtime charts retain their exact initialization seed.');
- const q=new URLSearchParams({run_id:c.run,symbol,frame:String(c.frame)});
+ const q=new URLSearchParams({run_id:c.run,symbol:c.sourceSymbol||symbol,frame:String(c.frame)});
+ if(c.sourceSymbol)q.set('display_symbol',symbol);
  if(original.has('after'))q.set('after',original.get('after'));
  return {kind:'history',path:'/api/renko-supertrend/ai-options/chart-source?'+q};
 }

@@ -348,7 +348,7 @@ class Service:
             except ImportError:from release_state import snapshot as release_snapshot
             release=release_snapshot()
             result=dict(dhan_direct_ready=True,motilal_direct_ready=True,motilal_fyers_data_ready=True,hybrid_completed_units_ready=True,sma_retest_optional_ready=True,manual_parent_override_ready=True,sma_entry_policy_revision=ENTRY_POLICY_REVISION,sma_only_capable=True,native_broker_integration_ready=True,entry_exit_source_ready=True,live_capability=live_capability(self.owner),phase='PREFLIGHT' if self.launching else 'FAILED' if self.error or (self.process and self.process.poll() not in (None,0)) else 'STREAM' if self.process and self.process.poll() is None else 'STOPPED',error=self.error,revision='ai-renko-options-v1',sizing_policy_revision='selected-native-20261122',parent_contract_revision='parent-candles-20261124',native_acquisition_ready=False,running=bool(self.process and self.process.poll() is None),run_id=self.run['id'] if self.run else None)
-            result.update(amount_allocation_ready=True,multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
+            result.update(dhan_chart_identity_ready=True,amount_allocation_ready=True,multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
             if self.run and not result['running']:
                 claims=[r for r in result['runner_inventory'] if r['run_id']==self.run['id'] and r['state']=='Preparing']
                 if claims:result['phase']='PREFLIGHT'
@@ -484,7 +484,16 @@ class Service:
     def chart_source(self,query):
         try:from .chart_source import read_source
         except ImportError:from chart_source import read_source
-        return read_source(DATA,self.owner,query.get('run_id'),query.get('symbol'),int(query.get('frame','0')),after=query.get('after'))
+        value=read_source(DATA,self.owner,query.get('run_id'),query.get('symbol'),int(query.get('frame','0')),after=query.get('after'))
+        if query.get('display_symbol'):
+            if owner_broker(self.owner)!='DHAN':raise ValueError('Mapped runtime source requires the selected Dhan account')
+            from strategies.nifty_ai_options.dhan_chart_binding import identity,display_payload
+            from strategies.nifty_ai_options.native_indian import bound_native
+            config=json.loads((DATA/'runs'/self.owner/query['run_id']/'config.json').read_text())
+            adapter=bound_native(dict(config,execution_route='OPTIONS',product='MARGIN'))
+            if identity(adapter.native,query['symbol'])!=query['display_symbol']:raise ValueError('Dhan chart display differs from its exact native master')
+            value=display_payload(value,query['symbol'],query['display_symbol'])
+        return value
 
     def search(self,query,market,route='OPTIONS'):
         broker=owner_broker(self.owner)

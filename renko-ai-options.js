@@ -205,6 +205,29 @@ function marketWaitLabel(snapshot){
  return ({WAITING_FOR_MARKET:'Waiting for market open · runner active',WAITING_FOR_MARKET_STATUS:'Waiting for broker market status · orders paused'})[snapshot.heartbeat?.market_state]||null;
 }
 
+function dhanChartSymbol(symbol,rows,market=''){
+ if(/^(?:IDX_I|MCX_COMM|(?:NSE|BSE)_(?:EQ|FNO|CURRENCY)):[0-9]{1,12}$/.test(symbol))return symbol;
+ const match=String(symbol||'').match(/^(NSE|BSE):(.+)$/);
+ if(!match||!Array.isArray(rows))throw Error('Selected Dhan chart instrument needs an exact catalog mapping.');
+ const ticker=({'NIFTY50-INDEX':'NIFTY','NIFTYBANK-INDEX':'BANKNIFTY','SENSEX-INDEX':'SENSEX'}[match[2]]||match[2].replace(/-EQ$/,''));
+ const wanted=String(market).includes('INDEX')||match[2].endsWith('-INDEX')?'IDX_I':String(market).includes('EQUITY')||String(market).includes('STOCK')?match[1]+'_EQ':null;
+ const found=rows.filter(r=>r.exchange===match[1]&&r.symbol===ticker&&(!wanted||r.segment===wanted)&&/^(?:IDX_I|(?:NSE|BSE)_(?:EQ|FNO)):[0-9]{1,12}$/.test(r.id));
+ const ids=[...new Set(found.map(r=>r.id))];
+ if(ids.length!==1)throw Error('Exact selected Dhan instrument is unavailable or ambiguous; unrelated chart not loaded.');
+ return ids[0];
+}
+function createDhanChartResolver(read,clock=()=>Date.now()){
+ const cache=new Map();
+ return function(account,symbol,market=''){
+  if(/^(?:IDX_I|MCX_COMM|(?:NSE|BSE)_(?:EQ|FNO|CURRENCY)):[0-9]{1,12}$/.test(symbol))return {symbol};
+  const key=JSON.stringify([account,symbol,market]);let row=cache.get(key);
+  if(row&&(row.symbol||clock()-row.at<60000))return row;
+  row={at:clock(),pending:true};cache.set(key,row);
+  row.promise=Promise.resolve().then(()=>read(account,symbol,market)).then(rows=>{row.symbol=dhanChartSymbol(symbol,rows,market);row.pending=false;return row.symbol;},error=>{row.error=error.message||'Dhan instrument lookup unavailable';row.pending=false;return null;}).catch(error=>{row.error=error.message;row.pending=false;return null;});
+  return row;
+ };
+}
+
 function selectionFrameUrl(frame,baseUrl,makeNavigation=()=>root.crypto.randomUUID()){
  if(frame.dataset.selectionBase!==baseUrl||!frame.dataset.selectionNavigation||(typeof frame.getAttribute==='function'&&!frame.getAttribute('src'))){
   frame.dataset.selectionBase=baseUrl;frame.dataset.selectionNavigation=makeNavigation();
@@ -603,6 +626,13 @@ function mount(){
 
   }
  }
+ const resolveDhanChart=createDhanChartResolver(async(account,symbol,market)=>{
+  const params=new URLSearchParams({q:symbol,offset:'0',segment:String(market).includes('INDEX')?'IDX_I':''});
+  const response=await fetch('/broker-workspace/'+encodeURIComponent(account)+'/api/chart-workspace/symbols?'+params,{cache:'no-store',signal:AbortSignal.timeout(8000)});
+  if(!response.ok)throw Error('Selected Dhan account instrument lookup failed; chart not loaded.');
+  const result=await response.json();if(!Array.isArray(result.symbols))throw Error('Dhan instrument catalog unavailable.');
+  return result.symbols;
+ });
  function renderExitNotices(){
   let banner=charts.querySelector('[data-exit-notices]');
   if(!banner){banner=document.createElement('div');banner.dataset.exitNotices='1';banner.setAttribute('role','alert');banner.style.cssText='margin:12px 0;padding:12px 16px;border:1px solid #c96c55;border-left:4px solid #ef866c;border-radius:7px;background:#321c20;color:#ffe1d8;overflow-wrap:anywhere';charts.querySelector('h2').after(banner);}
@@ -671,10 +701,26 @@ function mount(){
    const sourceRun=!(account.broker==='MOTILAL_OSWAL')&&snapshot?.running&&(view.frozen||item.owned)&&snapshot?.chart_source_series?.some(c=>c.symbol===item.symbol&&c.frame===Number.parseInt(item.timeframe||view.timeframe||v.timeframe,10)&&c.brick===item.brick)?current?.run_id:null;
    const split=account.broker==='MOTILAL_OSWAL';
    const dataAccount=split?(root.BrokerForms?.accounts?.()||[]).find(a=>a.id===v.dataAccount&&a.broker==='FYERS'):account;
-   const mapped=split?(i===0?((mappingPreview?.underlying===item.symbol&&mappingPreview?.market_data_account===dataAccount?.id?mappingPreview.market_data_underlying:null)||(['NSE','BSE'].includes(item.symbol.split(':')[0])?item.symbol:null)):Object.values(contracts).find(c=>c.symbol===item.symbol&&c.market_data_account===dataAccount?.id)?.market_data_symbol):item.symbol;
+   let mapped=split?(i===0?((mappingPreview?.underlying===item.symbol&&mappingPreview?.market_data_account===dataAccount?.id?mappingPreview.market_data_underlying:null)||(['NSE','BSE'].includes(item.symbol.split(':')[0])?item.symbol:null)):Object.values(contracts).find(c=>c.symbol===item.symbol&&c.market_data_account===dataAccount?.id)?.market_data_symbol):item.symbol;
+   if(account.broker==='DHAN'&&mapped){
+    const binding=resolveDhanChart(account.id,mapped,document.getElementById('renko-market')?.value||'');
+    if(!binding.symbol){
+     frame.removeAttribute('src');frame.hidden=true;const note=card.querySelector('.chart-load-status');note.hidden=false;note.textContent=binding.error||'Resolving the selected Dhan instrument…';
+     if(binding.pending&&!binding.redraw){binding.redraw=true;binding.promise.finally(()=>{if(selected()?.id===account.id&&values().underlying===view.underlying)drawCharts(values());});}
+     continue;
+    }
+    mapped=binding.symbol;
+   }
    if(!dataAccount||!mapped){frame.removeAttribute('src');frame.hidden=true;card.querySelector('.chart-load-status').hidden=false;card.querySelector('.chart-load-status').textContent='Preview contracts to verify this instrument in the selected FYERS data account.';continue;}
    const baseUrl=root.RenkoSupertrend.embeddedRenkoChartUrl(location.href,{accountId:dataAccount.id,broker:dataAccount.broker,symbol:mapped,instance:'ai-'+(split?'motilal-'+account.id+'-':'')+(sourceRun||'draft')+'-'+i+framePolicy.instanceSuffix,timeframe:item.timeframe||view.timeframe||v.timeframe,brick:item.brick,ai:true,runId:split?null:sourceRun});
    const chartLink=new URL(baseUrl);
+   if(account.broker==='DHAN'&&mapped!==item.symbol){
+    chartLink.searchParams.set('chartInstance',chartLink.searchParams.get('chartInstance')+'-'+mapped.replace(/[^A-Za-z0-9_-]/g,'-'));
+    if(sourceRun){
+     if(snapshot?.dhan_chart_identity_ready!==true){frame.removeAttribute('src');frame.hidden=true;const note=card.querySelector('.chart-load-status');note.hidden=false;note.textContent='Dhan runtime chart binding update is pending; unrelated history will not be substituted.';continue;}
+     chartLink.searchParams.set('aiSourceSymbol',item.symbol);
+    }
+   }
    // A restarted exact run reseeds its rolling history and brick indexes.
    // Reconcile once from the new worker session; never mix its incremental tail
    // into the previous session's immutable confirmed-brick cache.
@@ -697,7 +743,7 @@ function mount(){
    const url=selectionFrameUrl(frame,chartLink.href);
    const publishMarkers=()=>{const params=new URL(url).searchParams;
     const bandSettings=['sma','ema'].filter(k=>v[k+'Entry']||v[k+'Exit']).map(k=>({kind:k.toUpperCase(),period:Number(v[k+'Period']||30)}));
-const ownershipMappings=split?Object.fromEntries([[item.symbol,mapped],...(mappingPreview?.underlying===view.underlying&&mappingPreview?.market_data_account===dataAccount.id&&mappingPreview.market_data_underlying?[[view.underlying,mappingPreview.market_data_underlying]]:[]),...Object.values(contracts).filter(c=>c.market_data_account===dataAccount.id&&c.market_data_symbol).map(c=>[c.symbol,c.market_data_symbol])]):{};
+const ownershipMappings=account.broker==='DHAN'?{[item.symbol]:mapped}:split?Object.fromEntries([[item.symbol,mapped],...(mappingPreview?.underlying===view.underlying&&mappingPreview?.market_data_account===dataAccount.id&&mappingPreview.market_data_underlying?[[view.underlying,mappingPreview.market_data_underlying]]:[]),...Object.values(contracts).filter(c=>c.market_data_account===dataAccount.id&&c.market_data_symbol).map(c=>[c.symbol,c.market_data_symbol])]):{};
 frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-runtime-markers',account:dataAccount.id,instance:params.get('chartInstance'),symbol:mapped,execution_account:account.id,execution_symbol:item.symbol,indicator_factor:selectedFactor,chart_visible:selectedTab,band_settings:bandSettings,run_rules:i===0?capturedStrategyRules(snapshot,item.symbol,account.id):null,band_basis:i===0?((snapshot?.running?snapshot.signal_source==='PREMIUM':v.underlyingSignals===false)?'CHART':'UNDERLYING'):'PREMIUM',run_id:sourceRun,runtime_frame:Number.parseInt(item.timeframe||view.timeframe||v.timeframe,10),run_pnl:i===0&&snapshot?.underlying===item.symbol?snapshot?.trade_journal?.current_run:null,run_running:!!snapshot?.running,active_position:snapshot?.running&&!snapshot?.ownership?.pending?snapshot?.heartbeat?.position:null,active_trade:snapshot?.running?(snapshot?.trade_journal?.rows||[]).find(row=>row.status==='OPEN'&&row.symbol===snapshot?.heartbeat?.position?.symbol&&(row.managed_run||row.run_id)===snapshot.run_id):null,runtime_bands:sourceRun&&i===0?snapshot?.heartbeat?.moving_bands:null,events:snapshot?.underlying===item.symbol?(snapshot?.markers||[]).map(event=>({...event,underlying:snapshot.underlying})):(sourceRun?(snapshot?.markers||[]):[])},ownershipMappings),location.origin);};
    if(!selectedTab){
     if(frame.hasAttribute('src')&&frame.getAttribute('src')!==url)frame.removeAttribute('src');
@@ -1034,7 +1080,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
  strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={dhanChartSymbol,createDhanChartResolver,runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

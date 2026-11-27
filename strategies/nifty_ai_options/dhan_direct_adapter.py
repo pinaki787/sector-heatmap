@@ -57,4 +57,4 @@ class DhanDirectAdapter(NativeIndianAdapter):
   quantity=sum(int(p['netQty']) for p in rows)
   if any(p.get('productType')!=self.product for p in rows):raise ValueError('Dhan product differs from direct ownership')
   if flat is True and quantity!=0 or flat is False and quantity!=expected or flat is None and quantity not in (0,expected):raise ValueError('Signed Dhan quantity differs from ownership')
-  return dict(flat=quantity==0,quantity=quantity,broker='DHAN',account=self.account)
+  return dict(flat=quantity==0,quantity=quantity,broker=self.broker,account=self.account,checked_at=self.native.clock())

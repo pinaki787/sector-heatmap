@@ -89,7 +89,7 @@ class PositionManager:
  @property
  def blocked(self):return self.mode in ('DETACHED','STOPPING','RECOVERY_REQUIRED','STOPPED')
  def status(self):
-  return dict(revision=REVISION,mode=self.mode,entries_paused=self.entry_blocked,
+  return dict(external_reconciliation=getattr(getattr(self,'external_close_idle',None),'status',None),revision=REVISION,mode=self.mode,entries_paused=self.entry_blocked,
               detached_position=self.executor.state.get('detached_position'),pending_request=self.request)
  def update(self,phase,**details):
   if phase in ('STOPPED','DETACHED','ATTACHED'):
@@ -103,6 +103,10 @@ class PositionManager:
   self.mode=mode;self.entry_blocked=mode!='MANAGED' or bool(self.config.get('_managed_resume'))
   self.executor.state['management_mode']=mode;self.executor.save();clear_entry_signal(self.engine)
  def poll(self,*,busy=False):
+  if not hasattr(self,'external_close_idle'):
+   from strategies.nifty_ai_options.external_close_idle import ExternalCloseIdle
+   self.external_close_idle=ExternalCloseIdle(self)
+  if self.external_close_idle.poll(busy=busy):return True
   if self.request is None or self.request.get('phase') in TERMINAL:
    path=self.directory/'position-controls/command.json'
    if not path.exists():return False

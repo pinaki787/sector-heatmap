@@ -49,7 +49,7 @@
     return true;
   }
 
-  const sharedChartParameters = ['chartContext', 'chartInstance', 'aiNavigation', 'aiRenko', 'aiSizingPending', 'symbol', 'interval', 'type', 'method', 'brick', 'renkoSource', 'compareDisplay', 'comparisons', 'compareStyles',
+  const sharedChartParameters = ['chartContext', 'chartInstance', 'aiNavigation', 'aiRenko', 'aiSourceSymbol', 'aiSizingPending', 'symbol', 'interval', 'type', 'method', 'brick', 'renkoSource', 'compareDisplay', 'comparisons', 'compareStyles',
     'projection', 'wicks', 'compare', 'lines', 'timezone', 'scale', 'axis', 'lineSource',
     'previousClose', 'brokerPrice', 'lineStyle', 'lineGradient', 'candleStyle', 'renkoProjectionStyle', 'viewport'];
   const usesMacKeys = /^Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
@@ -27582,6 +27582,12 @@
     }
     restoredViewAnchor = undefined;
     const embeddedRenko = linkedChart?.chartContext === 'renko';
+    if (embeddedRenko && (!linkedChart.symbol || !validChartSymbol(linkedChart.symbol))) {
+      throw new Error('The strategy chart needs an exact selected-broker instrument. Refresh the strategy section; an unrelated saved chart will not be restored.');
+    }
+    if (embeddedRenko && aiSelectionParams.get('chartSource') && context.workspace.id !== aiSelectionParams.get('chartSource')) {
+      throw new Error('The strategy chart account differs from the selected broker account.');
+    }
     chartStoragePrefix = 'sector-pulse:chart-workspace:' + context.username + (embeddedRenko ? ':renko:' + encodeURIComponent(linkedChart.chartInstance || 'default') + ':' : ':');
     key = chartStoragePrefix + (yahooTicker ? 'yahoo:' + yahooTicker : context.workspace.id);
     instrumentHistory.clear();

@@ -66,6 +66,11 @@ def recorded_fill(action,result,marker=None,recorded_at=None):
 
 def ingest(db,owner,run,config,record,data,markers):
  action=record.get('action') or {};result=record.get('result') or {};operation=action.get('action')
+ if operation=='EXTERNAL_FLAT':
+  proof=record.get('broker_reconciliation') or {};position=action.get('position') or {}
+  if config.get('execution_mode')!='LIVE' or proof.get('account')!=owner or proof.get('broker')!=config.get('broker') or proof.get('symbol')!=position.get('symbol') or proof.get('quantity')!=0 or result.get('broker_flat_confirmed') is not True or result.get('orders_submitted')!=0:return
+  db.execute("UPDATE trades SET status='CLOSED',exit_time=?,exit_time_basis=?,exit_reason='EXTERNAL_BROKER_CLOSE',latest_price=NULL,latest_time=NULL WHERE account=? AND broker=? AND mode='LIVE' AND symbol=? AND entry_order=? AND quantity=? AND status='OPEN'",(proof['checked_at'],'broker-flat confirmation; exact fill unavailable',owner,config['broker'],position['symbol'],str(position.get('order_id') or ''),position.get('quantity')))
+  return
  if operation not in ('BUY','SELL','OPEN_LONG','OPEN_SHORT','CLOSE_LONG','CLOSE_SHORT'):return
  position=action.get('position') or {};symbol=position.get('symbol')
  if not symbol:return
