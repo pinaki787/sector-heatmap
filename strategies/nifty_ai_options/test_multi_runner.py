@@ -71,6 +71,15 @@ class MultiRunner(unittest.TestCase):
    atomic(self.data/'runs'/self.owner/name/'config.json',self.config(sym))
   a,_=recover(self.owner,self.data,instrument='MCX:GOLD-FUT');self.assertEqual(a['id'],'run-1')
   self.assertEqual(len(inventory(self.owner,self.data)),2)
+ def test_delta_inventory_uses_reconciled_ledger_not_old_heartbeat(self):
+  c=dict(self.config('PAXGUSD',mode='LIVE'),broker='DELTA_INDIA')
+  d=self.data/'runs'/self.owner/'run-1';atomic(d/'config.json',c)
+  atomic(d/'heartbeat.json',dict(at=100,pending={'key':'old'},position={'quantity':100}))
+  ledger=runtime_root(c,self.data)/self.owner/'delta-live.json'
+  atomic(ledger,dict(position=None,pending=None))
+  r=inventory(self.owner,self.data)[0];self.assertFalse(r['has_pending']);self.assertFalse(r['has_position'])
+  atomic(ledger,dict(position=None,pending={'key':'unknown'}));self.assertTrue(inventory(self.owner,self.data)[0]['has_pending'])
+  atomic(ledger,dict(position=None,pending=None,closing_legs={'old':{'position':{'quantity':1}}}));self.assertTrue(inventory(self.owner,self.data)[0]['has_position'])
  def test_pending_reservation_survives_and_is_not_arbitrarily_released(self):
   class Fake:
    live=True

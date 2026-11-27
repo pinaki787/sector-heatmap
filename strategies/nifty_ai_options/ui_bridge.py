@@ -441,6 +441,10 @@ class Service:
                 recovered=self.run['directory']/'reconciliation.json'
                 if recovered.exists() and not result['running']:
                     receipt=json.loads(recovered.read_text());owned=result.get('ownership') or {}
+                    from strategies.nifty_ai_options.delta_local_status import resolved
+                    if resolved(receipt,self.owner,self.run['id'],config,json.loads(ledger.read_text()) if ledger.exists() else {}):
+                        result.update(previous_failure=result.get('error'),reconciliation=receipt,phase='STOPPED',error=None,notice='Previous local entry rejection reconciled; strategy stopped. No order was submitted.')
+
                     if receipt.get('phase')=='RECOVERED_CLOSED' and receipt.get('account_id')==self.owner and receipt.get('run_id')==self.run['id'] and receipt.get('runtime_session')==config.get('runtime_session') and not any(owned.get(k) for k in ('position','pending','detached_position','positions','closing_legs','stop_verification_position')):
                         result.update(reconciliation={k:receipt.get(k) for k in ('phase','key','completed_at','entry_order','exit_order','broker_flat','external_position')},phase='STOPPED',error=None,notice='Historical fill and external broker close reconciled; automation is stopped.')
                         external=receipt.get('external_position')

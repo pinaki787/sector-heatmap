@@ -80,6 +80,15 @@ def inventory(owner,data=DATA):
  result=[]
  for row in latest.values():
   heartbeat=row['directory']/'heartbeat.json';h=json.loads(heartbeat.read_text()) if heartbeat.exists() else {}
+  # A stopped heartbeat is historical. The exact captured run's durable ledger
+  # reflects reconciliation performed after its final heartbeat.
+  c=row['config']
+  if c.get('broker')=='DELTA_INDIA':
+   ledger=runtime_root(c,data)/owner/('delta-live.json' if row['mode']=='LIVE' else 'delta-paper.json')
+   if ledger.exists():
+    owned=json.loads(ledger.read_text())
+    h={**h,'position':owned.get('position') or owned.get('detached_position') or owned.get('stop_verification_position') or owned.get('closing_legs'),'pending':owned.get('pending')}
+
   result.append({**{k:row[k] for k in ('run_id','instrument','runner_scope','mode','running','legacy_scope')},
    'heartbeat_at':h.get('at'),'state':'Running' if row['running'] else 'Preparing' if row['launching'] else 'Stopped',
    'has_position':bool(h.get('position')),'has_pending':bool(h.get('pending'))})
