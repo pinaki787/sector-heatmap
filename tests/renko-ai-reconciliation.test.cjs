@@ -16,3 +16,8 @@ test('earlier rejected manual requests are clearly historical only while stopped
  assert.match(manualRequestLabel(snapshot),/^Previous run/);
  assert.match(manualRequestLabel({...snapshot,running:true}),/^REJECTED/);
 });
+
+test('an active worker recovery pause is visible even without an outstanding command',()=>{
+ const view=positionControlView({running:true,ownership:{position:null,pending:null},position_control:{mode:'RECOVERY_REQUIRED',entries_paused:true}});
+ assert.match(view.status,/Recovery pause/);assert.match(view.status,/entries disabled/);
+});

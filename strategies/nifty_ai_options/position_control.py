@@ -74,6 +74,17 @@ class PositionManager:
   if config.get('_managed_resume'):self.mode='DETACHED'
   elif self.mode=='STOPPED':
    self.mode='MANAGED';executor.state['management_mode']='MANAGED';executor.save()
+  elif self.mode=='RECOVERY_REQUIRED' and config.get('execution_mode')=='LIVE' and config.get('broker')=='DELTA_INDIA' and config.get('execution_route')=='DIRECT' and not getattr(executor,'management_only',False):
+   state=executor.state
+   recovered=[r for r in state.get('reconciled_intents',[]) if r.get('phase')=='RECOVERED_CLOSED' and r.get('historical_pair_closed') is True and r.get('account_id')==config.get('account') and r.get('proof')]
+   retained=any(state.get(k) for k in ('position','pending','positions','closing_legs','detached_position','stop_verification_position'))
+   if recovered and not retained:
+    # Only a new user-started run may retire this verified historical pause.
+    # The owning in-memory manager must acknowledge MANAGED, not just its file.
+    proof=self.verify(None,flat=True)
+    if proof.get('flat') is not True:raise ValueError('Fresh broker-flat verification required before clearing recovery pause')
+    state.setdefault('management_audit',[]).append(dict(operation='REARM_RECOVERED_ON_USER_START',at=self.clock(),proof=recovered[-1]['proof'],orders_submitted=0))
+    self.save_mode('MANAGED')
   self.entry_blocked=self.mode!='MANAGED' or bool(config.get('_managed_resume'))
  @property
  def blocked(self):return self.mode in ('DETACHED','STOPPING','RECOVERY_REQUIRED','STOPPED')

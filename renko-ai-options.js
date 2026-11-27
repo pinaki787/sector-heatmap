@@ -41,7 +41,7 @@ function positionControlView(snapshot){
  const owned=ownership.position||snapshot?.heartbeat?.position;
  return {label:detached||!owned?'Attach':'Detach',operation:detached||!owned?'ATTACH':'DETACH',
   blocked:busy||!!ownership.pending,stopBlocked:busy,capable:snapshot?.position_control_capable===true,
-  status:reconciled?'Prior broker fill and close reconciled · stopped':receipt?(receipt.error||({STOPPED:receipt.simulated_flat_confirmed?'Paper position closed · stopped':receipt.broker_flat_confirmed?'Squared off · stopped':'Stopped · no owned position',DETACHED:'Detached · broker holding remains open',ATTACHED:'Attached · managing selected holding; new entries paused'})[receipt.phase]||receipt.notice||receipt.phase):detached?'Detached · broker holding remains open':''};
+  status:reconciled?'Prior broker fill and close reconciled · stopped':receipt?(receipt.error||({STOPPED:receipt.simulated_flat_confirmed?'Paper position closed · stopped':receipt.broker_flat_confirmed?'Squared off · stopped':'Stopped · no owned position',DETACHED:'Detached · broker holding remains open',ATTACHED:'Attached · managing selected holding; new entries paused'})[receipt.phase]||receipt.notice||receipt.phase):detached?'Detached · broker holding remains open':control.mode==='RECOVERY_REQUIRED'?'Recovery pause · entries disabled; verified rearm required':''};
 }
 function positionControlPayload(snapshot,values,account,operation,requestId,holding){
  const context=snapshot?.position_control_context;

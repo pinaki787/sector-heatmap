@@ -94,7 +94,13 @@ class DeltaPositions:
    from strategies.renko_supertrend.delta_execution import Execution
    self.native=Execution(self.delta)
   self.native.authenticate()
-  if owned is None:return dict(flat=True)
+  if owned is None:
+   if self.config.get('execution_route')!='DIRECT':return dict(flat=True,source='NO_OWNED_OPTION_CONTRACT')
+   product=self.delta.product(self.config['underlying']);pid=int(product['id'])
+   quantity=self.delta._position(pid)
+   if any(str(order.get('product_id'))==str(pid) for order in self.native.active_orders()):raise ValueError('Open Delta order blocks recovery rearm')
+   if quantity!=0:raise ValueError('Selected Delta contract has unmanaged broker exposure; recovery pause retained')
+   return dict(flat=True,quantity=0,product_id=pid,source='AUTHENTICATED_SELECTED_BROKER_POSITION_AND_ORDER_BOOK')
   product=self.delta.product(owned['symbol']);qty=self.delta._position(int(product['id']))
   if any(str(o.get('product_id'))==str(product['id']) for o in self.native.active_orders()):raise ValueError('Open Delta order blocks position control')
   expected=whole(owned['quantity'])*(-1 if owned.get('side')=='SHORT' else 1)

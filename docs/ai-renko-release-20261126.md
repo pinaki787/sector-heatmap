@@ -113,3 +113,20 @@ and exact-entry-order matching checks; unrelated manual holdings are excluded.
 Isolated browser fixtures verify gains, losses, stale fallback and zero lines
 after close. This adds no broker request or per-tick history download. Real
 open-position overlay validation remains unperformed while the account is flat.
+
+## Recovered control mode on a subsequent user Start
+
+A verified closed Delta direct trade no longer leaves a new user-started Live
+worker inheriting RECOVERY_REQUIRED. Rearm requires the exact account's durable
+closed-recovery proof, no retained ownership/order slots, and a fresh authenticated
+selected-contract position/order-book check. It clears pre-existing entry signals
+and records a management audit; management-only and attachment workers stay
+paused. Empty local ownership alone is not accepted as broker-flat evidence.
+
+The already-running older worker cannot hot-load this constructor correction.
+A separately approved controlled restart reseeded history under unchanged captured
+settings and a new runtime identity. The new worker acknowledged MANAGED with
+entries unpaused and processed fresh broker prices; no entry was forced.
+The UI also explicitly identifies an active recovery pause rather than implying
+that a running process is ready to trade. Unknown exposure and failed broker
+verification continue to block rearm.
