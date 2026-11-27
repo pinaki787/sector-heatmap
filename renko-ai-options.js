@@ -2,6 +2,11 @@
 (function(root){
 'use strict';
 const MODE='AI_RENKO_OPTIONS';
+function aiActionUrl(action,symbol){
+ const url=new URL('/api/renko-supertrend/ai-options/'+action,'https://sector-pulse.invalid');
+ url.searchParams.set('runner_symbol',symbol||'');
+ return url.pathname+url.search;
+}
 // An explicit alternative belongs to this visit, never to a later section entry.
 function runnerMarket(symbol,fields={}){
  const index=String(symbol||'').match(/^(NSE|BSE):.+-INDEX$/);
@@ -176,6 +181,7 @@ function restoredDataAccount(current,accounts){
 }
 function restoredInstrumentValues(defaults,saved,symbol,market){
  const values={...defaults,...(saved||{}),underlying:symbol};
+ if(market&&market!=='ALL')values.instrument_market=market;
  if(!saved){values.manualParent='';values.manualParentAt=null;
   if(['NSE_EQUITY','BSE_EQUITY'].includes(market)){values.route='DIRECT';values.product='INTRADAY';}
   else if(['NSE_STOCK','BSE_STOCK'].includes(market))values.route='OPTIONS';
@@ -855,7 +861,7 @@ referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&sele
  const aiContext=createAiContextLoader(root.fetch.bind(root));
  async function request(action,body){
   const context=body?await aiContext(root.BrokerForms?.context?.()||root.SectorPulseWorkspace):null;
-  const response=await root.BrokerForms.fetch('renko','/api/renko-supertrend/ai-options/'+action+'?runner_symbol='+encodeURIComponent(body?.runner_symbol||body?.underlying||values().underlying||''),aiRequestOptions(body?{...body,runner_symbol:body.runner_symbol||body.underlying||values().underlying}:body,context));
+  const response=await root.BrokerForms.fetch('renko',aiActionUrl(action,body?.runner_symbol||body?.underlying||values().underlying||''),aiRequestOptions(body?{...body,runner_symbol:body.runner_symbol||body.underlying||values().underlying}:body,context));
   if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('The selected broker backend has not loaded the AI strategy route.');
   const result=await response.json(),error=responseError(result,response.ok);if(error)throw Error(error);return result;
  }
@@ -1080,7 +1086,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
  strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={dhanChartSymbol,createDhanChartResolver,runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={aiActionUrl,dhanChartSymbol,createDhanChartResolver,runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

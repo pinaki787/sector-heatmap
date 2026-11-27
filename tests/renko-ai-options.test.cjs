@@ -247,3 +247,18 @@ test('Dhan cash markets are enabled only in the AI direct route',()=>{
  route='DIRECT';mode.value='SIMPLE_BRICK';sandbox.directMarketChoices();assert.equal(options[1].disabled,true);
  assert.match(source,/event.target.value==='DIRECT'&&\['FYERS','DHAN','MOTILAL_OSWAL'\].includes\(selected\(\)\?\.broker\)&&!snapshot\?\.running/);
 });
+
+test('AI search preserves route and market parameters while scoping runner identity',()=>{
+ const {aiActionUrl}=require('../renko-ai-options.js');
+ const u=new URL(aiActionUrl('search?'+new URLSearchParams({q:'PI Industries',market:'NSE_STOCK',route:'OPTIONS'}),'NSE:PIIND'),'https://example.test');
+ assert.equal(u.searchParams.get('q'),'PI Industries');
+ assert.equal(u.searchParams.get('market'),'NSE_STOCK');
+ assert.equal(u.searchParams.get('route'),'OPTIONS');
+ assert.equal(u.searchParams.get('runner_symbol'),'NSE:PIIND');
+ assert.equal(new URL(aiActionUrl('status','NSE:NIFTY'),'https://example.test').searchParams.get('runner_symbol'),'NSE:NIFTY');
+});
+
+test('explicit market selection survives instrument settings restoration',()=>{
+ const {restoredInstrumentValues}=require('../renko-ai-options.js');
+ assert.equal(restoredInstrumentValues({}, {instrument_market:'ALL'}, 'NSE:NIFTY','NSE_INDEX').instrument_market,'NSE_INDEX');
+});

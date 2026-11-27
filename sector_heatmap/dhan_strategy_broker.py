@@ -91,16 +91,11 @@ class Broker:
         text=text.strip().upper();rows=self._rows()
         if market=='MCX' or text.startswith('MCX:'):return dhan_mcx.search(rows,self.clock(),text)
         today=datetime.fromtimestamp(self.clock(),IST).date().isoformat()
-        eligible={(r['SEM_EXM_EXCH_ID'],contract_underlying(r)) for r in rows
-                  if r['SEM_SEGMENT']=='D' and r['SEM_OPTION_TYPE'] in ('CE','PE') and r['SEM_EXPIRY_DATE'][:10]>=today}
-        hosts=[r for r in rows if r['SEM_EXM_EXCH_ID'] in ('NSE','BSE') and r['SEM_SEGMENT'] in ('I','E')
-               and text in r['SEM_TRADING_SYMBOL'] and (r['SEM_EXM_EXCH_ID'],r['SEM_TRADING_SYMBOL']) in eligible]
-        hosts.sort(key=lambda r:(r['SEM_TRADING_SYMBOL']!=text,r['SEM_SEGMENT']!='I',r['SEM_TRADING_SYMBOL']))
-        matches=[dict(symbol=r['SEM_EXM_EXCH_ID']+':'+r['SEM_TRADING_SYMBOL'],
-                     description=r.get('SEM_CUSTOM_SYMBOL') or r['SEM_TRADING_SYMBOL'],underlying=r['SEM_TRADING_SYMBOL']) for r in hosts[:50]]
+        from .dhan_option_catalog import search
+        matches=search(rows,today,text,market)
         if market=='ALL':
             matches=dhan_mcx.search(rows,self.clock(),text)+matches
-        return matches[:50]
+        return matches
 
     def host_tick_size(self,symbol):
         row=self.underlying(symbol)
