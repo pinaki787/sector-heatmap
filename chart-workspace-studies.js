@@ -1232,6 +1232,28 @@
   ];
 
   const indicators = {
+    SectorPulseMidline: {
+      name:'Market Min Midline', plotNames:['Market Min Midline'], plotColors:['#ffb84d'],
+      inputs:[{id:'period',title:'Gaussian period',value:123,min:5,max:500}],
+      run(bars, values, length, multiplier, inputs={}) {
+        const period=Number.isInteger(inputs.period)&&inputs.period>=5&&inputs.period<=500?inputs.period:123;
+        const beta=(1-Math.cos(2*Math.PI/period))/(Math.pow(2,1/3)-1);
+        const alpha=-beta+Math.sqrt(beta*beta+2*beta), decay=1-alpha;
+        let g1=null,g2=null,g3=null,trend=0;
+        const points=[],colors=[];
+        for(const bar of bars){
+          const close=bar.close;
+          if(!Number.isFinite(close)){points.push(null);colors.push(undefined);continue;}
+          const previous=g3;
+          g1=g1===null?close:alpha*close+decay*g1;
+          g2=g2===null?g1:alpha*g1+decay*g2;
+          g3=g3===null?g2:alpha*g2+decay*g3;
+          if(previous!==null&&g3!==previous)trend=g3>previous?1:-1;
+          points.push(g3);colors.push(trend>0?'#2ea043':trend<0?'#e53935':'#ffb84d');
+        }
+        points.colors=colors;return [points];
+      }
+    },
     V1Reference: { name: 'Sector Pulse V1 · red-bar reference', shadow: true },
     Shadow: { name: 'Shadow Candle · X/R/M ranges', shadow: true },
     PivotStandard: {
@@ -4994,7 +5016,85 @@
     return records.join('\r\n') + '\r\n';
   }
 
-  root.SectorPulseChartStudies = { fixedRangeVolumeProfile, aggregatePivotCandles, standardPivotLevels, standardPivotPeriods, indicators, tradeDeltaPlots, shiftStudyPlots, renko, withRenkoVolume, renkoAtrSize, compilePine, pineNamedInputStatusLines, v1ReferenceRanges, shadowRanges, shadowRatios, previousShadowPeriods, shadowOscillators, shadowRangeHistory, chartCsv, mergeLiveCandles, v1TargetPrices, v1TargetStates, v1ExtraZones };
+  const aiNativeComponentStates=new WeakMap();
+  function aiRenkoNativePlots(study,bars) {
+    const inputs=study.inputs||{};
+    const period=Number.isInteger(inputs.nativeMidlinePeriod)&&inputs.nativeMidlinePeriod>=5&&inputs.nativeMidlinePeriod<=500?inputs.nativeMidlinePeriod:123;
+    const rsiLength=Number.isInteger(inputs.nativeRsiLength)&&inputs.nativeRsiLength>=1&&inputs.nativeRsiLength<=500?inputs.nativeRsiLength:14;
+    const maLength=Number.isInteger(inputs.nativeRsiMaLength)&&inputs.nativeRsiMaLength>=1&&inputs.nativeRsiMaLength<=500?inputs.nativeRsiMaLength:14;
+    const key=[period,rsiLength,maLength].join('|');
+    let cache=aiNativeComponentStates.get(study);
+    if(!cache||cache.key!==key){cache={key,keys:[],states:[],plots:Array.from({length:8},()=>[])};cache.plots[0].colors=[];aiNativeComponentStates.set(study,cache);}
+    let dirty=0;
+    while(dirty<bars.length&&dirty<cache.keys.length&&cache.keys[dirty][0]===bars[dirty].time&&cache.keys[dirty][1]===bars[dirty].close)dirty++;
+    cache.keys.length=dirty;cache.states.length=dirty;
+    cache.plots.forEach(p=>p.length=dirty);cache.plots[0].colors.length=dirty;
+    const beta=(1-Math.cos(2*Math.PI/period))/(Math.pow(2,1/3)-1),alpha=-beta+Math.sqrt(beta*beta+2*beta),decay=1-alpha;
+    for(let i=dirty;i<bars.length;i++){
+      const close=bars[i].close,previous=cache.states[i-1];
+      const s=previous?{...previous}:{g1:close,g2:close,g3:close,trend:0,changes:0,gainSum:0,lossSum:0,gain:0,loss:0,rsiSum:0,rsiCount:0};
+      if(previous){
+        s.g1=alpha*close+decay*s.g1;s.g2=alpha*s.g1+decay*s.g2;s.g3=alpha*s.g2+decay*s.g3;
+        if(s.g3!==previous.g3)s.trend=s.g3>previous.g3?1:-1;
+        const change=close-bars[i-1].close,gain=Math.max(change,0),loss=Math.max(-change,0);
+        s.changes++;
+        if(s.changes<=rsiLength){s.gainSum+=gain;s.lossSum+=loss;if(s.changes===rsiLength){s.gain=s.gainSum/rsiLength;s.loss=s.lossSum/rsiLength;}}
+        else{s.gain=(s.gain*(rsiLength-1)+gain)/rsiLength;s.loss=(s.loss*(rsiLength-1)+loss)/rsiLength;}
+      }
+      const value=s.changes<rsiLength?null:s.loss===0?100:s.gain===0?0:100-100/(1+s.gain/s.loss);
+      if(value!==null){s.rsiSum+=value;s.rsiCount++;}
+      const expired=cache.plots[1][i-maLength];
+      if(Number.isFinite(expired)){s.rsiSum-=expired;s.rsiCount--;}
+      cache.plots[0].push(s.g3);cache.plots[0].colors.push(s.trend>0?'#2ea043':s.trend<0?'#e53935':'#ffb84d');
+      cache.plots[1].push(value);cache.plots[2].push(s.rsiCount>=maLength?s.rsiSum/maLength:null);
+      [0,40,60,80,100].forEach((v,k)=>cache.plots[k+3].push(v));
+      cache.keys.push([bars[i].time,close]);cache.states.push(s);
+    }
+    cache.plots.recomputedBars=bars.length-dirty;return cache.plots;
+  }
+  function withAiRenkoNativeComponents(indicator,study,chartType='Candles',getReferenceBars=null) {
+    const referenceStudy={inputs:study.inputs||{}};
+    const count=indicator.plotNames?.length||0,inputs=study.inputs||{},rsiVisible=chartType==='Candles'&&inputs.nativeRsiVisible!==false;
+    const names=['Market Min Midline','RSI','RSI SMA','0','40','60','80','100'];
+    const colors=['#ffb84d','#7e57c2','#ff0000','#00000000','#000000','#000000','#000000','#00000000'];
+    const baseOptions=Array.from({length:count},(_,i)=>({...indicator.plotOptions?.[i],forceOverlay:true}));
+    const extraOptions=names.map((_,i)=>({forceOverlay:i===0,display:i===0?(inputs.nativeMidlineVisible===false?0:15):(rsiVisible?(i<3?15:1):0),width:2,color:colors[i]}));
+    return {...indicator,pane:rsiVisible,plotNames:[...(indicator.plotNames||[]),...names],
+      plotOptions:[...baseOptions,...extraOptions],plotColors:[...(indicator.plotColors||Array(count)),...colors],
+      nativeZoneAnchor:count+1,nativeZoneBands:rsiVisible?[
+        {lower:count+3,upper:count+4,color:'#ff000059'},
+        {lower:count+4,upper:count+5,color:'#80808059'},
+        {lower:count+5,upper:count+6,color:'#00800059'},
+        {lower:count+6,upper:count+7,color:'#00800059'},
+        {lower:count+6,upper:count+7,color:'#ff000040'}]:[],
+      run(...args){
+        const data=args[0],native=aiRenkoNativePlots(study,data);
+        let extra=native;
+        if(getReferenceBars && chartType !== 'Candles'){
+          const reference=getReferenceBars()||[];
+          referenceStudy.inputs=study.inputs||{};
+          const values=aiRenkoNativePlots(referenceStudy,reference)[0],points=[],colors=[];
+          let cursor=-1;
+          const byTime=chartType==='Renko'?new Map(reference.map((bar,i)=>[bar.time,i])):null;
+          for(const bar of data){
+            let selected;
+            if(byTime)selected=byTime.get(bar.time);
+            else{
+              while(cursor+1<reference.length&&(reference[cursor+1].sourceTime??reference[cursor+1].time)<=bar.time)cursor++;
+              selected=cursor;
+            }
+            const ref=reference[selected];
+            const exact=Number.isFinite(ref?.midline)&&ref.midline_period===(study.inputs?.nativeMidlinePeriod||123);
+            points.push(ref?(exact?ref.midline:values[selected]):null);colors.push(ref?values.colors?.[selected]:undefined);
+          }
+          points.colors=colors;extra=[points,...native.slice(1)];
+        }
+        return [...indicator.run(...args),...extra];
+      }
+    };
+  }
+
+  root.SectorPulseChartStudies = { aiRenkoNativePlots, withAiRenkoNativeComponents, fixedRangeVolumeProfile, aggregatePivotCandles, standardPivotLevels, standardPivotPeriods, indicators, tradeDeltaPlots, shiftStudyPlots, renko, withRenkoVolume, renkoAtrSize, compilePine, pineNamedInputStatusLines, v1ReferenceRanges, shadowRanges, shadowRatios, previousShadowPeriods, shadowOscillators, shadowRangeHistory, chartCsv, mergeLiveCandles, v1TargetPrices, v1TargetStates, v1ExtraZones };
 })(typeof window === 'undefined' ? globalThis : window);
 
 /* Renko calculation-timeframe engine: 20261120-1 */
@@ -5131,18 +5231,31 @@
     return result;
   }
   // A separate display series keeps forming prices out of confirmed strategy inputs.
-  function mountCompletedRenkoProjection({chart,getBars,size,enabled=()=>true,priceScaleId,priceFormat}) {
+  function mountCompletedRenkoProjection({chart,getBars,size,enabled=()=>true,priceScaleId,priceFormat,showSupertrend=()=>false,onSupertrendExtension,getSupertrend}) {
     const series=chart.addCandlestickSeries({priceScaleId,priceFormat,
       upColor:'rgba(8,153,129,0.28)',downColor:'rgba(242,54,69,0.28)',
       borderUpColor:'#089981',borderDownColor:'#f23645',wickVisible:false,
       priceLineVisible:false,lastValueVisible:false,title:''});
-    let lastPrice,lastTime,signature='',points=[];
+    let lastPrice,lastTime,signature='',points=[],trendSeries,trendSignature='';
+    function extendTrend(previous,next){
+      const supplied=previous&&getSupertrend?.(previous);
+      const reference=supplied||(previous&&Number.isFinite(previous.st)&&[1,-1].includes(previous.direction)?{value:previous.st,color:previous.direction===1?'#e53935':'#2ea043',index:previous.index}:null);
+      const valid=showSupertrend()&&previous&&Number.isFinite(reference?.value)&&next.length;
+      const data=valid?[{time:previous.time,value:reference.value},{time:next.at(-1).time,value:reference.value}]:[];
+      const key=JSON.stringify([data,reference?.color]);
+      if(key===trendSignature)return;
+      if(valid&&!trendSeries)trendSeries=chart.addLineSeries({priceScaleId,priceFormat,lineWidth:2,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:'',autoscaleInfoProvider:()=>null});
+      if(trendSeries){trendSeries.applyOptions({color:reference?.color||'#787b86'});trendSeries.setData(data);}
+      trendSignature=key;
+      onSupertrendExtension?.({kind:'LAST_CONFIRMED_VALUE_DISPLAY_ONLY',points:data,confirmedIndex:reference?.index??previous?.index,confirmedSourceTime:previous?.sourceTime,state:valid?'MATCHED_COMPLETED_VALUE':'WAITING_FOR_MATCHING_COMPLETED_SUPERTREND'});
+    }
     function update(price,sourceTime) {
       lastPrice=price;lastTime=sourceTime;
       const previous=getBars().at(-1);
       const next=enabled()&&previous&&Number.isFinite(price)&&Number.isFinite(sourceTime)
         ?closeRenkoProjection(previous,price,size,Math.max(sourceTime,previous.sourceTime??sourceTime),{showReversalRemainder:true})
           .map((bar,index)=>({...bar,time:previous.time+index+1})):[];
+      extendTrend(previous,next);
       const key=JSON.stringify(next);
       if(key===signature)return;
       if(next.length===points.length&&next.length&&next.every((bar,index)=>bar.time===points[index].time

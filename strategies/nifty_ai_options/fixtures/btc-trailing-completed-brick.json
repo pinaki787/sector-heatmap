@@ -1,0 +1,47 @@
+{
+  "provenance": "Sanitized recorded Delta BTCUSD market/trigger values; no private account or order identifiers",
+  "brick": 54.34782608695652,
+  "entry": 59415.5,
+  "ladder": {
+    "grid": {
+      "high": 59847.0,
+      "low": 59744.0,
+      "origin_at": 1795815000,
+      "available_at": 1795816800,
+      "source_frame": 30,
+      "session": 20785,
+      "revision": "v1-locked-reference-grid"
+    },
+    "entry": 59415.5,
+    "direction": "SHORT",
+    "first": 4,
+    "achieved": 3,
+    "stop": 59229.0
+  },
+  "latest_confirmed": {
+    "symbol": "BTCUSD",
+    "index": 5454,
+    "source_time": 1795862815.918668,
+    "available_at": 1795862816.1056921,
+    "open": 59184.782608695656,
+    "high": 59184.782608695656,
+    "low": 59130.434782608696,
+    "close": 59130.434782608696,
+    "st": 59271.7391304349,
+    "direction": 1,
+    "midline": null,
+    "midline_period": null,
+    "brick": 54.34782608695652
+  },
+  "tick": {
+    "kind": "price",
+    "series": "underlying",
+    "timestamp": 1795862866.947344,
+    "available_at": 1795862867.109364,
+    "close": 59231.0,
+    "symbol": "BTCUSD",
+    "source_basis": "BROKER_LIVE_PRICE",
+    "sequence": 1577
+  },
+  "synthetic_control": "A later full green control brick is generated only inside the test; not claimed as a recorded broker event"
+}

@@ -85,7 +85,7 @@ class ManualDispatcher:
         try:
             result=self.submit(action) or {}
             if result.get('deferred') is True:
-                self.inbox.update(request,'REJECTED',error='Market entry remained unfilled; no position opened' if result.get('terminal_no_fill') else 'Executable depth unavailable; no order sent' if result.get('reason')=='ENTRY_DEPTH_UNAVAILABLE' else 'Position control paused entry; no order sent' if result.get('reason')=='WAITING_FOR_POSITION_CONTROL' else 'Source unavailable before submission; no order sent' if result.get('reason')=='WAITING_FOR_SOURCE' else 'Market closed before submission; no order sent')
+                self.inbox.update(request,'REJECTED',error='Market entry remained unfilled; no position opened' if result.get('terminal_no_fill') else (str(result.get('detail') or 'Executable depth unavailable')+'; no order sent') if result.get('reason')=='ENTRY_DEPTH_UNAVAILABLE' else 'Position control paused entry; no order sent' if result.get('reason')=='WAITING_FOR_POSITION_CONTROL' else 'Source unavailable before submission; no order sent' if result.get('reason')=='WAITING_FOR_SOURCE' else 'Market closed before submission; no order sent')
                 self.pending=None;return
             own=self.executor.state.get('position')
             if self.executor.state.get('pending') or not own or own.get('symbol')!=action['position']['symbol']:raise RuntimeError('Manual fill is unresolved; retained for reconciliation')
@@ -156,6 +156,21 @@ def confirm_entry_fill(engine,executor,action,*,clock=time.time):
     owned=executor.state.get('position')
     if executor.state.get('pending') or not owned or owned.get('symbol')!=action['position']['symbol']:raise ValueError('Entry fill ownership is unresolved')
     if engine.position is not None:engine.position['entry_confirmed_at']=clock()
+    if engine.config.get('swing_targets_enabled'):engine.swing_wait=None
+    from strategies.nifty_ai_options.zone_targets import filled,enabled as zone_enabled
+    if zone_enabled(engine) and engine.position is not None:
+        engine.position.update({k:owned[k] for k in ('fill_price','order_id') if k in owned})
+    filled(engine)
+    from strategies.nifty_ai_options.support_retest import get
+    retest=get(engine)
+    if retest:
+        if engine.position is not None:engine.position.update({k:owned[k] for k in ('fill_price','order_id') if k in owned})
+        retest.capture(engine,dict(action=action['action'],timestamp=action['timestamp'],position=engine.position)) if engine.position is not None else None
+        if engine.position is not None:
+            owned.pop('retained_swing_target',None)
+            if engine.position.get('retained_swing_target'):owned['retained_swing_target']=__import__('copy').deepcopy(engine.position['retained_swing_target'])
+            executor.save()
+        retest.filled(engine,owned)
 
 
 def confirmed_flat_entry(engine,executor):

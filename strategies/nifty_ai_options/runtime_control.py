@@ -9,6 +9,11 @@ class HandoverReady(RuntimeError):pass
 def enqueue(directory,config,payload,*,target_config=None,preparing=False):
     for key,value in dict(account_id=config['account'],broker=config['broker'],run_id=Path(directory).name,runtime_session=config['runtime_session']).items():
         if payload.get(key)!=value:raise ValueError('Runtime change differs from the active '+key)
+    # Execution basis is captured by Start. A view request cannot change it.
+    if payload.get('display_mode',config.get('display_mode','CANDLES'))!=config.get('display_mode','CANDLES'):
+        raise ValueError('Execution chart basis is pinned at Start; chart view is display-only')
+    if payload.get('calculation_mode',config.get('calculation_mode','RENKO'))!=config.get('calculation_mode','RENKO'):
+        raise ValueError('Signal calculation basis is pinned at Start')
     changing=payload.get('underlying')!=config['underlying'] or payload.get('calculation_mode',config.get('calculation_mode','RENKO'))!=config.get('calculation_mode','RENKO')
     changing=changing or config.get('calculation_mode') in ('CANDLES','HYBRID') and payload.get('timeframe')!=config['timeframe']
     if changing:
@@ -34,6 +39,7 @@ def enqueue(directory,config,payload,*,target_config=None,preparing=False):
 class RuntimeControl:
     def __init__(self,config,directory,*,apply,apply_mode=None):
         self.config=config;self.directory=Path(directory);self.apply=apply;self.apply_mode=apply_mode;self.seen=None;self.entry_blocked=False
+        self.execution_basis={k:config.get(k) for k in ('display_mode','calculation_mode','supertrend_basis','exit_confirmation_mode','indicator_length','indicator_factor')}
     def poll(self,*,busy=False,position=False):
         path=self.directory/'reconfigure.json'
         if not path.exists():return
@@ -42,6 +48,13 @@ class RuntimeControl:
         command=json.loads(path.read_text())
         if command.get('phase') not in ('QUEUED','PREPARING_TARGET'):
             self.entry_blocked=False;self.seen=identity;return
+        target=command.get('target_config') or {}
+        if (command.get('display_mode',self.config.get('display_mode','CANDLES'))!=self.config.get('display_mode','CANDLES')
+            or any(k in target and target[k]!=v for k,v in self.execution_basis.items())):
+            self.entry_blocked=False
+            atomic(path,dict(command,phase='REJECTED',error='Execution basis is pinned at Start; view changes cannot reconfigure it'))
+            self.seen=None
+            return
         self.entry_blocked=bool(command.get('target_config'))
         if command.get('runtime_session')!=self.config.get('runtime_session') or command.get('account_id')!=self.config.get('account') or command.get('underlying')!=self.config.get('underlying'):raise ValueError('Runtime change belongs to a different session')
         if command.get('phase')=='PREPARING_TARGET' or busy:return
@@ -59,11 +72,8 @@ class RuntimeControl:
         if display not in ('CANDLES','RENKO'):raise ValueError('Invalid exit confirmation mode')
         if display!=self.config.get('display_mode','CANDLES') and not self.apply_mode:raise ValueError('Runtime cannot acknowledge this exit mode')
         if frame!=self.config['timeframe']:self.apply(frame)
-        if self.apply_mode:self.apply_mode(display)
+        # Display changes never call the runner's mode mutation callback.
         self.config['timeframe']=frame
-        self.config['display_mode']=display
-        if self.config.get('supertrend_basis')=='COMPLETED_RENKO':
-            self.config['exit_confirmation_mode']='RENKO_BRICKS_ONLY' if display=='RENKO' else 'HYBRID_COMPLETED_UNITS'
         atomic(self.directory/'config.json',self.config)
         atomic(path,dict(command,phase='APPLIED',applied_at=time.time()))
         self.seen=None

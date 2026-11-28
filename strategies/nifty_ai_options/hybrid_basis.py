@@ -26,11 +26,15 @@ def store(engine):
 def record_signal(engine,event,kind,bar,result):
  if engine.config.get('supertrend_basis')!='COMPLETED_RENKO':return
  symbol=engine.config['underlying'] if kind=='underlying' else engine.contract['symbol']
+ if kind=='underlying':
+  from strategies.nifty_ai_options.swing_targets import book
+  available=event.get('available_at',event.get('closed_at',event.get('timestamp',0)))
+  book(engine).observe(bar,available);engine.swing_observed_at=available
  if not hasattr(engine,'completed_signal_queue'):engine.completed_signal_queue=[]
  if not hasattr(engine,'completed_signal_counts'):engine.completed_signal_counts={}
  index=engine.completed_signal_counts.get(symbol,0)+1;engine.completed_signal_counts[symbol]=index
  stamp=event.get('timestamp')
- engine.completed_signal_queue.append(dict(symbol=symbol,index=index,source_time=stamp,available_at=event.get('available_at',event.get('closed_at',stamp+engine.config['timeframe']*60)),open=bar['open'],high=bar['high'],low=bar['low'],close=bar['close'],st=result.get('st'),direction=result.get('direction'),brick=engine.spot_size if kind=='underlying' else engine.contract['option_brick']))
+ engine.completed_signal_queue.append(dict(symbol=symbol,index=index,source_time=stamp,available_at=event.get('available_at',event.get('closed_at',stamp+engine.config['timeframe']*60)),open=bar['open'],high=bar['high'],low=bar['low'],close=bar['close'],st=result.get('st'),direction=result.get('direction'),midline=result.get('midline'),midline_period=result.get('midline_period'),brick=engine.spot_size if kind=='underlying' else engine.contract['option_brick']))
 
 def seed(engine,event,kind):
  renko,ai,field=attributes(engine,kind)

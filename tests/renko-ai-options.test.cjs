@@ -178,7 +178,7 @@ test('renamed draft indicator carries into a new run without changing source or 
  const custom={kind:'Pine',name:'AR-Supertrend',strategyManaged:true,source:'user modified source',inputs:{in_3:8}};
  const storage=new Map([['sector-pulse:chart-workspace:user:renko:ai-draft-0:workspace',JSON.stringify({symbol:'NIFTY',studies:[custom]})]]);
  const settings={studies:[]};
- vm.runInNewContext(source.slice(source.indexOf('  function aiIndicatorInputsMatch('),source.indexOf('  function aiIndicatorSourceMatches('))+block,{completedBrickSignalView:()=>false,window:{},document:{documentElement:{dataset:{}}},aiRuntimeParams:new URLSearchParams(),settings,embeddedRenko:true,linkedChart:{aiRenko:'1',method:'fixed',brick:'10',chartInstance:'ai-run-0'},Number,structuredClone,managedAiRenkoPineSource:b=>'generated-'+b,aiIndicatorSourceMatches:(source,brick)=>source==='generated-'+brick,chartStoragePrefix:'sector-pulse:chart-workspace:user:renko:ai-run-0:',chartSymbol:()=> 'NIFTY',context:{username:'user',workspace:{id:'workspace'}},aiRuntimeParams:new URLSearchParams({chartSource:'owner',aiRun:'run'}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)}});
+ vm.runInNewContext(source.slice(source.indexOf('  function aiIndicatorInputsMatch('),source.indexOf('  function aiIndicatorSourceMatches('))+block,{completedBrickSignalView:()=>false,window:{},document:{documentElement:{dataset:{}}},aiRuntimeParams:new URLSearchParams(),settings,embeddedRenko:true,linkedChart:{aiRenko:'1',method:'fixed',brick:'10',chartInstance:'ai-run-0'},Number,structuredClone,managedAiRenkoPineSource:b=>'generated-'+b,aiIndicatorSourceMatches:(source,brick)=>source==='generated-'+brick,chartStoragePrefix:'sector-pulse:chart-workspace:user:renko:ai-run-0:',chartSymbol:()=> 'NIFTY',context:{username:'user',workspace:{id:'workspace'}},aiRuntimeParams:new URLSearchParams({chartSource:'owner',aiRun:'run'}),readChartSnapshot:k=>storage.get(k)||null,durableChartSnapshots:new Map(),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)}});
  assert.equal(settings.studies.length,1);assert.equal(settings.studies[0].name,'AR-Supertrend');assert.equal(settings.studies[0].source,'user modified source');
  assert.ok(storage.has('sector-pulse:chart-workspace:user:ai-indicator:owner:NIFTY'));
 });
@@ -261,4 +261,22 @@ test('AI search preserves route and market parameters while scoping runner ident
 test('explicit market selection survives instrument settings restoration',()=>{
  const {restoredInstrumentValues}=require('../renko-ai-options.js');
  assert.equal(restoredInstrumentValues({}, {instrument_market:'ALL'}, 'NSE:NIFTY','NSE_INDEX').instrument_market,'NSE_INDEX');
+});
+
+test('optional Bull Bear and daily loss fields default off and retain precision',()=>{
+ const account={id:'owner',broker:'FYERS'};
+ const disabled=configuration(fields,account);
+ for(const k of ['ai_bull_entry_level','ai_bear_entry_level','ai_daily_max_loss'])assert.equal(disabled[k],null);
+ const configured=configuration({...fields,bullEntryLevel:'100.123456789',bearEntryLevel:'90.987654321',dailyMaxLoss:'123.45'},account);
+ assert.equal(configured.ai_bull_entry_level,100.123456789);assert.equal(configured.ai_bear_entry_level,90.987654321);assert.equal(configured.ai_daily_max_loss,123.45);
+});
+
+test('Midline display follows effective strategy filter, including captured active settings',()=>{
+ const {midlineDisplayEnabled}=require('../renko-ai-options.js');
+ assert.equal(midlineDisplayEnabled(null,{}),false);
+ assert.equal(midlineDisplayEnabled(null,{midlineEnabled:true}),true);
+ assert.equal(midlineDisplayEnabled(null,{midlineEnabled:true,supertrend:false}),false);
+ assert.equal(midlineDisplayEnabled({running:true,midline_filter_enabled:false},{midlineEnabled:true}),false);
+ assert.equal(midlineDisplayEnabled({running:true,midline_filter_enabled:true},{midlineEnabled:false}),true);
+ assert.equal(midlineDisplayEnabled({running:true,midline_filter_enabled:true,supertrend_enabled:false}),false);
 });

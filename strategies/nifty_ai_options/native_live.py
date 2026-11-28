@@ -164,7 +164,7 @@ class Runtime:
   atomic(self.directory/'heartbeat.json',state)
  def step(self):
   was_pending=bool(self.executor.state.get('pending'));self.executor.poll()
-  if was_pending and not self.executor.state.get('pending'):self.engine.position=__import__('copy').deepcopy(self.executor.state.get('position'))
+  if was_pending and not self.executor.state.get('pending'):self.engine.position=__import__('copy').deepcopy(self.executor.state.get('position'));__import__('strategies.nifty_ai_options.zone_targets',fromlist=['reconciled']).reconciled(self.engine,self.executor)
   try:
    self.quote_ready=bool(self.adapter.session()['open'])
    if self.quote_ready:

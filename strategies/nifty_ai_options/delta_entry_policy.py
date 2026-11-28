@@ -8,7 +8,7 @@ def decimal(value):
  except (InvalidOperation,ValueError,TypeError):raise EntryNotReady('Invalid executable depth')
  if not v.is_finite():raise EntryNotReady('Invalid executable depth')
  return v
-def read_depth(delta,symbol,max_age=2):
+def _read_depth_once(delta,symbol,max_age=2):
  reply=delta._get('/v2/l2orderbook/'+escape(symbol,safe=''),dict(depth=20))
  if not isinstance(reply,dict) or not isinstance(reply.get('result'),dict):raise EntryNotReady('Executable depth unavailable')
  book=reply['result']
@@ -30,6 +30,15 @@ def read_depth(delta,symbol,max_age=2):
  bid=max(p for p,n in sides['buy']);ask=min(p for p,n in sides['sell'])
  if bid>ask:raise EntryNotReady('Crossed executable depth')
  return dict(symbol=symbol,bid=float(bid),ask=float(ask),exchange_at=stamp,received_at=now),sides
+def read_depth(delta,symbol,max_age=2):
+ # Refetch only stale depth, before any order intent exists. Never relax age.
+ import time
+ for attempt in range(3):
+  try:return _read_depth_once(delta,symbol,max_age)
+  except EntryNotReady as error:
+   if str(error)!='Executable depth is stale' or attempt==2:raise
+   time.sleep(.15)
+
 def sufficient_depth(levels,side,quantity,limit):
  boundary=decimal(limit)
  rows=levels['sell' if side==1 else 'buy']

@@ -12,9 +12,9 @@ def fyers_reader(api):
         return reply,reply.get('candles',[])
     return read
 
-def delta_reader(delta):
+def delta_reader(delta,*,lookback=0):
     def read(symbol,frame,stamp):
-        reply=delta._get('/v2/history/candles',dict(symbol=symbol,resolution=str(frame)+'m',start=int(stamp),end=int(stamp+frame*60)))
+        reply=delta._get('/v2/history/candles',dict(symbol=symbol,resolution=str(frame)+'m',start=int(stamp-lookback*frame*60),end=int(stamp+frame*60)))
         rows=reply.get('result')
         if not isinstance(rows,list):raise ValueError('Delta completed source history unavailable')
         return reply,[[r['time'],r.get('open'),r.get('high'),r.get('low'),r.get('close'),r.get('volume')] for r in rows]

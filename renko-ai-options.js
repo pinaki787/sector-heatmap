@@ -7,6 +7,83 @@ function aiActionUrl(action,symbol){
  url.searchParams.set('runner_symbol',symbol||'');
  return url.pathname+url.search;
 }
+
+// Read-only chain nested in the strategy chart section; inherits its section permissions.
+function mountUnderlyingOptionChain(host,getContext){
+ const box=document.createElement('details');box.className='renko-option-chain';
+ box.innerHTML='<summary>Option chain <span data-chain-caption></span></summary><div class="roc-body"><div class="roc-toolbar"><label class="field">Expiry<select data-chain-expiry aria-label="Option-chain expiry"><option value="">Nearest listed expiry</option></select></label><label class="field">Strikes each side<select data-chain-count aria-label="Option-chain strikes each side"><option>5</option><option selected>10</option><option>20</option></select></label><button type="button" class="button secondary" data-chain-refresh>Refresh snapshot</button><label class="roc-greeks"><input type="checkbox" data-chain-greeks> All Greeks</label></div><p data-chain-status role="status">Open to load the selected underlying. No background polling.</p><div class="roc-scroll" tabindex="0" role="region" aria-label="Selected underlying option chain"></div><small>Broker snapshot · missing values show —. Snapshot time is retrieval time, not a guarantee of fresh quotes. Viewing contracts does not change strategy selection.</small><div data-chain-chart></div></div>';
+ host.querySelector('.renko-ai-chart-tabs').before(box);
+ const css=document.createElement('style');css.textContent='.renko-option-chain{margin:14px 0;border:1px solid #334a62;border-radius:10px;background:#101e30;color:#e6edf7}.renko-option-chain>summary{padding:14px 16px;font-weight:600;cursor:pointer}.renko-option-chain [data-chain-caption]{margin-left:12px;color:#a8bfd0;font-size:12px;font-weight:400}.roc-body{padding:0 16px 16px}.roc-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin:8px 0 14px}.roc-toolbar>.field{min-width:150px;max-width:260px;flex:1}.roc-toolbar select,.roc-toolbar button{height:42px}.roc-greeks{padding:12px 0;white-space:nowrap}.roc-scroll{max-height:480px;overflow:auto;border:1px solid #334a62;border-radius:8px}.roc-scroll:empty{display:none}.roc-scroll table{width:100%;min-width:0!important;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}.roc-scroll th{position:sticky;top:0;background:#1b3048;z-index:2;color:#bfd1e3}.roc-scroll td,.roc-scroll th{padding:9px 12px;text-align:right;border-bottom:1px solid #263b52}.roc-scroll .roc-strike{font-weight:700;background:#1a2b41;text-align:center}.roc-scroll .roc-atm td{background:#17394a}.roc-scroll .roc-call{color:#8ce0bc}.roc-scroll .roc-put{color:#f3a7ac}.roc-scroll button{padding:4px 7px;background:transparent;border:1px solid #52738e;border-radius:5px;color:inherit;cursor:pointer;font:inherit}.roc-body>small{display:block;color:#a8bfd0;font-size:11px;line-height:1.5;margin-top:10px}.roc-body [data-chain-status]{font-size:12px;line-height:1.5}.roc-body [data-chain-chart] iframe{width:100%;height:620px;border:1px solid #334a62;border-radius:8px;margin-top:12px}.roc-preview-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:16px;overflow-wrap:anywhere}@media(max-width:600px){.renko-option-chain:not(.roc-full) .roc-secondary{display:none}.roc-body{padding:0 10px 12px}.roc-toolbar{display:grid;grid-template-columns:1fr 1fr;align-items:end}.roc-toolbar>.field{min-width:0}.roc-toolbar button{grid-column:1/-1}.renko-option-chain [data-chain-caption]{display:block;margin:6px 0 0}.roc-scroll td,.roc-scroll th{padding:8px}.roc-body [data-chain-chart] iframe{height:850px}}';
+ document.head.append(css);
+ const expiry=box.querySelector('[data-chain-expiry]'),count=box.querySelector('[data-chain-count]'),status=box.querySelector('[data-chain-status]'),table=box.querySelector('.roc-scroll'),refresh=box.querySelector('[data-chain-refresh]'),all=box.querySelector('[data-chain-greeks]'),preview=box.querySelector('[data-chain-chart]');
+ let scope='',generation=0,controller=null,last=null,busy=false;const cache=new Map();
+ const fmt=value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))?(Number(value)!==0&&Math.abs(Number(value))<.01?(Number(value)<0?'−':'')+'<0.01':Number(value).toLocaleString('en-IN',{maximumFractionDigits:2})):'—';
+ const cell=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;};
+ function clear(){generation++;controller?.abort();controller=null;busy=false;refresh.disabled=false;last=null;table.replaceChildren();preview.replaceChildren();expiry.replaceChildren(new Option('Nearest listed expiry',''));status.textContent='Open to load the selected underlying. No background polling.';}
+ function sync(){
+  const c=getContext(),next=[c.account?.id,c.account?.broker,c.underlying].join('|');
+  box.hidden=!c.account?.id||!c.underlying;
+  box.querySelector('[data-chain-caption]').textContent=(c.account?.broker||'Choose broker')+(c.account?.label?' · '+c.account.label:'')+' · '+(c.underlying||'Choose underlying');
+  if(next!==scope){scope=next;clear();if(box.open&&!box.hidden)load();}
+ }
+ function render(data){
+  last=data;box.classList.toggle('roc-full',all.checked);table.replaceChildren();const t=document.createElement('table'),head=document.createElement('thead'),tr=document.createElement('tr'),body=document.createElement('tbody');
+  const fields=all.checked?['oi','volume','bid','ask','iv','delta','gamma','theta','vega','premium']:['oi','volume','iv','delta','premium'];
+  const names={oi:'OI',volume:'Volume',bid:'Bid',ask:'Ask',iv:'IV %',delta:'Delta',gamma:'Gamma',theta:'Theta',vega:'Vega',premium:'Premium'};
+  for(const f of fields)tr.append(cell('th','Call '+names[f],'roc-call'+(!['delta','premium'].includes(f)?' roc-secondary':'')));
+  tr.append(cell('th','Strike','roc-strike'));
+  for(const f of [...fields].reverse())tr.append(cell('th','Put '+names[f],'roc-put'+(!['delta','premium'].includes(f)?' roc-secondary':'')));
+  head.append(tr);
+  for(const row of data.rows){
+   const r=document.createElement('tr');if(row.atm)r.className='roc-atm';
+   const add=(item,f,side)=>{const td=cell('td',fmt(item?.[f]),(side==='call'?'roc-call':'roc-put')+(!['delta','premium'].includes(f)?' roc-secondary':''));
+    if(f==='premium'&&item?.symbol){const b=document.createElement('button');b.type='button';b.textContent=fmt(item.premium);b.title=item.symbol+' · view chart only';b.setAttribute('aria-label','View '+side+' chart at strike '+fmt(row.strike));b.onclick=()=>openChart(item.symbol);td.replaceChildren(b);}r.append(td);};
+   for(const f of fields)add(row.call,f,'call');
+   r.append(cell('td',fmt(row.strike)+(row.atm?' · ATM':''),'roc-strike'));
+   for(const f of [...fields].reverse())add(row.put,f,'put');body.append(r);
+  }
+  t.append(head,body);table.append(t);
+  const when=new Date(data.fetched_at*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false});
+  status.textContent=data.broker+' · '+data.underlying+' · Underlying '+fmt(data.spot)+' '+(data.currency||'')+' · Expiry '+(data.expiries.find(e=>e.value===data.expiry)?.date||data.expiry)+' · Snapshot '+when+' IST'+(data.cached?' · Cached':'')+' · '+data.rows.length+' strikes. Select a premium to view its chart.';
+ }
+ function openChart(symbol){
+  const c=getContext();if(!last||last.account_id!==c.account?.id||last.underlying!==c.underlying)return;
+  preview.replaceChildren();const head=document.createElement('div');head.className='roc-preview-head';const title=cell('strong',symbol+' · chart preview'),close=cell('button','Close chart','button secondary');close.type='button';close.onclick=()=>preview.replaceChildren();head.append(title,close);
+  const frame=document.createElement('iframe'),url=new URL('/',location.origin);
+  for(const [k,v] of Object.entries({view:'chart-workspace',chartContext:'option-chain',chartInstance:'option-chain-'+c.account.id,chartSource:c.account.id,symbol,interval:'5',type:'Candles'}))url.searchParams.set(k,v);
+  frame.title='Option-chain contract chart';frame.loading='lazy';frame.src=url.href;preview.append(head,frame);
+ }
+ async function load(){
+  const c=getContext();if(!box.open||box.hidden||busy||!c.account?.id||!c.underlying)return;
+  const key=[scope,expiry.value,count.value].join('|'),cached=cache.get(key);
+  if(cached&&Date.now()/1000-cached.fetched_at<15){render({...cached,cached:true});return;}
+  const ticket=++generation;controller?.abort();controller=new AbortController();busy=true;refresh.disabled=true;status.textContent='Loading '+c.underlying+' option chain from '+c.account.broker+'…';table.replaceChildren();preview.replaceChildren();
+  try{
+   const params=new URLSearchParams({runner_symbol:c.underlying,underlying:c.underlying,expiry:expiry.value,strikes:count.value});
+   const response=await root.BrokerForms.fetch('renko','/api/renko-supertrend/ai-options/option-chain?'+params,{cache:'no-store',signal:controller.signal});
+   if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('Option-chain backend has not loaded yet.');
+   const data=await response.json();if(ticket!==generation||!box.open)return;
+   if(!response.ok||data.error)throw Error(data.error||'Selected broker option chain unavailable.');
+   if(data.account_id!==c.account.id||data.broker!==c.account.broker||data.underlying!==c.underlying)throw Error('Option-chain source does not match the selected broker and underlying.');
+   const prior=expiry.value;expiry.replaceChildren(new Option('Nearest listed expiry',''),...data.expiries.map(e=>new Option(e.date,e.value)));expiry.value=prior;
+   cache.set(key,data);if(cache.size>24)cache.delete(cache.keys().next().value);render(data);
+  }catch(error){if(ticket===generation&&error.name!=='AbortError'){last=null;table.replaceChildren();status.textContent='Unavailable · '+error.message;}}
+  finally{if(ticket===generation){busy=false;refresh.disabled=false;}}
+ }
+ box.addEventListener('toggle',()=>{if(box.open){sync();load();}else{generation++;controller?.abort();busy=false;refresh.disabled=false;}});
+ expiry.onchange=()=>{generation++;controller?.abort();busy=false;load();};count.onchange=expiry.onchange;refresh.onclick=load;all.onchange=()=>{if(last)render(last);};
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){generation++;controller?.abort();busy=false;refresh.disabled=false;}});
+ return {sync};
+}
+
+
+function chartLayoutVisible(layout,tab,active){
+ if(layout==='underlying-call')return tab==='underlying'||tab==='call';
+ if(layout==='underlying-put')return tab==='underlying'||tab==='put';
+ if(layout==='three')return ['underlying','call','put'].includes(tab);
+ return tab===active;
+}
+
 // An explicit alternative belongs to this visit, never to a later section entry.
 function runnerMarket(symbol,fields={}){
  const index=String(symbol||'').match(/^(NSE|BSE):.+-INDEX$/);
@@ -117,6 +194,8 @@ function capturedStrategyRules(snapshot,symbol,account){
  if(!Array.isArray(bands))return null;
  const lines=['Signals: '+(premium?'selected option premium':'underlying')+' · '+(snapshot.source_timeframe||h.timeframe||'?')+' minute candles.'];
  lines.push(snapshot.calculation_mode==='HYBRID'?'Confirmation: completed price brick first, or a completed candle body smaller than one brick. Partial units never qualify.':'Calculation: candle-only captured run. Changing chart display does not switch the running decision basis.');
+ if(st&&!snapshot.midline_filter_enabled)lines.push('Midline entry filter: Off.');
+ if(st&&snapshot.midline_filter_enabled)lines.push('Midline trend filter: latest buy signal + completed brick above → Long / Call; latest sell signal + completed brick below → Short / Put. No fresh flip required. Period '+(snapshot.midline_period||123)+'. Equal closes block entry.');
  if(st)lines.push('Supertrend: length '+(snapshot.indicator_length||5)+' · multiplier '+(snapshot.indicator_factor||3)+'.');
  if(st)lines.push(premium?'Entry: bullish premium Supertrend flip; underlying direction selects Call / Put.':'Entry: a NEW confirmed Supertrend flip after Start — bullish buys Call; bearish buys Put. An already-aligned trend alone does not enter.');
  else lines.push('Entry: SMA band only; no Supertrend gate.');
@@ -168,10 +247,18 @@ function createAiContextLoader(fetcher){
 function aiRequestOptions(body,context){
  return body?{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':context?.csrf||''},body:JSON.stringify(body)}:undefined;
 }
+function verifiedManagedStop(snapshot,symbol,now=Date.now()/1000){
+ const h=snapshot?.heartbeat,p=h?.position,l=h?.zone_policy?.ladder;
+ const stamp=Date.parse(h?.at||'')/1000,control=h?.position_control;
+ if(!snapshot?.running||!snapshot.run_id||snapshot.underlying!==symbol||!p||p.symbol!==symbol||p.execution_route!=='DIRECT'||!p.order_id||!(p.quantity>0)||h.pending||snapshot.ownership?.pending||control?.mode!=='MANAGED'||control?.entries_paused===true||h.source_health?.entries_blocked===true||!Number.isFinite(stamp)||now-stamp<0||now-stamp>5)return null;
+ if(h.zone_policy?.active===false||h.zone_policy?.revision!=='opposing-structure-zone-v1'||!l||l.entry!==p.fill_price||l.direction!==p.side||!(l.achieved>=1)||!Number.isFinite(l.stop)||l.stop<=0)return null;
+ if(!p.target_grid||!['high','low','origin_at','available_at','source_frame','session'].every(k=>p.target_grid[k]===l.grid?.[k]))return null;
+ return {price:l.stop,symbol,order_id:String(p.order_id),run_id:snapshot.run_id,runtime_session:h.runtime_session,verified_at:stamp,kind:'STRATEGY_MANAGED',broker_resting:false,confirmation_mode:h.zone_policy.stop_confirmation_mode||'LEGACY_PRICE_TOUCH',achieved:l.achieved};
+}
 function mappedChartOwnership(payload,mappings){
  const mapRow=row=>row?{...row,execution_symbol:row.symbol,execution_underlying:row.underlying,
   symbol:mappings[row.symbol]||row.symbol,underlying:mappings[row.underlying]||row.underlying}:null;
- return {...payload,active_position:mapRow(payload.active_position),active_trade:mapRow(payload.active_trade),
+ return {...payload,active_stop:mapRow(payload.active_stop),active_position:mapRow(payload.active_position),active_trade:mapRow(payload.active_trade),
   events:(payload.events||[]).map(mapRow)};
 }
 function restoredDataAccount(current,accounts){
@@ -193,6 +280,12 @@ function manualSizingValues(fields){
  const value=Number(fields.manualParent);
  return {...fields,reference:Number.isFinite(value)&&value>0?String(value):'',
   session:'Manual parent override',evidence:'User-entered parent size; not independently verified'};
+}
+function runtimeSelectionChanges(current,next){
+ return current.underlying!==next.underlying||current.timeframe!==next.timeframe;
+}
+function displayedChartType(fields){
+ return fields.chartView|| (fields.calculationMode==='RENKO'?'Renko':'Candles');
 }
 function chartFramePolicy(item){
  const pending=!(Number.isFinite(Number(item.brick))&&Number(item.brick)>0);
@@ -255,7 +348,7 @@ function sizingContext(symbol,broker,category){
  if(broker==='DHAN')market=({NSE_EQ:'NSE',BSE_EQ:'BSE',NSE_FNO:'NSE',BSE_FNO:'BSE',MCX_COMM:'MCX'})[market]||market;
  let parentHours,asset;
  if(market==='MCX'){parentHours=14;}
- else if(category==='GOLD'||category==='GLOBAL_COMMODITY'){parentHours=22;asset='GOLD';}
+ else if(category==='GOLD'||category==='GLOBAL_COMMODITY'||broker==='DELTA_INDIA'&&symbol==='PAXGUSD'){parentHours=22;asset='GOLD';}
  else if(['NSE','BSE'].includes(market))parentHours=6;
  else if(market==='CRYPTO')parentHours=23;
  else if(market==='MCX')parentHours=14;
@@ -283,6 +376,13 @@ function chartContracts(preview,heartbeat,underlying){
  for(const c of [heartbeat?.selected_contract,heartbeat?.pending?.intent?.position,heartbeat?.position])if(c?.option_type&&c.underlying===underlying)contracts[c.option_type]=c;
  return contracts;
 }
+function midlineFilterAvailable(fields={}){return (fields.chartView||(fields.calculationMode==='RENKO'?'Renko':'Candles'))==='Candles';}
+function midlineFilterDefault(fields={},choice=null){return midlineFilterAvailable(fields)&&choice!==false;}
+function midlineDisplayEnabled(snapshot,fields={}){
+ return snapshot?.running
+  ?snapshot.supertrend_enabled!==false&&snapshot.midline_filter_enabled===true
+  :fields.supertrend!==false&&fields.midlineEnabled===true;
+}
 function configuration(fields,account,preview=false){
  if(!['FYERS','DELTA_INDIA','DHAN','MOTILAL_OSWAL'].includes(account?.broker))throw Error('Select a supported broker account.');
  if(account.broker==='MOTILAL_OSWAL'&&((fields.route||'OPTIONS')==='OPTIONS'?fields.product!=='NORMAL':!['INTRADAY','MARGIN'].includes(fields.product)))throw Error('Choose a supported Motilal product.');
@@ -303,7 +403,7 @@ function configuration(fields,account,preview=false){
   bands['ai_'+kind+'_band_entry']=fields[kind+'Entry']===true;
   bands['ai_'+kind+'_band_exit']=fields[kind+'Exit']===true;
  }
- const factor=Number(fields.factor??3);
+ const factor=fields.calculationMode==='RENKO'?2.1:3;
  if(fields.supertrend!==false&&(!Number.isFinite(factor)||factor<0.1))throw Error('Enter a Supertrend multiplier of at least 0.10.');
  const quantityMode=fields.quantityMode||'QUANTITY',amount=Number(fields.allocationAmount);
  if(!['QUANTITY','AMOUNT_INR'].includes(quantityMode))throw Error('Choose quantity or INR amount.');
@@ -313,7 +413,7 @@ function configuration(fields,account,preview=false){
  if(!preview&&account.broker==='FYERS'&&!(fields.route==='DIRECT'?['MARGIN','INTRADAY','CNC']:['MARGIN','INTRADAY']).includes(fields.product))throw Error('Choose a product.');
  if(!['1 minute','5 minutes','30 minutes'].includes(fields.timeframe))throw Error('Choose 1, 5 or 30 minutes.');
  if(moneyness==='OTM'&&!(Number(fields.premium||40)>0))throw Error('Enter a positive premium target.');
- return {...(account.broker==='MOTILAL_OSWAL'?{ai_market_data_broker:'FYERS',ai_market_data_account:fields.dataAccount}:{}),...bands,ai_sma_retest_required:fields.smaRetest===true,ai_sizing_mode:sizingMode,ai_manual_parent_value:sizingMode==='MANUAL_PARENT'?Number(fields.manualParent):null,...(sizingMode==='MANUAL_PARENT'&&fields.manualParentAt?{ai_manual_parent_entered_at:fields.manualParentAt}:{}),ai_supertrend_enabled:fields.supertrend!==false,ai_indicator_inputs:{length:5,factor,adx_enabled:false},strategy_mode:MODE,broker:account.broker,account_id:account.id,underlying:fields.underlying,timeframe:fields.timeframe,
+ return {...(account.broker==='MOTILAL_OSWAL'?{ai_market_data_broker:'FYERS',ai_market_data_account:fields.dataAccount}:{}),...bands,ai_sma_retest_required:fields.smaRetest===true,ai_sizing_mode:sizingMode,ai_manual_parent_value:sizingMode==='MANUAL_PARENT'?Number(fields.manualParent):null,...(sizingMode==='MANUAL_PARENT'&&fields.manualParentAt?{ai_manual_parent_entered_at:fields.manualParentAt}:{}),ai_supertrend_enabled:fields.supertrend!==false,ai_midline_filter_enabled:midlineFilterAvailable(fields)&&fields.supertrend!==false&&fields.midlineEnabled===true,ai_midline_period:Number(fields.midlinePeriod||123),ai_swing_targets_enabled:fields.swingTargets===true,ai_swing_retest_required:fields.swingTargets===true,ai_zone_targets_enabled:fields.zoneTargets===true,ai_grid_trailing_enabled:fields.gridTrailing===true,ai_trailing_reentry_enabled:fields.gridTrailing===true,ai_bull_entry_level:fields.bullEntryLevel==null||fields.bullEntryLevel===''?null:Number(fields.bullEntryLevel),ai_bear_entry_level:fields.bearEntryLevel==null||fields.bearEntryLevel===''?null:Number(fields.bearEntryLevel),ai_daily_max_loss:fields.dailyMaxLoss==null||fields.dailyMaxLoss===''?null:Number(fields.dailyMaxLoss),ai_indicator_inputs:{length:fields.calculationMode==='RENKO'?1:14,factor,adx_enabled:false},strategy_mode:MODE,broker:account.broker,account_id:account.id,underlying:fields.underlying,timeframe:fields.timeframe,
  mode:fields.execution,ai_calculation_mode:fields.decisionMode||'HYBRID',ai_display_mode:fields.calculationMode||'CANDLES',ai_signal_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_entry_source:(fields.underlyingSignals??fields.underlyingEntry)===false?'PREMIUM':'UNDERLYING',ai_option_moneyness:moneyness,lots:quantityMode==='AMOUNT_INR'?null:preview?null:lots,entry_quantity_mode:quantityMode,entry_amount_inr:quantityMode==='AMOUNT_INR'?amount:null,preview_options:preview,target_premium:Number(fields.premium||40),ai_product:fields.product,
  ai_execution_route:fields.route||'OPTIONS',ai_market:context.market,ai_asset:context.asset,ai_parent_hours:context.parentHours,ai_atr_length:context.atrLength,ai_baseline_minutes:30,
  ai_expiry_policy:fields.route!=='DIRECT'&&fields.expiry?'explicit_listed':'nearest_tradable',...(fields.route!=='DIRECT'&&fields.expiry?{ai_expiry:String(fields.expiry)}:{}),ai_reference_value:value,ai_reference_session:fields.session,ai_reference_symbol:fields.underlying,
@@ -343,6 +443,11 @@ function mount(){
  section.dataset.aiOptionsMounted='1';
  const aiOption=new Option('AI Renko Supertrend',MODE);
  aiOption.disabled=section.dataset.aiContextReady!=='1';mode.add(aiOption);
+ // Retain legacy runners and history while removing their modes from new UI selection.
+ for(const option of mode.options)if(['SIMPLE_BRICK','SUPERTREND'].includes(option.value)){
+  option.disabled=true;option.hidden=true;
+ }
+
  root.addEventListener('renko-ai-context-ready',()=>{aiOption.disabled=section.dataset.aiContextReady!=='1';});
 
  const toolbar=document.createElement('div');toolbar.className='renko-ai-toolbar field-grid';
@@ -359,6 +464,15 @@ function mount(){
  <div class="field" data-ai-source-field hidden><span>Chart and signal data</span><strong>FYERS</strong><input type="hidden" data-ai="dataBroker" value="FYERS"><small>Motilal remains the execution broker selected above.</small></div>
  <label class="field" data-ai-source-field hidden>FYERS data account<select data-ai="dataAccount"><option value="">Choose your FYERS account</option></select></label>
  <label class="field">Supertrend multiplier<input data-ai="factor" aria-label="Supertrend multiplier" type="number" min="0.1" step="0.01" value="3"><small>Applies to underlying, Call and Put.</small></label>
+ <label class="field"><span>Midline entry filter</span><span><input data-ai="midlineEnabled" aria-label="Use Midline entry filter" type="checkbox"> Use Midline entry filter</span><small>Off: Supertrend entries do not require the Midline. Candles: filter on by default; you can turn it off. Renko: filter off. Candlestick Midline stays visible.</small></label>
+ <label class="field"><span>Strong opposing-zone profit</span><span><input data-ai="zoneTargets" aria-label="Use strong opposing-zone profit and confirmed-break continuation" type="checkbox"> Take profit at strong opposing zones</span><small>Zone touch → completed-break continuation.</small><small data-ai-zone-state hidden></small><details><summary>Rule and source</summary><small>Confirmed 5m structural direction shift: 5/5 pivot, displacement ≥ 0.8 ATR14, opposing origin within 12 candles. Exit at the near edge; continuation needs a completed Renko brick beyond the far edge. No retest or fresh signal required. Uses 1m/5m source; choose separately from swing targets. A qualifying zone does not guarantee a bounce or a profitable fill.</small></details></label>
+ <label class="field"><span>Target-grid trailing</span><span><input data-ai="gridTrailing" aria-label="Use target-grid trailing stop" type="checkbox"> Trail one achieved target behind</span><small>T1 → Entry · T2 → T1 · T3 → T2 · continues. Re-entry waits for a completed pullback and directional break.</small><small data-ai-grid-state hidden></small><details><summary>Rule and availability</summary><small>Optional, off by default. Fresh prices advance the target ladder. In Renko mode the trailing exit requires a completed adverse brick closing at or beyond the stop; a tick or provisional brick cannot exit. After a trailing exit and confirmed flat, continuation waits for a completed counter-direction brick, then a later completed directional brick beyond the low/high frozen at exit. No touch-only re-entry and no fresh Buy/Sell signal required. Frozen V1 reference anchor/spacing; each fill starts at its first unachieved grid level. The stop only ratchets toward profit. Entry is the actual fill, not fee-inclusive break-even. Direct instruments, 1m/5m source; options require a separate premium/underlying break-even mapping and are not enabled for this rule.</small></details></label>
+ <label class="field"><span>Retained support/resistance targets</span><span><input data-ai="swingTargets" aria-label="Use retained support and resistance targets with failed-retest re-entry" type="checkbox"> Use targets and failed-retest re-entry</span><small>Renko only · retain unbroken confirmed support/resistance. After profit touch and confirmed flat, wait for departure, a return to the level, then a completed directional brick beyond it. No fresh Buy/Sell signal required.</small></label>
+ <label class="field">Bull entry level · optional<input data-ai="bullEntryLevel" aria-label="Bull entry level" type="number" min="0.01" step="any" placeholder="Off · leave blank"><small>Long / Call requires a completed underlying close above this price. Also shown on the chart.</small></label>
+ <label class="field">Bear entry level · optional<input data-ai="bearEntryLevel" aria-label="Bear entry level" type="number" min="0.01" step="any" placeholder="Off · leave blank"><small>Short / Put requires a completed underlying close below this price. Also shown on the chart.</small></label>
+ <label class="field">Daily maximum loss · optional<input data-ai="dailyMaxLoss" aria-label="Daily maximum realized loss" type="number" min="0.01" step="0.01" placeholder="Off · leave blank"><small>Account quote currency · today’s AI strategy realized loss before fees. At the limit, new entries stop; existing exits continue.</small></label>
+ <div class="renko-ai-wide"><small data-ai-loss-status role="status"></small></div>
+ <div class="renko-ai-wide"><small data-ai-midline-rule>Midline trend filter · completed buy close above: Long / Call. Completed sell close below: Short / Put. Existing premium / ATM selection applies.</small></div>
  <label class="field">Source timeframe<select data-ai="timeframe"><option>1 minute</option><option>5 minutes</option><option>30 minutes</option></select></label>
  <label class="field renko-ai-wide" data-ai-entry-source><span>Option entry and exit source</span><span class="renko-ai-toggle"><input type="checkbox" data-ai="underlyingSignals" aria-label="Use underlying chart for option entry and exit" checked>Use underlying chart</span><small data-ai-entry-running></small></label>
  <label class="field">Option selection<select data-ai="moneyness"><option value="OTM">OTM · premium target</option><option value="ATM">ATM · nearest strike</option></select><small hidden></small></label>
@@ -398,7 +512,26 @@ function mount(){
  toolbar.after(panel);
  const charts=document.createElement('section');charts.className='panel renko-ai-charts';charts.hidden=true;
  charts.innerHTML='<h2>Strategy charts</h2><p hidden></p><div class="renko-ai-chart-tabs" role="tablist" aria-label="Strategy chart selection"></div><div class="renko-ai-chart-grid"></div>';panel.after(charts);charts.after(journal);
- const style=document.createElement('style');style.textContent='#renko-supertrend.renko-ai-active>:not(.head):not(.renko-ai-toolbar):not(.renko-ai-panel):not(.renko-ai-charts):not(.renko-ai-journal){display:none!important}.renko-ai-toolbar{margin:14px 0}.renko-ai-active>.head small:not(.renko-ai-summary),.renko-ai-active>.head #renko-state{display:none!important}#renko-supertrend .renko-ai-panel .field-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:16px}.renko-ai-toolbar>label{max-width:440px}.renko-ai-wide{grid-column:1/-1}.renko-ai-panel input[type=checkbox]{width:18px!important;min-width:18px!important;vertical-align:middle}.renko-ai-sizing{padding:12px 16px;border-left:3px solid #75b6de;background:#15334a;color:#d7e7f3}.renko-ai-chart-grid{display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}.renko-ai-chart-grid iframe{width:100%;height:clamp(520px,72vh,900px);border:1px solid #334154;border-radius:8px}.renko-ai-chart-grid h3{margin:8px 0}.renko-ai-chart-grid .contract-details{min-height:48px;color:#a8bfd0;font-size:12px;line-height:1.6}.renko-ai-panel .packet-actions{display:flex;flex-wrap:wrap;gap:10px}@media(max-width:600px){.renko-ai-panel .packet-actions>button{flex:1 1 100%}.renko-ai-chart-grid iframe{height:650px}}';style.textContent+='\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px 20px;align-items:start}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label{max-width:none;min-width:0;grid-column:span 4;position:relative;display:grid!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:20px 42px minmax(16px,auto);gap:6px!important;align-content:start;align-items:start;padding:0!important;border:0!important}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label:nth-child(-n+2){grid-column:span 6}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>.renko-setting-name{grid-row:1;grid-column:1;padding-right:30px}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>select,#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>input{grid-row:2;grid-column:1;height:42px!important;min-height:42px;min-width:0;width:100%;max-width:100%;margin:0;box-sizing:border-box}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>small{grid-row:3}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>.renko-parameter-help{position:absolute;right:0;top:-2px;margin:0!important}\n#renko-supertrend .renko-ai-panel>.field-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;align-items:start}\n#renko-supertrend .renko-ai-panel .field{min-width:0;align-content:start}\n#renko-supertrend .renko-ai-panel label.field{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:20px 42px auto;gap:6px;justify-content:start;align-items:start}\n#renko-supertrend .renko-ai-panel label.field>input:not([type=checkbox]),#renko-supertrend .renko-ai-panel label.field>select{grid-row:2;min-width:0;width:100%;max-width:100%;height:42px;min-height:42px;margin:0;box-sizing:border-box}\n#renko-supertrend .renko-ai-panel label.field>small{grid-row:3;line-height:1.45;margin:0}\n#renko-supertrend .renko-ai-band-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}\n#renko-supertrend .renko-ai-band-card{min-width:0;margin:0;padding:16px;border:1px solid #334154;border-left:3px solid #38bdf8;border-radius:8px;background:#101e30}\n#renko-supertrend .renko-ai-band-card.ema-band{border-left-color:#a78bfa}\n#renko-supertrend .renko-ai-band-card>legend{padding:0 8px;font-size:13px;font-weight:600;color:#d7e7f3}\n#renko-supertrend .renko-ai-band-row{display:grid;grid-template-columns:minmax(90px,.7fr) repeat(2,minmax(0,1fr));gap:16px;align-items:start}\n#renko-supertrend .renko-ai-toggle{grid-row:2;display:flex;align-items:center;gap:10px;min-height:42px;padding:8px 12px;border:1px solid #334154;border-radius:6px;background:#0b1728;box-sizing:border-box;color:#c9dbea}\n#renko-supertrend .renko-ai-toggle input[type=checkbox]{height:18px!important;width:18px!important;min-width:18px!important;margin:0!important;flex:none;accent-color:#75b6de}\n#renko-supertrend .renko-ai-band-card>small{display:block;margin-top:8px;line-height:1.4;color:#a8bfd0}\n#renko-supertrend .renko-ai-reference-details{padding:12px 16px;border:1px solid #334154;border-radius:8px}\n#renko-supertrend .renko-ai-reference-details>summary{cursor:pointer;font-size:12px;font-weight:600;color:#a8bfd0}\n#renko-supertrend .renko-ai-reference-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;margin:16px 0 0}\n#renko-supertrend .renko-ai-reference-grid>div:last-child{grid-column:1/-1}\n#renko-supertrend .renko-ai-reference-grid dt{font-size:11px;color:#a8bfd0;margin-bottom:5px}\n#renko-supertrend .renko-ai-reference-grid dd{margin:0;color:#d7e7f3;font-size:12px;overflow-wrap:anywhere}\n@media(max-width:1100px){#renko-supertrend .renko-ai-panel>.field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#renko-supertrend .renko-ai-band-grid{grid-template-columns:1fr}}\n@media(max-width:650px){#renko-supertrend.renko-ai-active>.renko-ai-toolbar{grid-template-columns:1fr;gap:12px}#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label,#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label:nth-child(-n+2){grid-column:1}#renko-supertrend .renko-ai-panel>.field-grid,#renko-supertrend .renko-ai-band-row,#renko-supertrend .renko-ai-reference-grid{grid-template-columns:1fr}}\n';style.textContent+='.renko-ai-export{align-self:center;position:relative;font-size:12px;color:#a8bfd0}.renko-ai-export summary{cursor:pointer;padding:10px}.renko-ai-export[open] .button{margin-top:8px}';style.textContent+='.renko-ai-attachment{margin:16px 0;padding:16px;border:1px solid #334154;border-radius:10px;min-width:0}.renko-ai-attachment legend{padding:0 6px;font-weight:600}.renko-ai-attachment p{font-size:12px;line-height:1.6}.renko-ai-attachment .field-grid{align-items:end}.renko-ai-attachment [data-ai-action=positions],.renko-ai-attachment select{height:42px;min-height:42px;box-sizing:border-box}.renko-ai-attachment [data-ai-action=positions]{align-self:end}';style.textContent+='#renko-supertrend .renko-ai-panel [data-ai-entry-source]{grid-template-rows:20px 42px auto auto}#renko-supertrend .renko-ai-panel [data-ai-entry-source]>*{grid-column:1;min-width:0}#renko-supertrend .renko-ai-panel [data-ai-entry-source]>[data-ai-entry-running]{grid-row:4}';document.head.append(style);
+ const chartLayoutToolbar=document.createElement('div');chartLayoutToolbar.className='renko-ai-layout-toolbar';
+ chartLayoutToolbar.innerHTML='<label class="field">Chart layout<select aria-label="Strategy chart layout"><option value="single">Single chart · tabs</option><option value="underlying-call">Underlying + Call</option><option value="underlying-put">Underlying + Put</option><option value="three">Underlying + Call + Put</option></select></label><small>Display only · charts stack on narrow screens.</small>';
+ charts.querySelector('.renko-ai-chart-tabs').before(chartLayoutToolbar);
+ const multiStyle=document.createElement('style');multiStyle.textContent=`
+.renko-ai-charts{container-type:inline-size}
+.renko-ai-chart-grid:not([data-layout="single"]){gap:14px}
+.renko-ai-chart-grid:not([data-layout="single"])>article{position:relative;padding:14px}
+.renko-ai-chart-grid:not([data-layout="single"]) h3{margin:0 0 6px;font-size:16px;line-height:1.4;padding-right:90px}
+.renko-ai-chart-grid:not([data-layout="single"]) .contract-details{min-height:0;margin:0 0 12px;line-height:1.5}
+.renko-ai-chart-grid:not([data-layout="single"]) .chart-tables-toggle{position:absolute;right:12px;top:10px;min-height:32px;padding:5px 10px;font-size:12px}
+.renko-ai-chart-grid:not([data-layout="single"]) iframe{height:clamp(980px,100vh,1180px);background:#fff}
+@container(max-width:1100px){.renko-ai-chart-grid[data-layout="underlying-call"],.renko-ai-chart-grid[data-layout="underlying-put"],.renko-ai-chart-grid[data-layout="three"]{grid-template-columns:minmax(0,1fr)}}
+@container(min-width:1101px) and (max-width:1550px){.renko-ai-chart-grid[data-layout="three"]{grid-template-columns:repeat(2,minmax(0,1fr))}.renko-ai-chart-grid[data-layout="three"]>article:first-child{grid-column:1/-1}}
+@container(min-width:1551px){.renko-ai-chart-grid[data-layout="three"]{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container(max-width:600px){.renko-ai-chart-grid:not([data-layout="single"])>article{padding:10px}.renko-ai-chart-grid:not([data-layout="single"]) iframe{height:1060px}}
+`;charts.append(multiStyle);
+const chartLayoutPick=chartLayoutToolbar.querySelector('select');
+ let chartLayoutMode='single';
+ chartLayoutPick.onchange=()=>{chartLayoutMode=chartLayoutPick.value;try{localStorage.setItem(activeChartTabScope+':layout',chartLayoutMode);}catch{}drawCharts(values());};
+ const style=document.createElement('style');style.textContent='#renko-supertrend.renko-ai-active>:not(.head):not(.renko-ai-toolbar):not(.renko-ai-panel):not(.renko-ai-charts):not(.renko-ai-journal){display:none!important}.renko-ai-toolbar{margin:14px 0}.renko-ai-active>.head small:not(.renko-ai-summary),.renko-ai-active>.head #renko-state{display:none!important}#renko-supertrend .renko-ai-panel .field-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:16px}.renko-ai-toolbar>label{max-width:440px}.renko-ai-wide{grid-column:1/-1}.renko-ai-panel input[type=checkbox]{width:18px!important;min-width:18px!important;vertical-align:middle}.renko-ai-sizing{padding:12px 16px;border-left:3px solid #75b6de;background:#15334a;color:#d7e7f3}.renko-ai-chart-grid{display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}.renko-ai-chart-grid iframe{width:100%;height:clamp(520px,72vh,900px);border:1px solid #334154;border-radius:8px}.renko-ai-chart-grid h3{margin:8px 0}.renko-ai-chart-grid .contract-details{min-height:48px;color:#a8bfd0;font-size:12px;line-height:1.6}.renko-ai-panel .packet-actions{display:flex;flex-wrap:wrap;gap:10px}@media(max-width:600px){.renko-ai-panel .packet-actions>button{flex:1 1 100%}.renko-ai-chart-grid iframe{height:850px}}';style.textContent+='\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px 20px;align-items:start}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label{max-width:none;min-width:0;grid-column:span 4;position:relative;display:grid!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:20px 42px minmax(16px,auto);gap:6px!important;align-content:start;align-items:start;padding:0!important;border:0!important}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label:nth-child(-n+2){grid-column:span 6}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>.renko-setting-name{grid-row:1;grid-column:1;padding-right:30px}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>select,#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>input{grid-row:2;grid-column:1;height:42px!important;min-height:42px;min-width:0;width:100%;max-width:100%;margin:0;box-sizing:border-box}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>small{grid-row:3}\n#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label>.renko-parameter-help{position:absolute;right:0;top:-2px;margin:0!important}\n#renko-supertrend .renko-ai-panel>.field-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;align-items:start}\n#renko-supertrend .renko-ai-panel .field{min-width:0;align-content:start}\n#renko-supertrend .renko-ai-panel label.field{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:20px 42px auto;gap:6px;justify-content:start;align-items:start}\n#renko-supertrend .renko-ai-panel label.field>input:not([type=checkbox]),#renko-supertrend .renko-ai-panel label.field>select{grid-row:2;min-width:0;width:100%;max-width:100%;height:42px;min-height:42px;margin:0;box-sizing:border-box}\n#renko-supertrend .renko-ai-panel label.field>small{grid-row:3;line-height:1.45;margin:0}\n#renko-supertrend .renko-ai-band-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}\n#renko-supertrend .renko-ai-band-card{min-width:0;margin:0;padding:16px;border:1px solid #334154;border-left:3px solid #38bdf8;border-radius:8px;background:#101e30}\n#renko-supertrend .renko-ai-band-card.ema-band{border-left-color:#a78bfa}\n#renko-supertrend .renko-ai-band-card>legend{padding:0 8px;font-size:13px;font-weight:600;color:#d7e7f3}\n#renko-supertrend .renko-ai-band-row{display:grid;grid-template-columns:minmax(90px,.7fr) repeat(2,minmax(0,1fr));gap:16px;align-items:start}\n#renko-supertrend .renko-ai-toggle{grid-row:2;display:flex;align-items:center;gap:10px;min-height:42px;padding:8px 12px;border:1px solid #334154;border-radius:6px;background:#0b1728;box-sizing:border-box;color:#c9dbea}\n#renko-supertrend .renko-ai-toggle input[type=checkbox]{height:18px!important;width:18px!important;min-width:18px!important;margin:0!important;flex:none;accent-color:#75b6de}\n#renko-supertrend .renko-ai-band-card>small{display:block;margin-top:8px;line-height:1.4;color:#a8bfd0}\n#renko-supertrend .renko-ai-reference-details{padding:12px 16px;border:1px solid #334154;border-radius:8px}\n#renko-supertrend .renko-ai-reference-details>summary{cursor:pointer;font-size:12px;font-weight:600;color:#a8bfd0}\n#renko-supertrend .renko-ai-reference-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;margin:16px 0 0}\n#renko-supertrend .renko-ai-reference-grid>div:last-child{grid-column:1/-1}\n#renko-supertrend .renko-ai-reference-grid dt{font-size:11px;color:#a8bfd0;margin-bottom:5px}\n#renko-supertrend .renko-ai-reference-grid dd{margin:0;color:#d7e7f3;font-size:12px;overflow-wrap:anywhere}\n@media(max-width:1100px){#renko-supertrend .renko-ai-panel>.field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#renko-supertrend .renko-ai-band-grid{grid-template-columns:1fr}}\n@media(max-width:650px){#renko-supertrend.renko-ai-active>.renko-ai-toolbar{grid-template-columns:1fr;gap:12px}#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label,#renko-supertrend.renko-ai-active>.renko-ai-toolbar>label:nth-child(-n+2){grid-column:1}#renko-supertrend .renko-ai-panel>.field-grid,#renko-supertrend .renko-ai-band-row,#renko-supertrend .renko-ai-reference-grid{grid-template-columns:1fr}}\n';style.textContent+='.renko-ai-export{align-self:center;position:relative;font-size:12px;color:#a8bfd0}.renko-ai-export summary{cursor:pointer;padding:10px}.renko-ai-export[open] .button{margin-top:8px}';style.textContent+='.renko-ai-attachment{margin:16px 0;padding:16px;border:1px solid #334154;border-radius:10px;min-width:0}.renko-ai-attachment legend{padding:0 6px;font-weight:600}.renko-ai-attachment p{font-size:12px;line-height:1.6}.renko-ai-attachment .field-grid{align-items:end}.renko-ai-attachment [data-ai-action=positions],.renko-ai-attachment select{height:42px;min-height:42px;box-sizing:border-box}.renko-ai-attachment [data-ai-action=positions]{align-self:end}';style.textContent+='#renko-supertrend .renko-ai-panel [data-ai-entry-source]{grid-template-rows:20px 42px auto auto}#renko-supertrend .renko-ai-panel [data-ai-entry-source]>*{grid-column:1;min-width:0}#renko-supertrend .renko-ai-panel [data-ai-entry-source]>[data-ai-entry-running]{grid-row:4}';style.textContent+="\n/* Consistent form controls and explicit two-track action rows. */\n#renko-supertrend .renko-ai-panel .packet-actions { align-items:flex-end;gap:12px; }\n#renko-supertrend .renko-ai-panel .packet-actions > .button,\n#renko-supertrend .renko-ai-panel .packet-actions > details > summary {\n box-sizing:border-box;min-height:42px;height:42px;display:inline-flex;\n align-items:center;justify-content:center;margin:0;line-height:1.25;\n}\n#renko-supertrend .renko-ai-panel .packet-actions > details {\n align-self:flex-end;margin:0;\n}\n#renko-supertrend .renko-ai-manual .packet-actions {\n display:grid;grid-template-columns:minmax(180px,300px) minmax(180px,max-content);\n align-items:end;justify-content:start;gap:12px;\n}\n#renko-supertrend .renko-ai-manual .packet-actions > label.field,\n#renko-supertrend .renko-ai-attachment .field-grid > label.field {\n display:grid!important;grid-template-rows:20px 42px!important;\n gap:6px!important;align-items:start;align-content:start;\n padding:0!important;margin:0!important;min-width:0;\n}\n#renko-supertrend .renko-ai-manual select,\n#renko-supertrend .renko-ai-attachment select,\n#renko-supertrend .renko-ai-attachment button {\n height:42px;min-height:42px;box-sizing:border-box;margin:0;\n}\n#renko-supertrend .renko-ai-manual [data-ai-action=manual-entry] {\n align-self:end;width:100%;min-height:42px;height:42px;\n}\n#renko-supertrend .renko-ai-attachment .field-grid { align-items:end; }\n@media(max-width:650px){\n #renko-supertrend .renko-ai-panel .packet-actions {display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;} #renko-supertrend .renko-ai-panel .packet-actions > .button {width:100%;} #renko-supertrend .renko-ai-manual .packet-actions {grid-template-columns:minmax(0,1fr);}\n #renko-supertrend .renko-ai-panel .packet-actions > details {width:100%;}\n #renko-supertrend .renko-ai-panel .packet-actions > details > summary {justify-content:flex-start;}\n}\n";style.textContent+="\n.renko-ai-layout-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:14px 0;}\n.renko-ai-layout-toolbar .field{width:290px;max-width:100%;margin:0;}\n.renko-ai-layout-toolbar select{height:42px;box-sizing:border-box;}\n.renko-ai-layout-toolbar small{color:#a8bfd0;font-size:12px;}\n.renko-ai-chart-grid[data-layout=\"underlying-call\"],\n.renko-ai-chart-grid[data-layout=\"underlying-put\"]{grid-template-columns:repeat(2,minmax(0,1fr));}\n.renko-ai-chart-grid[data-layout=\"three\"]{grid-template-columns:repeat(3,minmax(0,1fr));}\n.renko-ai-chart-grid>article{min-width:0;}\n.renko-ai-chart-grid:not([data-layout=\"single\"])>article{padding:12px;border:1px solid #334a62;border-radius:10px;background:#0e1c2e;}\n.renko-ai-chart-grid:not([data-layout=\"single\"]) iframe{height:740px;}\n@media(max-width:1100px){.renko-ai-chart-grid[data-layout=\"three\"]{grid-template-columns:repeat(2,minmax(0,1fr));}}\n@media(max-width:760px){\n .renko-ai-chart-grid[data-layout]{grid-template-columns:minmax(0,1fr);}\n .renko-ai-chart-grid:not([data-layout=\"single\"]) iframe{height:850px;}\n .renko-ai-layout-toolbar{align-items:stretch;}.renko-ai-layout-toolbar .field{width:100%;}\n}\n";document.head.append(style);
  const displayInput=document.createElement('input');displayInput.type='hidden';displayInput.dataset.ai='calculationMode';displayInput.value='RENKO';panel.append(displayInput);
  const chartViewInput=document.createElement('input');chartViewInput.type='hidden';chartViewInput.dataset.ai='chartView';chartViewInput.value='Renko';panel.append(chartViewInput);
  const inputs=[...panel.querySelectorAll('[data-ai]')],status=panel.querySelector('.renko-ai-status'),sizing=panel.querySelector('.renko-ai-sizing');
@@ -413,7 +546,7 @@ function mount(){
  const strategySectionVisible=()=>section.classList.contains('active')&&!section.hidden;
  function restoreAiView(){
   if(!strategySectionVisible()||section.dataset.aiContextReady!=='1'||!selected()?.id)return;
-  const intended=strategyVisit.selected();
+  const intended=MODE;
   try{
    if(mode.value!==intended){
     applyingViewDefault=true;
@@ -431,7 +564,7 @@ function mount(){
  root.addEventListener('renko-ai-context-ready',restoreAiView);
 
  style.textContent+='.renko-ai-runners{padding:12px 0;border-bottom:1px solid #334154;margin-bottom:12px}.renko-ai-runners summary{cursor:pointer;font-weight:600}.renko-ai-runners [data-runner-list]{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.renko-ai-runners button{white-space:normal;text-align:left;max-width:100%}.renko-ai-chart-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px;padding-bottom:12px;border-bottom:1px solid #334154}.renko-ai-chart-tabs[hidden]{display:none}.renko-ai-chart-tabs [role=tab]{min-height:42px;padding:9px 18px;border:1px solid #40536a;border-radius:7px;background:#142337;color:#bfd1e1;font-weight:600;cursor:pointer}.renko-ai-chart-tabs [role=tab][aria-selected=true]{background:#24567b;border-color:#78b7e4;color:#fff}.renko-ai-chart-tabs [role=tab]:focus-visible{outline:2px solid #9bd3ff;outline-offset:3px}.renko-ai-chart-grid>article{min-width:0;width:100%}.renko-ai-chart-grid>article[hidden]{display:none!important}';
- let activeChartTab='underlying',activeChartTabScope='',factorDraftValue=null,supertrendDraftValue=null,retestDraftValue=null;
+ let activeChartTab='underlying',activeChartTabScope='',factorDraftValue=null,supertrendDraftValue=null,midlineFilterDraftValue=null,retestDraftValue=null;
  const values=()=>manualSizingValues({...Object.fromEntries(inputs.map(n=>[n.dataset.ai,n.type==='checkbox'?n.checked:n.value])),manualParentAt,underlying:document.getElementById('renko-symbol')?.value,instrument_market:document.getElementById('renko-market')?.value,decisionMode:snapshot?.running?snapshot.calculation_mode:(snapshot?.hybrid_completed_units_ready?'HYBRID':'CANDLES')});
  const selectionSync=new SelectionSync();
  let acceptedSelection=null;
@@ -439,13 +572,14 @@ function mount(){
  let current=null,snapshot=null,legacyFields=null,legacyOptions=null,referenceLoaded=false,referenceSymbol=null,optionPreview=null,lastDisplayReference=null;
  const instrumentControls=['market','search','symbol'].map(id=>document.getElementById('renko-'+id)?.closest('label')).filter(Boolean).map(node=>{const anchor=document.createComment('AI instrument control position');node.before(anchor);return {node,parent:node.parentNode,anchor};});
  const aiSummary=document.createElement("small");aiSummary.className="renko-ai-summary muted";aiSummary.textContent="";section.querySelector(".head h1").parentElement.append(aiSummary);aiSummary.hidden=true;
+ const underlyingOptionChain=mountUnderlyingOptionChain(charts,()=>({account:selected(),underlying:values().underlying}));
  function directMarketChoices(){const account=selected();if(!['DHAN','MOTILAL_OSWAL'].includes(account?.broker))return;const direct=mode.value===MODE&&values().route==='DIRECT';for(const o of document.getElementById('renko-market').options)if(['NSE_EQUITY','BSE_EQUITY'].includes(o.value))o.disabled=!direct;}
  function show(){
   const ai=mode.value===MODE,account=selected();for(const c of instrumentControls){if(ai&&c.node.parentNode!==toolbar)toolbar.append(c.node);else if(!ai&&c.node.parentNode===toolbar)c.parent.insertBefore(c.node,c.anchor.nextSibling);}section.classList.toggle('renko-ai-active',ai);panel.hidden=charts.hidden=journal.hidden=!ai;aiSummary.hidden=!ai;
   const option=[...mode.options].find(o=>o.value===MODE);option.disabled=!['FYERS','DELTA_INDIA','DHAN','MOTILAL_OSWAL'].includes(account?.broker);
   directMarketChoices();if(!ai){if(suggestionBox)suggestionBox.hidden=true;return;}
   if(referenceSymbol!==values().underlying){panel.dataset.lastReferenceClear=String(referenceSymbol)+' -> '+values().underlying;for(const key of ['reference','evidence','session'])panel.querySelector('[data-ai='+key+']').value='';referenceSymbol=null;referenceLoaded=false;}
-  renderJournal();
+  renderJournal();underlyingOptionChain.sync();
   for(const field of panel.querySelectorAll('[data-ai-source-field]'))field.hidden=account?.broker!=='MOTILAL_OSWAL';
   const sourcePick=panel.querySelector('[data-ai=dataAccount]'),sourcePrior=sourcePick.value;
   const sourceAccounts=(root.BrokerForms?.accounts?.()||[]).filter(a=>a.broker==='FYERS');
@@ -457,6 +591,36 @@ function mount(){
   if(account?.broker==='MOTILAL_OSWAL'&&!snapshot?.running&&snapshot?.phase!=='PREFLIGHT')sourcePick.value=restoredDataAccount(sourcePick.value,sourceAccounts);
   for(const key of ['dataBroker','dataAccount'])panel.querySelector('[data-ai='+key+']').disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';
   const v=values();
+  panel.dataset.midlineFilterReady=String(snapshot?.midline_filter_ready===true);
+  for(const [field,key] of [['bullEntryLevel','bull_entry_level'],['bearEntryLevel','bear_entry_level']]){const el=panel.querySelector('[data-ai='+field+']');el.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';if(snapshot?.running)el.value=snapshot[key]??'';}
+  for(const [field,key] of [['zoneTargets','zone_targets_enabled'],['gridTrailing','grid_trailing_enabled']]){const input=panel.querySelector('[data-ai='+field+']');input.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT'||snapshot?.zone_targets_ready!==true||(field==='gridTrailing'&&snapshot?.trailing_reentry_ready!==true);input.title=snapshot?.running?'Captured by the active run; verified active state is shown below':snapshot?.zone_targets_ready===true?'Captured when you start a new run':'Dashboard capability update awaits a safe reload; existing runs keep their captured settings';if(snapshot?.running)input.checked=(snapshot[key]??snapshot.heartbeat?.[key])===true;}
+  const policy=snapshot?.heartbeat?.zone_policy,position=snapshot?.heartbeat?.position,zone=position?.zone_target||policy?.continuation;
+  const formatPolicyPrice=value=>Number(value).toLocaleString('en-IN',{maximumFractionDigits:2});
+  const zoneState=panel.querySelector('[data-ai-zone-state]'),gridState=panel.querySelector('[data-ai-grid-state]');
+  zoneState.hidden=!(snapshot?.zone_targets_enabled||snapshot?.heartbeat?.zone_targets_enabled);
+  zoneState.textContent=zone ? zone.side+' '+formatPolicyPrice(zone.low)+'–'+formatPolicyPrice(zone.high)+' · '+zone.source_frame+'m source · '+new Date(zone.origin_at*1000).toLocaleString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})+' IST'+(policy?.continuation?' · '+policy.continuation.phase.replaceAll('_',' ').toLowerCase():'') : 'No qualifying fresh strong zone reported; protective exits remain active.';
+  gridState.hidden=!(snapshot?.grid_trailing_enabled||snapshot?.heartbeat?.grid_trailing_enabled);
+  gridState.textContent=policy?.ladder ? 'T'+policy.ladder.achieved+' achieved · '+(policy.ladder.stop==null?'stop not armed':'stop '+formatPolicyPrice(policy.ladder.stop)) : 'Waiting for a confirmed fill and its frozen reference grid.';
+  const swingInput=panel.querySelector('[data-ai=swingTargets]');swingInput.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';if(snapshot?.running)swingInput.checked=(snapshot.swing_targets_enabled??snapshot.heartbeat?.swing_targets_enabled)===true;
+  const lossInput=panel.querySelector('[data-ai=dailyMaxLoss]');
+  lossInput.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';
+  if(snapshot?.running)lossInput.value=snapshot.daily_max_loss??'';
+  const lossStatus=panel.querySelector('[data-ai-loss-status]');
+  lossStatus.textContent=snapshot?.running?(snapshot.daily_max_loss?'Captured daily limit: '+Number(snapshot.daily_max_loss).toFixed(2)+' · new entries only.':'Daily loss limit: Off for the active runner.'):(snapshot?.daily_loss_filter_ready===true?'Optional daily limit · blank keeps it off.':'Daily loss limit update awaits a safe dashboard reload after the active strategy stops.');
+
+  const midlineInput=panel.querySelector('[data-ai=midlineEnabled]');
+  if(snapshot?.running){
+   if(midlineFilterDraftValue===null)midlineFilterDraftValue=midlineInput.checked;
+   midlineInput.checked=snapshot.midline_filter_enabled===true;v.midlineEnabled=midlineInput.checked;
+  }else if(midlineFilterDraftValue!==null){midlineInput.checked=midlineFilterDraftValue;v.midlineEnabled=midlineFilterDraftValue;midlineFilterDraftValue=null;}
+  if(!snapshot?.running&&snapshot?.phase!=='PREFLIGHT'){
+   let choice=null;try{const saved=localStorage.getItem(storage()+':candlestick-midline:'+v.underlying);if(saved!==null)choice=JSON.parse(saved);}catch{}
+   midlineInput.checked=midlineFilterDefault(v,choice);v.midlineEnabled=midlineInput.checked;
+  }
+  midlineInput.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT'||v.supertrend===false||!midlineFilterAvailable(v);
+  midlineInput.title=snapshot?.running?'Captured by the active run. Stop and start to change this rule.':'Optional candlestick-only entry filter; does not change Midline display or exits.';
+  const midlineRule=panel.querySelector('[data-ai-midline-rule]');
+  if(midlineRule)midlineRule.textContent=snapshot?.running?(snapshot.midline_filter_enabled?'Active Midline trend filter · period '+(snapshot.midline_period||123)+' · latest buy + completed brick above: Long / Call; latest sell + completed brick below: Short / Put.':'Active Midline entry filter: Off · Supertrend entries use the remaining configured rules.'):(!midlineFilterAvailable(v)?'Midline entry filter unavailable · switch to Candles to use it.':v.supertrend===false?'Midline entry filter inactive while Supertrend is off.':v.midlineEnabled!==true?'Midline entry filter: Off · Supertrend entries use the remaining configured rules.':'Midline entry filter: On · latest buy signal + completed brick above: Long / Call; latest sell signal + completed brick below: Short / Put. Existing premium / ATM selection applies.');
   const directRouteOption=[...panel.querySelector('[data-ai=route]').options].find(o=>o.value==='DIRECT');directRouteOption.disabled=false;directRouteOption.title=account?.broker==='MOTILAL_OSWAL'?'Protected limit · 1 tick beyond fresh bid/ask · IOC; fill not guaranteed.':'';
   if(!snapshot?.running&&!v.product){const product=defaultProduct(account,v);if(product){panel.querySelector('[data-ai=product]').value=product;v.product=product;}}
   const manualMode=v.sizingMode==='MANUAL_PARENT';
@@ -475,8 +639,9 @@ function mount(){
    if(factorDraftValue===null)factorDraftValue=factorInput.value;
    factorInput.value=String(snapshot.indicator_factor||3);v.factor=factorInput.value;
   }else if(factorDraftValue!==null){factorInput.value=factorDraftValue;v.factor=factorDraftValue;factorDraftValue=null;}
-  factorInput.disabled=!!snapshot?.running||snapshot?.phase==='PREFLIGHT';
-  factorInput.title=factorInput.disabled?'Multiplier is captured by the active run. Stop before editing.':'Updates all three strategy charts.';
+  if(!snapshot?.running){factorInput.value=String(v.calculationMode==='RENKO'?2.1:3);v.factor=factorInput.value;}
+  factorInput.disabled=true;
+  factorInput.title=snapshot?.running?'Multiplier is captured by the active run.':'Renko: ATR 1 × 2.1; Candlesticks: ATR 14 × 3.';
   if(['DHAN','MOTILAL_OSWAL'].includes(account?.broker)){
    const direct=v.route==='DIRECT';
    const product=direct?(['INTRADAY','MARGIN'].includes(v.product)?v.product:'INTRADAY'):account.broker==='DHAN'?'MARGIN':'NORMAL',pick=panel.querySelector('[data-ai=product]');
@@ -676,14 +841,20 @@ function mount(){
   if(activeChartTabScope!==tabScope){
    activeChartTabScope=tabScope;activeChartTab='underlying';
    try{activeChartTab=localStorage.getItem(tabScope)||'underlying';}catch{}
+   chartLayoutMode='single';try{chartLayoutMode=localStorage.getItem(tabScope+':layout')||'single';}catch{}
+   if(!['single','underlying-call','underlying-put','three'].includes(chartLayoutMode))chartLayoutMode='single';
+
   }
   if(!entries.some(item=>item.tab===activeChartTab))activeChartTab='underlying';
-  tabBar.hidden=entries.length<2;
+  if(view.route==='DIRECT')chartLayoutMode='single';
+  chartLayoutPick.value=chartLayoutMode;chartLayoutPick.disabled=view.route==='DIRECT';
+  grid.dataset.layout=chartLayoutMode;
+  tabBar.hidden=entries.length<2||chartLayoutMode!=='single';
   grid.classList.toggle('options-charts',view.route!=='DIRECT');
   for(const [i,item] of entries.entries()){
    let card=grid.children[i];if(!card){card=document.createElement('article');card.innerHTML='<h3></h3><p class="contract-details"></p><p class="chart-load-status" role="status" hidden></p><button class="button secondary chart-retry" type="button" hidden>Retry chart</button><iframe loading="lazy"></iframe>';grid.append(card);}
-   const selectedTab=item.tab===activeChartTab;
-   card.hidden=!selectedTab;card.dataset.chartTab=item.tab;card.id='ai-chart-panel-'+account.id+'-'+i;card.setAttribute('role','tabpanel');
+   const selectedTab=chartLayoutVisible(chartLayoutMode,item.tab,activeChartTab);
+   card.hidden=!selectedTab;card.dataset.chartTab=item.tab;card.id='ai-chart-panel-'+account.id+'-'+i;card.setAttribute('role',chartLayoutMode==='single'?'tabpanel':'group');card.setAttribute('aria-label',item.title);
    let tab=tabBar.children[i];
    if(!tab){tab=document.createElement('button');tab.type='button';tab.setAttribute('role','tab');tabBar.append(tab);}
    tab.dataset.chartTab=item.tab;tab.id='ai-chart-tab-'+account.id+'-'+i;
@@ -701,6 +872,21 @@ function mount(){
     event.preventDefault();buttons[next].click();buttons[next].focus();
    };
    card.querySelector('h3').textContent=item.title;card.querySelector('.contract-details').textContent=item.details;
+   let tableToggle=card.querySelector('.chart-tables-toggle');
+   if(!tableToggle){
+    tableToggle=document.createElement('button');tableToggle.type='button';tableToggle.className='button secondary chart-tables-toggle';tableToggle.textContent='Tables';
+    tableToggle.title='Show or hide Market View and detailed levels';tableToggle.setAttribute('aria-pressed','true');
+    window.addEventListener('message',event=>{
+      const frame=card.querySelector('iframe');if(!frame?.src)return;
+      const url=new URL(frame.src,location.href),d=event.data;
+      if(event.origin!==location.origin||event.source!==frame.contentWindow||d?.type!=='sector-pulse-chart-table-state'||d.account!==url.searchParams.get('chartSource')||d.instance!==url.searchParams.get('chartInstance')||d.symbol!==url.searchParams.get('symbol')||typeof d.visible!=='boolean')return;
+      tableToggle.setAttribute('aria-pressed',String(d.visible));tableToggle.textContent=d.visible?'Hide tables':'Show tables';
+    });
+
+    card.querySelector('.contract-details').after(tableToggle);
+    tableToggle.onclick=()=>{const visible=tableToggle.getAttribute('aria-pressed')!=='true';tableToggle.setAttribute('aria-pressed',String(visible));const target=card.querySelector('iframe'),url=new URL(target.src,location.href);target.contentWindow?.postMessage({type:'sector-pulse-chart-tables',account:url.searchParams.get('chartSource'),instance:url.searchParams.get('chartInstance'),symbol:url.searchParams.get('symbol'),visible},location.origin);};
+   }
+   tableToggle.setAttribute('aria-label','Show or hide tables · '+item.title);tableToggle.hidden=chartLayoutMode==='single';tableToggle.disabled=!item.symbol;
    const framePolicy=chartFramePolicy(item);
    const frame=card.querySelector('iframe');frame.title=item.title;frame.allowFullscreen=true;frame.setAttribute('allow','fullscreen');frame.hidden=framePolicy.hidden;
    if(frame.hidden){frame.removeAttribute('src');continue;}
@@ -734,23 +920,27 @@ function mount(){
     chartLink.searchParams.set('aiRuntimeSession',snapshot.heartbeat.runtime_session);
    if(split){chartLink.searchParams.set('aiExecutionBroker','MOTILAL_OSWAL');chartLink.searchParams.set('aiExecutionAccount',account.id);}
    if(snapshot?.running?snapshot.supertrend_basis==='COMPLETED_RENKO':snapshot?.hybrid_completed_units_ready)chartLink.searchParams.set('aiSignalBasis','COMPLETED_RENKO');
+   chartLink.searchParams.set('aiSectorPulseV1','1');
+   chartLink.searchParams.set('aiMidline',midlineDisplayEnabled(snapshot,v)?'1':'0');
+   if(sourceRun)chartLink.searchParams.set('aiMidlinePeriod',String(snapshot?.midline_period||123));
    if(framePolicy.pending)chartLink.searchParams.set('aiSizingPending','1');
-   if(snapshot?.run_id)chartLink.searchParams.set('aiLength',String(snapshot.indicator_length||5));
-   const selectedFactor=snapshot?.running?Number(snapshot.indicator_factor||3):Number(v.factor||3);
+   chartLink.searchParams.set('aiLength',String(sourceRun?(snapshot.indicator_length||5):(v.calculationMode==='RENKO'?1:14)));
+   const selectedFactor=sourceRun?Number(snapshot.indicator_factor||3):(v.calculationMode==='RENKO'?2.1:3);
+   const selectedLength=sourceRun?Number(snapshot.indicator_length||5):(v.calculationMode==='RENKO'?1:14);
    chartLink.searchParams.set('aiFactor',String(selectedFactor));
    // Multiplier changes use the existing chart's cached data, not a new iframe.
    try{
     const previous=new URL(frame.getAttribute('src'));
-    if(previous.searchParams.get('chartSource')===account.id&&previous.searchParams.get('symbol')===item.symbol
+    if(sourceRun&&previous.searchParams.get('chartSource')===account.id&&previous.searchParams.get('symbol')===item.symbol
       &&previous.searchParams.get('aiRun')===(sourceRun||null)&&previous.searchParams.get('interval')===chartLink.searchParams.get('interval'))
       chartLink.searchParams.set('aiFactor',previous.searchParams.get('aiFactor')||String(selectedFactor));
    }catch{}
-   chartLink.searchParams.set('type',framePolicy.type||((snapshot?.running?snapshot.display_mode:v.calculationMode)==='RENKO'?'Renko':(['Candles','Line','Heikin Ashi'].includes(v.chartView)?v.chartView:'Candles')));
+   chartLink.searchParams.set('type',framePolicy.type||displayedChartType(v));
    const url=selectionFrameUrl(frame,chartLink.href);
    const publishMarkers=()=>{const params=new URL(url).searchParams;
     const bandSettings=['sma','ema'].filter(k=>v[k+'Entry']||v[k+'Exit']).map(k=>({kind:k.toUpperCase(),period:Number(v[k+'Period']||30)}));
 const ownershipMappings=account.broker==='DHAN'?{[item.symbol]:mapped}:split?Object.fromEntries([[item.symbol,mapped],...(mappingPreview?.underlying===view.underlying&&mappingPreview?.market_data_account===dataAccount.id&&mappingPreview.market_data_underlying?[[view.underlying,mappingPreview.market_data_underlying]]:[]),...Object.values(contracts).filter(c=>c.market_data_account===dataAccount.id&&c.market_data_symbol).map(c=>[c.symbol,c.market_data_symbol])]):{};
-frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-runtime-markers',account:dataAccount.id,instance:params.get('chartInstance'),symbol:mapped,execution_account:account.id,execution_symbol:item.symbol,indicator_factor:selectedFactor,chart_visible:selectedTab,band_settings:bandSettings,run_rules:i===0?capturedStrategyRules(snapshot,item.symbol,account.id):null,band_basis:i===0?((snapshot?.running?snapshot.signal_source==='PREMIUM':v.underlyingSignals===false)?'CHART':'UNDERLYING'):'PREMIUM',run_id:sourceRun,runtime_frame:Number.parseInt(item.timeframe||view.timeframe||v.timeframe,10),run_pnl:i===0&&snapshot?.underlying===item.symbol?snapshot?.trade_journal?.current_run:null,run_running:!!snapshot?.running,active_position:snapshot?.running&&!snapshot?.ownership?.pending?snapshot?.heartbeat?.position:null,active_trade:snapshot?.running?(snapshot?.trade_journal?.rows||[]).find(row=>row.status==='OPEN'&&row.symbol===snapshot?.heartbeat?.position?.symbol&&(row.managed_run||row.run_id)===snapshot.run_id):null,runtime_bands:sourceRun&&i===0?snapshot?.heartbeat?.moving_bands:null,events:snapshot?.underlying===item.symbol?(snapshot?.markers||[]).map(event=>({...event,underlying:snapshot.underlying})):(sourceRun?(snapshot?.markers||[]):[])},ownershipMappings),location.origin);};
+frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-runtime-markers',account:dataAccount.id,instance:params.get('chartInstance'),symbol:mapped,execution_account:account.id,execution_symbol:item.symbol,indicator_factor:selectedFactor,indicator_length:selectedLength,entry_price_levels:i===0?{bull:snapshot?.running?snapshot.bull_entry_level:(v.bullEntryLevel===''?null:Number(v.bullEntryLevel)),bear:snapshot?.running?snapshot.bear_entry_level:(v.bearEntryLevel===''?null:Number(v.bearEntryLevel))}:null,chart_visible:selectedTab,chart_layout:chartLayoutMode,band_settings:bandSettings,run_rules:i===0?capturedStrategyRules(snapshot,item.symbol,account.id):null,band_basis:i===0?((snapshot?.running?snapshot.signal_source==='PREMIUM':v.underlyingSignals===false)?'CHART':'UNDERLYING'):'PREMIUM',run_id:sourceRun,runtime_frame:Number.parseInt(item.timeframe||view.timeframe||v.timeframe,10),run_pnl:i===0&&snapshot?.underlying===item.symbol?snapshot?.trade_journal?.current_run:null,run_running:!!snapshot?.running,runtime_session:snapshot?.heartbeat?.runtime_session,active_stop:verifiedManagedStop(snapshot,item.symbol),active_position:snapshot?.running&&!snapshot?.ownership?.pending?snapshot?.heartbeat?.position:null,active_trade:snapshot?.running?(snapshot?.trade_journal?.rows||[]).find(row=>row.status==='OPEN'&&row.symbol===snapshot?.heartbeat?.position?.symbol&&(row.managed_run||row.run_id)===snapshot.run_id):null,runtime_bands:sourceRun&&i===0?snapshot?.heartbeat?.moving_bands:null,events:snapshot?.underlying===item.symbol?(snapshot?.markers||[]).map(event=>({...event,underlying:snapshot.underlying})):(sourceRun?(snapshot?.markers||[]):[])},ownershipMappings),location.origin);};
    if(!selectedTab){
     if(frame.hasAttribute('src')&&frame.getAttribute('src')!==url)frame.removeAttribute('src');
     else if(frame.hasAttribute('src'))publishMarkers();
@@ -787,9 +977,9 @@ frame.contentWindow?.postMessage(mappedChartOwnership({type:'sector-pulse-ai-run
   }
   return selectionSync.change(next,async desired=>{
     sizingContext(desired.underlying,account.broker,desired.category);
-    if(snapshot?.running){
+    if(snapshot?.running&&runtimeSelectionChanges(values(),desired)){
      if(!root.confirm('The runner is active. Changing instrument or timeframe can affect entry and exit. Continue?'))return false;
-     const change=await request('reconfigure',{broker:account.broker,account_id:account.id,run_id:snapshot.run_id,runtime_session:snapshot.heartbeat?.runtime_session,underlying:desired.underlying,timeframe:Number.parseInt(desired.timeframe,10),calculation_mode:snapshot.calculation_mode||'HYBRID',display_mode:desired.calculationMode||'CANDLES',confirmed:true});
+     const change=await request('reconfigure',{broker:account.broker,account_id:account.id,run_id:snapshot.run_id,runtime_session:snapshot.heartbeat?.runtime_session,underlying:desired.underlying,timeframe:Number.parseInt(desired.timeframe,10),calculation_mode:snapshot.calculation_mode||'HYBRID',display_mode:snapshot.display_mode||'CANDLES',confirmed:true});
      if(change.reconfiguration?.target_underlying){
       snapshot=change;current=change;status.textContent='Instrument change queued · existing position keeps its strategy exits until flat.';
       return selected()?.id===account.id;
@@ -924,6 +1114,7 @@ referenceSymbol=v?.underlying||null;expiryDraft=v?.expiry||'';if(!v?.route&&sele
   }
  },true);
  panel.addEventListener('change',event=>{event.stopPropagation();
+  if(event.target.dataset.ai==='midlineEnabled'&&!snapshot?.running&&midlineFilterAvailable(values())){try{localStorage.setItem(storage()+':candlestick-midline:'+values().underlying,JSON.stringify(event.target.checked));}catch{}}
   if(event.target.dataset.ai==='route'&&event.target.value==='DIRECT'&&['FYERS','DHAN','MOTILAL_OSWAL'].includes(selected()?.broker)&&!snapshot?.running)panel.querySelector('[data-ai=product]').value='INTRADAY';
   if(event.target.dataset.ai==='moneyness'){
    optionMultiplier(event.target.value);optionPreview=null;attachmentChoice=null;attachmentRows=[];
@@ -1001,6 +1192,17 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
     snapshot=await request('manual-entry',body);current=snapshot;status.dataset.manualRequestId=id;status.textContent=manualRequestNotice(snapshot);show();return;
    }
    const payload=action==='stop'?{broker:selected()?.broker,account_id:selected()?.id,underlying:values().underlying}:configuration(values(),selected(),action==='preview');
+   if(action==='start'&&payload.ai_trailing_reentry_enabled&&snapshot?.trailing_reentry_ready!==true)throw Error('Completed-brick trailing continuation is not loaded in this dashboard. No strategy was started.');
+   if(action==='start'&&(payload.ai_zone_targets_enabled||payload.ai_grid_trailing_enabled)&&snapshot?.zone_targets_ready!==true)throw Error('The new zone/trailing backend is not loaded. Start is blocked for these optional rules until deployment is verified.');
+   if(action==='start'&&payload.ai_swing_targets_enabled&&snapshot?.swing_targets_ready!==true)throw Error('Swing target runtime is not loaded yet; the active position retains its exits.');
+   if(action==='start'&&[payload.ai_bull_entry_level,payload.ai_bear_entry_level].some(x=>x!=null)){
+    if([payload.ai_bull_entry_level,payload.ai_bear_entry_level].some(x=>x!=null&&(!Number.isFinite(x)||x<=0)))throw Error('Bull / Bear entry levels must be positive, or blank.');
+    if(snapshot?.entry_price_levels_ready!==true)throw Error('Bull / Bear entry filters are not loaded in this workspace yet. A safe dashboard reload is required.');
+   }
+   if(action==='start'&&payload.ai_daily_max_loss!=null){
+    if(!Number.isFinite(payload.ai_daily_max_loss)||payload.ai_daily_max_loss<=0)throw Error('Daily maximum loss must be positive, or blank to disable.');
+    if(snapshot?.daily_loss_filter_ready!==true)throw Error('Daily loss limit is not loaded in this workspace yet. Let the active runner finish before the dashboard reload.');
+   }
    if(action==='start'&&values().supertrend===false&&!snapshot?.sma_only_capable)throw Error('SMA-only runtime update is not loaded yet.');
    if(action==='start'&&values().supertrend!==false){
     const chart=charts.querySelector('iframe');
@@ -1008,7 +1210,11 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
     try{indicator=chart?.contentWindow?.SectorPulseAiIndicatorContract?.();}catch{}
     if(!indicator?.compatible)throw Error('Start unavailable: the plotted indicator source/settings have not matched the supported strategy indicator.');
     if(Number(indicator.factor)!==Number(values().factor||3))throw Error('The chart multiplier is synchronizing; wait for the chart before Start.');
+    if(snapshot?.midline_filter_ready!==true)throw Error('Midline entry-filter runtime update is pending for this broker workspace.');
+    if(!Number.isInteger(indicator.midline_period)||indicator.midline_period<5||indicator.midline_period>500)throw Error('Wait for the chart Midline settings before Start.');
+    payload.ai_midline_period=indicator.midline_period;
     payload.ai_indicator_inputs={length:indicator.length,factor:indicator.factor,adx_enabled:indicator.adx_enabled};
+    if(!['Renko','Candles'].includes(indicator.displayType))throw Error('Start supports Renko or Candles execution. Choose one before Start; other chart types remain display-only.');
     payload.ai_display_mode=indicator.displayType==='Renko'?'RENKO':'CANDLES';
    }
 
@@ -1086,7 +1292,7 @@ if(event.target.dataset.ai==='category'){clearInstrumentReference();refreshStatu
  root.addEventListener('broker-accounts-ready',()=>{restoreAiView();show();refreshStatus();});
  strategySectionEntry();show();
 }
-if(typeof module!=='undefined')module.exports={aiActionUrl,dhanChartSymbol,createDhanChartResolver,runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
+if(typeof module!=='undefined')module.exports={midlineFilterDefault,midlineFilterAvailable,runtimeSelectionChanges,displayedChartType,verifiedManagedStop,chartLayoutVisible,midlineDisplayEnabled,aiActionUrl,dhanChartSymbol,createDhanChartResolver,runnerMarket,journalQuantity,defaultProduct,manualRequestLabel,manualRequestNotice,createStrategyVisit,restoredDataAccount,createAiContextLoader,aiRequestOptions,mappedChartOwnership,restoredInstrumentValues,instrumentSettingsKey,readInstrumentSettings,writeInstrumentSettings,capturedStrategyRules,manualSizingValues,chartFramePolicy,expiryDeadline,nativeBrokerReady,positionControlView,positionControlPayload,optionMultiplier,retainAttachment,responseError,selectionFrameUrl,selectionIntentMatches,marketWaitLabel,SelectionSync,manualEntryPayload,configuration,sizingContext,chartContracts,chartView,verifiedReference};
 if(typeof document!=='undefined'){
  const observer=new MutationObserver(()=>mount());observer.observe(document.documentElement,{childList:true,subtree:true});
  root.addEventListener('broker-accounts-ready',mount);if(document.readyState!=='loading')mount();else document.addEventListener('DOMContentLoaded',mount);

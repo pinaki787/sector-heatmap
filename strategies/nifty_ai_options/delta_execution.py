@@ -9,7 +9,7 @@ ACTIONS={'BUY':(True,1),'SELL':(False,-1),'OPEN_LONG':(True,1),'OPEN_SHORT':(Tru
 from strategies.nifty_ai_options.delta_entry_policy import ENTRY_POLICY_REVISION
 class DeltaExecution:
     entry_policy_revision=ENTRY_POLICY_REVISION
-    def __init__(self,delta,owner,state_dir,*,live=False,contracts=None,native=None,management_only=False):
+    def __init__(self,delta,owner,state_dir,*,live=False,contracts=None,native=None,management_only=False,verified_resume=None):
         from strategies.renko_supertrend.delta_execution import Execution as NativeExecution
         if isinstance(contracts,bool) or not isinstance(contracts,int) or contracts<1:raise ValueError('Explicit positive whole Delta contracts required')
         self.management_only=management_only
@@ -25,7 +25,10 @@ class DeltaExecution:
         if any(slot.get('position') or slot.get('pending') for slot in self.state.get('closing_legs',{}).values()):
             self.close();raise ValueError('Previous option legs retain exposure or orders; use the captured Stop recovery before a new run')
         if self.state.get('detached_position') or self.state.get('stop_verification_position'):self.close();raise ValueError('Retained position control requires Attach or Stop')
-        if self.state.get('position') or self.state.get('pending'):self.close();raise ValueError('Owned Delta position/pending intent requires reconciliation before restart')
+        from strategies.nifty_ai_options.controlled_restart import accepts
+        resumed=accepts(verified_resume,self.state,owner,delta.clock())
+        if verified_resume is not None and not resumed:self.close();raise ValueError('Controlled restart ledger proof expired or changed')
+        if (self.state.get('position') or self.state.get('pending')) and not resumed:self.close();raise ValueError('Owned Delta position/pending intent requires reconciliation before restart')
     def save(self):atomic(self.path,self.state)
     def close(self):self.lock.close()
     def reconcile_pending(self):
@@ -80,7 +83,8 @@ class DeltaExecution:
         entry_book=None
         if self.live and entry:
             from strategies.nifty_ai_options.delta_entry_policy import read_depth,EntryNotReady
-            try:quote,entry_book=read_depth(self.delta,symbol)
+            try:
+                quote,entry_book=read_depth(self.delta,symbol);now=self.delta.clock()
             except (EntryNotReady,ValueError) as error:return dict(deferred=True,reason='ENTRY_DEPTH_UNAVAILABLE',detail=str(error),orders_submitted=0)
         if not quote or quote.get('symbol')!=symbol or not -2<=now-quote.get('exchange_at',0)<=15:raise ValueError('Fresh exact Delta quote required')
         bid,ask=quote.get('bid'),quote.get('ask')

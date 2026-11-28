@@ -131,18 +131,31 @@
     return result;
   }
   // A separate display series keeps forming prices out of confirmed strategy inputs.
-  function mountCompletedRenkoProjection({chart,getBars,size,enabled=()=>true,priceScaleId,priceFormat}) {
+  function mountCompletedRenkoProjection({chart,getBars,size,enabled=()=>true,priceScaleId,priceFormat,showSupertrend=()=>false,onSupertrendExtension,getSupertrend}) {
     const series=chart.addCandlestickSeries({priceScaleId,priceFormat,
       upColor:'rgba(8,153,129,0.28)',downColor:'rgba(242,54,69,0.28)',
       borderUpColor:'#089981',borderDownColor:'#f23645',wickVisible:false,
       priceLineVisible:false,lastValueVisible:false,title:''});
-    let lastPrice,lastTime,signature='',points=[];
+    let lastPrice,lastTime,signature='',points=[],trendSeries,trendSignature='';
+    function extendTrend(previous,next){
+      const supplied=previous&&getSupertrend?.(previous);
+      const reference=supplied||(previous&&Number.isFinite(previous.st)&&[1,-1].includes(previous.direction)?{value:previous.st,color:previous.direction===1?'#e53935':'#2ea043',index:previous.index}:null);
+      const valid=showSupertrend()&&previous&&Number.isFinite(reference?.value)&&next.length;
+      const data=valid?[{time:previous.time,value:reference.value},{time:next.at(-1).time,value:reference.value}]:[];
+      const key=JSON.stringify([data,reference?.color]);
+      if(key===trendSignature)return;
+      if(valid&&!trendSeries)trendSeries=chart.addLineSeries({priceScaleId,priceFormat,lineWidth:2,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:'',autoscaleInfoProvider:()=>null});
+      if(trendSeries){trendSeries.applyOptions({color:reference?.color||'#787b86'});trendSeries.setData(data);}
+      trendSignature=key;
+      onSupertrendExtension?.({kind:'LAST_CONFIRMED_VALUE_DISPLAY_ONLY',points:data,confirmedIndex:reference?.index??previous?.index,confirmedSourceTime:previous?.sourceTime,state:valid?'MATCHED_COMPLETED_VALUE':'WAITING_FOR_MATCHING_COMPLETED_SUPERTREND'});
+    }
     function update(price,sourceTime) {
       lastPrice=price;lastTime=sourceTime;
       const previous=getBars().at(-1);
       const next=enabled()&&previous&&Number.isFinite(price)&&Number.isFinite(sourceTime)
         ?closeRenkoProjection(previous,price,size,Math.max(sourceTime,previous.sourceTime??sourceTime),{showReversalRemainder:true})
           .map((bar,index)=>({...bar,time:previous.time+index+1})):[];
+      extendTrend(previous,next);
       const key=JSON.stringify(next);
       if(key===signature)return;
       if(next.length===points.length&&next.length&&next.every((bar,index)=>bar.time===points[index].time

@@ -42,5 +42,9 @@ function currentLine(position,bars,symbol,trade,now=Date.now()/1000){
  const title=validTrade?(trade.currency||'')+' '+(value>=0?'+':'')+value.toFixed(2)+' gross':(value>=0?'+':'')+value.toFixed(2)+' pts';
  return {price,title,color:value>=0?'#26a69a':'#ef5350',lineWidth:1,lineStyle:0,axisLabelVisible:true};
 }
-root.RenkoAiChartMarkers={markers,entryLine,currentLine};if(typeof module!=='undefined')module.exports={markers,entryLine,currentLine};
+function stopLine(stop,position,symbol,now=Date.now()/1000){
+ if(!stop||!position||position.symbol!==symbol||stop.symbol!==symbol||!position.order_id||String(position.order_id)!==stop.order_id||!(position.quantity>0)||stop.kind!=='STRATEGY_MANAGED'||stop.broker_resting!==false||!Number.isFinite(stop.price)||stop.price<=0||!Number.isFinite(stop.verified_at)||now-stop.verified_at<0||now-stop.verified_at>8)return null;
+ return {price:stop.price,title:(stop.confirmation_mode==='RENKO_BRICKS_ONLY'?'Stop · completed brick ':'Strategy stop ')+stop.price.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}),color:'#d97706',lineWidth:2,lineStyle:2,axisLabelVisible:true};
+}
+root.RenkoAiChartMarkers={markers,entryLine,currentLine,stopLine};if(typeof module!=='undefined')module.exports={markers,entryLine,currentLine,stopLine};
 })(typeof window==='undefined'?globalThis:window);

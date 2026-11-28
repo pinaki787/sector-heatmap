@@ -45,6 +45,9 @@ def configuration(payload,owner):
         entry_gate='underlying_flip' if payload.get('ai_execution_route')=='DIRECT' else 'underlying_flip_premium_bullish',exit_supertrend='underlying' if payload.get('ai_execution_route')=='DIRECT' else 'premium',indicator_brick_mode='Manual',
         sma_exit_enabled=payload.get('ai_sma_exit_enabled',False),sma_price_basis='underlying',
         accept_close_source_renko_approximation=payload.get('ai_accept_chart_basis',False))
+    # PAXGUSD is the selected Delta gold commodity, not the generic crypto default.
+    if config['broker']=='DELTA_INDIA' and config['underlying']=='PAXGUSD':
+        config.update(asset='GOLD',sizing_category='GLOBAL_COMMODITY')
     from strategies.nifty_ai_options.allocation import policy
     config.update(policy(payload))
     if config['entry_quantity_mode']=='AMOUNT_INR':config['lots']=1 # constructor seed only; every entry resolves fresh amount
@@ -81,7 +84,36 @@ def configuration(payload,owner):
     length=inputs['length'];factor=inputs['factor']
     import math
     if isinstance(length,bool) or not isinstance(length,int) or not 1<=length<=1000 or isinstance(factor,bool) or not isinstance(factor,(int,float)) or not math.isfinite(factor) or factor<=0 or inputs['adx_enabled'] is not False:raise ValueError('Unsupported plotted indicator settings; no order source substituted')
+    # Display-mode Supertrend policy; native parent brick ATR remains separate.
+    length,factor=(1,2.1) if config['display_mode']=='RENKO' else (14,3)
     config['indicator_length']=length;config['indicator_factor']=factor;config['indicator_adx_enabled']=False
+    config['execution_basis_at_start']={k:config[k] for k in ('display_mode','calculation_mode','supertrend_basis','exit_confirmation_mode','indicator_length','indicator_factor')}
+    config['midline_filter_enabled']=payload.get('ai_supertrend_enabled',True) is not False and payload.get('ai_midline_filter_enabled',False)
+    config['midline_period']=payload.get('ai_midline_period',123)
+    from strategies.nifty_ai_options.daily_loss_filter import optional_amount
+    config['daily_max_loss']=optional_amount(payload.get('ai_daily_max_loss'))
+    config['zone_targets_enabled']=payload.get('ai_zone_targets_enabled',False)
+    config['grid_trailing_enabled']=payload.get('ai_grid_trailing_enabled',False)
+    config['trailing_reentry_enabled']=payload.get('ai_trailing_reentry_enabled',False)
+    if not isinstance(config['trailing_reentry_enabled'],bool):raise ValueError('Trailing continuation switch must be boolean')
+    if config['trailing_reentry_enabled'] and not config['grid_trailing_enabled']:raise ValueError('Trailing continuation requires target-grid trailing')
+
+    if not all(isinstance(config[k],bool) for k in ('zone_targets_enabled','grid_trailing_enabled')):raise ValueError('Zone and trailing switches must be boolean')
+    config['swing_targets_enabled']=payload.get('ai_swing_targets_enabled',False)
+    config['swing_retest_required']=payload.get('ai_swing_retest_required',False)
+    if not isinstance(config['swing_retest_required'],bool):raise ValueError('Retained-level retest switch must be boolean')
+    if config['swing_retest_required'] and not config['swing_targets_enabled']:raise ValueError('Retest continuation requires retained swing targets')
+    if not isinstance(config['swing_targets_enabled'],bool):raise ValueError('Swing target switch must be boolean')
+    if config['swing_targets_enabled'] and config.get('supertrend_basis')!='COMPLETED_RENKO':raise ValueError('Swing targets require completed Renko signal calculation')
+
+    for key in ('bull_entry_level','bear_entry_level'):
+        value=payload.get('ai_'+key)
+        if value is not None and (isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0):raise ValueError('Bull / Bear entry levels must be positive prices, or blank')
+        config[key]=value
+
+    if not isinstance(config['midline_filter_enabled'],bool):raise ValueError('Midline trend filter must be boolean')
+    if isinstance(config['midline_period'],bool) or not isinstance(config['midline_period'],int) or not 5<=config['midline_period']<=500:raise ValueError('Midline period must be a whole number from 5 to 500')
+
     signal_source=payload.get('ai_signal_source')
     if signal_source is not None and signal_source not in ('UNDERLYING','PREMIUM'):raise ValueError('Choose underlying or premium signal source')
     source=signal_source or payload.get('ai_entry_source')
@@ -166,6 +198,8 @@ def configuration(payload,owner):
         except ImportError:from native_sizing import failed_session_fallback
         fallback=failed_session_fallback(config)
         if fallback:config=fallback
+    from strategies.nifty_ai_options.zone_targets import validate as validate_zone_policy
+    validate_zone_policy(config)
     return config
 
 def expiry_options(owner,config):
@@ -347,7 +381,7 @@ class Service:
             try:from .release_state import snapshot as release_snapshot
             except ImportError:from release_state import snapshot as release_snapshot
             release=release_snapshot()
-            result=dict(dhan_direct_ready=True,motilal_direct_ready=True,motilal_fyers_data_ready=True,hybrid_completed_units_ready=True,sma_retest_optional_ready=True,manual_parent_override_ready=True,sma_entry_policy_revision=ENTRY_POLICY_REVISION,sma_only_capable=True,native_broker_integration_ready=True,entry_exit_source_ready=True,live_capability=live_capability(self.owner),phase='PREFLIGHT' if self.launching else 'FAILED' if self.error or (self.process and self.process.poll() not in (None,0)) else 'STREAM' if self.process and self.process.poll() is None else 'STOPPED',error=self.error,revision='ai-renko-options-v1',sizing_policy_revision='selected-native-20261122',parent_contract_revision='parent-candles-20261124',native_acquisition_ready=False,running=bool(self.process and self.process.poll() is None),run_id=self.run['id'] if self.run else None)
+            result=dict(trailing_reentry_ready=True,zone_targets_ready=True,grid_trailing_ready=True,swing_targets_ready=True,entry_price_levels_ready=True,daily_loss_filter_ready=True,midline_filter_ready=True,dhan_direct_ready=True,motilal_direct_ready=True,motilal_fyers_data_ready=True,hybrid_completed_units_ready=True,sma_retest_optional_ready=True,manual_parent_override_ready=True,sma_entry_policy_revision=ENTRY_POLICY_REVISION,sma_only_capable=True,native_broker_integration_ready=True,entry_exit_source_ready=True,live_capability=live_capability(self.owner),phase='PREFLIGHT' if self.launching else 'FAILED' if self.error or (self.process and self.process.poll() not in (None,0)) else 'STREAM' if self.process and self.process.poll() is None else 'STOPPED',error=self.error,revision='ai-renko-options-v1',sizing_policy_revision='selected-native-20261122',parent_contract_revision='parent-candles-20261124',native_acquisition_ready=False,running=bool(self.process and self.process.poll() is None),run_id=self.run['id'] if self.run else None)
             result.update(dhan_chart_identity_ready=True,amount_allocation_ready=True,multi_runner_ready=True,multi_runner_revision=MULTI_RUNNER_REVISION,multi_runner_capacity=capacity(),runner_instrument=getattr(self,'instrument',None),runner_inventory=inventory(self.owner,DATA))
             if self.run and not result['running']:
                 claims=[r for r in result['runner_inventory'] if r['run_id']==self.run['id'] and r['state']=='Preparing']
@@ -412,7 +446,7 @@ class Service:
                 # Read the exact run's durable ledger even after SIGTERM/crash.
                 # Account key comes from authenticated preflight, never a browser path.
                 config=json.loads((self.run['directory']/'config.json').read_text())
-                result.update(supertrend_basis=config.get('supertrend_basis','BROKER_CANDLES'),sma_retest_required=config.get('sma_retest_required',True),sizing_mode=config.get('sizing_mode','AUTO'),manual_parent_value=config.get('manual_parent_value'),supertrend_enabled=config.get('supertrend_enabled',True),display_mode=config.get('display_mode','CANDLES'),indicator_length=config.get('indicator_length',5),indicator_factor=config.get('indicator_factor',3.0),source_timeframe=config.get('timeframe'),execution_route=config.get('execution_route'),underlying=config.get('underlying'),calculation_mode=config.get('calculation_mode','RENKO'),option_moneyness=config.get('option_moneyness','OTM'),entry_gate=config.get('entry_gate'),signal_source=config.get('signal_source'),exit_supertrend=config.get('exit_supertrend'),chart_source_ready=(self.run['directory']/'chart-source').is_dir())
+                result.update(trailing_reentry_ready=True,zone_targets_ready=True,grid_trailing_ready=True,swing_targets_ready=True,entry_price_levels_ready=True,daily_loss_filter_ready=True,zone_targets_enabled=config.get('zone_targets_enabled',False),trailing_reentry_enabled=config.get('trailing_reentry_enabled',False),grid_trailing_enabled=config.get('grid_trailing_enabled',False),swing_retest_required=config.get('swing_retest_required',False),swing_targets_enabled=config.get('swing_targets_enabled',False),daily_max_loss=config.get('daily_max_loss'),bull_entry_level=config.get('bull_entry_level'),bear_entry_level=config.get('bear_entry_level'),midline_filter_ready=True,supertrend_basis=config.get('supertrend_basis','BROKER_CANDLES'),sma_retest_required=config.get('sma_retest_required',True),sizing_mode=config.get('sizing_mode','AUTO'),manual_parent_value=config.get('manual_parent_value'),midline_filter_enabled=config.get('midline_filter_enabled',False),midline_period=config.get('midline_period',123),supertrend_enabled=config.get('supertrend_enabled',True),display_mode=config.get('display_mode','CANDLES'),indicator_length=config.get('indicator_length',5),indicator_factor=config.get('indicator_factor',3.0),source_timeframe=config.get('timeframe'),execution_route=config.get('execution_route'),underlying=config.get('underlying'),calculation_mode=config.get('calculation_mode','RENKO'),option_moneyness=config.get('option_moneyness','OTM'),entry_gate=config.get('entry_gate'),signal_source=config.get('signal_source'),exit_supertrend=config.get('exit_supertrend'),chart_source_ready=(self.run['directory']/'chart-source').is_dir())
                 result['chart_source_series']=[json.loads(path.read_text()) for path in (self.run['directory']/'chart-source').glob('*-meta.json')]
 
                 proof=self.run['directory']/'preflight/preflight.json'

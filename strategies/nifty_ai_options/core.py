@@ -1,3 +1,5 @@
+try:from .trend_filter import entry_allowed,entry_proof,current_trend_confirmation
+except ImportError:from trend_filter import entry_allowed,entry_proof,current_trend_confirmation
 try:from . import sma_only
 except ImportError:import sma_only
 """Deterministic strategy core; no broker imports or inherited entry filters."""
@@ -78,7 +80,7 @@ class Strategy:
         self.sma=SMAExit();self.last_time={};self.pending_underlying_flip=None
         self.entry_confirmation=HybridConfirmation(self.spot_size);self.hybrid_sequence=0;self.hybrid_price_at={};self.hybrid_exchange_at={};self.hybrid_last_sequence={};self.premium_confirmation=None;self.hybrid_active=False;self.premium_entry_confirmation=None
     def signal_side(self):return sma_only.side(self)
-    def indicator(self,size):return AIRenko(length=self.config.get('indicator_length',5),factor=self.config.get('indicator_factor',3.0),manual_brick=size if self.config.get('indicator_brick_mode')=='Manual' else None,pine_series_precision=True,completed_bricks=self.config.get('supertrend_basis')=='COMPLETED_RENKO')
+    def indicator(self,size):return AIRenko(length=self.config.get('indicator_length',5),factor=self.config.get('indicator_factor',3.0),manual_brick=size if self.config.get('indicator_brick_mode')=='Manual' else None,pine_series_precision=True,completed_bricks=self.config.get('supertrend_basis')=='COMPLETED_RENKO',midline_period=self.config.get('midline_period',123) if self.config.get('midline_filter_enabled',False) else None,track_close=self.config.get('zone_targets_enabled',False) or self.config.get('grid_trailing_enabled',False) or self.config.get('swing_targets_enabled',False) or any(self.config.get(k) is not None for k in ('bull_entry_level','bear_entry_level')))
     def reset_contract(self,contract,delta=None):
         if self.position:raise ValueError('Cannot change open-trade contract/sizing')
         if not contract.get('symbol'):raise ValueError('Symbol required')
@@ -136,18 +138,23 @@ class Strategy:
                 adverse=result['flip'] and ((result['direction']>0 if self.position['side']=='CE' else result['direction']<0) if kind=='underlying' else result['direction']>0)
                 if adverse and self.config['exit_supertrend'] in (kind,'either'):
                     actions+=self.exit(at,'AI_RENKO_SUPERTREND_'+kind.upper());break
-            elif result['flip']:
-                if kind=='underlying':self.pending_underlying_flip=at
+            elif result['flip'] or kind=='underlying' and self.calculation_mode=='RENKO' and current_trend_confirmation(self,dict(bar,kind='brick',closed=True,closed_at=event.get('closed_at',at),available_at=event.get('available_at',event.get('closed_at',at))),result):
+                if kind=='underlying':
+                    self.pending_underlying_flip=at
+                    if not entry_allowed(self,'CE' if self.under_result['direction']<0 else 'PE'):
+                        self.pending_underlying_flip=None;continue
                 gate=self.config['entry_gate']
                 side='CE' if self.under_result and self.under_result['direction']<0 else 'PE'
                 if kind=='underlying' and (not hasattr(self,'contract') or self.contract.get('option_type')!=side):
                     actions.append(dict(action='SELECT',side=side,timestamp=at));continue
                 eligible=(kind=='underlying' and gate=='underlying_flip') or (kind=='underlying' and gate=='underlying_flip_premium_bullish' and self.premium_result and self.premium_result['direction']<0 and self.last_time.get('premium',-1)>=at) or (kind=='premium' and gate=='underlying_trend_premium_flip' and result['direction']<0 and self.under_result is not None)
-                if eligible and self.band.entry_ready(side,self.config,getattr(self,'entry_observation_at',at)):
+                if eligible and entry_allowed(self,side) and self.band.entry_ready(side,self.config,getattr(self,'entry_observation_at',at)):
                     if not hasattr(self,'contract') or self.contract.get('option_type')!=side:actions.append(dict(action='SELECT',side=side,timestamp=at));continue
                     self.pending_underlying_flip=None
                     self.band.consume_entry()
-                    self.position=dict(self.contract,side=side,entry_timestamp=at)
+                    self.position=dict(self.contract,side=side,entry_timestamp=at,midline_confirmation=entry_proof(self))
+                    from strategies.nifty_ai_options.swing_targets import capture
+                    capture(self,self.position)
                     actions.append(dict(action='BUY',timestamp=at,position=dict(self.position)))
         if self.config.get('sma_band_entry') and self.position is None:
             result=self.premium_result if self.config.get('band_price_basis')=='premium' else self.under_result
@@ -156,6 +163,7 @@ class Strategy:
                 self.pending_underlying_flip=event.get('available_at',event.get('closed_at',at+self.config['timeframe']*60))
                 self.pending_underlying_flip_source_at=confirmation['closed_at'];self.entry_observation_at=self.pending_underlying_flip
                 side='CE' if self.under_result and self.under_result['direction']<0 else 'PE'
+                if not entry_allowed(self,side):self.pending_underlying_flip=None;return actions
                 if not hasattr(self,'contract') or self.contract.get('option_type')!=side:actions.append(dict(action='SELECT',side=side,timestamp=self.pending_underlying_flip))
                 else:
                     action=self.selected_gate_entry()
@@ -198,7 +206,9 @@ class Strategy:
                 elif index:result=dict(result,flip=False)
                 if kind=='underlying':
                     self.under_result=result
-                    if result['flip']:self.entry_confirmation.arm('LONG' if result['direction']<0 else 'SHORT',at,(kind,self.hybrid_sequence,len(units)),source_at=exchange)
+                    if result['flip']:
+                        self.entry_confirmation.clear()
+                        if entry_allowed(self,'LONG' if result['direction']<0 else 'SHORT',result):self.entry_confirmation.arm('LONG' if result['direction']<0 else 'SHORT',at,(kind,self.hybrid_sequence,len(units)),source_at=exchange)
                 else:
                     self.premium_result=result
                     if result['flip'] and result['direction']<0:
@@ -224,7 +234,9 @@ class Strategy:
                 else:result=ai.update(chart_candle(event))
                 if kind=='underlying':
                     self.under_result=result
-                    if result['flip']:self.entry_confirmation.arm('LONG' if result['direction']<0 else 'SHORT',at,(kind,'candle',event['timestamp']),source_at=event.get('closed_at',event['timestamp']+self.config['timeframe']*60))
+                    if result['flip']:
+                        self.entry_confirmation.clear()
+                        if entry_allowed(self,'LONG' if result['direction']<0 else 'SHORT',result):self.entry_confirmation.arm('LONG' if result['direction']<0 else 'SHORT',at,(kind,'candle',event['timestamp']),source_at=event.get('closed_at',event['timestamp']+self.config['timeframe']*60))
                 else:
                     self.premium_result=result
                     if result['flip'] and result['direction']<0:self.premium_entry_confirmation.arm('LONG',at,('premium-candle',event['timestamp']),source_at=event.get('closed_at',event['timestamp']+self.config['timeframe']*60))
@@ -242,6 +254,10 @@ class Strategy:
         result=self.under_result if kind=='underlying' else self.premium_result
         if not units or not result:return []
         unit=units[-1];direction='LONG' if result['direction']<0 else 'SHORT'
+        if kind=='underlying':
+            from strategies.nifty_ai_options.swing_targets import target_exit
+            target_actions=target_exit(self,units,at)
+            if target_actions:return target_actions
         if self.position:
             if self.config['exit_supertrend'] not in (kind,'either'):return []
             confirmation=confirm_exit(unit,self.position,direction,result['st'],size,premium=kind=='premium')
@@ -258,7 +274,9 @@ class Strategy:
             return actions
         gate_mode=self.config['entry_gate']
         if kind=='underlying':
-            confirmation=self.entry_confirmation.confirm(unit,direction,result['st'])
+            current=current_trend_confirmation(self,unit,result)
+            confirmation=current or self.entry_confirmation.confirm(unit,direction,result['st'])
+            if current:self.entry_confirmation.clear()
             if confirmation and gate_mode!='underlying_trend_premium_flip':
                 self.pending_underlying_flip=at;self.pending_underlying_flip_source_at=confirmation['closed_at']
                 if self.calculation_mode=='HYBRID':self.hybrid_entry_confirmation=confirmation
@@ -275,6 +293,8 @@ class Strategy:
                     self.pending_underlying_flip=at;self.pending_underlying_flip_source_at=confirmation['closed_at']
                     if self.calculation_mode=='HYBRID':self.hybrid_entry_confirmation=confirmation
         if self.pending_underlying_flip is None:return []
+        if not entry_allowed(self,'CE' if self.under_result['direction']<0 else 'PE'):
+            self.pending_underlying_flip=None;return []
         side='CE' if self.under_result['direction']<0 else 'PE'
         if not hasattr(self,'contract') or self.contract.get('option_type')!=side:return [dict(action='SELECT',side=side,timestamp=at)]
         if gate_mode!='underlying_flip' and (not self.premium_confirmation or self.premium_confirmation['available_at']<self.pending_underlying_flip):return []
@@ -287,6 +307,8 @@ class Strategy:
         if direction not in ('CE','PE') or not hasattr(self,'contract') or self.contract.get('option_type')!=direction:raise ValueError('Prepare the exact Call or Put before manual entry')
         positive(at,'Manual entry timestamp');self.entry_reset_at=at;self.pending_underlying_flip=None;self.band.retest=None
         self.position=dict(self.contract,side=direction,entry_timestamp=at,manual_override=True)
+        from strategies.nifty_ai_options.swing_targets import capture
+        capture(self,self.position)
         return dict(action='BUY',timestamp=at,position=dict(self.position),manual_override=True)
 
     def selected_gate_entry(self):
@@ -307,10 +329,13 @@ class Strategy:
             if premium_at<at:return None
         side='CE' if self.under_result['direction']<0 else 'PE'
         if self.contract['option_type']!=side:return None
+        if not entry_allowed(self,side):self.pending_underlying_flip=None;return None
         if not self.band.entry_ready(side,self.config,getattr(self,'entry_observation_at',at)):self.pending_underlying_flip=None;return None
         entry_at=max(at,premium_at)
         self.band.consume_entry()
-        self.position=dict(self.contract,side=side,entry_timestamp=entry_at,signal_timestamp=at,underlying_flip_timestamp=at if mode!='underlying_trend_premium_flip' else None,entry_gate=mode)
+        self.position=dict(self.contract,side=side,entry_timestamp=entry_at,signal_timestamp=at,underlying_flip_timestamp=at if mode!='underlying_trend_premium_flip' else None,entry_gate=mode,midline_confirmation=entry_proof(self))
+        from strategies.nifty_ai_options.swing_targets import capture
+        capture(self,self.position)
         self.pending_underlying_flip=None
         return dict(action='BUY',timestamp=entry_at,position=dict(self.position),**(dict(confirmation=self.hybrid_entry_confirmation) if self.calculation_mode=='HYBRID' and getattr(self,'hybrid_entry_confirmation',None) else {}))
     def exit(self,at,reason):

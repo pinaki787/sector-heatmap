@@ -68,6 +68,8 @@ def advance(engine,executor,submit):
  engine.position=None;engine.pending_direction=(row['direction'],row['signal_at'])
  entry=engine.selected_gate_entry()
  if entry is None:
+  if config.get('midline_filter_enabled') and (getattr(engine,'midline_filter_status',{}) or {}).get('allowed') is False:
+   cancel(executor,row,'Midline trend filter rejected the retained signal');return None
   row['phase']='WAITING_FOR_ENTRY';executor.save();return None
  if entry['action']!='OPEN_'+row['direction'] or entry['position'].get('symbol')!=row['symbol'] or entry['timestamp']!=row['signal_at']:
   engine.position=None;cancel(executor,row,'Entry differs from retained signal');raise ValueError('Retained direct reversal entry identity mismatch')

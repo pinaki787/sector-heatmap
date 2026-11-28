@@ -206,6 +206,10 @@ def entry_valid(engine,action):
  if side is None:return None
  if side!=p.get('side'):return False
  config=engine.config
+ if config.get('midline_filter_enabled',False):
+  try:from .trend_filter import entry_allowed
+  except ImportError:from trend_filter import entry_allowed
+  if not entry_allowed(engine,p.get('side')):return False
  if config.get('supertrend_enabled',True) and config.get('entry_gate')!='underlying_flip':
   premium=getattr(engine,'premium_result',None)
   if not premium:return None

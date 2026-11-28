@@ -1,3 +1,5 @@
+try:from .trend_filter import entry_allowed,entry_proof,current_trend_confirmation
+except ImportError:from trend_filter import entry_allowed,entry_proof,current_trend_confirmation
 try:from . import sma_only
 except ImportError:import sma_only
 """Selected-instrument direct AI Renko signals; no premium series or delta."""
@@ -26,7 +28,7 @@ class DirectStrategy:
         if not config.get('underlying'):raise ValueError('Selected underlying required')
         sized=scale_reference(config['reference_value'],config['market'],config.get('asset'),explicit_category=config.get('sizing_category'))
         self.parent_hours=sized['parent_hours'];self.allow_short=config.get('product')!='CNC';self.spot_size=sized['base_brick'];self.under_renko=Traditional(self.spot_size)
-        self.under_ai=AIRenko(length=config.get('indicator_length',5),factor=config.get('indicator_factor',3.0),manual_brick=self.spot_size,pine_series_precision=True,completed_bricks=config.get('supertrend_basis')=='COMPLETED_RENKO')
+        self.under_ai=AIRenko(length=config.get('indicator_length',5),factor=config.get('indicator_factor',3.0),manual_brick=self.spot_size,pine_series_precision=True,completed_bricks=config.get('supertrend_basis')=='COMPLETED_RENKO',midline_period=config.get('midline_period',123) if config.get('midline_filter_enabled',False) else None,track_close=config.get('zone_targets_enabled',False) or config.get('grid_trailing_enabled',False) or config.get('swing_targets_enabled',False) or any(config.get(k) is not None for k in ('bull_entry_level','bear_entry_level')))
         self.entry_confirmation=HybridConfirmation(self.spot_size);self.hybrid_sequence=0;self.hybrid_price_at=None;self.hybrid_exchange_at=None;self.hybrid_last_sequence=0
         self.position=self.under_result=None;self.pending_direction=None;self.last_time={};self.sma=SMAExit()
         self.contract=dict(symbol=config['underlying'],underlying=config['underlying'],spot_brick=self.spot_size,execution_route='DIRECT',asset=config.get('asset'),parent_hours=self.parent_hours)
@@ -73,8 +75,9 @@ class DirectStrategy:
                 self.entry_observation_at=self.pending_direction[1]
                 action=self.selected_gate_entry()
                 if action:action['confirmation']=confirmation;return [action]
-        if not formed or self.under_result['direction']==previous_direction:return []
-        direction='LONG' if self.under_result['direction']<0 else 'SHORT';self.pending_direction=(direction,at)
+        current=current_trend_confirmation(self,dict(bar,kind='brick',closed=True,closed_at=event.get('closed_at',at),available_at=event.get('available_at',event.get('closed_at',at))),self.under_result) if formed and self.calculation_mode=='RENKO' else None
+        if not formed or self.under_result['direction']==previous_direction and not current:return []
+        direction='LONG' if self.under_result['direction']<0 else 'SHORT';self.pending_direction=(direction,at) if entry_allowed(self,direction) else None
         if self.position:
             return self.exit(at,'AI_RENKO_SUPERTREND_UNDERLYING') if self.position['side']!=direction else []
         action=self.selected_gate_entry();return [action] if action else []
@@ -108,7 +111,9 @@ class DirectStrategy:
                 previous=self.under_result['direction'] if self.under_result else 1
                 self.under_result=bar['_signal_result'] if self.calculation_mode=='HYBRID' and self.config.get('supertrend_basis')=='COMPLETED_RENKO' else dict(probe,flip=bool(probe['flip'] and index==0)) if self.calculation_mode=='HYBRID' else self.under_ai.update(bar)
                 direction='LONG' if self.under_result['direction']<0 else 'SHORT'
-                if self.under_result['direction']!=previous:self.entry_confirmation.arm(direction,at,('price',self.hybrid_sequence,len(units)),source_at=exchange)
+                if self.under_result['direction']!=previous:
+                    self.entry_confirmation.clear()
+                    if entry_allowed(self,direction):self.entry_confirmation.arm(direction,at,('price',self.hybrid_sequence,len(units)),source_at=exchange)
                 units.append(dict(bar,kind='brick',closed=True,closed_at=event['timestamp'],available_at=at,direction=direction,st=self.under_result['st']))
         elif kind=='underlying':
             if self.calculation_mode=='HYBRID' and (event.get('closed') is not True or event.get('source_basis')!='PROVIDER_CONFIRMED_CLOSE' or event.get('body_available') is not True):return []
@@ -127,7 +132,9 @@ class DirectStrategy:
                         units.extend(dict(bar,kind='brick',closed=True,closed_at=event['closed_at'],available_at=at,direction='LONG' if bar['_signal_result']['direction']<0 else 'SHORT',st=bar['_signal_result']['st']) for bar in store(self)['underlying'].pop('confirmed_bricks',[]))
                     if self.under_result is None:return observe_band(self,event)
                 else:self.under_result=self.under_ai.update(chart_candle(event))
-                if self.under_result['flip']:self.entry_confirmation.arm('LONG' if self.under_result['direction']<0 else 'SHORT',at,('candle',event['timestamp']),source_at=event.get('closed_at',event['timestamp']+self.config['timeframe']*60))
+                if self.under_result['flip']:
+                    self.entry_confirmation.clear()
+                    if entry_allowed(self,'LONG' if self.under_result['direction']<0 else 'SHORT'):self.entry_confirmation.arm('LONG' if self.under_result['direction']<0 else 'SHORT',at,('candle',event['timestamp']),source_at=event.get('closed_at',event['timestamp']+self.config['timeframe']*60))
             if not self.under_result:return observe_band(self,event)
             direction='LONG' if self.under_result['direction']<0 else 'SHORT'
             if self.config.get('supertrend_basis')!='COMPLETED_RENKO' or abs(event['close']-event['open'])<self.spot_size:
@@ -145,7 +152,12 @@ class DirectStrategy:
         if not units:return []
         # Use the final complete unit from this executable observation.
         unit=units[-1];direction=unit['direction'];line=unit['st']
-        entry=self.entry_confirmation.confirm(unit,direction,line) or reentry
+        from strategies.nifty_ai_options.swing_targets import target_exit
+        target_actions=target_exit(self,units,at)
+        if target_actions:return target_actions
+        current=current_trend_confirmation(self,unit,self.under_result)
+        entry=current or self.entry_confirmation.confirm(unit,direction,line) or reentry
+        if current:self.entry_confirmation.clear()
         if self.position:
             exit_confirmation=confirm_exit(unit,self.position,direction,line,self.spot_size)
             if not exit_confirmation:return []
@@ -166,16 +178,21 @@ class DirectStrategy:
         if direction=='SHORT' and not self.allow_short:raise ValueError('Cash delivery does not permit a short entry')
         positive(at,'Manual entry timestamp');self.entry_reset_at=at;self.pending_direction=None;self.band.retest=None
         self.position=dict(self.contract,side=direction,entry_timestamp=at,manual_override=True)
+        from strategies.nifty_ai_options.swing_targets import capture
+        capture(self,self.position)
         return dict(action='OPEN_'+direction,timestamp=at,position=dict(self.position),manual_override=True)
 
     def selected_gate_entry(self):
         if sma_only.enabled(self.config):return sma_only.entry(self,False)
         if self.position or self.pending_direction is None:return None
         direction,at=self.pending_direction;self.pending_direction=None
+        if not entry_allowed(self,direction):return None
         if not self.band.entry_ready(direction,self.config,getattr(self,'entry_observation_at',at)):return None
         if direction=='SHORT' and not self.allow_short:return None
         self.band.consume_entry()
-        self.position=dict(self.contract,side=direction,entry_timestamp=at)
+        self.position=dict(self.contract,side=direction,entry_timestamp=at,midline_confirmation=entry_proof(self))
+        from strategies.nifty_ai_options.swing_targets import capture
+        capture(self,self.position)
         return dict(action='OPEN_'+direction,timestamp=at,position=dict(self.position))
     def exit(self,at,reason):
         self.band.consume_entry()

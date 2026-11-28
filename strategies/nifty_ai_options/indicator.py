@@ -1,5 +1,7 @@
 """Direct sequential recurrence of ai-renko-supertrend.pine (ADX disabled)."""
 import math
+try:from .trend_filter import GaussianMidline
+except ImportError:from trend_filter import GaussianMidline
 
 class RMA:
     def __init__(self, length):
@@ -15,10 +17,12 @@ class RMA:
 
 class AIRenko:
     """Host bars update smoothing even when no synthetic brick is crossed."""
-    def __init__(self, length=5, factor=3.0, manual_brick=None, tick=.05, pine_series_precision=False, completed_bricks=False):
+    def __init__(self, length=5, factor=3.0, manual_brick=None, tick=.05, pine_series_precision=False, completed_bricks=False, midline_period=None, track_close=False):
         self.length, self.factor, self.manual_brick, self.tick = length, factor, manual_brick, tick
         self.pine_series_precision=pine_series_precision
+        self.track_close=track_close
         self.completed_bricks=completed_bricks
+        self.midline=GaussianMidline(midline_period) if midline_period is not None else None
         self.atrs = [RMA(n) for n in (length,15,9)]
         self.previous_close = self.rc = self.ro = self.atr = None
         self.upper = self.lower = self.st = None
@@ -34,6 +38,7 @@ class AIRenko:
             o=float(bar.get('open',float('nan')))
             if self.manual_brick is None or not math.isfinite(o) or not math.isclose(abs(c-o),self.manual_brick,rel_tol=1e-9,abs_tol=1e-9) or h!=max(o,c) or l!=min(o,c):
                 raise ValueError('One completed fixed-size no-wick Renko brick required')
+        midline=self.midline.update(c) if self.midline is not None else None
         tr = h-l if self.previous_close is None else max(h-l,abs(h-self.previous_close),abs(l-self.previous_close))
         host, regime, low = [a.update(tr) for a in self.atrs]
         self.previous_close = c
@@ -65,7 +70,7 @@ class AIRenko:
         self.lower=self.q(bl if pl is None or bl>pl or previous_rc<pl else pl)
         self.direction=1 if ps is None else (-1 if self.rc>self.upper else 1) if ps==pu else (1 if self.rc<self.lower else -1)
         self.st=self.lower if self.direction<0 else self.upper
-        return dict(direction=self.direction,flip=self.direction!=pd,box=box,
+        return dict(direction=self.direction,flip=self.direction!=pd,box=box,**(dict(bar_close=c) if self.track_close or self.midline is not None else {}),**(dict(midline=midline,midline_period=self.midline.period) if self.midline is not None else {}),
                     synthetic_open=self.ro,synthetic_close=self.rc,synthetic_atr=self.atr,
                     st=self.st,effective_factor=effective,host_atr=host,steps=steps)
 

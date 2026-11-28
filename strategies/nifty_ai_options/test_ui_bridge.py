@@ -8,6 +8,33 @@ class Tests(unittest.TestCase):
         bound=patch('ui_bridge.owner_broker',return_value='FYERS');bound.start();self.addCleanup(bound.stop)
         reference=patch('native_reference.resolve_reference',return_value=dict(native_box=400,reference_session='2026-11-19',source='unit fixture',url='fixture'));reference.start();self.addCleanup(reference.stop)
 
+    def test_trailing_continuation_is_explicit_captured_and_requires_trailing(self):
+        self.assertFalse(configuration(PAYLOAD,'owner')['trailing_reentry_enabled'])
+        with self.assertRaises(ValueError):configuration(dict(PAYLOAD,ai_trailing_reentry_enabled=True),'owner')
+        for bad in ('true',1,None):
+            with self.assertRaises(ValueError):configuration(dict(PAYLOAD,ai_trailing_reentry_enabled=bad),'owner')
+        c=configuration(dict(PAYLOAD,ai_execution_route='DIRECT',ai_calculation_mode='HYBRID',ai_display_mode='RENKO',ai_grid_trailing_enabled=True,ai_trailing_reentry_enabled=True),'owner')
+        self.assertTrue(c['trailing_reentry_enabled']);self.assertEqual(c['exit_confirmation_mode'],'RENKO_BRICKS_ONLY')
+
+    def test_display_supertrend_policy_keeps_parent_sizing_separate(self):
+        for display,length,factor in [('RENKO',1,2.1),('CANDLES',14,3)]:
+            c=configuration(dict(PAYLOAD,ai_display_mode=display,ai_indicator_inputs=dict(length=7,factor=9,adx_enabled=False)),'owner')
+            self.assertEqual(c['indicator_length'],length)
+            self.assertEqual(c['indicator_factor'],factor)
+            self.assertEqual(c['display_mode'],display)
+
+    def test_optional_entry_and_loss_configuration(self):
+        c=configuration(dict(PAYLOAD,ai_bull_entry_level=100.123456789,ai_bear_entry_level=90.1,ai_daily_max_loss=25),'owner')
+        self.assertEqual(c['bull_entry_level'],100.123456789);self.assertEqual(c['daily_max_loss'],25)
+        for key in ('ai_bull_entry_level','ai_bear_entry_level','ai_daily_max_loss'):
+            for value in (True,0,-1,float('nan'),float('inf'),'10'):
+                with self.assertRaises(ValueError):configuration(dict(PAYLOAD,**{key:value}),'owner')
+    def test_midline_filter_requires_explicit_opt_in(self):
+        self.assertFalse(configuration(PAYLOAD,'owner')['midline_filter_enabled'])
+        self.assertFalse(configuration(dict(PAYLOAD,ai_midline_filter_enabled=False),'owner')['midline_filter_enabled'])
+        self.assertTrue(configuration(dict(PAYLOAD,ai_midline_filter_enabled=True),'owner')['midline_filter_enabled'])
+        self.assertFalse(configuration(dict(PAYLOAD,ai_midline_filter_enabled=True,ai_supertrend_enabled=False),'owner')['midline_filter_enabled'])
+
     def test_sma_only_has_no_supertrend_configuration_gate(self):
         for source in ('UNDERLYING','PREMIUM'):
             c=configuration(dict(PAYLOAD,ai_supertrend_enabled=False,ai_signal_source=source,ai_sma_band_period=10,ai_indicator_inputs={'factor':0},ai_ema_band_exit=True),'owner')

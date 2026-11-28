@@ -55,6 +55,12 @@ def entry_guard(directory,executor):
   receipt=json.loads(path.read_text()) if path.exists() else {}
   if receipt.get('phase') in ACTIVE or executor.state.get('management_mode') not in (None,'MANAGED'):
    raise EntryBlocked('Position control has paused new entries')
+  if getattr(executor,'runner_config',{}).get('daily_max_loss') not in (None,''):
+   from strategies.nifty_ai_options.daily_loss_filter import check
+   try:loss=check(executor)
+   except (ValueError,OSError,__import__('sqlite3').Error) as error:
+    raise EntryBlocked('Daily loss evidence unavailable; new entries blocked, exits remain active') from error
+   if loss.get('blocked'):raise EntryBlocked(loss['reason'])
   yield
 
 

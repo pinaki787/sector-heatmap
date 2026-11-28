@@ -32,7 +32,7 @@ def history(api,config,meta,frame,directory):
     raw=ok(fetch(api,dict(symbol=config['underlying'],resolution=str(frame),date_format=1,range_from=start,range_to=today.isoformat(),cont_flag=0)))
     atomic(Path(directory)/(str(frame)+'m-raw.json'),raw)
     rows,audit=normalize_closes(raw.get('candles',[]));atomic(Path(directory)/(str(frame)+'m-audit.json'),audit)
-    if band_enabled(config) or config.get('calculation_mode') in ('CANDLES','HYBRID'):rows=retain_broker_ohlc(rows,raw.get('candles',[]))
+    if band_enabled(config) or config.get('zone_targets_enabled') or config.get('grid_trailing_enabled') or config.get('calculation_mode') in ('CANDLES','HYBRID'):rows=retain_broker_ohlc(rows,raw.get('candles',[]))
     return [r for r in rows if r[0]+frame*60<=time.time() and meta['opening_minutes']<=datetime.fromtimestamp(r[0],IST).hour*60+datetime.fromtimestamp(r[0],IST).minute<meta['closing_minutes']]
 
 def inspect(config,api,master):
@@ -209,7 +209,7 @@ def stream(args):
                 now=time.monotonic()
                 if now-last_heartbeat<1:return
                 last_heartbeat=now
-                atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),position_control=manager.status(),manual_entry_capable=session.ready and not source_unavailable.is_set() and not manager.entry_blocked,source_state='WAITING_FOR_SOURCE' if source_unavailable.is_set() else 'READY',reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending'],**session.snapshot()))
+                atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),midline_filter=getattr(engine,'midline_filter_status',None),position_control=manager.status(),manual_entry_capable=session.ready and not source_unavailable.is_set() and not manager.entry_blocked,source_state='WAITING_FOR_SOURCE' if source_unavailable.is_set() else 'READY',reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending'],**session.snapshot()))
             while not stopped.is_set():
                 if manager.poll(busy=bool(manual.pending)):return
                 session.poll(force=source_failed.is_set())
@@ -256,7 +256,7 @@ def stream(args):
                     last_reconcile=time.monotonic()
                     try:
                         receipt=executor.reconcile_pending()
-                        engine.position=__import__('copy').deepcopy(executor.state.get('position'))
+                        engine.position=__import__('copy').deepcopy(executor.state.get('position'));__import__('strategies.nifty_ai_options.zone_targets',fromlist=['reconciled']).reconciled(engine,executor)
                         if receipt:
                             journal.write(json.dumps(dict(reconciliation=receipt,recorded_at=time.time()))+'\n')
                             if receipt.get('filled_quantity') and receipt.get('broker_flat'):

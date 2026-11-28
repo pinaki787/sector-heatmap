@@ -108,6 +108,7 @@ try:
 except ImportError:
  from position_control import entry_guard,EntryBlocked
 from contextlib import nullcontext
+from strategies.nifty_ai_options import delta_quote_recovery as quote_recovery
 
 def stream(args):
     config=json.loads(Path(args.config).read_text());worker_admission(config,getattr(args,'output',None));live=args.live
@@ -115,7 +116,7 @@ def stream(args):
     if live and os.getenv('AI_RENKO_LIVE_ORDERS',os.getenv('NIFTY_AI_LIVE_ORDERS'))!='I_ACCEPT_REAL_ORDERS':raise ValueError('Explicit Live environment opt-in required')
     if not config.get('accept_close_source_renko_approximation'):raise ValueError('Review the confirmed-close Renko basis before Start')
     config.setdefault('execution_mode','LIVE' if live else 'PAPER')
-    if not config.get('_managed_resume'):config=runtime_configuration(config,Path(args.output))
+    if not config.get('_managed_resume') and not config.get('_controlled_restart'):config=runtime_configuration(config,Path(args.output))
     from strategies.nifty_ai_options.delta_entry_policy import ENTRY_POLICY_REVISION
     config['entry_execution_policy']=ENTRY_POLICY_REVISION
     config['entry_order_type']='market_order'
@@ -125,12 +126,18 @@ def stream(args):
     broker=executor=engine=None;symbol=None
     try:
         summary=inspect(config,delta);atomic(out/'preflight.json',summary)
-        executor=DeltaExecution(delta,config['account'],runtime_root(config),live=live,contracts=config['lots'],management_only=config.get('_managed_resume',False))
+        verified_resume=None
+        if config.get('_controlled_restart'):
+            if not live or config.get('execution_route')!='DIRECT':raise ValueError('Controlled restart is scoped to the approved live direct worker')
+            from strategies.nifty_ai_options.controlled_restart import verify
+            verified_resume=verify(delta,config,out,runtime_root(config)/config['account']/'delta-live.json')
+        executor=DeltaExecution(delta,config['account'],runtime_root(config),live=live,contracts=config['lots'],management_only=config.get('_managed_resume',False),verified_resume=verified_resume)
         configure_executor(executor,config)
         executor.fill_evidence_path=out/'confirmed-fills.jsonl'
         try:from .confirmed_close import ConfirmedClose,delta_reader
         except ImportError:from confirmed_close import ConfirmedClose,delta_reader
         confirmed=ConfirmedClose(delta_reader(delta),out/'confirmed-source')
+        gap_confirmed=ConfirmedClose(delta_reader(delta,lookback=30),out/'gap-confirmed-source')
         try:from .chart_source import ChartSource
         except ImportError:from chart_source import ChartSource
         chart_source=ChartSource(out/'chart-source',calculation_mode=config.get('calculation_mode','RENKO'))
@@ -142,7 +149,7 @@ def stream(args):
         broker=SourceBroker(delta,out,on_tick)
         direct=config['execution_route']=='DIRECT';underlying=config['underlying']
         engine=automatic_strategy(DirectStrategy(config) if direct else Strategy(config),config,exposure=lambda:bool(executor.state['position'] or executor.state['pending'] or executor.state.get('positions') or executor.state.get('detached_position')),chart_source=chart_source,config_path=out/'config.json')
-        rows=history(delta,underlying,config['timeframe'],out/'source-history',(band_enabled(config) or config.get('calculation_mode') in ('CANDLES','HYBRID')))
+        rows=verified_resume['warmup_rows'] if verified_resume and verified_resume.get('warmup_rows') else history(delta,underlying,config['timeframe'],out/'source-history',(band_enabled(config) or config.get('zone_targets_enabled') or config.get('grid_trailing_enabled') or config.get('calculation_mode') in ('CANDLES','HYBRID')))
         if not rows:raise ValueError('No selected-underlying completed warm-up closes')
         chart_source.seed(underlying,config['timeframe'],rows,engine.spot_size)
         for r in rows:engine.update(dict(kind='underlying',timestamp=r[0],open=r[1],high=r[2],low=r[3],close=r[4]));engine.position=None
@@ -162,7 +169,21 @@ def stream(args):
             if config.get('band_price_basis')=='premium':chart_source.seed_bands(engine)
             return contract['symbol']
         symbol=select()
-        if live and not config.get('_managed_resume'):live_readiness(delta,[symbol])
+        if live and not config.get('_managed_resume') and not verified_resume:live_readiness(delta,[symbol])
+        if verified_resume:
+            engine.position=__import__('copy').deepcopy(executor.state.get('position'))
+            if engine.position and verified_resume.get('position_target'):
+                engine.position['retained_swing_target']=__import__('copy').deepcopy(verified_resume['position_target'])
+                executor.state['position']['retained_swing_target']=__import__('copy').deepcopy(verified_resume['position_target']);executor.save()
+            if engine.position and verified_resume.get('trailing_snapshot'):
+                from strategies.nifty_ai_options.zone_targets import TargetLadder
+                restored=verified_resume['trailing_snapshot']
+                engine.position['target_grid']=__import__('copy').deepcopy(restored['grid'])
+                executor.state['position']['target_grid']=__import__('copy').deepcopy(restored['grid']);executor.save()
+                engine.zone_policy.trailing=TargetLadder.restore(restored)
+                engine.zone_policy.position_key=[engine.position.get('order_id'),engine.position['entry_timestamp']]
+                engine.zone_policy.save()
+            atomic(out/'controlled-restart-loaded.json',dict(revision='retained-support-retest-v1',at=delta.clock(),run_id=out.name,account=config['account'],underlying=underlying,position_preserved=engine.position,automatic_resume=True))
         engine.entry_reset_at=delta.clock()
         if direct:engine.pending_direction=None
         else:engine.pending_underlying_flip=None
@@ -195,16 +216,15 @@ def stream(args):
                     if not current['connected'] or generation is not None and current['generation']!=generation:raise ValueError('Source changed before reverse entry; history reconciliation required')
                 try:quote=dict(broker.quote(action['position']['symbol']),symbol=action['position']['symbol'])
                 except ValueError as error:
-                    if direct or str(error)!='Fresh executable Delta backend quote required.':raise
-                    restore_unsubmitted(engine,executor,action)
-                    if action['action']=='SELL':engine.quote_exit_pending=dict(action)
-                    return dict(deferred=True,reason='WAITING_FOR_FRESH_QUOTE')
+                    if str(error)!=quote_recovery.QUOTE_UNAVAILABLE:raise
+                    return quote_recovery.defer_quote(engine,executor,action,error,delta.clock())
+                quote_recovery.quote_recovered(executor,delta.clock())
                 try:
                     with entry_guard(out,executor) if action['action'] in ('BUY','OPEN_LONG','OPEN_SHORT') else nullcontext():
                         result=reversal.execute(engine,executor,action,lambda:executor.submit(action,quote)) if direct else executor.submit(action,quote)
-                except EntryBlocked:
+                except EntryBlocked as error:
                     restore_unsubmitted(engine,executor,action)
-                    return dict(deferred=True,reason='WAITING_FOR_POSITION_CONTROL')
+                    return dict(deferred=True,reason='WAITING_FOR_ENTRY_ADMISSION',detail=str(error),orders_submitted=0)
                 if result.get('deferred'):
                     restore_unsubmitted(engine,executor,action)
                     journal.write(json.dumps(dict(action=action,result=result,recorded_at=time.time()))+'\n')
@@ -212,8 +232,8 @@ def stream(args):
                     return result
                 if direct:reversal.entered(executor,action)
                 confirm_entry_fill(engine,executor,action,clock=delta.clock)
-                if action['action']=='SELL':
-                    engine.quote_exit_pending=None
+                if action['action'] in ('SELL','CLOSE_LONG','CLOSE_SHORT'):
+                    quote_recovery.clear_retained_exit(engine,executor)
                 journal.write(json.dumps(dict(action=action,result=result))+'\n')
                 if (out/'markers.json').exists():markers[:]=json.loads((out/'markers.json').read_text())
                 markers.append(dict(timestamp=action['timestamp'],source_timestamp=action['timestamp'],confirmed_at=time.time(),symbol=action['position']['symbol'],action=action['action'],mode='LIVE' if live else 'PAPER',confirmed=True,price=result.get('fill_price',result.get('simulated_fill')),order_id=result.get('order_id')))
@@ -262,7 +282,7 @@ def stream(args):
                     meta.update(option_type=row['side'],expiry=row['expiry'])
                     engine.reset_contract(meta,d)
                     if config.get('signal_source')!='UNDERLYING':
-                        rows=history(delta,symbol,config['timeframe'],out/'source-history',(band_enabled(config) or config.get('calculation_mode') in ('CANDLES','HYBRID')))
+                        rows=history(delta,symbol,config['timeframe'],out/'source-history',(band_enabled(config) or config.get('zone_targets_enabled') or config.get('grid_trailing_enabled') or config.get('calculation_mode') in ('CANDLES','HYBRID')))
                         if not rows:raise ValueError('Exact held premium warm-up is unavailable')
                         chart_source.seed(symbol,config['timeframe'],rows,engine.contract['option_brick'])
                         engine.last_time.pop('premium',None)
@@ -275,10 +295,23 @@ def stream(args):
             while not overflow:
                 if not direct:
                     was_pending=bool(executor.state.get('pending'));executor.poll()
-                    if was_pending and not executor.state.get('pending'):engine.position=__import__('copy').deepcopy(executor.state.get('position'))
+                    if was_pending and not executor.state.get('pending'):engine.position=__import__('copy').deepcopy(executor.state.get('position'));__import__('strategies.nifty_ai_options.zone_targets',fromlist=['reconciled']).reconciled(engine,executor)
                 if manager.poll(busy=bool(manual.pending)):return
                 status=broker.stream_status()
-                if generation is not None and (not status['connected'] or status['generation']!=generation):raise ValueError('Public stream disconnected/reconnected; halt for history reconciliation')
+                if generation is not None and (not status['connected'] or status['generation']!=generation):
+                    if not direct:raise ValueError('Public stream disconnected/reconnected; halt for history reconciliation')
+                    quote_recovery.clear_entries(engine)
+                    health=dict(state='RECONNECTING' if not status['connected'] else 'RECONCILING_HISTORY',entries_blocked=True,automatic_recovery=True)
+                    atomic(out/'source-health.json',dict(health,at=delta.clock(),symbol=underlying))
+                    atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,source_health=health,manual_entry_capable=False,runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
+                    if not status['connected']:
+                        time.sleep(.25);continue
+                    generation=status['generation']
+                    # Old queued prices must not cross the connection generation.
+                    while True:
+                        try:q.get_nowait()
+                        except queue.Empty:break
+                    bars={name:SourceBars(config['timeframe'],continuous=True,confirmed_closes=True) for name in bars}
                 try:tick=q.get(timeout=1)
                 except queue.Empty:
                     if time.monotonic()-last_tick>30:
@@ -287,9 +320,9 @@ def stream(args):
                             engine.pending_direction = None
                             if hasattr(engine,'pending_underlying_flip'):engine.pending_underlying_flip=None
                             engine.band.consume_entry()
-                        health=feed_health.check(broker,underlying,time.monotonic())
+                        health=feed_health.check(broker,underlying,time.monotonic(),automatic=direct)
                         atomic(out/'source-health.json',dict(health,at=delta.clock(),symbol=underlying))
-                        atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),source_health=health,native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),position_control=manager.status(),manual_entry_capable=False,reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
+                        atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),source_health=health,native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),midline_filter=getattr(engine,'midline_filter_status',None),daily_loss_filter=executor.state.get('daily_loss_filter'),swing_levels=__import__('strategies.nifty_ai_options.swing_targets',fromlist=['book']).book(engine).snapshot(),swing_wait=getattr(engine,'swing_wait',None),zone_policy=engine.zone_policy.snapshot() if getattr(engine,'zone_policy',None) else None,zone_targets_enabled=config.get('zone_targets_enabled',False),grid_trailing_enabled=config.get('grid_trailing_enabled',False),swing_targets_enabled=config.get('swing_targets_enabled',False),support_retest=getattr(engine,'support_retest',None).snapshot() if getattr(engine,'support_retest',None) else None,position_control=manager.status(),manual_entry_capable=False,reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
                         # Waiting/recovery never executes a manual or automatic entry.
                         # Only a fresh validated selected-symbol tick resumes decisions.
                         continue
@@ -303,6 +336,14 @@ def stream(args):
                 current_status=broker.stream_status()
                 if not current_status['connected']:raise ValueError('Public stream unavailable before processing tick')
                 if generation is None:generation=current_status['generation']
+                if direct and not quote_recovery.refresh_quote(executor,broker,symbol,delta.clock()):
+                    quote_recovery.clear_entries(engine)
+                    health=dict(executor.state['quote_recovery'],automatic_recovery=True)
+                    atomic(out/'source-health.json',dict(health,at=delta.clock(),symbol=underlying))
+                    if time.monotonic()-last_write>=1:
+                        atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,source_health=health,quote_recovery=health,automatic_feed_recovery=True,manual_entry_capable=False,runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
+                        last_write=time.monotonic()
+                    continue
                 feed_health.reset()
                 last_tick=time.monotonic();sym=tick['symbol']
                 if direct and executor.state.get('pending') and time.monotonic()-last_reconcile>=1:
@@ -310,7 +351,7 @@ def stream(args):
                     try:
                         receipt=executor.reconcile_pending()
                         if receipt:
-                            engine.position=__import__('copy').deepcopy(executor.state.get('position'))
+                            engine.position=__import__('copy').deepcopy(executor.state.get('position'));__import__('strategies.nifty_ai_options.zone_targets',fromlist=['reconciled']).reconciled(engine,executor)
                             journal.write(json.dumps(dict(reconciliation=receipt,recorded_at=delta.clock()))+'\n')
                             if receipt.get('filled_quantity') and receipt.get('broker_flat'):
                                 result=dict(order_id=receipt['order_id'],filled_quantity=receipt['filled_quantity'],fill_price=receipt['fill_price'])
@@ -320,9 +361,20 @@ def stream(args):
                     except ValueError as error:
                         executor.state['reconciliation_notice']=str(error);executor.save()
                 if manager.blocked:continue
-                if not direct and sym==symbol and getattr(engine,'quote_exit_pending',None) and engine.position:
-                    result=submit(engine.quote_exit_pending)
-                    if not result.get('deferred'):engine.position=None
+                if direct:
+                    # Reconcile a quiet-trade interval before any live decision/manual entry.
+                    # Every missing candle must exist in selected-account provider history.
+                    from strategies.nifty_ai_options.delta_gap_recovery import missing_events,apply_recovered
+                    recovered=missing_events(gap_confirmed,engine,bars[sym],sym,'underlying',config['timeframe'],stamp,price,delta.clock())
+                    if recovered:
+                        atomic(out/'source-health.json',dict(state='RECONCILING_HISTORY',entries_blocked=True,symbol=sym,at=delta.clock(),bars=len(recovered)))
+                        apply_recovered(recovered,engine,chart_source,submit,lambda row:journal.write(json.dumps(row)+'\n'))
+                        bars[sym]=SourceBars(config['timeframe'],continuous=True,confirmed_closes=True)
+                        bars[sym].update(stamp,price)
+                        atomic(out/'source-health.json',dict(state='HISTORY_RECONCILED',entries_blocked=False,symbol=sym,at=delta.clock(),bars=len(recovered),through=recovered[-1]['timestamp']))
+                if sym==symbol and getattr(engine,'quote_exit_pending',None) and engine.position:
+                    result=quote_recovery.retry_exit(engine,executor,submit)
+                    if result and not result.get('deferred'):engine.position=None
                 if not manager.entry_blocked:manual.poll()
                 if not manager.entry_blocked:control.poll(busy=bool(manual.pending or executor.state['pending']),position=bool(executor.state['position']))
                 engine.entry_paused=control.entry_blocked or manager.entry_blocked
@@ -383,13 +435,13 @@ def stream(args):
                 if direct and executor.state.get('pending_reversal') and not executor.state.get('pending'):
                     reversal.advance(engine,executor,submit)
                 if time.monotonic()-last_write>=1:
-                    atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),entry_execution_policy=config['entry_execution_policy'],position_control=manager.status(),manual_entry_capable=not manager.entry_blocked,reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
+                    atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),midline_filter=getattr(engine,'midline_filter_status',None),daily_loss_filter=executor.state.get('daily_loss_filter'),swing_levels=__import__('strategies.nifty_ai_options.swing_targets',fromlist=['book']).book(engine).snapshot(),swing_wait=getattr(engine,'swing_wait',None),zone_policy=engine.zone_policy.snapshot() if getattr(engine,'zone_policy',None) else None,zone_targets_enabled=config.get('zone_targets_enabled',False),grid_trailing_enabled=config.get('grid_trailing_enabled',False),swing_targets_enabled=config.get('swing_targets_enabled',False),support_retest=getattr(engine,'support_retest',None).snapshot() if getattr(engine,'support_retest',None) else None,midline_entry_policy='CURRENT_TREND_ON_COMPLETED_BRICK' if config.get('midline_filter_enabled') else 'FRESH_FLIP',quote_recovery=executor.state.get('quote_recovery'),automatic_feed_recovery=direct,entry_execution_policy=config['entry_execution_policy'],position_control=manager.status(),manual_entry_capable=not manager.entry_blocked,reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending']))
                     last_write=time.monotonic()
             raise ValueError('Delta source queue overflow; halted')
     finally:
         if getattr(engine,'close_native_sizing',None):engine.close_native_sizing()
         if executor:
-            atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=getattr(engine,'contract',None),exit_waiting_for_quote=bool(getattr(engine,'quote_exit_pending',None)),position=executor.state['position'],pending=executor.state['pending']))
+            atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=getattr(engine,'contract',None),terminal=True,exit_waiting_for_quote=bool(getattr(engine,'quote_exit_pending',None)),position=executor.state['position'],pending=executor.state['pending']))
             executor.close()
         if broker:broker.stop()
         delta.requester.close()

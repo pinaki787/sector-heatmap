@@ -37,9 +37,9 @@ def _seed(path):
         while len(_seed_cache)>64:_seed_cache.popitem(last=False)
         return value
 
-def _price_tail(path,symbol,seed_end,cursor,forming_config=None):
+def _price_tail(path,symbol,seed_end,cursor,forming_config=None,epoch=None):
     with _cache_lock:
-        stat=path.stat();cache_key=(path,'hybrid') if forming_config else path;state=_price_cache.get(cache_key)
+        stat=path.stat();cache_key=(path,'hybrid',epoch) if forming_config and epoch else (path,epoch) if epoch else (path,'hybrid') if forming_config else path;state=_price_cache.get(cache_key)
         if state is None or state['inode']!=stat.st_ino or stat.st_size<state['offset']:
             state=dict(inode=stat.st_ino,offset=0,rows=[],times=[],sequence=0,bytes_read=0)
             _price_cache[cache_key]=state
@@ -72,17 +72,18 @@ def _price_tail(path,symbol,seed_end,cursor,forming_config=None):
         result=([] if forming_config else state['rows'][index:],len(state['rows']),state['sequence'],state['times'][-1] if state['times'] else seed_end)
         return result+(list(state['forming']) if state.get('forming') else None,) if forming_config else result
 
-def _band_tail(path,cursor):
+def _band_tail(path,cursor,epoch=None):
     if not path.exists():return []
     with _cache_lock:
-        stat=path.stat();state=_band_cache.get(path)
+        stat=path.stat();cache_key=(path,epoch) if epoch else path;state=_band_cache.get(cache_key)
         if not state or state['inode']!=stat.st_ino or stat.st_size<state['offset']:state=dict(inode=stat.st_ino,offset=0,rows=[])
         if stat.st_size>state['offset']:
             with path.open('rb') as stream:stream.seek(state['offset']);chunk=stream.read()
             complete=chunk.rfind(b'\n')+1
-            state['rows'].extend(json.loads(line) for line in chunk[:complete].splitlines())
+            added=[json.loads(line) for line in chunk[:complete].splitlines()]
+            state['rows'].extend(added)
             state['offset']+=complete
-        _band_cache[path]=state;_band_cache.move_to_end(path)
+        _band_cache[cache_key]=state;_band_cache.move_to_end(cache_key)
         while len(_band_cache)>64:_band_cache.popitem(last=False)
         return [r for r in state['rows'] if cursor is None or r['available_at']>cursor]
 
@@ -191,7 +192,7 @@ def read_source(data,owner,run_id,symbol,frame,*,after=None):
         if not math.isfinite(cursor):raise ValueError('Invalid AI chart cursor')
     observations=path.with_name(path.stem+'-observations.jsonl')
     if observations.exists() and value.get('calculation_mode')=='HYBRID':
-        _,count,sequence,through,forming=_price_tail(observations,symbol,value['rows'][value['seed_rows']-1][0],None,forming_config=config)
+        _,count,sequence,through,forming=_price_tail(observations,symbol,value['rows'][value['seed_rows']-1][0],None,forming_config=config,epoch=config.get('runtime_session'))
         clean=value['rows'] if cursor is None else [r for r in value['rows'] if r[0]>cursor]
         if forming and forming[0]>value['confirmed_through']:
             clean=list(clean)+[forming]
@@ -199,16 +200,16 @@ def read_source(data,owner,run_id,symbol,frame,*,after=None):
         value=dict(value,observation_count=count,last_observation_sequence=sequence)
     elif observations.exists() and not value.get('ohlc_available'):
         seed=value['rows'][:value['seed_rows']]
-        prices,count,sequence,through=_price_tail(observations,symbol,seed[-1][0],cursor)
+        prices,count,sequence,through=_price_tail(observations,symbol,seed[-1][0],cursor,epoch=config.get('runtime_session'))
         clean=([r for r in seed if cursor is None or r[0]>cursor])+prices
         value=dict(value,source_basis='BROKER_SEED_AND_LIVE_PRICE',observation_count=count,last_observation_sequence=sequence,confirmed_through=through)
     else:
         clean=value['rows'] if cursor is None else [r for r in value['rows'] if r[0]>cursor]
     signal_points=[]
     if config.get('supertrend_basis')=='COMPLETED_RENKO':
-        signal_points=_band_tail(path.with_name(path.stem+'-signals.jsonl'),cursor)
+        signal_points=_band_tail(path.with_name(path.stem+'-signals.jsonl'),cursor,epoch=config.get('runtime_session'))
     moving_bands=[]
     band_seed=path.with_name(path.stem+'-band-seed.json')
     if cursor is None and band_seed.exists():moving_bands.append(json.loads(band_seed.read_text()))
-    moving_bands.extend(_band_tail(path.with_name(path.stem+'-bands.jsonl'),cursor))
+    moving_bands.extend(_band_tail(path.with_name(path.stem+'-bands.jsonl'),cursor,epoch=config.get('runtime_session')))
     return dict(value,supertrend_basis=config.get('supertrend_basis'),signal_points=signal_points,moving_bands=moving_bands,rows=clean,provider='AI runtime confirmed source',run_id=run_id,account=owner,verification_only=config.get('_verification_only',False),older_history=False,read_only=True,orders_submitted=0)

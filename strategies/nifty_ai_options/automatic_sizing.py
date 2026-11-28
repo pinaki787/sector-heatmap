@@ -44,6 +44,10 @@ class AutoSizedStrategy:
     def __init__(self,engine,monitor,*,exposure=lambda:False,chart_source=None,config_path=None):
         self._inner=engine;self._monitor=monitor;self._factory=type(engine);self._exposure=exposure;self._chart_source=chart_source;self._config_path=config_path
         self._events=[];self._selection=None;self._delta=None;self._active_box=engine.config['reference_value'];self._active_window=engine.config.get('reference_completed_parent_at');self._rebuilding=False
+        from strategies.nifty_ai_options.zone_targets import enabled,ZonePolicy
+        if enabled(engine):engine.zone_policy=ZonePolicy(engine,Path(config_path).parent/'zone-policy.json' if config_path else None)
+        from strategies.nifty_ai_options.support_retest import install
+        install(engine,config_path)
     def __getattr__(self,name):return getattr(self._inner,name)
     def __setattr__(self,name,value):
         if name in self._local or name.startswith('_'):object.__setattr__(self,name,value)
@@ -68,11 +72,16 @@ class AutoSizedStrategy:
             return True
         if self._inner.position or self._exposure():return False
         config=apply_reference(self._inner.config,ref);replacement=self._factory(config)
+        from strategies.nifty_ai_options.zone_targets import enabled,ZonePolicy
+        if enabled(replacement):replacement.zone_policy=ZonePolicy(replacement,Path(self._config_path).parent/'zone-policy.json' if self._config_path else None)
+        from strategies.nifty_ai_options.support_retest import install
+        install(replacement,self._config_path)
         if self._selection:
             if self._delta is None:replacement.reset_contract(self._selection)
             else:replacement.reset_contract(self._selection,self._delta)
         for event in self._events:
             (replacement.update_hybrid(event) if event.get('_hybrid') else replacement.update(event));replacement.position=None
+            if getattr(replacement,'zone_policy',None):replacement.zone_policy.observe(replacement,event,warm=not event.get('_hybrid'))
         if hasattr(replacement,'pending_direction'):replacement.pending_direction=None
         if hasattr(replacement,'pending_underlying_flip'):replacement.pending_underlying_flip=None
         if getattr(replacement,'band',None):replacement.band.retest=None
@@ -96,19 +105,45 @@ class AutoSizedStrategy:
     def manual_entry(self,direction,at):
         if not self._refresh():raise ValueError('Fresh automatic sizing is required for manual entry')
         if self._exposure():raise ValueError('Owned exposure or a pending order prevents manual entry')
-        return self._inner.manual_entry(direction,at)
+        zone=getattr(self._inner,'zone_policy',None)
+        if zone and self._inner.config.get('grid_trailing_enabled') and not (zone.grid.valid(at) and zone.book.fresh(at)):raise ValueError('Current-session target grid is not validated; trailing entry is unavailable')
+        action=self._inner.manual_entry(direction,at)
+        from strategies.nifty_ai_options.support_retest import get
+        retest=get(self._inner)
+        if retest:retest.capture(self._inner,action)
+        if getattr(self._inner,'zone_policy',None):self._inner.zone_policy.capture(self._inner,action)
+        return action
 
     def selected_gate_entry(self):
         if getattr(self._inner,'entry_paused',False):self._clear_entry();return None
         if not self._refresh():self._clear_entry();return None
-        return self._inner.selected_gate_entry()
+        action=self._inner.selected_gate_entry()
+        if action and getattr(self._inner,'zone_policy',None):self._inner.zone_policy.capture(self._inner,action)
+        return action
     def update_hybrid(self,event):
         return self._update(dict(event,_hybrid=True),hybrid=True)
     def update(self,event):
         return self._update(event,hybrid=False)
     def _update(self,event,*,hybrid):
         ready=self._refresh();prior=self._inner.position
-        actions=(self._inner.update_hybrid(event) if hybrid else self._inner.update(event));self._events.append(dict(event))
+        from strategies.nifty_ai_options.support_retest import get
+        retest=get(self._inner)
+        if retest:retest.before(self._inner,event,clear=not self._exposure(),warm=not hybrid)
+        from strategies.nifty_ai_options.zone_targets import policy
+        zone=policy(self._inner)
+        if zone:
+            self._inner.zone_break_proof=None
+            self._inner.grid_exit_unit=None
+            self._inner.zone_execution_clear=not self._exposure()
+            if hybrid:zone.reconcile(self._inner.zone_execution_clear,event.get('available_at',event['timestamp']))
+            try:zone.observe(self._inner,event,warm=not hybrid)
+            except ValueError as error:zone.notice='SOURCE_UNAVAILABLE: '+str(error);zone.book.last_available=None
+        self._inner.zone_replaying=not hybrid
+        try:actions=(self._inner.update_hybrid(event) if hybrid else self._inner.update(event))
+        finally:self._inner.zone_replaying=False
+        self._events.append(dict(event))
+        if hybrid and zone and (ready or prior is not None):actions=zone.after(self._inner,event,actions)
+        if hybrid and retest and (ready or prior is not None):actions=retest.after(self._inner,event,actions,prior)
         if ready:return actions
         # Keep genuine exits for existing exposure; reject every stale-size entry.
         entries={'BUY','OPEN_LONG','OPEN_SHORT'}
@@ -123,6 +158,7 @@ def runtime_configuration(config,output):
     manual=updated.get('sizing_mode')=='MANUAL_PARENT' and updated.get('reference_source')=='manual_parent_override' and updated.get('reference_native_provider')=='USER'
     if not manual and (updated.get('reference_native_provider')!='TRADINGVIEW' or not reference.get('verified_native_size') or not reference.get('completed_parent') or reference.get('valid_until',0)<=time.time()):
         raise ValueError('Fresh verified automatic native sizing is required before runtime setup')
+    updated.setdefault('swing_retest_required',bool(updated.get('swing_targets_enabled',False)))
     updated=dict(updated,runtime_session=secrets.token_hex(16))
     atomic(Path(output)/'config.json',updated)
     return updated

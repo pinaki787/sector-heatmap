@@ -252,7 +252,7 @@ def stream(args):
         opening,closing=session_bounds(signal_symbol)
         engine=automatic_strategy(Strategy(config),config,exposure=lambda:bool(executor.state['position'] or executor.state['pending'] or executor.state.get('positions') or executor.state.get('detached_position')),chart_source=chart_source,config_path=out/'config.json');today=datetime.now(IST).date()
         start=(today-timedelta(days=14)).isoformat();end=today.isoformat()
-        under=history(api,underlying(config),config['timeframe'],start,end,out/'source-history',(band_enabled(config) or config.get('calculation_mode') in ('CANDLES','HYBRID')))
+        under=history(api,underlying(config),config['timeframe'],start,end,out/'source-history',(band_enabled(config) or config.get('zone_targets_enabled') or config.get('grid_trailing_enabled') or config.get('calculation_mode') in ('CANDLES','HYBRID')))
         if not under:raise ValueError('No underlying warm-up history')
         chart_source.seed(signal_symbol,config['timeframe'],under,engine.spot_size)
         for r in under:
@@ -451,10 +451,10 @@ def stream(args):
             now=time.monotonic()
             if now-last_heartbeat<1:return
             last_heartbeat=now
-            atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),exit_waiting_for_quote=bool(getattr(engine,'quote_exit_pending',None)),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),position_control=manager.status(),manual_entry_capable=session.ready and not source_unavailable.is_set() and not manager.entry_blocked,source_state='WAITING_FOR_SOURCE' if source_unavailable.is_set() else 'READY',reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending'],**session.snapshot()))
+            atomic(out/'heartbeat.json',dict(at=datetime.now(IST).isoformat(),mode='LIVE' if live else 'PAPER',symbol=symbol,selected_contract=engine.contract,calculation_mode=config.get('calculation_mode','RENKO'),exit_waiting_for_quote=bool(getattr(engine,'quote_exit_pending',None)),native_sizing=getattr(engine,'native_sizing_status',None),moving_bands=engine.band.snapshot(engine.config),midline_filter=getattr(engine,'midline_filter_status',None),position_control=manager.status(),manual_entry_capable=session.ready and not source_unavailable.is_set() and not manager.entry_blocked,source_state='WAITING_FOR_SOURCE' if source_unavailable.is_set() else 'READY',reconfigure_capable=True,timeframe=config['timeframe'],runtime_session=config.get('runtime_session'),position=executor.state['position'],pending=executor.state['pending'],**session.snapshot()))
         while not stopped.is_set():
             was_pending=bool(executor.state.get('pending'));executor.poll()
-            if was_pending and not executor.state.get('pending'):engine.position=__import__('copy').deepcopy(executor.state.get('position'))
+            if was_pending and not executor.state.get('pending'):engine.position=__import__('copy').deepcopy(executor.state.get('position'));__import__('strategies.nifty_ai_options.zone_targets',fromlist=['reconciled']).reconciled(engine,executor)
             for cached_symbol in list(quote_cache):
                 if cached_symbol not in (signal_symbol,symbol) and not executor.has_symbol(cached_symbol):
                     unsubscribe_unused(cached_symbol);discard_unused_quote(cached_symbol)
